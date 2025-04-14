@@ -1,7 +1,11 @@
-use crate::{AutomationError, Selector, UIElement};
+use std::any::Any;
+use crate::element::{UIElement, UIElementAttributes};
+use crate::{Locator, Selector, AutomationError, ClickResult};
+use anyhow::Result;
+use serde_json::Value;
 
 /// The common trait that all platform-specific engines must implement
-pub trait AccessibilityEngine: Send + Sync {
+pub trait AccessibilityEngine: Send + Sync + Any {
     /// Get the root UI element
     fn get_root_element(&self) -> UIElement;
 
@@ -39,7 +43,7 @@ pub trait AccessibilityEngine: Send + Sync {
     fn open_url(&self, url: &str, browser: Option<&str>) -> Result<UIElement, AutomationError>;
 
     /// Convert to Any for downcasting
-    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any(&self) -> &dyn Any;
 
     // //Scroll at a specific position on screen
     // fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
@@ -75,22 +79,14 @@ pub fn create_engine(
     }
     #[cfg(target_os = "windows")]
     {
-        return Ok(Box::new(windows::WindowsEngine::new(
-            use_background_apps,
-            activate_app,
-        )?));
+        return Err(AutomationError::UnsupportedPlatform("Windows not yet supported".to_string()));
     }
     #[cfg(target_os = "linux")]
     {
-        return Ok(Box::new(linux::LinuxEngine::new(
-            use_background_apps,
-            activate_app,
-        )?));
+        return Err(AutomationError::UnsupportedPlatform("Linux not yet supported".to_string()));
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
-        return Err(AutomationError::UnsupportedPlatform(
-            "Current platform is not supported".to_string(),
-        ));
+        Err(AutomationError::UnsupportedPlatform("Unsupported operating system".to_string()))
     }
 }
