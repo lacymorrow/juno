@@ -1,30 +1,8 @@
-use crate::element::UIElementImpl;
-use super::utils::{macos_role_to_generic_role, parse_ax_attribute_value};
-use crate::platforms::tree_search::ElementsCollectorWithWindows;
-use super::engine::MacOSEngine;
-use super::ffi::AXValueGetValue;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
-use accessibility::AXAttribute;
-use accessibility::AXUIElement;
-use core_foundation::base::CFString;
-use core_foundation::boolean::CFBoolean;
-use core_foundation::string::CFStringRef;
-use core_graphics::event::CGEvent;
-use core_graphics::event_source::CGEventSource;
-use core_graphics::event_source::CGEventSourceStateID;
-use core_graphics::event::CGEventTapLocation;
-use core_graphics::event::CGKeyCode;
-use core_graphics::geometry::CGPoint;
-use core_graphics::geometry::CGSize;
-use serde_json;
-use crate::element::{UIElement, UIElementAttributes, ClickResult, ClickMethodSelection, AutomationError, Locator, Selector};
-use crate::platforms::macos::thread_safe_ax_ui_element::ThreadSafeAXUIElement;
 use super::actions::ClickMethodSelection;
 use super::constants::*;
-use super::ffi::{AXUIElementSetAttributeValue};
+use super::ffi::{AXUIElementSetAttributeValue, AXValueGetValue};
 use super::wrappers::ThreadSafeAXUIElement;
+use super::engine::MacOSEngine;
 use crate::{
     AutomationError,
     ClickResult,
@@ -36,15 +14,22 @@ use crate::{
 };
 use crate::platforms::macos::utils::{macos_role_to_generic_role, parse_ax_attribute_value};
 use crate::platforms::tree_search::ElementsCollectorWithWindows;
-use super::engine::MacOSEngine;
-use accessibility::{AXAttribute, AXUIElement};
-use core_foundation::base::TCFType;
+use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes as AXAttrsTrait};
+use core_foundation::base::{TCFType, CFTypeRef};
 use core_foundation::string::CFString;
+use core_foundation::number::CFNumber;
+use core_foundation::boolean::CFBoolean;
 use core_graphics::event::{CGEventType, CGMouseButton, CGEventTapLocation, CGEvent, CGEventFlags, CGKeyCode};
 use core_graphics::event_source::{CGEventSourceStateID, CGEventSource};
 use core_graphics::geometry::{CGPoint, CGSize};
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use tracing::debug;
+use anyhow::Result;
+use serde_json;
 
+#[derive(Debug)]
 pub struct MacOSUIElement {
     pub(crate) element: ThreadSafeAXUIElement,
     pub(crate) use_background_apps: bool,
@@ -54,37 +39,18 @@ pub struct MacOSUIElement {
 impl MacOSUIElement {
     pub(crate) fn generate_stable_id(&self) -> String {
         let mut hasher = DefaultHasher::new();
+        let role = self.element.0.role().map(|r| r.to_string()).unwrap_or_default();
+        let title = self.element.0.title().map(|t| t.to_string()).unwrap_or_default();
+        let desc = self.element.0.description().map(|d| d.to_string()).unwrap_or_default();
 
-        let role = self
-            .element
-            .0
-            .role()
-            .map(|r| r.to_string())
-            .unwrap_or_default();
-        let title = self
-            .element
-            .0
-            .title()
-            .map(|t| t.to_string())
-            .unwrap_or_default();
-        let desc = self
-            .element
-            .0
-            .description()
-            .map(|d| d.to_string())
-            .unwrap_or_default();
-
-        let (_, _, w, h) = self
-            .bounds()
-            .map(|(x, y, w, h)| {
-                (
-                    x.round() as i32,
-                    y.round() as i32,
-                    w.round() as i32,
-                    h.round() as i32,
-                )
-            })
-            .unwrap_or((0, 0, 0, 0));
+        let (_, _, w, h) = self.bounds().map(|(x, y, w, h)| {
+            (
+                x.round() as i32,
+                y.round() as i32,
+                w.round() as i32,
+                h.round() as i32,
+            )
+        }).unwrap_or((0, 0, 0, 0));
 
         let count_of_children = self.children().unwrap_or_default().len();
 
@@ -230,7 +196,7 @@ impl MacOSUIElement {
 
     fn click_auto(&self) -> Result<ClickResult, AutomationError> {
         if let Some(app) = self.get_application() {
-            let app_attributes = app.attributes();
+            let app_attributes = UIElementImpl::attributes(&app);
             let app_name = app_attributes.label.unwrap_or_default().to_lowercase();
             debug!("detected application: {}", app_name);
             if app_name.contains("chrome") || app_name.contains("safari") || app_name.contains("arc") ||
@@ -367,70 +333,13 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn role(&self) -> String {
-        let role = self
-            .element
-            .0
-            .role()
-            .map(|r| r.to_string())
-            .unwrap_or_default();
-
-        macos_role_to_generic_role(&role)
-            .first()
-            .unwrap_or(&role)
-            .to_string()
+        let role = self.element.0.role().map(|r| r.to_string()).unwrap_or_default();
+        macos_role_to_generic_role(&role).first().unwrap_or(&role).to_string()
     }
 
     fn attributes(&self) -> UIElementAttributes {
         let mut properties = HashMap::new();
         let is_window = self.element.0.role().map_or(false, |r| r.to_string() == "AXWindow");
-
-        if is_window {
-            let mut attrs = UIElementAttributes {
-                role: "window".to_string(),
-                label: None,
-                value: None,
-                description: None,
-                properties,
-            };
-
-            let title_attrs = [
-                "AXTitle",
-                "AXTitleUIElement",
-                "AXDocument",
-                "AXFilename",
-                "AXName",
-            ];
-
-            for title_attr_name in title_attrs {
-                let title_attr = AXAttribute::new(&CFString::new(title_attr_name));
-                if let Ok(value) = self.element.0.attribute(&title_attr) {
-                    if let Some(cf_string) = value.downcast_into::<CFString>() {
-                        attrs.label = Some(cf_string.to_string());
-                        break;
-                    }
-                }
-            }
-
-            let pos_attr = AXAttribute::new(&CFString::new("AXPosition"));
-            if let Ok(_) = self.element.0.attribute(&pos_attr) {
-            }
-
-            let std_attrs = ["AXMinimized", "AXMain", "AXFocused"];
-
-            for attr_name in std_attrs {
-                let attr = AXAttribute::new(&CFString::new(attr_name));
-                if let Ok(value) = self.element.0.attribute(&attr) {
-                    if let Some(cf_bool) = value.downcast_into::<core_foundation::boolean::CFBoolean>() {
-                        attrs.properties.insert(
-                            attr_name.to_string(),
-                            Some(serde_json::Value::String(format!("{:?}", cf_bool))),
-                        );
-                    }
-                }
-            }
-
-            return attrs;
-        }
 
         let mut attrs = UIElementAttributes {
             role: self.role(),
@@ -440,56 +349,72 @@ impl UIElementImpl for MacOSUIElement {
             properties,
         };
 
-        let label_attr = AXAttribute::new(&CFString::new("AXTitle"));
-        match self.element.0.attribute(&label_attr) {
-            Ok(value) => {
-                if let Some(cf_string) = value.downcast_into::<CFString>() {
-                    attrs.label = Some(cf_string.to_string());
-                }
-            }
-            Err(_e) => {
-                let alt_label_attr = AXAttribute::new(&CFString::new("AXLabel"));
-                if let Ok(value) = self.element.0.attribute(&alt_label_attr) {
+        if is_window {
+            attrs.role = "window".to_string();
+            let title_attrs = ["AXTitle", "AXTitleUIElement", "AXDocument", "AXFilename", "AXName"];
+            for title_attr_name in title_attrs {
+                let title_attr = AXAttribute::new(&CFString::new(title_attr_name));
+                if let Ok(value) = self.element.0.attribute(&title_attr) {
                     if let Some(cf_string) = value.downcast_into::<CFString>() {
                         attrs.label = Some(cf_string.to_string());
+                        break;
                     }
                 }
             }
-        }
-
-        let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
-        match self.element.0.attribute(&desc_attr) {
-            Ok(value) => {
-                if let Some(cf_string) = value.downcast_into::<CFString>() {
-                    attrs.description = Some(cf_string.to_string());
+            let std_attrs = ["AXMinimized", "AXMain", "AXFocused"];
+            for attr_name in std_attrs {
+                let attr = AXAttribute::new(&CFString::new(attr_name));
+                if let Ok(value) = self.element.0.attribute(&attr) {
+                    if let Some(cf_bool) = value.downcast_into::<CFBoolean>() {
+                        attrs.properties.insert(attr_name.to_string(), Some(serde_json::Value::String(format!("{:?}", cf_bool))));
+                    }
                 }
             }
-            Err(_e) => {
+        } else {
+            attrs.label = self.element.0.title().ok().map(|s| s.to_string());
+            if attrs.label.is_none() {
+                attrs.label = self.element.0.attribute(&AXAttribute::new(&CFString::new("AXLabel")))
+                    .ok()
+                    .and_then(|val| val.downcast_into::<CFString>())
+                    .map(|s| s.to_string());
+            }
+            attrs.description = self.element.0.description().ok().map(|s| s.to_string());
+
+            let value_attr = AXAttribute::new(&CFString::new("AXValue"));
+            if let Ok(value) = self.element.0.attribute(&value_attr) {
+                if let Some(cf_string) = value.clone().downcast_into::<CFString>() {
+                    attrs.value = Some(cf_string.to_string());
+                } else if let Some(cf_num) = value.downcast_into::<CFNumber>() {
+                    if let Some(num) = cf_num.to_i64() {
+                        attrs.value = Some(num.to_string());
+                    } else if let Some(num) = cf_num.to_f64() {
+                        attrs.value = Some(num.to_string());
+                    }
+                } else {
+                    // Potentially handle other AXValue types (e.g., boolean)
+                }
             }
         }
 
         if let Ok(attr_names) = self.element.0.attribute_names() {
             for name in attr_names.iter() {
                 let attr = AXAttribute::new(&name);
-                match self.element.0.attribute(&attr) {
-                    Ok(value) => {
-                        let parsed_value = parse_ax_attribute_value(&name.to_string(), value);
-                        attrs.properties.insert(name.to_string(), parsed_value);
-                    }
-                    Err(e) => {
-                        if !matches!(
-                            e,
-                            accessibility::Error::Ax(-25212)
-                                | accessibility::Error::Ax(-25205)
-                                | accessibility::Error::Ax(-25204)
-                        ) {
+                let name_str = name.to_string();
+                if !["AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue", "AXMinimized", "AXMain", "AXFocused", "AXPosition", "AXSize"].contains(&name_str.as_str()) {
+                    match self.element.0.attribute(&attr) {
+                        Ok(value) => {
+                            let parsed_value = parse_ax_attribute_value(&name_str, value);
+                            attrs.properties.insert(name_str, parsed_value);
+                        }
+                        Err(e) => {
+                            if !matches!(e, accessibility::Error::Ax(-25212) | accessibility::Error::Ax(-25205) | accessibility::Error::Ax(-25204)) {
+                                // debug!("Error getting property attribute '{}': {:?}", name_str, e);
+                            }
                         }
                     }
                 }
             }
-        } else {
         }
-
         attrs
     }
 
@@ -527,7 +452,7 @@ impl UIElementImpl for MacOSUIElement {
 
     fn focus(&self) -> Result<(), AutomationError> {
         let raise_attr = AXAttribute::new(&CFString::new("AXRaise"));
-        if let Ok(_) = self.element.0.perform_action(&raise_attr.as_CFString()) {
+        if self.element.0.perform_action(&raise_attr.as_CFString()).is_ok() {
             debug!("Successfully raised element");
             if let Some(app) = self.get_application() {
                 unsafe {
@@ -536,12 +461,12 @@ impl UIElementImpl for MacOSUIElement {
                     let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
                     let elem_ref = self.element.0.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
                     let result = AXUIElementSetAttributeValue(app_ref, attr_str_ref, elem_ref);
-                    if result == 0 { debug!("Successfully set focus to element"); return Ok(()); }
-                    else { debug!("Failed to set element as focused: error code {}", result); }
+                    if result == 0 { debug!("Successfully set focus to element via AXFocusedUIElement"); return Ok(()); }
+                    else { debug!("Failed to set AXFocusedUIElement: error code {}", result); }
                 }
             }
         }
-        debug!("Attempting to focus by clicking the element");
+        debug!("Raise action failed or app not found, attempting focus via click");
         self.click().map(|_result| { debug!("Focus achieved via click method: {}", _result.method); () })
     }
 
@@ -555,7 +480,7 @@ impl UIElementImpl for MacOSUIElement {
         }
         let is_web_input = { let role = self.role().to_lowercase(); role.contains("web") || role.contains("generic") };
         if is_web_input {
-            debug!("Detected web input, using specialized handling");
+            debug!("Detected web input, using specialized handling for type_text");
             for attr_name in &["AXValue", "AXValueAttribute", "AXText"] {
                 let cf_string = CFString::new(text);
                 unsafe {
@@ -567,6 +492,18 @@ impl UIElementImpl for MacOSUIElement {
                     if result == 0 { debug!("Successfully set text using {}", attr_name); return Ok(()); }
                 }
             }
+            debug!("Setting AXValue/AXText attributes failed for web input, falling back to keyboard simulation");
+            let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+                .map_err(|_| AutomationError::PlatformError("Failed to create event source for typing".to_string()))?;
+            for char_code in text.encode_utf16() {
+                let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
+                    .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
+                key_down.post(CGEventTapLocation::HID);
+                let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
+                    .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
+                key_up.post(CGEventTapLocation::HID);
+            }
+            return Ok(());
         }
         let cf_string = CFString::new(text);
         unsafe {
@@ -576,18 +513,29 @@ impl UIElementImpl for MacOSUIElement {
             let value_ref = cf_string.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
             let result = AXUIElementSetAttributeValue(element_ref, attr_str_ref, value_ref);
             if result != 0 {
-                debug!("Failed to set text value via AXValue: error code {}", result);
-                return Err(AutomationError::PlatformError(format!("Failed to set text: error code {}", result)));
+                debug!("Failed to set native text value via AXValue: error code {}, trying keyboard simulation", result);
+                let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+                    .map_err(|_| AutomationError::PlatformError("Failed to create event source for typing".to_string()))?;
+                for char_code in text.encode_utf16() {
+                    let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
+                        .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
+                    key_down.post(CGEventTapLocation::HID);
+                    let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
+                        .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
+                    key_up.post(CGEventTapLocation::HID);
+                }
+                return Ok(());
             }
-            debug!("Successfully set text value via AXValue (standard approach)");
+            debug!("Successfully set native text value via AXValue");
         }
         Ok(())
     }
 
     fn press_key(&self, key_combo: &str) -> Result<(), AutomationError> {
         debug!("Pressing key combination: {}", key_combo);
+        let element_label = UIElementImpl::attributes(self).label.unwrap_or_default();
         let element_role = self.role();
-        let element_label = self.attributes().label.unwrap_or_default();
+
         match self.focus() {
             Ok(_) => debug!("successfully focused element for key press"),
             Err(e) => {
