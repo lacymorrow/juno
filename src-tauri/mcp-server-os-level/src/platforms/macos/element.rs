@@ -1,33 +1,25 @@
 use super::actions::ClickMethodSelection;
+use super::attributes;
 use super::constants::*;
-use super::ffi::{AXUIElementSetAttributeValue, AXValueGetValue};
-use super::wrappers::ThreadSafeAXUIElement;
 use super::engine::MacOSEngine;
-use crate::{
-    AutomationError,
-    ClickResult,
-    UIElement,
-    UIElementAttributes,
-    Locator,
-    Selector,
-    element::UIElementImpl,
-};
-use crate::platforms::macos::utils::{macos_role_to_generic_role, parse_ax_attribute_value};
+use super::ffi::AXValueGetValue;
+use super::interaction;
+use super::utils::macos_role_to_generic_role;
+use super::wrappers::ThreadSafeAXUIElement;
+use crate::platforms::macos::attributes::get_element_attributes;
 use crate::platforms::tree_search::ElementsCollectorWithWindows;
+use crate::UIElementAttributes;
+use crate::{element::UIElementImpl, AutomationError, ClickResult, Locator, Selector, UIElement};
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes as AXAttrsTrait};
-use core_foundation::base::{TCFType, CFTypeRef};
+use anyhow::Result;
+use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
-use core_foundation::number::CFNumber;
-use core_foundation::boolean::CFBoolean;
-use core_graphics::event::{CGEventType, CGMouseButton, CGEventTapLocation, CGEvent, CGEventFlags, CGKeyCode};
-use core_graphics::event_source::{CGEventSourceStateID, CGEventSource};
+use core_graphics::event::{CGEvent, CGEventTapLocation};
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::{CGPoint, CGSize};
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use tracing::debug;
-use anyhow::Result;
-use serde_json;
 
 #[derive(Debug)]
 pub struct MacOSUIElement {
@@ -39,18 +31,36 @@ pub struct MacOSUIElement {
 impl MacOSUIElement {
     pub(crate) fn generate_stable_id(&self) -> String {
         let mut hasher = DefaultHasher::new();
-        let role = self.element.0.role().map(|r| r.to_string()).unwrap_or_default();
-        let title = self.element.0.title().map(|t| t.to_string()).unwrap_or_default();
-        let desc = self.element.0.description().map(|d| d.to_string()).unwrap_or_default();
+        let role = self
+            .element
+            .0
+            .role()
+            .map(|r| r.to_string())
+            .unwrap_or_default();
+        let title = self
+            .element
+            .0
+            .title()
+            .map(|t| t.to_string())
+            .unwrap_or_default();
+        let desc = self
+            .element
+            .0
+            .description()
+            .map(|d| d.to_string())
+            .unwrap_or_default();
 
-        let (_, _, w, h) = self.bounds().map(|(x, y, w, h)| {
-            (
-                x.round() as i32,
-                y.round() as i32,
-                w.round() as i32,
-                h.round() as i32,
-            )
-        }).unwrap_or((0, 0, 0, 0));
+        let (_, _, w, h) = self
+            .bounds()
+            .map(|(x, y, w, h)| {
+                (
+                    x.round() as i32,
+                    y.round() as i32,
+                    w.round() as i32,
+                    h.round() as i32,
+                )
+            })
+            .unwrap_or((0, 0, 0, 0));
 
         let count_of_children = self.children().unwrap_or_default().len();
 
@@ -70,13 +80,17 @@ impl MacOSUIElement {
         format!("ax_{:x}", hasher.finish())
     }
 
-    fn bounds(&self) -> Result<(f64, f64, f64, f64), AutomationError> {
+    pub(crate) fn bounds(&self) -> Result<(f64, f64, f64, f64), AutomationError> {
         let mut x = 0.0;
         let mut y = 0.0;
         let mut width = 0.0;
         let mut height = 0.0;
 
-        if let Ok(position) = self.element.0.attribute(&AXAttribute::new(&CFString::new("AXPosition"))) {
+        if let Ok(position) = self
+            .element
+            .0
+            .attribute(&AXAttribute::new(&CFString::new("AXPosition")))
+        {
             unsafe {
                 let value_ref = position.as_CFTypeRef();
                 let mut point: CGPoint = CGPoint { x: 0.0, y: 0.0 };
@@ -88,10 +102,17 @@ impl MacOSUIElement {
             }
         }
 
-        if let Ok(size) = self.element.0.attribute(&AXAttribute::new(&CFString::new("AXSize"))) {
+        if let Ok(size) = self
+            .element
+            .0
+            .attribute(&AXAttribute::new(&CFString::new("AXSize")))
+        {
             unsafe {
                 let value_ref = size.as_CFTypeRef();
-                let mut cg_size: CGSize = CGSize { width: 0.0, height: 0.0 };
+                let mut cg_size: CGSize = CGSize {
+                    width: 0.0,
+                    height: 0.0,
+                };
                 let size_ptr = &mut cg_size as *mut CGSize as *mut ::std::os::raw::c_void;
                 if AXValueGetValue(value_ref as *const _, K_AXVALUE_CGSIZE_TYPE, size_ptr) != 0 {
                     width = cg_size.width;
@@ -99,7 +120,10 @@ impl MacOSUIElement {
                 }
             }
         }
-        debug!("Element bounds: x={}, y={}, width={}, height={}", x, y, width, height);
+        debug!(
+            "Element bounds: x={}, y={}, width={}, height={}",
+            x, y, width, height
+        );
         Ok((x, y, width, height))
     }
 
@@ -137,16 +161,22 @@ impl MacOSUIElement {
             }
             Err(e) => {
                 if !all_children.is_empty() {
-                    debug!("Failed to get regular children but returning {} windows", all_children.len());
+                    debug!(
+                        "Failed to get regular children but returning {} windows",
+                        all_children.len()
+                    );
                     Ok(all_children)
                 } else {
-                    Err(AutomationError::PlatformError(format!("Failed to get children: {}", e)))
+                    Err(AutomationError::PlatformError(format!(
+                        "Failed to get children: {}",
+                        e
+                    )))
                 }
             }
         }
     }
 
-    fn parent(&self) -> Result<Option<UIElement>, AutomationError>{
+    fn parent(&self) -> Result<Option<UIElement>, AutomationError> {
         let attr = AXAttribute::new(&CFString::new("AXParent"));
         match self.element.0.attribute(&attr) {
             Ok(value) => {
@@ -162,156 +192,6 @@ impl MacOSUIElement {
             }
             Err(_) => Ok(None),
         }
-    }
-
-    pub(crate) fn get_application(&self) -> Option<MacOSUIElement> {
-        let attr = AXAttribute::new(&CFString::new("AXTopLevelUIElement"));
-        match self.element.0.attribute(&attr) {
-            Ok(value) => {
-                if let Some(app) = value.downcast::<AXUIElement>() {
-                    Some(MacOSUIElement {
-                        element: ThreadSafeAXUIElement::new(app),
-                        use_background_apps: self.use_background_apps,
-                        activate_app: self.activate_app,
-                    })
-                } else {
-                    None
-                }
-            }
-            Err(_) => None,
-        }
-    }
-
-    pub(crate) fn click_with_method(
-        &self,
-        method: ClickMethodSelection,
-    ) -> Result<ClickResult, AutomationError> {
-        match method {
-            ClickMethodSelection::Auto => self.click_auto(),
-            ClickMethodSelection::AXPress => self.click_press(),
-            ClickMethodSelection::AXClick => self.click_accessibility_click(),
-            ClickMethodSelection::MouseSimulation => self.click_mouse_simulation(),
-        }
-    }
-
-    fn click_auto(&self) -> Result<ClickResult, AutomationError> {
-        if let Some(app) = self.get_application() {
-            let app_attributes = UIElementImpl::attributes(&app);
-            let app_name = app_attributes.label.unwrap_or_default().to_lowercase();
-            debug!("detected application: {}", app_name);
-            if app_name.contains("chrome") || app_name.contains("safari") || app_name.contains("arc") ||
-               app_name.contains("firefox") || app_name.contains("edge") || app_name.contains("brave") ||
-               app_name.contains("opera") || app_name.contains("vivaldi") || app_name.contains("microsoft edge") {
-                debug!("browser detected, using mouse simulation directly");
-                return self.click_mouse_simulation();
-            }
-        }
-        match self.click_press() {
-            Ok(result) => return Ok(result),
-            Err(e) => debug!("AXPress failed: {:?}, trying alternative methods", e),
-        }
-        match self.click_accessibility_click() {
-            Ok(result) => return Ok(result),
-            Err(e) => debug!("AXClick failed: {:?}, trying alternative methods", e),
-        }
-        self.click_mouse_simulation()
-    }
-
-    fn click_press(&self) -> Result<ClickResult, AutomationError> {
-        let press_attr = AXAttribute::new(&CFString::new("AXPress"));
-        match self.element.0.perform_action(&press_attr.as_CFString()) {
-            Ok(_) => {
-                debug!("Successfully clicked element with AXPress");
-                Ok(ClickResult {
-                    method: "AXPress".to_string(),
-                    coordinates: None,
-                    details: "Used accessibility AXPress action".to_string(),
-                })
-            }
-            Err(e) => Err(AutomationError::PlatformError(format!("AXPress click failed: {:?}", e))),
-        }
-    }
-
-    fn click_accessibility_click(&self) -> Result<ClickResult, AutomationError> {
-        let click_attr = AXAttribute::new(&CFString::new("AXClick"));
-        match self.element.0.perform_action(&click_attr.as_CFString()) {
-            Ok(_) => {
-                debug!("Successfully clicked element with AXClick");
-                Ok(ClickResult {
-                    method: "AXClick".to_string(),
-                    coordinates: None,
-                    details: "Used accessibility AXClick action".to_string(),
-                })
-            }
-            Err(e) => Err(AutomationError::PlatformError(format!("AXClick click failed: {:?}", e))),
-        }
-    }
-
-    fn click_mouse_simulation(&self) -> Result<ClickResult, AutomationError> {
-        match self.bounds() {
-            Ok((x, y, width, height)) => {
-                let center_x = x + width / 2.0;
-                let center_y = y + height / 2.0;
-                let point = CGPoint::new(center_x, center_y);
-                let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-                    .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
-
-                let mouse_move = CGEvent::new_mouse_event(source.clone(), CGEventType::MouseMoved, point, CGMouseButton::Left)
-                    .map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
-                mouse_move.post(CGEventTapLocation::HID);
-                std::thread::sleep(std::time::Duration::from_millis(50));
-
-                debug!("Mouse down at ({}, {})", center_x, center_y);
-                let mouse_down = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-                    .map_err(|_| AutomationError::PlatformError("Failed to create mouse down event".to_string()))?;
-                mouse_down.post(CGEventTapLocation::HID);
-                std::thread::sleep(std::time::Duration::from_millis(50));
-
-                debug!("Mouse up at ({}, {})", center_x, center_y);
-                let mouse_up = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-                    .map_err(|_| AutomationError::PlatformError("Failed to create mouse up event".to_string()))?;
-                mouse_up.post(CGEventTapLocation::HID);
-
-                debug!("Performed simulated mouse click at ({}, {})", center_x, center_y);
-                Ok(ClickResult {
-                    method: "MouseSimulation".to_string(),
-                    coordinates: Some((center_x, center_y)),
-                    details: format!("Used mouse simulation at coordinates ({:.1}, {:.1}), element bounds: ({:.1}, {:.1}, {:.1}, {:.1})", center_x, center_y, x, y, width, height),
-                })
-            }
-            Err(e) => Err(AutomationError::PlatformError(format!("Failed to determine element bounds for click: {}", e))),
-        }
-    }
-
-    fn get_key_code(&self, key: &str) -> Result<u16, AutomationError> {
-        let key_map: HashMap<&str, u16> = [
-            ("return", KEY_RETURN), ("enter", KEY_RETURN), ("tab", KEY_TAB), ("space", KEY_SPACE),
-            ("delete", KEY_DELETE), ("backspace", KEY_DELETE), ("esc", KEY_ESCAPE), ("escape", KEY_ESCAPE),
-            ("left", KEY_ARROW_LEFT), ("right", KEY_ARROW_RIGHT), ("down", KEY_ARROW_DOWN), ("up", KEY_ARROW_UP),
-        ].iter().cloned().collect();
-        key_map.get(key.to_lowercase().as_str()).copied()
-            .ok_or_else(|| AutomationError::InvalidArgument(format!("Unknown key: {}", key)))
-    }
-
-    pub(crate) fn parse_key_combination(&self, key_combo: &str) -> Result<(u16, CGEventFlags), AutomationError> {
-        let parts: Vec<String> = key_combo.split('+').map(|s| s.trim().to_lowercase()).collect();
-        if parts.is_empty() {
-            return Err(AutomationError::InvalidArgument("Empty key combination".to_string()));
-        }
-        let key = &parts[parts.len() - 1];
-        let key_code = self.get_key_code(key)?;
-        let mut flags = CGEventFlags::empty();
-        for modifier in &parts[0..parts.len() - 1] {
-            match modifier.as_str() {
-                "cmd" | "command" => flags.insert(MODIFIER_COMMAND),
-                "shift" => flags.insert(MODIFIER_SHIFT),
-                "alt" | "option" => flags.insert(MODIFIER_OPTION),
-                "ctrl" | "control" => flags.insert(MODIFIER_CONTROL),
-                "fn" => flags.insert(MODIFIER_FN),
-                _ => return Err(AutomationError::InvalidArgument(format!("Unknown modifier: {}", modifier)))
-            }
-        }
-        Ok((key_code, flags))
     }
 }
 
@@ -333,89 +213,20 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn role(&self) -> String {
-        let role = self.element.0.role().map(|r| r.to_string()).unwrap_or_default();
-        macos_role_to_generic_role(&role).first().unwrap_or(&role).to_string()
+        let role = self
+            .element
+            .0
+            .role()
+            .map(|r| r.to_string())
+            .unwrap_or_default();
+        macos_role_to_generic_role(&role)
+            .first()
+            .unwrap_or(&role)
+            .to_string()
     }
 
     fn attributes(&self) -> UIElementAttributes {
-        let mut properties = HashMap::new();
-        let is_window = self.element.0.role().map_or(false, |r| r.to_string() == "AXWindow");
-
-        let mut attrs = UIElementAttributes {
-            role: self.role(),
-            label: None,
-            value: None,
-            description: None,
-            properties,
-        };
-
-        if is_window {
-            attrs.role = "window".to_string();
-            let title_attrs = ["AXTitle", "AXTitleUIElement", "AXDocument", "AXFilename", "AXName"];
-            for title_attr_name in title_attrs {
-                let title_attr = AXAttribute::new(&CFString::new(title_attr_name));
-                if let Ok(value) = self.element.0.attribute(&title_attr) {
-                    if let Some(cf_string) = value.downcast_into::<CFString>() {
-                        attrs.label = Some(cf_string.to_string());
-                        break;
-                    }
-                }
-            }
-            let std_attrs = ["AXMinimized", "AXMain", "AXFocused"];
-            for attr_name in std_attrs {
-                let attr = AXAttribute::new(&CFString::new(attr_name));
-                if let Ok(value) = self.element.0.attribute(&attr) {
-                    if let Some(cf_bool) = value.downcast_into::<CFBoolean>() {
-                        attrs.properties.insert(attr_name.to_string(), Some(serde_json::Value::String(format!("{:?}", cf_bool))));
-                    }
-                }
-            }
-        } else {
-            attrs.label = self.element.0.title().ok().map(|s| s.to_string());
-            if attrs.label.is_none() {
-                attrs.label = self.element.0.attribute(&AXAttribute::new(&CFString::new("AXLabel")))
-                    .ok()
-                    .and_then(|val| val.downcast_into::<CFString>())
-                    .map(|s| s.to_string());
-            }
-            attrs.description = self.element.0.description().ok().map(|s| s.to_string());
-
-            let value_attr = AXAttribute::new(&CFString::new("AXValue"));
-            if let Ok(value) = self.element.0.attribute(&value_attr) {
-                if let Some(cf_string) = value.clone().downcast_into::<CFString>() {
-                    attrs.value = Some(cf_string.to_string());
-                } else if let Some(cf_num) = value.downcast_into::<CFNumber>() {
-                    if let Some(num) = cf_num.to_i64() {
-                        attrs.value = Some(num.to_string());
-                    } else if let Some(num) = cf_num.to_f64() {
-                        attrs.value = Some(num.to_string());
-                    }
-                } else {
-                    // Potentially handle other AXValue types (e.g., boolean)
-                }
-            }
-        }
-
-        if let Ok(attr_names) = self.element.0.attribute_names() {
-            for name in attr_names.iter() {
-                let attr = AXAttribute::new(&name);
-                let name_str = name.to_string();
-                if !["AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue", "AXMinimized", "AXMain", "AXFocused", "AXPosition", "AXSize"].contains(&name_str.as_str()) {
-                    match self.element.0.attribute(&attr) {
-                        Ok(value) => {
-                            let parsed_value = parse_ax_attribute_value(&name_str, value);
-                            attrs.properties.insert(name_str, parsed_value);
-                        }
-                        Err(e) => {
-                            if !matches!(e, accessibility::Error::Ax(-25212) | accessibility::Error::Ax(-25205) | accessibility::Error::Ax(-25204)) {
-                                // debug!("Error getting property attribute '{}': {:?}", name_str, e);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        attrs
+        get_element_attributes(self)
     }
 
     fn children(&self) -> Result<Vec<UIElement>, AutomationError> {
@@ -431,150 +242,69 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn click(&self) -> Result<ClickResult, AutomationError> {
-        self.click_with_method(ClickMethodSelection::Auto)
+        interaction::click_with_method(self, ClickMethodSelection::Auto)
     }
 
     fn double_click(&self) -> Result<ClickResult, AutomationError> {
-        let first_click = self.click()?;
-        match self.click() {
-            Ok(second_click) => Ok(ClickResult { method: second_click.method, coordinates: second_click.coordinates, details: format!("Double-click: First click: {}, Second click: {}", first_click.details, second_click.details) }),
+        let first_click = interaction::click_with_method(self, ClickMethodSelection::Auto)?;
+        match interaction::click_with_method(self, ClickMethodSelection::Auto) {
+            Ok(second_click) => Ok(ClickResult {
+                method: second_click.method,
+                coordinates: second_click.coordinates,
+                details: format!(
+                    "Double-click: First click: {}, Second click: {}",
+                    first_click.details, second_click.details
+                ),
+            }),
             Err(e) => Err(e),
         }
     }
 
     fn right_click(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedOperation("Right-click not yet implemented for macOS".to_string()))
+        Err(AutomationError::UnsupportedOperation(
+            "Right-click not yet implemented for macOS".to_string(),
+        ))
     }
 
     fn hover(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedOperation("Hover not yet implemented for macOS".to_string()))
+        Err(AutomationError::UnsupportedOperation(
+            "Hover not yet implemented for macOS".to_string(),
+        ))
     }
 
     fn focus(&self) -> Result<(), AutomationError> {
-        let raise_attr = AXAttribute::new(&CFString::new("AXRaise"));
-        if self.element.0.perform_action(&raise_attr.as_CFString()).is_ok() {
-            debug!("Successfully raised element");
-            if let Some(app) = self.get_application() {
-                unsafe {
-                    let app_ref = app.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
-                    let attr_str = CFString::new("AXFocusedUIElement");
-                    let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                    let elem_ref = self.element.0.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                    let result = AXUIElementSetAttributeValue(app_ref, attr_str_ref, elem_ref);
-                    if result == 0 { debug!("Successfully set focus to element via AXFocusedUIElement"); return Ok(()); }
-                    else { debug!("Failed to set AXFocusedUIElement: error code {}", result); }
-                }
-            }
-        }
-        debug!("Raise action failed or app not found, attempting focus via click");
-        self.click().map(|_result| { debug!("Focus achieved via click method: {}", _result.method); () })
+        interaction::focus(self)
     }
 
     fn type_text(&self, text: &str) -> Result<(), AutomationError> {
-        match self.focus() {
-            Ok(_) => debug!("Successfully focused element for typing"),
-            Err(e) => {
-                debug!("Focus failed, but continuing with type_text: {:?}", e);
-                if let Err(click_err) = self.click() { debug!("Click also failed: {:?}", click_err); }
-            }
-        }
-        let is_web_input = { let role = self.role().to_lowercase(); role.contains("web") || role.contains("generic") };
-        if is_web_input {
-            debug!("Detected web input, using specialized handling for type_text");
-            for attr_name in &["AXValue", "AXValueAttribute", "AXText"] {
-                let cf_string = CFString::new(text);
-                unsafe {
-                    let element_ref = self.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
-                    let attr_str = CFString::new(attr_name);
-                    let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                    let value_ref = cf_string.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                    let result = AXUIElementSetAttributeValue(element_ref, attr_str_ref, value_ref);
-                    if result == 0 { debug!("Successfully set text using {}", attr_name); return Ok(()); }
-                }
-            }
-            debug!("Setting AXValue/AXText attributes failed for web input, falling back to keyboard simulation");
-            let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-                .map_err(|_| AutomationError::PlatformError("Failed to create event source for typing".to_string()))?;
-            for char_code in text.encode_utf16() {
-                let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
-                    .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
-                key_down.post(CGEventTapLocation::HID);
-                let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
-                    .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
-                key_up.post(CGEventTapLocation::HID);
-            }
-            return Ok(());
-        }
-        let cf_string = CFString::new(text);
-        unsafe {
-            let element_ref = self.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
-            let attr_str = CFString::new("AXValue");
-            let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-            let value_ref = cf_string.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-            let result = AXUIElementSetAttributeValue(element_ref, attr_str_ref, value_ref);
-            if result != 0 {
-                debug!("Failed to set native text value via AXValue: error code {}, trying keyboard simulation", result);
-                let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-                    .map_err(|_| AutomationError::PlatformError("Failed to create event source for typing".to_string()))?;
-                for char_code in text.encode_utf16() {
-                    let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
-                        .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
-                    key_down.post(CGEventTapLocation::HID);
-                    let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
-                        .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
-                    key_up.post(CGEventTapLocation::HID);
-                }
-                return Ok(());
-            }
-            debug!("Successfully set native text value via AXValue");
-        }
-        Ok(())
+        interaction::type_text(self, text)
     }
 
     fn press_key(&self, key_combo: &str) -> Result<(), AutomationError> {
-        debug!("Pressing key combination: {}", key_combo);
-        let element_label = UIElementImpl::attributes(self).label.unwrap_or_default();
-        let element_role = self.role();
-
-        match self.focus() {
-            Ok(_) => debug!("successfully focused element for key press"),
-            Err(e) => {
-                let error_msg = format!("key press aborted - failed to focus {} element '{}' before pressing '{}': {}", element_role, element_label, key_combo, e);
-                debug!("{}", error_msg);
-                return Err(AutomationError::PlatformError(error_msg));
-            }
-        }
-        let (key_code, flags) = self.parse_key_combination(key_combo)?;
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
-
-        let key_down = CGEvent::new_keyboard_event(source.clone(), key_code as CGKeyCode, true)
-            .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
-        if !flags.is_empty() { key_down.set_flags(flags); }
-        key_down.post(CGEventTapLocation::HID);
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        let key_up = CGEvent::new_keyboard_event(source, key_code as CGKeyCode, false)
-            .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
-        if !flags.is_empty() { key_up.set_flags(flags); }
-        key_up.post(CGEventTapLocation::HID);
-
-        debug!("Successfully pressed key combination: {}", key_combo);
-        Ok(())
+        interaction::press_key(self, key_combo)
     }
 
     fn get_text(&self, max_depth: usize) -> Result<String, AutomationError> {
-        let collector = ElementsCollectorWithWindows::new(&self.element.0, |_| true).with_limits(None, Some(max_depth));
+        let collector = ElementsCollectorWithWindows::new(&self.element.0, |_| true)
+            .with_limits(None, Some(max_depth));
         let elements = collector.find_all();
         let mut all_text: Vec<String> = Vec::new();
         for element in elements {
-            for attr_name in &["AXValue", "AXTitle", "AXDescription", "AXHelp", "AXLabel", "AXText"] {
+            for attr_name in &[
+                "AXValue",
+                "AXTitle",
+                "AXDescription",
+                "AXHelp",
+                "AXLabel",
+                "AXText",
+            ] {
                 let attr = AXAttribute::new(&CFString::new(attr_name));
                 if let Ok(value) = element.attribute(&attr) {
                     if let Some(cf_string) = value.downcast_into::<CFString>() {
                         let text = cf_string.to_string();
-                        if !text.is_empty() && !all_text.contains(&text) { all_text.push(text); }
+                        if !text.is_empty() && !all_text.contains(&text) {
+                            all_text.push(text);
+                        }
                     }
                 }
             }
@@ -583,23 +313,13 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn set_value(&self, value: &str) -> Result<(), AutomationError> {
-        let cf_string = CFString::new(value);
-        unsafe {
-            let element_ref = self.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
-            let attr_str = CFString::new("AXValue");
-            let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-            let value_ref = cf_string.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-            let result = AXUIElementSetAttributeValue(element_ref, attr_str_ref, value_ref);
-            if result != 0 {
-                debug!("Failed to set value via AXValue: error code {}", result);
-                return Err(AutomationError::PlatformError(format!("Failed to set value: error code {}", result)));
-            }
-        }
-        Ok(())
+        interaction::set_value(self, value)
     }
 
     fn is_enabled(&self) -> Result<bool, AutomationError> {
-        Err(AutomationError::UnsupportedOperation("is_enabled not yet implemented for macOS".to_string()))
+        Err(AutomationError::UnsupportedOperation(
+            "is_enabled not yet implemented for macOS".to_string(),
+        ))
     }
 
     fn is_visible(&self) -> Result<bool, AutomationError> {
@@ -610,24 +330,41 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn is_focused(&self) -> Result<bool, AutomationError> {
-        Err(AutomationError::UnsupportedOperation("is_focused not yet implemented for macOS".to_string()))
+        Err(AutomationError::UnsupportedOperation(
+            "is_focused not yet implemented for macOS".to_string(),
+        ))
     }
 
     fn perform_action(&self, action: &str) -> Result<(), AutomationError> {
         let action_attr = AXAttribute::new(&CFString::new(action));
-        self.element.0.perform_action(&action_attr.as_CFString())
-            .map_err(|e| AutomationError::PlatformError(format!("Failed to perform action {}: {}", action, e)))
+        self.element
+            .0
+            .perform_action(&action_attr.as_CFString())
+            .map_err(|e| {
+                AutomationError::PlatformError(format!(
+                    "Failed to perform action {}: {}",
+                    action, e
+                ))
+            })
     }
 
     fn create_locator(&self, selector: Selector) -> Result<Locator, AutomationError> {
         let engine = MacOSEngine::new(self.use_background_apps, self.activate_app)?;
-        if self.element.0.role().map_or(false, |r| r.to_string() == "AXApplication") {
+        if self
+            .element
+            .0
+            .role()
+            .map_or(false, |r| r.to_string() == "AXApplication")
+        {
             if let Some(app_name) = self.attributes().label {
                 engine.refresh_accessibility_tree(Some(&app_name))?;
             }
         }
         let attrs = self.attributes();
-        debug!("Creating locator for element: role={}, label={:?}", attrs.role, attrs.label);
+        debug!(
+            "Creating locator for element: role={}, label={:?}",
+            attrs.role, attrs.label
+        );
         let self_element = UIElement::new(self.clone_box());
         let locator = Locator::new(std::sync::Arc::new(engine), selector).within(self_element);
         Ok(locator)
@@ -644,20 +381,33 @@ impl UIElementImpl for MacOSUIElement {
     fn scroll(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
         let _ = self.focus();
         let (x, y, width, height) = self.bounds()?;
-        let center_x = x + width / 2.0; let center_y = y + height / 2.0;
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
+        let center_x = x + width / 2.0;
+        let center_y = y + height / 2.0;
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("Failed to create event source".to_string())
+        })?;
         let scroll_amount = amount as i32;
         let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
-            "up" => (0, -scroll_amount), "down" => (0, scroll_amount),
-            "left" => (-scroll_amount, 0), "right" => (scroll_amount, 0),
-            _ => return Err(AutomationError::InvalidArgument(format!("Invalid scroll direction: {}. Must be up, down, left, or right", direction)))
+            "up" => (0, -scroll_amount),
+            "down" => (0, scroll_amount),
+            "left" => (-scroll_amount, 0),
+            "right" => (scroll_amount, 0),
+            _ => {
+                return Err(AutomationError::InvalidArgument(format!(
+                    "Invalid scroll direction: {}. Must be up, down, left, or right",
+                    direction
+                )))
+            }
         };
-        let scroll_event = CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0)
-            .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+        let scroll_event =
+            CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0).map_err(|_| {
+                AutomationError::PlatformError("Failed to create scroll event".to_string())
+            })?;
         scroll_event.post(CGEventTapLocation::HID);
-        debug!("scrolled {} by {} lines at position ({}, {})", direction, amount, center_x, center_y);
+        debug!(
+            "scrolled {} by {} lines at position ({}, {})",
+            direction, amount, center_x, center_y
+        );
         Ok(())
     }
 }
-
