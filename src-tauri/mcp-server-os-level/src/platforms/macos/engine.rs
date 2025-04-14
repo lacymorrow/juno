@@ -1,23 +1,22 @@
 use super::element::MacOSUIElement;
 use super::permissions::check_accessibility_permissions;
-use super::utils::{get_pid_for_element, get_running_application_pids, map_generic_role_to_macos_roles, element_contains_text};
-use super::wrappers::ThreadSafeAXUIElement;
-use crate::{
-    AutomationError,
-    UIElement,
-    Selector,
+use super::utils::{
+    element_contains_text, get_pid_for_element, get_running_application_pids,
+    map_generic_role_to_macos_roles,
 };
-use accessibility::{AXUIElementAttributes, AXAttribute, AXUIElement};
-use anyhow::Result;
-use core_graphics::display::CGPoint;
-use core_graphics::event::{CGEventType, CGMouseButton, CGEventTapLocation, CGEvent};
-use core_graphics::event_source::{CGEventSourceStateID, CGEventSource};
-use tracing::{debug, trace};
-use crate::element::UIElementImpl;
+use super::wrappers::ThreadSafeAXUIElement;
+use crate::platforms::tree_search::{
+    ElementFinderWithWindows, ElementsCollectorWithWindows, TreeWalkerWithWindows,
+};
 use crate::platforms::AccessibilityEngine;
-use crate::platforms::tree_search::{ElementFinderWithWindows, ElementsCollectorWithWindows, TreeWalkerWithWindows};
-use std::sync::Arc;
+use crate::{AutomationError, Selector, UIElement};
+use accessibility::AXUIElementAttributes;
+use anyhow::Result;
 use core_foundation::string::CFString;
+use core_graphics::display::CGPoint;
+use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use tracing::{debug, trace};
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -120,22 +119,20 @@ impl MacOSEngine {
             debug!("using cached application element");
 
             match cached_element.0.role() {
-                Ok(role) if role.to_string() == "AXApplication" => {
-                    unsafe {
-                        use objc::{class, msg_send, sel, sel_impl};
-                        let pid = get_pid_for_element(cached_element);
+                Ok(role) if role.to_string() == "AXApplication" => unsafe {
+                    use objc::{class, msg_send, sel, sel_impl};
+                    let pid = get_pid_for_element(cached_element);
 
-                        let nsra_class = class!(NSRunningApplication);
-                        let app: *mut objc::runtime::Object =
-                            msg_send![nsra_class, runningApplicationWithProcessIdentifier:pid];
-                        if !app.is_null() {
-                            let _: () = msg_send![app, activateWithOptions:1];
-                            debug!("Activated application using cached element");
+                    let nsra_class = class!(NSRunningApplication);
+                    let app: *mut objc::runtime::Object =
+                        msg_send![nsra_class, runningApplicationWithProcessIdentifier:pid];
+                    if !app.is_null() {
+                        let _: () = msg_send![app, activateWithOptions:1];
+                        debug!("Activated application using cached element");
 
-                            return Ok(cached_element.clone());
-                        }
+                        return Ok(cached_element.clone());
                     }
-                }
+                },
                 _ => {
                     debug!("Cached element is no longer valid");
                 }
@@ -189,12 +186,14 @@ impl MacOSEngine {
         direction: &str,
         amount: f64,
     ) -> Result<(), AutomationError> {
-        debug!("scrolling {} by {} at position ({}, {})", direction, amount, x, y);
+        debug!(
+            "scrolling {} by {} at position ({}, {})",
+            direction, amount, x, y
+        );
 
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .map_err(|_| {
-                AutomationError::PlatformError("Failed to create event source".to_string())
-            })?;
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("Failed to create event source".to_string())
+        })?;
 
         let scroll_amount = amount as i32;
 
@@ -225,15 +224,17 @@ impl MacOSEngine {
 
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        let scroll_event = CGEvent::new_scroll_event(
-            source, 0, 1,
-            scroll_y, scroll_x, 0,
-        )
-        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+        let scroll_event =
+            CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0).map_err(|_| {
+                AutomationError::PlatformError("Failed to create scroll event".to_string())
+            })?;
 
         scroll_event.post(CGEventTapLocation::HID);
 
-        debug!("scrolled {} by {} at position ({}, {})", direction, amount, x, y);
+        debug!(
+            "scrolled {} by {} at position ({}, {})",
+            direction, amount, x, y
+        );
         Ok(())
     }
 
@@ -244,19 +245,22 @@ impl MacOSEngine {
     ) -> Result<(), AutomationError> {
         debug!("getting current mouse location using CGEvent::new with a valid event source");
 
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .map_err(|_| AutomationError::PlatformError("failed to create event source".to_string()))?;
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("failed to create event source".to_string())
+        })?;
         debug!("created event source successfully");
 
-        let event = CGEvent::new(source)
-            .map_err(|_| AutomationError::PlatformError("failed to create event for obtaining current mouse position".to_string()))?;
+        let event = CGEvent::new(source).map_err(|_| {
+            AutomationError::PlatformError(
+                "failed to create event for obtaining current mouse position".to_string(),
+            )
+        })?;
         debug!("got current event; mouse position: {:?}", event.location());
 
         let current_pos = event.location();
 
         self.scroll_at_position(current_pos.x, current_pos.y, direction, amount)
     }
-
 }
 
 impl AccessibilityEngine for MacOSEngine {
@@ -514,7 +518,7 @@ impl AccessibilityEngine for MacOSEngine {
                         "only role -> id chains are supported".to_string(),
                     ));
                 }
-            },
+            }
             Selector::Filter(_) => Err(AutomationError::UnsupportedOperation(
                 "Filter selector not implemented".to_string(),
             )),
@@ -645,8 +649,12 @@ impl AccessibilityEngine for MacOSEngine {
 
         // Retry loop with targeted scanning
         while retry_count < max_retries {
-            debug!("looking for newly launched app '{}', attempt {}/{}",
-                   app_name, retry_count + 1, max_retries);
+            debug!(
+                "looking for newly launched app '{}', attempt {}/{}",
+                app_name,
+                retry_count + 1,
+                max_retries
+            );
 
             // Try to find the app directly without full refresh
             unsafe {

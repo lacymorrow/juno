@@ -1,25 +1,18 @@
 pub mod actions;
+pub mod attributes;
 pub mod constants;
 pub mod element;
 pub mod engine;
 pub mod ffi;
+pub mod interaction;
 pub mod permissions;
 pub mod utils;
 pub mod wrappers;
 
-use crate::platforms::AccessibilityEngine;
-use crate::element::UIElementImpl;
-use crate::{
-    AutomationError,
-    ClickResult,
-    UIElement,
-    UIElementAttributes,
-    Locator,
-    Selector,
-};
+// No platform-level imports needed here after refactoring
 
 // Re-export key types publicly
-pub use engine::MacOSEngine;
 pub use element::MacOSUIElement;
+pub use engine::MacOSEngine;
 
 // The rest of the original file content has been moved to the respective modules.
