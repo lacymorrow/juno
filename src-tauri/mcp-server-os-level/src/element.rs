@@ -233,28 +233,13 @@ impl Clone for UIElement {
     }
 }
 
-// Implement AsAny for the UIElement wrapper struct
-impl AsAny for UIElement {
-    fn as_any(&self) -> &dyn std::any::Any {
-         AsAny::as_any(self.inner.as_ref())
-    }
-}
-
-// Implement AsAny for the boxed trait object as well
-impl AsAny for Box<dyn UIElementImpl> {
-    fn as_any(&self) -> &dyn std::any::Any {
-        // Disambiguate: Call the as_any method from the UIElementImpl trait
-        UIElementImpl::as_any(self.as_ref())
-    }
-}
-
-// Define a serializable struct for the element tree node
-#[derive(Serialize, Debug, Clone)]
+#[derive(Debug, Serialize)]
 pub struct ElementTreeNode {
-    pub role: String,
-    pub label: Option<String>,
-    pub description: Option<String>,
-    pub bounds: Option<(f64, f64, f64, f64)>,
+    pub attributes: UIElementAttributes,
     pub children: Vec<ElementTreeNode>,
-    // Add other relevant attributes as needed
+    // Add any other relevant info you want in the tree node
 }
+
+// Default implementation for clone_box if not provided by platform
+// This is often needed if the trait object itself doesn't have a direct clone.
+// However, specific implementations of UIElementImpl will need to implement clone_box.
