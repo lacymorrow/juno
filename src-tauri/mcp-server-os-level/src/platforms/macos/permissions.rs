@@ -1,13 +1,13 @@
-use crate::AutomationError;
 use crate::platforms::macos::ffi::AXIsProcessTrustedWithOptions; // Import from ffi module
+use crate::AutomationError;
+use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
-use core_foundation::base::TCFType;
 use tracing::debug;
 
-// Add this new function to the file (not inside any impl block)
-pub(crate) fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, AutomationError> {
+// Make the function public so it can be called from server.rs
+pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, AutomationError> {
     debug!("checking accessibility permissions");
 
     unsafe {
@@ -20,10 +20,7 @@ pub(crate) fn check_accessibility_permissions(show_prompt: bool) -> Result<bool,
         };
 
         // Create dictionary with proper memory management
-        let options = CFDictionary::from_CFType_pairs(&[(
-            key.as_CFType(),
-            value.as_CFType(),
-        )]);
+        let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
 
         // Call the function with proper type conversion
         let is_trusted = AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef());

@@ -11,7 +11,11 @@ use crate::platforms::tree_search::{
 use crate::platforms::AccessibilityEngine;
 use crate::{AutomationError, Selector, UIElement};
 use accessibility::AXUIElementAttributes;
+use accessibility_sys::kAXFocusedUIElementAttribute;
+use accessibility_sys::AXUIElementRef;
 use anyhow::Result;
+use core_foundation::base::CFType;
+use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
@@ -286,10 +290,39 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {
-        // not implemented
-        Err(AutomationError::UnsupportedOperation(
-            "get_focused_element not yet implemented for macOS".to_string(),
-        ))
+        // Create CFString from the attribute name literal
+        let attr_name = CFString::new(unsafe { kAXFocusedUIElementAttribute });
+        // Create the attribute struct for CFType (as this is what `new` provides)
+        let cf_type_attribute = accessibility::AXAttribute::<CFType>::new(&attr_name);
+
+        // Call attribute expecting a CFType result
+        match self.system_wide.0.attribute(&cf_type_attribute) {
+            Ok(focused_element_val) => {
+                // focused_element_val is CFType
+                // Convert the CFType result to AXUIElement
+                let focused_element = unsafe {
+                    // Cast the *const c_void from as_CFTypeRef to the expected *mut __AXUIElement (AXUIElementRef)
+                    let element_ref =
+                        focused_element_val.as_CFTypeRef() as *mut libc::c_void as AXUIElementRef;
+                    accessibility::AXUIElement::wrap_under_create_rule(element_ref)
+                };
+
+                // Ensure the element is valid before wrapping
+                if focused_element.role().is_ok() {
+                    Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_element)))
+                } else {
+                    debug!("Focused element obtained via CFType is invalid/inaccessible");
+                    Err(AutomationError::PlatformError(
+                        "Focused element is invalid or inaccessible.".to_string(),
+                    ))
+                }
+            }
+            // Map any error directly to PlatformError
+            Err(e) => Err(AutomationError::PlatformError(format!(
+                "Failed to get focused element attribute as CFType: {:?}",
+                e
+            ))),
+        }
     }
 
     fn get_application_by_name(&self, name: &str) -> Result<UIElement, AutomationError> {

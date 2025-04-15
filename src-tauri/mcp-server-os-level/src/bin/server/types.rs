@@ -1,10 +1,18 @@
-use std::{collections::HashMap, sync::Arc, time::Instant};
-use computer_use_ai_sdk::UIElement;
+use computer_use_ai_sdk::{Desktop, UIElement};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use serde_json::Value;
+use std::{collections::HashMap, sync::Arc, time::Instant};
+use tokio::sync::Mutex;
 
 // ================ Types ================
+
+// Define ElementCache struct at module level
+#[derive(Debug, Clone)]
+pub struct ElementCache {
+    pub elements: Vec<UIElement>,
+    pub timestamp: Instant,
+    pub app_name: String,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ElementSelector {
@@ -94,9 +102,10 @@ pub struct GetTextResponse {
     pub text: String,
 }
 
-// App state
+// App state - Remove Debug derive
 pub struct AppState {
-    pub element_cache: Arc<Mutex<Option<(Vec<UIElement>, Instant, String)>>>,
+    pub element_cache: Arc<Mutex<Option<ElementCache>>>,
+    pub desktop: Arc<Desktop>,
 }
 
 // MCP-specific types

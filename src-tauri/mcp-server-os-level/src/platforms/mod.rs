@@ -1,8 +1,7 @@
-use std::any::Any;
-use crate::element::{UIElement, UIElementAttributes};
-use crate::{Locator, Selector, AutomationError, ClickResult};
+use crate::element::UIElement;
+use crate::{AutomationError, Selector};
 use anyhow::Result;
-use serde_json::Value;
+use std::any::Any;
 
 /// The common trait that all platform-specific engines must implement
 pub trait AccessibilityEngine: Send + Sync + Any {
@@ -79,14 +78,20 @@ pub fn create_engine(
     }
     #[cfg(target_os = "windows")]
     {
-        return Err(AutomationError::UnsupportedPlatform("Windows not yet supported".to_string()));
+        return Err(AutomationError::UnsupportedPlatform(
+            "Windows not yet supported".to_string(),
+        ));
     }
     #[cfg(target_os = "linux")]
     {
-        return Err(AutomationError::UnsupportedPlatform("Linux not yet supported".to_string()));
+        return Err(AutomationError::UnsupportedPlatform(
+            "Linux not yet supported".to_string(),
+        ));
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
-        Err(AutomationError::UnsupportedPlatform("Unsupported operating system".to_string()))
+        Err(AutomationError::UnsupportedPlatform(
+            "Unsupported operating system".to_string(),
+        ))
     }
 }
