@@ -23,7 +23,7 @@ pub struct UIElementAttributes {
 }
 
 /// Interface for platform-specific element implementations
-pub(crate) trait UIElementImpl: Send + Sync + Debug {
+pub(crate) trait UIElementImpl: Send + Sync + Debug + AsAny {
     fn object_id(&self) -> usize;
     fn id(&self) -> Option<String>;
     fn role(&self) -> String;
@@ -44,12 +44,29 @@ pub(crate) trait UIElementImpl: Send + Sync + Debug {
     fn is_visible(&self) -> Result<bool, AutomationError>;
     fn is_focused(&self) -> Result<bool, AutomationError>;
     fn perform_action(&self, action: &str) -> Result<(), AutomationError>;
-    fn as_any(&self) -> &dyn std::any::Any;
     fn create_locator(&self, selector: Selector) -> Result<Locator, AutomationError>;
     fn scroll(&self, direction: &str, amount: f64) -> Result<(), AutomationError>;
+    fn screenshot(&self) -> Result<String, AutomationError>;
+    fn select_text(&self) -> Result<(), AutomationError>;
+    fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError>;
 
     // Add a method to clone the box
     fn clone_box(&self) -> Box<dyn UIElementImpl>;
+
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+// Add a public method to access the underlying Any implementation
+pub trait AsAny {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+// Generic implementation for types that implement UIElementImpl
+impl<T: UIElementImpl + ?Sized + 'static> AsAny for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        // Delegate to the implementation provided by UIElementImpl
+        UIElementImpl::as_any(self)
+    }
 }
 
 impl UIElement {
@@ -153,9 +170,9 @@ impl UIElement {
         self.inner.perform_action(action)
     }
 
-    /// Get the underlying implementation as a specific type
-    pub(crate) fn as_any(&self) -> &dyn std::any::Any {
-        self.inner.as_any()
+    /// Public method to get as Any, using the AsAny trait
+    pub fn as_any(&self) -> &dyn std::any::Any {
+        AsAny::as_any(self.inner.as_ref()) // Call trait method on the boxed inner value
     }
 
     /// Find elements matching the selector within this element
@@ -167,6 +184,21 @@ impl UIElement {
     /// Scroll the element in a given direction
     pub fn scroll(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
         self.inner.scroll(direction, amount)
+    }
+
+    /// Get a screenshot of this element
+    pub fn screenshot(&self) -> Result<String, AutomationError> {
+        self.inner.screenshot()
+    }
+
+    /// Select text within this element
+    pub fn select_text(&self) -> Result<(), AutomationError> {
+        self.inner.select_text()
+    }
+
+    /// Get all attributes of the element
+    pub fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
+        self.inner.get_all_attributes()
     }
 }
 
@@ -192,5 +224,20 @@ impl Clone for UIElement {
         Self {
             inner: self.inner.clone_box(),
         }
+    }
+}
+
+// Implement AsAny for the UIElement wrapper struct
+impl AsAny for UIElement {
+    fn as_any(&self) -> &dyn std::any::Any {
+         AsAny::as_any(self.inner.as_ref())
+    }
+}
+
+// Implement AsAny for the boxed trait object as well
+impl AsAny for Box<dyn UIElementImpl> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        // Disambiguate: Call the as_any method from the UIElementImpl trait
+        UIElementImpl::as_any(self.as_ref())
     }
 }

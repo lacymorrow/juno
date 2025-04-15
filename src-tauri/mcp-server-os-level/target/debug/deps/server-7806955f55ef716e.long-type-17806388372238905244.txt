@@ -1,1 +1,0 @@
-fn(axum::extract::State<Arc<{type error}, {type error}>>, Json<{type error}>) -> impl std::future::Future<Output = Result<Json<type_by_index::TypeByIndexWithElementsResponse>, (axum::http::StatusCode, Json<serde_json::Value>)>> {type_by_index_handler}

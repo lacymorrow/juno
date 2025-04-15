@@ -15,23 +15,31 @@ name = "dotdot_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-computer-use-ai-sdk = { path = "mcp-server-os-level" }
+tauri = { version = "2.2.0", features = ["tray-icon"] }
+tauri-plugin-opener = "2.2.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+computer-use-ai-sdk = { path = "./mcp-server-os-level" }
 dotenvy = "0.15"
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.12.5", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
-base64 = "0.22"
+base64 = "0.22.1"
 axum = "0.7"
 tower-http = { version = "0.5", features = ["cors"] }
 log = "0.4"
-image = { version = "0.25", features = ["png"] }
-tracing-subscriber = "0.3"
+image = "0.25.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5.11", features = ["derive"] }
 
 [features]
+# this feature is used for production builds or when `devPath` points to the filesystem
+# DO NOT REMOVE!!
+default = ["custom-protocol"]
+# this feature is used when building mobile applications
+# mobile = ["tauri/mobile"] # Temporarily comment out if causing issues
+custom-protocol = ["tauri/custom-protocol"]
 
