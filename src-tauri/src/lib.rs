@@ -463,6 +463,10 @@ async fn get_logs(state: tauri::State<'_, AppState>) -> Result<Vec<String>, Stri
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize tracing subscriber
+    // Default level is INFO, set RUST_LOG=debug or RUST_LOG=trace for more detailed logs
+    tracing_subscriber::fmt::init();
+
     // Load environment variables from .env file
     dotenv().ok();
 
