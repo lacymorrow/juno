@@ -25,4 +25,19 @@ pub enum AutomationError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("No focused element found: {0}")]
+    NoFocusedElement(String),
+
+    #[error(
+        "Element has zero or negative dimensions and cannot be used for visual operations. Role: '{role}', Label: '{label}', Bounds: ({x}, {y}, {width}, {height})"
+    )]
+    ZeroElementDimensions {
+        role: String,
+        label: String,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    },
 }

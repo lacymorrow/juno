@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea"; // For displaying JSON
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area"; // To handle potentially large JSON
 
@@ -10,9 +9,14 @@ const DevToolsPanel: React.FC = () => {
   const [focusedElementInfo, setFocusedElementInfo] = useState<string | null>(
     null
   );
+  const [elementScreenshotSrc, setElementScreenshotSrc] = useState<
+    string | null
+  >(null);
   const [isLoadingScreenshot, setIsLoadingScreenshot] = useState(false);
   const [isLoadingFocusInfo, setIsLoadingFocusInfo] = useState(false);
   const [isDelayingFocusInfo, setIsDelayingFocusInfo] = useState(false); // New state for delay
+  const [isLoadingElementScreenshot, setIsLoadingElementScreenshot] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
 
@@ -29,6 +33,7 @@ const DevToolsPanel: React.FC = () => {
     setIsLoadingScreenshot(true);
     setError(null);
     setScreenshotSrc(null); // Clear previous screenshot
+    setElementScreenshotSrc(null);
     try {
       const base64String: string = await invoke("capture_screenshot_command");
       setScreenshotSrc(`data:image/png;base64,${base64String}`);
@@ -40,8 +45,26 @@ const DevToolsPanel: React.FC = () => {
     }
   };
 
+  const handleCaptureElementScreenshot = async () => {
+    setIsLoadingElementScreenshot(true);
+    setError(null);
+    setElementScreenshotSrc(null);
+    try {
+      const base64String: string = await invoke(
+        "capture_element_screenshot_command"
+      );
+      setElementScreenshotSrc(`data:image/png;base64,${base64String}`);
+    } catch (err: any) {
+      console.error("Failed to capture element screenshot:", err);
+      setError(`Failed to capture element screenshot: ${err?.message || err}`);
+    } finally {
+      setIsLoadingElementScreenshot(false);
+    }
+  };
+
   const fetchAndSetFocusInfo = async () => {
     setIsLoadingFocusInfo(true);
+    setElementScreenshotSrc(null);
     try {
       const infoJsonString: string = await invoke(
         "dev_get_focused_element_info"
@@ -123,6 +146,19 @@ const DevToolsPanel: React.FC = () => {
               ? "Waiting 5s... (Switch Focus Now!)"
               : "Get Focused Element Info (After 5s Delay)"}
           </Button>
+          <Button
+            onClick={handleCaptureElementScreenshot}
+            disabled={
+              isLoadingElementScreenshot ||
+              isDelayingFocusInfo ||
+              isLoadingFocusInfo ||
+              isLoadingScreenshot
+            }
+          >
+            {isLoadingElementScreenshot
+              ? "Capturing Element..."
+              : "Capture Focused Element Screenshot"}
+          </Button>
         </div>
 
         {screenshotSrc && (
@@ -131,6 +167,19 @@ const DevToolsPanel: React.FC = () => {
             <img
               src={screenshotSrc}
               alt="Captured Screenshot"
+              className="max-w-full h-auto border"
+            />
+          </div>
+        )}
+
+        {elementScreenshotSrc && (
+          <div className="mt-4 border rounded-lg p-2">
+            <h3 className="text-lg font-semibold mb-2">
+              Focused Element Screenshot:
+            </h3>
+            <img
+              src={elementScreenshotSrc}
+              alt="Captured Element Screenshot"
               className="max-w-full h-auto border"
             />
           </div>

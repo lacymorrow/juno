@@ -4,11 +4,14 @@ use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes}; // Import 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use core_foundation::base::TCFType; // Import TCFType trait
 use core_foundation::string::CFString;
-use core_graphics::display::{CGDisplay, CGDisplayBounds, CGMainDisplayID};
+use core_graphics::display::{CGDisplay, CGDisplayBounds, CGMainDisplayID, CGGetActiveDisplayList, CGDirectDisplayID}; // Use CGGetActiveDisplayList
+use core_graphics::geometry::{CGRect, CGPoint}; // Removed CGPointMake, CGRectContainsPoint
 use core_graphics::image::CGImage;
-use image::{ImageBuffer, ImageFormat}; // Use ImageFormat instead of ImageOutputFormat. Removed unused Pixel, RgbaImage.
+use image::{ImageBuffer, ImageFormat, Rgba, imageops}; // Use ImageFormat instead of ImageOutputFormat. Removed unused Pixel, RgbaImage. Added imageops
 use std::io::Cursor; // Added for image encoding
-use tracing::debug; // Added base64 import
+use tracing::{debug, warn}; // Added warn
+use super::element::MacOSUIElement; // Added for the new function
+use crate::element::UIElementImpl; // Import the trait providing .attributes()
 
 // Helper function to get PID from an AXUIElement
 pub(crate) fn get_pid_for_element(element: &ThreadSafeAXUIElement) -> i32 {
@@ -208,8 +211,236 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
 
 /// Captures a screenshot of the main display and encodes it as base64 PNG.
 pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
-    let cg_image = capture_screenshot_cgimage()?; // Renamed internal function
+    let cg_image = capture_screenshot_cgimage(None)?; // Pass None explicitly
+    // Convert CGImage to buffer first
+    let buffer = cgimage_to_imagebuffer(cg_image)?;
+    encode_imagebuffer_to_base64_png(&buffer)
+}
 
+/// Captures a screenshot of a specific UI element and encodes it as base64 PNG.
+/// Currently assumes the element is on the main display.
+pub fn capture_element_screenshot(element: &MacOSUIElement) -> Result<String, AutomationError> {
+    let (x, y, width, height) = element.bounds()?;
+
+    // Add check for zero or negative dimensions immediately after getting bounds
+    // Check if dimensions are strictly positive before proceeding
+    if width <= 0.0 || height <= 0.0 {
+        let attrs = element.attributes(); // Get attributes for context
+        let role = attrs.role;
+        let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+        // Log the specific warning
+        warn!(
+            "Cannot capture screenshot for element with zero or negative dimensions. Role: '{}', Label: '{}', Bounds: ({}, {}, {}, {})",
+            role, label, x, y, width, height
+        );
+        // Return the specific error variant
+        return Err(AutomationError::ZeroElementDimensions {
+            role,
+            label,
+            x,
+            y,
+            width,
+            height,
+        });
+    }
+
+    // Get the center point of the element
+    let center_x = x + width / 2.0;
+    let center_y = y + height / 2.0;
+    let element_center_point = CGPoint { x: center_x, y: center_y }; // Construct CGPoint directly
+
+    // Find the display containing the element's center point
+    let target_display_id = match find_display_containing_point(element_center_point) {
+        Ok(id) => id,
+        Err(_) => {
+            warn!(
+                "Could not determine display for element at ({}, {}). Defaulting to main display.",
+                center_x, center_y
+            );
+            unsafe { CGMainDisplayID() } // Fallback to main display
+        }
+    };
+
+    // Get the bounds of the target display
+    let display_bounds = unsafe { CGDisplayBounds(target_display_id) };
+
+    // Adjust element coordinates to be relative to the target display's origin
+    let relative_x = x - display_bounds.origin.x;
+    let relative_y = y - display_bounds.origin.y;
+
+    // Create a CGRect for the element's bounds, now relative to the target display
+    // Ensure bounds are positive and convert to u32 for cropping
+    // Use floor() for position and ceil() for dimensions, ensuring minimum 1px size.
+    let crop_x = relative_x.max(0.0).floor() as u32;
+    let crop_y = relative_y.max(0.0).floor() as u32;
+    let crop_width = width.max(1.0).ceil() as u32; // Ensure at least 1px width
+    let crop_height = height.max(1.0).ceil() as u32; // Ensure at least 1px height
+
+    // Capture the *target* display
+    let display_cg_image = capture_screenshot_cgimage(Some(target_display_id))?; // Pass the display ID
+
+    // Convert the target display's CGImage to an ImageBuffer
+    let display_buffer = cgimage_to_imagebuffer(display_cg_image)?;
+
+    // Crop the ImageBuffer
+    // Check if crop dimensions are valid within the display buffer
+    if crop_x + crop_width > display_buffer.width() || crop_y + crop_height > display_buffer.height() {
+        warn!(
+            "Element bounds ({}, {}, {}, {}) exceed screen dimensions ({}, {}). Clamping crop.",
+            crop_x, crop_y, crop_width, crop_height, display_buffer.width(), display_buffer.height()
+        );
+        // Optionally clamp dimensions, or return error. For now, let crop_imm handle it (it might panic or return subimage).
+        // Let's clamp to avoid panic from crop_imm if width/height are 0 or exceed boundaries after clamping x/y.
+        let clamped_width = crop_width.min(display_buffer.width().saturating_sub(crop_x));
+        let clamped_height = crop_height.min(display_buffer.height().saturating_sub(crop_y));
+         if clamped_width == 0 || clamped_height == 0 {
+             // Add element context to this error message as well
+             let attrs = element.attributes();
+             let role = attrs.role;
+             let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+             let err_msg = format!(
+                "Element bounds result in zero-size crop area after clamping. Role: '{}', Label: '{}', Original Bounds: ({}, {}, {}, {}), Clamped Crop: ({}, {}, {}, {})",
+                role, label, x, y, width, height, crop_x, crop_y, clamped_width, clamped_height
+             );
+             warn!("{}", err_msg);
+            // Keep this as PlatformError for now, as it's a different condition (clamping issue)
+            return Err(AutomationError::PlatformError(err_msg));
+        }
+        let cropped_buffer = imageops::crop_imm(
+            &display_buffer,
+            crop_x,
+            crop_y,
+            clamped_width,
+            clamped_height,
+        ).to_image();
+         encode_imagebuffer_to_base64_png(&cropped_buffer) // Encode the cropped buffer
+
+    } else if crop_width == 0 || crop_height == 0 {
+         // Also add context here for the direct zero-size crop case
+         let attrs = element.attributes();
+         let role = attrs.role;
+         let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+         let err_msg = format!(
+            "Element bounds result in zero-size crop area before clamping (likely due to u32 conversion). Role: '{}', Label: '{}', Original Bounds: ({}, {}, {}, {})",
+            role, label, x, y, width, height
+         );
+         warn!("{}", err_msg);
+         // Keep this as PlatformError as well (conversion/clamping issue)
+         return Err(AutomationError::PlatformError(err_msg));
+    } else {
+        // Crop the buffer using the original element bounds (as u32)
+        let cropped_buffer = imageops::crop_imm(
+            &display_buffer,
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height
+        ).to_image();
+         encode_imagebuffer_to_base64_png(&cropped_buffer) // Encode the cropped buffer
+    }
+}
+
+/// Converts a CGImage into an ImageBuffer<Rgba<u8>, Vec<u8>>.
+fn cgimage_to_imagebuffer(cg_image: CGImage) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
+    let width = cg_image.width();
+    let height = cg_image.height();
+    let data = cg_image.data();
+    let bytes = data.bytes();
+
+    let expected_len_min = width * height * 4;
+    if bytes.len() < expected_len_min {
+        return Err(AutomationError::PlatformError(format!(
+            "Screenshot data length mismatch: expected at least {}, got {}",
+            expected_len_min,
+            bytes.len()
+        )));
+    }
+
+    let mut img_buffer = ImageBuffer::new(width as u32, height as u32);
+    for y in 0..height {
+        for x in 0..width {
+            let index = (y * cg_image.bytes_per_row()) + (x * 4);
+            if index + 3 >= bytes.len() {
+                warn!(
+                    "Reached end of screenshot data prematurely at ({}, {}), index {}",
+                    x, y, index
+                );
+                break;
+            }
+            let b = bytes[index];
+            let g = bytes[index + 1];
+            let r = bytes[index + 2];
+            let a = bytes[index + 3];
+            img_buffer.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
+        }
+    }
+    Ok(img_buffer)
+}
+
+/// Encodes an ImageBuffer into a base64 PNG string.
+fn encode_imagebuffer_to_base64_png(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<String, AutomationError> {
+    let mut png_data = Cursor::new(Vec::new());
+    buffer
+        .write_to(&mut png_data, ImageFormat::Png)
+        .map_err(|e| AutomationError::PlatformError(format!("Failed to encode PNG: {}", e)))?;
+    let base64_string = BASE64_STANDARD.encode(png_data.into_inner());
+    Ok(base64_string)
+}
+
+/// Captures a screenshot of the main display.
+/// If `display_id` is None, captures the main display.
+/// TODO: Add support for specifying display ID.
+fn capture_screenshot_cgimage(display_id: Option<CGDirectDisplayID>) -> Result<CGImage, AutomationError> {
+    unsafe {
+        // Use unwrap_or_else with a closure for unsafe call
+        let target_display_id = display_id.unwrap_or_else(|| unsafe { CGMainDisplayID() });
+        // Call the 4-argument version expected by core-graphics 0.24
+        let cg_image = CGDisplay::screenshot(CGDisplayBounds(target_display_id), 0, 0, 0)
+            .ok_or_else(|| {
+                AutomationError::PlatformError(format!("Failed to capture screenshot for display ID {}", target_display_id))
+            })?;
+        Ok(cg_image)
+    }
+}
+
+/// Finds the CGDirectDisplayID of the display containing the given point (in global coordinates).
+fn find_display_containing_point(point: CGPoint) -> Result<CGDirectDisplayID, AutomationError> {
+    unsafe {
+        const MAX_DISPLAYS: u32 = 16; // Assume a reasonable maximum number of displays
+        let mut online_displays = [0; MAX_DISPLAYS as usize];
+        let mut display_count: u32 = 0;
+
+        // Get the list of online displays
+        let result = CGGetActiveDisplayList(MAX_DISPLAYS, online_displays.as_mut_ptr(), &mut display_count);
+        if result != 0 { // Check for errors (kCGErrorSuccess is 0)
+            return Err(AutomationError::PlatformError(format!("Failed to get online display list: error code {}", result)));
+        }
+
+        if display_count == 0 {
+            return Err(AutomationError::PlatformError("No active displays found".to_string()));
+        }
+
+        // Iterate through the displays and check if the point is within their bounds
+        for i in 0..display_count {
+            let display_id = online_displays[i as usize];
+            let bounds: CGRect = CGDisplayBounds(display_id);
+            if bounds.contains(&point) {
+                debug!("Point ({}, {}) found on display {} with bounds {:?}", point.x, point.y, display_id, bounds);
+                return Ok(display_id);
+            }
+        }
+
+        // If no display contains the point (e.g., point is in the bezel space?)
+        // Fallback: return the main display ID
+        warn!("Point ({}, {}) not found within any display bounds. Falling back to main display.", point.x, point.y);
+        Ok(CGMainDisplayID())
+        // Or return an error if preferred:
+        // Err(AutomationError::PlatformError(format!("Point ({}, {}) not found on any active display", point.x, point.y)))
+    }
+}
+
+/// Encodes a CGImage into a base64 PNG string.
+fn encode_cgimage_to_base64_png(cg_image: CGImage) -> Result<String, AutomationError> {
     // Get image dimensions
     let width = cg_image.width();
     let height = cg_image.height();
@@ -218,82 +449,60 @@ pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
     let data = cg_image.data(); // Returns CFDataRef directly
     let bytes = data.bytes(); // &[u8]
 
-    // Ensure data length matches expected size (RGBA)
-    let expected_len = width * height * 4;
-    if bytes.len() < expected_len {
-        // Allow for extra padding bytes
+    // Ensure data length matches expected size (RGBA or BGRA)
+    let expected_len_min = width * height * 4;
+    if bytes.len() < expected_len_min {
         return Err(AutomationError::PlatformError(format!(
             "Screenshot data length mismatch: expected at least {}, got {}",
-            expected_len,
+            expected_len_min,
             bytes.len()
         )));
     }
 
     // Create an RgbaImage from the raw bytes
     // We need to handle potential byte order issues and alpha channel position (BGRA vs RGBA)
-    // Assuming macOS provides BGRA data based on common practices
+    // macOS screenshots are typically BGRA. The `image` crate expects RGBA.
     let mut img_buffer = ImageBuffer::new(width as u32, height as u32);
 
     for y in 0..height {
         for x in 0..width {
-            let index = (y * cg_image.bytes_per_row()) + (x * 4); // Use bytes_per_row for correct indexing
+            // Calculate index considering bytes per row for potential padding
+            let index = (y * cg_image.bytes_per_row()) + (x * 4);
             if index + 3 >= bytes.len() {
-                // Avoid out-of-bounds access if data is shorter than expected for the last pixel(s)
-                // This might happen with padding bytes at the end of rows.
-                // We can log a warning or simply stop processing pixels.
-                // For now, let's stop processing to avoid panic.
-                tracing::warn!(
+                // Avoid out-of-bounds access if data is shorter than expected
+                warn!(
                     "Reached end of screenshot data prematurely at ({}, {}), index {}",
-                    x,
-                    y,
-                    index
+                    x, y, index
                 );
-                break; // Break inner loop
+                break; // Stop processing this row
             }
+            // Assuming BGRA format from macOS screenshot
             let b = bytes[index];
             let g = bytes[index + 1];
             let r = bytes[index + 2];
             let a = bytes[index + 3];
-            img_buffer.put_pixel(x as u32, y as u32, image::Rgba([r, g, b, a]));
-        }
-        if y < height - 1
-            && (y * cg_image.bytes_per_row()) + (cg_image.bytes_per_row() - 1) >= bytes.len()
-        {
-            // If we broke the inner loop due to reaching end of data, break outer loop too.
-            tracing::warn!(
-                "Stopping screenshot processing prematurely due to data length issues after row {}",
-                y
-            );
-            break; // Break outer loop
+            img_buffer.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
         }
     }
 
-    // Encode the image to PNG format in memory
-    let mut png_data = Vec::new();
-    {
-        // Scope to ensure Cursor is dropped before reading png_data
-        let mut writer = Cursor::new(&mut png_data);
-        img_buffer
-            .write_to(&mut writer, ImageFormat::Png)
-            .map_err(|e| {
-                AutomationError::Internal(format!("Failed to encode screenshot to PNG: {}", e))
-            })?;
-    } // Cursor is dropped here
+    // Encode the buffer to PNG format in memory
+    let mut png_data = Cursor::new(Vec::new());
+    img_buffer
+        .write_to(&mut png_data, ImageFormat::Png)
+        .map_err(|e| AutomationError::PlatformError(format!("Failed to encode PNG: {}", e)))?;
 
     // Encode the PNG data to base64
-    let base64_string = BASE64_STANDARD.encode(&png_data);
+    let base64_string = BASE64_STANDARD.encode(png_data.into_inner());
 
     Ok(base64_string)
 }
 
-/// Captures a screenshot of the main display as a CGImage. (Internal use)
-fn capture_screenshot_cgimage() -> Result<CGImage, AutomationError> {
+/// Checks if the current process has accessibility permissions.
+pub fn check_accessibility_permissions() -> bool {
     unsafe {
-        let main_display_id = CGMainDisplayID();
-        let image_ref = CGDisplay::screenshot(CGDisplayBounds(main_display_id), 0, 0, 0)
-            .ok_or_else(|| {
-                AutomationError::PlatformError("Failed to capture screenshot".to_string())
-            })?;
-        Ok(image_ref)
+        // Call the FFI function. Passing NULL (as CFDictionaryRef which is a pointer)
+        // for options dictionary defaults to checking standard accessibility trust.
+        use super::ffi::AXIsProcessTrustedWithOptions;
+        AXIsProcessTrustedWithOptions(std::ptr::null())
     }
 }

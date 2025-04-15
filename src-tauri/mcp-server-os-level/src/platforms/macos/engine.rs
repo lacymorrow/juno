@@ -10,18 +10,18 @@ use crate::platforms::tree_search::{
 };
 use crate::platforms::AccessibilityEngine;
 use crate::{AutomationError, Selector, UIElement};
-use accessibility::{AXAttribute, AXUIElementAttributes};
-use accessibility_sys::kAXFocusedUIElementAttribute;
-use accessibility_sys::AXUIElementRef;
+use accessibility::{AXAttribute, AXUIElementAttributes, Error as AXError};
+use accessibility_sys::{kAXFocusedUIElementAttribute, AXUIElementRef, kAXFrontmostAttribute, AXUIElementGetTypeID, kAXErrorNoValue};
 use anyhow::Result;
-use core_foundation::base::CFType;
-use core_foundation::base::TCFType;
+use core_foundation::base::{CFType, TCFType, CFTypeID, CFGetTypeID};
+use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use libc;
+use std::collections::BTreeMap;
 use tracing::{debug, trace, warn};
 
 pub struct MacOSEngine {
@@ -268,6 +268,106 @@ impl MacOSEngine {
     }
 }
 
+// Standalone helper function to check if a raw AXUIElement matches the Attributes selector
+fn check_ax_element_attributes_match(
+    e: &accessibility::AXUIElement,
+    attrs: &BTreeMap<String, String>,
+) -> bool {
+    for (key, value) in attrs.iter() {
+        let key_lower = key.to_lowercase();
+        let value_lower = value.to_lowercase();
+
+        let match_result = match key_lower.as_str() {
+            "focused" => {
+                let expected_focus = value_lower == "true";
+                let focus_attr = AXAttribute::new(&CFString::new("AXFocused"));
+                e.attribute(&focus_attr)
+                    .ok()
+                    .and_then(|v| v.downcast_into::<CFBoolean>())
+                    .map_or(false, |b| b == expected_focus.into())
+            }
+            "role" => {
+                let role_attr = AXAttribute::new(&CFString::new("AXRole"));
+                e.attribute(&role_attr)
+                    .ok()
+                    .and_then(|v| v.downcast_into::<CFString>())
+                    .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+            }
+            "title" | "label" => {
+                // Check AXTitle first
+                let title_attr = AXAttribute::new(&CFString::new("AXTitle"));
+                let title_match = e
+                    .attribute(&title_attr)
+                    .ok()
+                    .and_then(|v| v.downcast_into::<CFString>())
+                    .map_or(false, |s| !s.to_string().is_empty() && s.to_string().to_lowercase() == value_lower);
+
+                if title_match {
+                    true
+                } else {
+                    // Fallback to AXLabel
+                    let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
+                    e.attribute(&label_attr)
+                        .ok()
+                        .and_then(|v| v.downcast_into::<CFString>())
+                        .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+                }
+            }
+            "description" => {
+                let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
+                e.attribute(&desc_attr)
+                    .ok()
+                    .and_then(|v| v.downcast_into::<CFString>())
+                    .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+            }
+            "value" => {
+                 let value_attr = AXAttribute::new(&CFString::new("AXValue"));
+                 e.attribute(&value_attr)
+                     .ok()
+                     .map_or(false, |v| {
+                         if let Some(s) = v.clone().downcast_into::<CFString>() {
+                             s.to_string().to_lowercase() == value_lower
+                         } else if let Some(n) = v.clone().downcast_into::<CFNumber>() {
+                             // Handle numeric comparison if necessary, for now just stringify
+                             if let Some(int_val) = n.to_i64() {
+                                 int_val.to_string() == value_lower
+                             } else if let Some(float_val) = n.to_f64() {
+                                 float_val.to_string() == value_lower
+                             } else {
+                                 false
+                             }
+                         } else if let Some(b) = v.clone().downcast_into::<CFBoolean>(){
+                            (b == true.into()).to_string() == value_lower
+                         } else {
+                             false
+                         }
+                     })
+             }
+            "id" => {
+                 // Check AXIdentifier first
+                 let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
+                 e.attribute(&axid_attr)
+                     .ok()
+                     .and_then(|v| v.downcast_into::<CFString>())
+                     .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+                // Note: We don't check the generated ID here for efficiency
+            }
+             // Add more attribute checks here if needed (e.g., AXEnabled)
+             _ => {
+                 warn!("Unsupported attribute key in selector: {}", key);
+                 false // Treat unsupported keys as non-matching for now
+             }
+        };
+
+        if !match_result {
+            // Reduced logging inside predicate for performance
+            // trace!("Attribute mismatch for key '{}': expected '{}'", key, value);
+            return false; // If any attribute doesn't match, the element doesn't match
+        }
+    }
+    true // All specified attributes matched
+}
+
 impl AccessibilityEngine for MacOSEngine {
     fn get_applications(&self) -> Result<Vec<UIElement>, AutomationError> {
         // Get running application PIDs using NSWorkspace
@@ -291,82 +391,122 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {
-        // Add an explicit info log to confirm entry
-        tracing::info!("Entering MacOSEngine::get_focused_element");
+        tracing::info!("Entering MacOSEngine::get_focused_element (using kAXFrontmostAttribute strategy)");
 
-        // Create CFString from the attribute name literal
-        let attr_name = CFString::new(kAXFocusedUIElementAttribute);
-        // Create the attribute struct for CFType (as this is what `new` provides)
-        let cf_type_attribute = accessibility::AXAttribute::<CFType>::new(&attr_name);
+        // 1. Find the frontmost application by iterating (including accessory apps)
+        let pids = get_running_application_pids(true)?; // Include accessory apps initially
+        let mut focused_app_element: Option<accessibility::AXUIElement> = None;
 
-        // Call attribute expecting a CFType result
-        match self.system_wide.0.attribute(&cf_type_attribute) {
+        let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
+        let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
+        // Attribute for checking activation policy manually if needed (though get_pid might be better)
+        let policy_attr = accessibility::AXAttribute::<CFType>::new(&CFString::new("AXActivationPolicy"));
+
+        for pid in pids {
+            let app_element = accessibility::AXUIElement::application(pid);
+
+            // Optional: Manually skip background-only apps if get_running_application_pids(true) includes them unexpectedly
+            // It *shouldn't* based on NSWorkspace docs, but let's be safe.
+            // We'll rely on the kAXFrontmost check primarily.
+            /*
+            if let Ok(policy_val) = app_element.attribute(&policy_attr) {
+                if let Some(policy_num) = policy_val.downcast_into::<CFNumber>() {
+                    if let Some(policy_int) = policy_num.to_i64() {
+                        if policy_int == 2 { // NSApplicationActivationPolicyProhibited
+                             trace!("Skipping PID {} due to activation policy 2", pid);
+                             continue;
+                        }
+                    }
+                }
+            }
+            */
+
+            // Get attribute as CFType, then downcast
+            match app_element.attribute(&frontmost_attr) {
+                Ok(frontmost_val) => {
+                    // Downcast the CFType result to CFBoolean
+                    if let Some(is_frontmost) = frontmost_val.downcast_into::<CFBoolean>() {
+                        // Compare CFBoolean to true
+                        if is_frontmost == true.into() { // Correct comparison
+                            debug!("Found frontmost application with PID: {}", pid);
+                            // Double check it's not a background-only process before accepting
+                             if let Ok(role) = app_element.role(){
+                                if role.to_string() == "AXApplication" { // Basic sanity check
+                                    focused_app_element = Some(app_element);
+                                    break; // Found the focused app
+                                }
+                            }
+                        }
+                    } else {
+                        trace!("kAXFrontmostAttribute for PID {} was not a CFBoolean", pid);
+                    }
+                }
+                Err(e) => {
+                    // Log error but continue checking other apps
+                    trace!("Error checking kAXFrontmostAttribute for PID {}: {:?}", pid, e);
+                }
+            }
+        }
+
+        // Ensure we found a focused application
+        let focused_app_element = match focused_app_element {
+            Some(app) => app,
+            None => {
+                warn!("Could not find any frontmost application.");
+                return Err(AutomationError::ElementNotFound(
+                    "No frontmost application found".to_string(),
+                ));
+            }
+        };
+
+        // Log details about the focused application (optional but helpful)
+        // ... (logging code can remain the same, using focused_app_element)
+        match focused_app_element.title() {
+             Ok(title) => debug!("Focused Application Title (found via frontmost): {}", title.to_string()),
+             Err(e) => debug!("Error getting focused app title: {:?}", e),
+        }
+
+        // 2. Get the focused UI element AS CFType *from the identified frontmost application*
+        let focused_ui_attr_name = CFString::new(kAXFocusedUIElementAttribute);
+        let focused_ui_attr = accessibility::AXAttribute::<CFType>::new(&focused_ui_attr_name);
+
+        match focused_app_element.attribute(&focused_ui_attr) {
             Ok(focused_element_val) => {
-                // --- Start Added Logging ---
-                debug!("Successfully retrieved kAXFocusedUIElementAttribute as CFType.");
-                let cf_type_ref = focused_element_val.as_CFTypeRef();
-                debug!("CFTypeRef pointer: {:?}", cf_type_ref);
-                if cf_type_ref.is_null() {
-                    warn!("Focused element CFTypeRef is NULL, cannot proceed.");
+                let focused_element_ref = focused_element_val.as_CFTypeRef();
+                if focused_element_ref.is_null() {
+                    warn!("kAXFocusedUIElementAttribute returned NULL CFTypeRef.");
                     return Err(AutomationError::PlatformError(
-                        "Focused element CFTypeRef is NULL".to_string(),
+                        "Focused UI element reference from attribute is NULL".to_string(),
                     ));
                 }
-                // --- End Added Logging ---
 
-                // focused_element_val is CFType
-                // Convert the CFType result to AXUIElement
+                // --- Safety Check: Verify CFTypeID before casting ---
+                let expected_type_id: CFTypeID = unsafe { AXUIElementGetTypeID() };
+                let actual_type_id: CFTypeID = unsafe { CFGetTypeID(focused_element_ref) };
+                debug!("Focused Element CFType Check: Expected TypeID: {}, Actual TypeID: {}", expected_type_id, actual_type_id);
+
+                if actual_type_id != expected_type_id {
+                    warn!(
+                        "Type mismatch for focused element! Expected AXUIElement ({}), got TypeID {}.",
+                        expected_type_id, actual_type_id
+                    );
+                    return Err(AutomationError::PlatformError(format!(
+                        "Type mismatch for focused element: expected AXUIElement ({}), got TypeID {}",
+                        expected_type_id, actual_type_id
+                    )));
+                }
+                // --- End Safety Check ---
+
+                // Cast CFType to AXUIElement (Now with more confidence)
                 let focused_element = unsafe {
-                    // --- Start Added Logging ---
-                    debug!("Entering unsafe block to cast CFTypeRef to AXUIElementRef.");
-                    // --- End Added Logging ---
-                    // Cast the *const c_void from as_CFTypeRef to the expected *mut __AXUIElement (AXUIElementRef)
-                    let element_ref =
-                        focused_element_val.as_CFTypeRef() as *mut libc::c_void as AXUIElementRef;
-                    // --- Start Added Logging ---
-                    debug!("AXUIElementRef pointer: {:?}", element_ref);
-                    if element_ref.is_null() {
-                        warn!("Casted AXUIElementRef is NULL, cannot wrap.");
-                        // Returning an error here might be safer than proceeding with a null ref
-                        return Err(AutomationError::PlatformError(
-                            "Casted AXUIElementRef is NULL".to_string(),
-                        ));
-                    }
-                    debug!("Wrapping AXUIElementRef using wrap_under_create_rule.");
-                    // --- End Added Logging ---
-                    accessibility::AXUIElement::wrap_under_create_rule(element_ref)
+                    debug!("Attempting cast from CFTypeRef to AXUIElementRef...");
+                    let element_ref = focused_element_ref as *mut libc::c_void as AXUIElementRef;
+                    // No null check needed here as we checked focused_element_ref above
+                    debug!("Cast successful. Wrapping AXUIElementRef...");
+                    let wrapped_element = accessibility::AXUIElement::wrap_under_create_rule(element_ref);
+                    debug!("Wrapping successful.");
+                    wrapped_element
                 };
-
-                // --- Start Added Logging ---
-                debug!("Successfully wrapped AXUIElement. Checking its validity.");
-                // --- End Added Logging ---
-
-                // --- Start Existing Logging ---
-                debug!("Raw focused element obtained:");
-                match focused_element.role() {
-                    Ok(role) => debug!("  Raw Role: {}", role.to_string()),
-                    Err(e) => debug!("  Error getting raw role: {:?}", e),
-                }
-                match focused_element.subrole() {
-                    Ok(subrole) => debug!("  Raw Subrole: {}", subrole.to_string()),
-                    Err(e) => debug!("  Error getting raw subrole: {:?}", e),
-                }
-                match focused_element.title() {
-                    Ok(title) => debug!("  Raw Title: {}", title.to_string()),
-                    Err(e) => debug!("  Error getting raw title: {:?}", e),
-                }
-                match focused_element.description() {
-                    Ok(desc) => debug!("  Raw Description: {}", desc.to_string()),
-                    Err(e) => debug!("  Error getting raw description: {:?}", e),
-                }
-                match focused_element.attribute_names() {
-                    Ok(names) => debug!(
-                        "  Raw Attribute Names: {:?}",
-                        names.iter().map(|s| s.to_string()).collect::<Vec<_>>()
-                    ),
-                    Err(e) => debug!("  Error getting raw attribute names: {:?}", e),
-                }
-                // --- End Existing Logging ---
 
                 // --- Start Fetching Core Attributes Early ---
                 let mut fetched_role = String::new();
@@ -374,7 +514,6 @@ impl AccessibilityEngine for MacOSEngine {
                 let mut fetched_description = None;
                 let mut fetched_value = None;
 
-                // Fetch Role
                 let role_attr = AXAttribute::new(&CFString::new("AXRole"));
                 if let Ok(role_val) = focused_element.attribute(&role_attr) {
                     if let Some(cf_string) = role_val.downcast_into::<CFString>() {
@@ -383,7 +522,6 @@ impl AccessibilityEngine for MacOSEngine {
                 }
                 debug!("Pre-fetched Role: {}", fetched_role);
 
-                // Fetch Label (try AXTitle first, then AXLabel)
                 let title_attr = AXAttribute::new(&CFString::new("AXTitle"));
                 if let Ok(title_val) = focused_element.attribute(&title_attr) {
                     if let Some(cf_string) = title_val.downcast_into::<CFString>() {
@@ -403,7 +541,6 @@ impl AccessibilityEngine for MacOSEngine {
                 }
                 debug!("Pre-fetched Label: {:?}", fetched_label);
 
-                // Fetch Description
                 let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
                 if let Ok(desc_val) = focused_element.attribute(&desc_attr) {
                     if let Some(cf_string) = desc_val.downcast_into::<CFString>() {
@@ -412,7 +549,6 @@ impl AccessibilityEngine for MacOSEngine {
                 }
                 debug!("Pre-fetched Description: {:?}", fetched_description);
 
-                // Fetch Value
                 let value_attr = AXAttribute::new(&CFString::new("AXValue"));
                 if let Ok(value_val) = focused_element.attribute(&value_attr) {
                     if let Some(cf_string) = value_val.clone().downcast_into::<CFString>() {
@@ -424,16 +560,15 @@ impl AccessibilityEngine for MacOSEngine {
                             fetched_value = Some(num.to_string());
                         }
                     }
-                    // Add other type checks for AXValue if necessary (e.g., boolean)
                 }
                 debug!("Pre-fetched Value: {:?}", fetched_value);
                 // --- End Fetching Core Attributes Early ---
 
-                // Ensure the element is still somewhat valid before wrapping
-                if !fetched_role.is_empty()
+                 if !fetched_role.is_empty()
                     || fetched_label.is_some()
                     || fetched_description.is_some()
                 {
+                    debug!("Returning specific focused element within the frontmost app.");
                     Ok(self.wrap_element(
                         ThreadSafeAXUIElement::new(focused_element),
                         Some(fetched_role),
@@ -442,17 +577,28 @@ impl AccessibilityEngine for MacOSEngine {
                         fetched_value,
                     ))
                 } else {
-                    debug!("Focused element obtained via CFType seems invalid/inaccessible based on pre-fetched attributes");
-                    Err(AutomationError::PlatformError(
-                        "Focused element is invalid or inaccessible.".to_string(),
-                    ))
+                    debug!("Specific focused element seems invalid, returning frontmost app element instead.");
+                    Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None))
                 }
             }
-            // Map any error directly to PlatformError
-            Err(e) => Err(AutomationError::PlatformError(format!(
-                "Failed to get focused element attribute as CFType: {:?}",
-                e
-            ))),
+            Err(e) => {
+                // Check if the error is kAXErrorNoValue (-25212)
+                if let AXError::Ax(err_num) = e {
+                    if err_num == kAXErrorNoValue {
+                        warn!(
+                            "Frontmost application has no specific focused UI element (kAXErrorNoValue). Returning the application element itself."
+                        );
+                        // Return the application element we found earlier
+                        return Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None));
+                    }
+                }
+                // For any other error, report it as before
+                 warn!("Failed to get kAXFocusedUIElementAttribute (as CFType) from frontmost application: {:?}", e);
+                 Err(AutomationError::PlatformError(format!(
+                    "Failed to get focused UI element from frontmost application: {:?}",
+                    e
+                 )))
+            }
         }
     }
 
@@ -518,6 +664,7 @@ impl AccessibilityEngine for MacOSEngine {
                 if let Some(macos_el) = el.as_any().downcast_ref::<MacOSUIElement>() {
                     &macos_el.element.0
                 } else {
+                    // Use panic! for now as this indicates a programming error
                     panic!("Root element is not a macOS element")
                 }
             })
@@ -525,15 +672,26 @@ impl AccessibilityEngine for MacOSEngine {
 
         // Regular element finding logic
         match selector {
-            Selector::Role { role, name: _ } => {
+            Selector::Role { role, name } => { // Handle optional name here too
                 // Get all possible macOS roles for this generic role
                 let macos_roles = map_generic_role_to_macos_roles(role);
+                let target_name = name.clone(); // Clone name for use in closure
 
                 let collector = ElementFinderWithWindows::new(
-                    &self.system_wide.0,
+                    start_element, // Pass start_element correctly
                     move |e| {
                         let element_role = e.role().unwrap_or(CFString::new("")).to_string();
-                        macos_roles.contains(&element_role)
+                        if !macos_roles.contains(&element_role) {
+                            return false;
+                        }
+                        // If name is specified, check it
+                        if let Some(ref required_name) = target_name {
+                            let element_title = e.title().unwrap_or(CFString::new("")).to_string();
+                            if element_title != *required_name {
+                                return false;
+                            }
+                        }
+                        true // Role matches, and name matches if specified
                     },
                     None,
                 );
@@ -545,8 +703,8 @@ impl AccessibilityEngine for MacOSEngine {
                     Ok(ax_ui_element) => ax_ui_element,
                     Err(_) => {
                         return Err(AutomationError::ElementNotFound(format!(
-                            "Element with role '{}' not found",
-                            role
+                            "Element matching selector '{:?}' not found", // Improved error message
+                            selector
                         )))
                     }
                 };
@@ -561,10 +719,26 @@ impl AccessibilityEngine for MacOSEngine {
             Selector::Id(id) => {
                 let id_owned = id.clone(); // Create an owned copy
                 let collector = ElementFinderWithWindows::new(
-                    &self.system_wide.0,
+                    start_element, // Pass start_element correctly
                     move |e| {
-                        // Use move to take ownership of id_owned
-                        e.identifier().unwrap_or(CFString::new("")).to_string() == id_owned
+                        // Check AXIdentifier first for a more direct match
+                        let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
+                        if let Ok(axid_val) = e.attribute(&axid_attr) {
+                             if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
+                                if cf_string.to_string() == id_owned {
+                                    return true;
+                                }
+                            }
+                        }
+                        // Fallback: Check generated ID (less reliable but better than nothing)
+                        // Need to wrap 'e' to call id() - This is inefficient in a walker predicate!
+                        // Consider if ID selector should *only* use AXIdentifier on macOS.
+                        // For now, let's comment out the fallback due to inefficiency.
+                        /*
+                        let wrapped = self.wrap_element(ThreadSafeAXUIElement::new(e.clone()), None, None, None, None);
+                        wrapped.id().map_or(false, |gen_id| gen_id == id_owned)
+                        */
+                        false // Only checking AXIdentifier for now
                     },
                     None,
                 );
@@ -576,7 +750,7 @@ impl AccessibilityEngine for MacOSEngine {
                     Ok(ax_ui_element) => ax_ui_element,
                     Err(_) => {
                         return Err(AutomationError::ElementNotFound(format!(
-                            "Element with ID '{}' not found",
+                            "Element with ID (AXIdentifier) '{}' not found", // Clarify ID type
                             id
                         )))
                     }
@@ -589,13 +763,28 @@ impl AccessibilityEngine for MacOSEngine {
                     None,
                 ))
             }
-            Selector::Name(name) => {
-                let name_owned = name.clone(); // Create an owned copy
+             Selector::Name(name) => {
+                let name_lower = name.to_lowercase(); // Case-insensitive comparison
                 let collector = ElementFinderWithWindows::new(
-                    &self.system_wide.0,
+                    start_element, // Pass start_element correctly
                     move |e| {
-                        // Use move to take ownership of name_owned
-                        e.title().unwrap_or(CFString::new("")).to_string() == name_owned
+                        // Check AXTitle first
+                        let title_match = e
+                            .title()
+                            .map_or(false, |t| t.to_string().to_lowercase() == name_lower);
+                        if title_match {
+                            return true;
+                        }
+                        // Fallback to AXLabel
+                        let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
+                         if let Ok(label_val) = e.attribute(&label_attr) {
+                             if let Some(cf_string) = label_val.downcast_into::<CFString>() {
+                                if cf_string.to_string().to_lowercase() == name_lower {
+                                    return true;
+                                }
+                            }
+                        }
+                        false
                     },
                     None,
                 );
@@ -603,7 +792,7 @@ impl AccessibilityEngine for MacOSEngine {
 
                 walker.walk(start_element, &collector);
 
-                let ax_ui_element = match collector.find() {
+                 let ax_ui_element = match collector.find() {
                     Ok(ax_ui_element) => ax_ui_element,
                     Err(_) => {
                         return Err(AutomationError::ElementNotFound(format!(
@@ -622,18 +811,12 @@ impl AccessibilityEngine for MacOSEngine {
             }
 
             Selector::Text(text) => {
-                let text_owned = text.clone(); // Create an owned copy
+                let text_lower = text.to_lowercase(); // Case-insensitive comparison
 
-                // Create a collector that recursively checks children
                 let collector = ElementFinderWithWindows::new(
-                    &self.system_wide.0,
+                    start_element, // Pass start_element correctly
                     move |e| {
-                        // First check if element itself contains the text in any attribute
-                        if element_contains_text(e, &text_owned) {
-                            return true;
-                        }
-
-                        false
+                        element_contains_text(e, &text_lower) // Use lower case text
                     },
                     None,
                 );
@@ -646,12 +829,12 @@ impl AccessibilityEngine for MacOSEngine {
                     Ok(ax_ui_element) => ax_ui_element,
                     Err(_) => {
                         return Err(AutomationError::ElementNotFound(format!(
-                            "Element with text '{}' not found",
+                            "Element containing text '{}' not found",
                             text
                         )))
                     }
                 };
-                Ok(self.wrap_element(
+                 Ok(self.wrap_element(
                     ThreadSafeAXUIElement::new(ax_ui_element),
                     None,
                     None,
@@ -659,9 +842,35 @@ impl AccessibilityEngine for MacOSEngine {
                     None,
                 ))
             }
-            Selector::Attributes(_attrs) => Err(AutomationError::UnsupportedOperation(
-                "Attributes selector not implemented".to_string(),
-            )),
+            Selector::Attributes(attrs) => {
+                // Clone attrs for the closure
+                let attrs_clone = attrs.clone();
+                let collector = ElementFinderWithWindows::new(
+                    start_element,
+                    move |e| {
+                        // Check attributes directly on the raw AXUIElement
+                        check_ax_element_attributes_match(e, &attrs_clone)
+                    },
+                    None,
+                );
+
+                let walker: TreeWalkerWithWindows = TreeWalkerWithWindows::new();
+                walker.walk(start_element, &collector);
+
+                let ax_ui_element = match collector.find() {
+                    Ok(ax_ui_element) => ax_ui_element,
+                    Err(_) => {
+                        return Err(AutomationError::ElementNotFound(format!(
+                            "Element matching attributes '{:?}' not found",
+                            attrs
+                        )))
+                    }
+                };
+                 Ok(self.wrap_element(
+                    ThreadSafeAXUIElement::new(ax_ui_element),
+                    None, None, None, None
+                ))
+            }
             Selector::Path(_) => Err(AutomationError::UnsupportedOperation(
                 "Path selector not implemented".to_string(),
             )),
@@ -708,7 +917,7 @@ impl AccessibilityEngine for MacOSEngine {
                 }
             }
             Selector::Filter(_) => Err(AutomationError::UnsupportedOperation(
-                "Filter selector not implemented".to_string(),
+                "Filter selector not implemented for find_elements".to_string(),
             )),
         }
     }
@@ -719,23 +928,35 @@ impl AccessibilityEngine for MacOSEngine {
         root: Option<&UIElement>,
     ) -> Result<Vec<UIElement>, AutomationError> {
         // Get the start element from the provided root or fall back to system_wide
-        let start_element = root
+         let start_element = root
             .map(|el| {
                 if let Some(macos_el) = el.as_any().downcast_ref::<MacOSUIElement>() {
                     &macos_el.element.0
                 } else {
-                    panic!("Root element is not a macOS element")
+                     panic!("Root element is not a macOS element") // Indicate programming error
                 }
             })
             .unwrap_or(&self.system_wide.0);
 
+
         match selector {
-            Selector::Role { role, name: _ } => {
+            Selector::Role { role, name } => { // Handle optional name
                 let macos_roles = map_generic_role_to_macos_roles(role);
+                 let target_name = name.clone(); // Clone name for use in closure
 
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
                     let element_role = e.role().unwrap_or(CFString::new("")).to_string();
-                    macos_roles.contains(&element_role)
+                     if !macos_roles.contains(&element_role) {
+                         return false;
+                     }
+                     // If name is specified, check it
+                     if let Some(ref required_name) = target_name {
+                         let element_title = e.title().unwrap_or(CFString::new("")).to_string();
+                         if element_title != *required_name {
+                             return false;
+                         }
+                     }
+                     true
                 });
 
                 let ax_ui_elements = collector.find_all();
@@ -750,65 +971,92 @@ impl AccessibilityEngine for MacOSEngine {
 
                 Ok(ui_elements)
             }
-            Selector::Id(id) => {
+             Selector::Id(id) => {
                 let id_owned = id.clone();
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
-                    e.identifier().unwrap_or(CFString::new("")).to_string() == id_owned
+                    // Check AXIdentifier first
+                     let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
+                     if let Ok(axid_val) = e.attribute(&axid_attr) {
+                         if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
+                             if cf_string.to_string() == id_owned {
+                                 return true;
+                             }
+                         }
+                     }
+                     // Fallback: generated ID (commented out due to inefficiency)
+                     /*
+                    let wrapped = self.wrap_element(ThreadSafeAXUIElement::new(e.clone()), None, None, None, None);
+                    wrapped.id().map_or(false, |gen_id| gen_id == id_owned)
+                    */
+                     false
                 });
-
                 let ax_ui_elements = collector.find_all();
-
-                // Convert AXUIElements to UIElements
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| {
-                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
-                    })
+                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
                     .collect();
-
                 Ok(ui_elements)
             }
             Selector::Name(name) => {
-                let name_owned = name.clone();
+                let name_lower = name.to_lowercase();
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
-                    e.title().unwrap_or(CFString::new("")).to_string() == name_owned
+                     // Check AXTitle first
+                     let title_match = e
+                         .title()
+                         .map_or(false, |t| t.to_string().to_lowercase() == name_lower);
+                     if title_match {
+                         return true;
+                     }
+                     // Fallback to AXLabel
+                    let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
+                     if let Ok(label_val) = e.attribute(&label_attr) {
+                         if let Some(cf_string) = label_val.downcast_into::<CFString>() {
+                            if cf_string.to_string().to_lowercase() == name_lower {
+                                return true;
+                            }
+                        }
+                    }
+                    false
                 });
-
-                let ax_ui_elements = collector.find_all();
-
-                // Convert AXUIElements to UIElements
+                 let ax_ui_elements = collector.find_all();
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| {
-                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
-                    })
+                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
                     .collect();
-
                 Ok(ui_elements)
             }
             Selector::Text(text) => {
-                let text_owned = text.clone();
+                let text_lower = text.to_lowercase();
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
-                    element_contains_text(e, &text_owned)
+                    element_contains_text(e, &text_lower) // Use lower case text
                 });
-
-                let ax_ui_elements = collector.find_all();
-
-                // Convert AXUIElements to UIElements
+                 let ax_ui_elements = collector.find_all();
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| {
-                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
-                    })
+                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
                     .collect();
-
                 Ok(ui_elements)
             }
-            Selector::Attributes(_attrs) => Err(AutomationError::UnsupportedOperation(
-                "Attributes selector not implemented for find_elements".to_string(),
-            )),
+             Selector::Attributes(attrs) => {
+                let attrs_clone = attrs.clone();
+                // Use ElementsCollectorWithWindows which handles traversal
+                let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
+                    // Check attributes directly on the raw AXUIElement
+                    check_ax_element_attributes_match(e, &attrs_clone)
+                });
+
+                 let ax_ui_elements = collector.find_all(); // Get all matching AXUIElements
+
+                 // Convert AXUIElements to UIElements
+                let ui_elements = ax_ui_elements
+                    .into_iter()
+                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
+                    .collect();
+
+                 Ok(ui_elements)
+            }
             Selector::Path(_) => Err(AutomationError::UnsupportedOperation(
-                "Path selector not implemented for find_elements".to_string(),
+                "Path selector not implemented".to_string(),
             )),
             Selector::Filter(_) => Err(AutomationError::UnsupportedOperation(
                 "Filter selector not implemented for find_elements".to_string(),
@@ -956,17 +1204,25 @@ impl AccessibilityEngine for MacOSEngine {
         }
     }
 
+    fn scroll_at_position(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+    ) -> Result<(), AutomationError> {
+        self.scroll_at_position(x, y, direction, amount)
+    }
+
+    fn scroll_at_current_position(
+        &self,
+        direction: &str,
+        amount: f64,
+    ) -> Result<(), AutomationError> {
+        self.scroll_at_current_position(direction, amount)
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-
-    // fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
-    //     // Call the struct implementation directly
-    //     self.scroll_at_position(x, y, direction, amount)
-    // }
-
-    // fn scroll_at_current_position(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
-    //     // Call the struct implementation directly
-    //     self.scroll_at_current_position(direction, amount)
-    // }
 }

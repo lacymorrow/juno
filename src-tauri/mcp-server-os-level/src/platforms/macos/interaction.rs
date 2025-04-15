@@ -1,21 +1,20 @@
 use super::actions::ClickMethodSelection;
 use super::constants::*;
 use super::element::MacOSUIElement;
-use super::ffi::AXUIElementSetAttributeValue;
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
-use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes as AXAttrsTrait};
-use anyhow::Result;
-use core_foundation::base::TCFType;
-use core_foundation::string::CFString;
+use accessibility::{AXAttribute, AXUIElement};
+use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
+use core_foundation::base::{TCFType, CFTypeRef};
+use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
     CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // --- Moved from element.rs --- //
 
@@ -202,17 +201,17 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
         debug!("Successfully raised element");
         if let Some(app) = get_application(element) {
             unsafe {
-                let app_ref = app.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
+                let app_ref = app.element.0.as_concrete_TypeRef();
                 let attr_str = CFString::new("AXFocusedUIElement");
-                let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                let elem_ref =
-                    element.element.0.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                let result = AXUIElementSetAttributeValue(app_ref, attr_str_ref, elem_ref);
+                let attr_str_ref = attr_str.as_concrete_TypeRef();
+                let elem_ref = element.element.0.as_concrete_TypeRef() as CFTypeRef;
+                let result = AXUIElementSetAttributeValue(app_ref as AXUIElementRef, attr_str_ref as CFStringRef, elem_ref);
                 if result == 0 {
                     debug!("Successfully set focus to element via AXFocusedUIElement");
                     return Ok(());
                 } else {
-                    debug!("Failed to set AXFocusedUIElement: error code {}", result);
+                    let error = accessibility::Error::from(accessibility::Error::Ax(result));
+                    debug!("Failed to set AXFocusedUIElement: {:?}", error);
                 }
             }
         }
@@ -243,12 +242,11 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
         for attr_name in &["AXValue", "AXValueAttribute", "AXText"] {
             let cf_string = CFString::new(text);
             unsafe {
-                let element_ref =
-                    element.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
+                let element_ref = element.element.0.as_concrete_TypeRef();
                 let attr_str = CFString::new(attr_name);
-                let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                let value_ref = cf_string.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-                let result = AXUIElementSetAttributeValue(element_ref, attr_str_ref, value_ref);
+                let attr_str_ref = attr_str.as_concrete_TypeRef();
+                let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
+                let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
                 if result == 0 {
                     debug!("Successfully set text using {}", attr_name);
                     return Ok(());
@@ -275,15 +273,16 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
     }
     let cf_string = CFString::new(text);
     unsafe {
-        let element_ref = element.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
+        let element_ref = element.element.0.as_concrete_TypeRef();
         let attr_str = CFString::new("AXValue");
-        let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-        let value_ref = cf_string.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-        let result = AXUIElementSetAttributeValue(element_ref, attr_str_ref, value_ref);
+        let attr_str_ref = attr_str.as_concrete_TypeRef();
+        let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
+        let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
         if result != 0 {
+            let error = accessibility::Error::from(accessibility::Error::Ax(result));
             debug!(
-                "Failed to set native text value via AXValue: error code {}, trying keyboard simulation",
-                result
+                "Failed to set native text value via AXValue: {:?}, trying keyboard simulation",
+                error
             );
             let source =
                 CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
@@ -414,16 +413,17 @@ pub(crate) fn press_key(element: &MacOSUIElement, key_combo: &str) -> Result<(),
 pub(crate) fn set_value(element: &MacOSUIElement, value: &str) -> Result<(), AutomationError> {
     let cf_string = CFString::new(value);
     unsafe {
-        let element_ref = element.element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
+        let element_ref = element.element.0.as_concrete_TypeRef();
         let attr_str = CFString::new("AXValue");
-        let attr_str_ref = attr_str.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-        let value_ref = cf_string.as_concrete_TypeRef() as *const ::std::os::raw::c_void;
-        let result = AXUIElementSetAttributeValue(element_ref, attr_str_ref, value_ref);
+        let attr_str_ref = attr_str.as_concrete_TypeRef();
+        let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
+        let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
         if result != 0 {
-            debug!("Failed to set value via AXValue: error code {}", result);
+            let error = accessibility::Error::from(accessibility::Error::Ax(result));
+            debug!("Failed to set value via AXValue: {:?}", error);
             return Err(AutomationError::PlatformError(format!(
-                "Failed to set value: error code {}",
-                result
+                "Failed to set value: {:?}",
+                error
             )));
         }
     }
@@ -465,5 +465,10 @@ pub(crate) fn scroll(
         "scrolled {} by {} at element center ({}, {})",
         direction, amount, center_x, center_y
     );
+    Ok(())
+}
+
+pub(crate) fn select_text(_element: &MacOSUIElement) -> Result<(), AutomationError> {
+    warn!("select_text function is not yet implemented for macOS");
     Ok(())
 }
