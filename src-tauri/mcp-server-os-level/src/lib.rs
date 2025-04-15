@@ -297,6 +297,15 @@ impl Desktop {
                     required: vec!["selector".to_string(), "direction".to_string(), "amount".to_string()],
                 },
             },
+            ToolDefinition {
+                name: "captureScreenshot".to_string(),
+                description: "Captures a screenshot of the main display and returns it as a base64 encoded PNG string.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::new(),
+                    required: Vec::new(),
+                },
+            },
         ]
     }
 
@@ -489,6 +498,19 @@ impl Desktop {
                         selector_str
                     )))
                 }
+            }
+            "captureScreenshot" => {
+                if !args.is_null() && !args.as_object().map_or(true, |m| m.is_empty()) {
+                    return Err(AutomationError::InvalidArgument(
+                        "captureScreenshot tool does not accept any arguments.".to_string(),
+                    ));
+                }
+                let base64_image = self.capture_screenshot_base64()?;
+                Ok(serde_json::json!({
+                    "status": "success",
+                    "screenshot_base64": base64_image,
+                    "format": "png"
+                }))
             }
             _ => Err(AutomationError::UnsupportedOperation(format!(
                 "Tool '{}' not recognized.",
