@@ -28,6 +28,10 @@ pub(crate) fn get_application(element: &MacOSUIElement) -> Option<MacOSUIElement
                     element: ThreadSafeAXUIElement::new(app),
                     use_background_apps: element.use_background_apps,
                     activate_app: element.activate_app,
+                    cached_role: String::new(),
+                    cached_label: None,
+                    cached_description: None,
+                    cached_value: None,
                 })
             } else {
                 None
@@ -431,13 +435,15 @@ pub(crate) fn scroll(
     direction: &str,
     amount: f64,
 ) -> Result<(), AutomationError> {
-    let _ = focus(element);
+    element.focus()?; // Ensure the element or its container is focused
     let (x, y, width, height) = element.bounds()?;
     let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
+
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
     let scroll_amount = amount as i32;
+
     let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
         "up" => (0, -scroll_amount),
         "down" => (0, scroll_amount),
@@ -450,11 +456,13 @@ pub(crate) fn scroll(
             )))
         }
     };
+
     let scroll_event = CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0)
         .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+
     scroll_event.post(CGEventTapLocation::HID);
     debug!(
-        "scrolled {} by {} lines at position ({}, {})",
+        "scrolled {} by {} at element center ({}, {})",
         direction, amount, center_x, center_y
     );
     Ok(())
