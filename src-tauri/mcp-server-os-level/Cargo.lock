@@ -266,6 +266,7 @@ dependencies = [
  "core-graphics",
  "dotenvy",
  "image",
+ "libc",
  "log",
  "objc",
  "objc-foundation",

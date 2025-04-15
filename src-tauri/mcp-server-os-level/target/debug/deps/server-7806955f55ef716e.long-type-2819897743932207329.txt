@@ -1,1 +1,0 @@
-fn(axum::extract::State<Arc<{type error}, {type error}>>, Json<{type error}>) -> impl std::future::Future<Output = Result<Json<open_application::OpenApplicationWithElementsResponse>, (axum::http::StatusCode, Json<serde_json::Value>)>> {open_application_handler}
