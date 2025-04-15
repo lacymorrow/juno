@@ -17,10 +17,11 @@ use core_foundation::string::CFString;
 use core_graphics::event::{CGEvent, CGEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::{CGPoint, CGSize};
+use objc::{class, msg_send, sel, sel_impl};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug)]
 pub struct MacOSUIElement {
@@ -216,6 +217,78 @@ impl MacOSUIElement {
     }
 }
 
+/// Gets the focused UI element by first finding the frontmost application via NSWorkspace.
+pub fn get_focused_element_ns_workspace(
+    use_background_apps: bool,
+    activate_app: bool,
+) -> Result<UIElement, AutomationError> {
+    debug!("Attempting to get focused element via NSWorkspace");
+    unsafe {
+        // 1. Get NSWorkspace shared instance
+        let workspace_class = class!(NSWorkspace);
+        let shared_workspace: *mut objc::runtime::Object =
+            msg_send![workspace_class, sharedWorkspace];
+        if shared_workspace.is_null() {
+            return Err(AutomationError::PlatformError(
+                "Failed to get shared NSWorkspace instance".to_string(),
+            ));
+        }
+
+        // 2. Get the frontmost application
+        let frontmost_app: *mut objc::runtime::Object = msg_send![shared_workspace, frontmostApplication];
+        if frontmost_app.is_null() {
+            debug!("NSWorkspace reported no frontmost application.");
+            return Err(AutomationError::NoFocusedElement(
+                "NSWorkspace reported no frontmost application".to_string(),
+            ));
+        }
+
+        // 3. Get the PID of the frontmost application
+        let pid: i32 = msg_send![frontmost_app, processIdentifier];
+        if pid <= 0 {
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to get PID for frontmost application: {:?}",
+                frontmost_app
+            )));
+        }
+        debug!("Frontmost application PID: {}", pid);
+
+        // 4. Create an AXUIElement for the application PID
+        let app_element_ref = accessibility::AXUIElement::application(pid);
+
+        // 5. Get the focused UI element attribute from the application element
+        let focused_element_attr_name = CFString::new("AXFocusedUIElement");
+        let focused_element_attr = AXAttribute::new(&focused_element_attr_name);
+        match app_element_ref.attribute(&focused_element_attr) {
+            Ok(focused_element_cf) => {
+                 if let Some(focused_element) = focused_element_cf.downcast::<AXUIElement>() {
+                    debug!("Successfully found focused element via NSWorkspace->App->Focus");
+                    Ok(UIElement::new(Box::new(MacOSUIElement {
+                        element: ThreadSafeAXUIElement::new(focused_element),
+                        use_background_apps,
+                        activate_app,
+                        cached_role: String::new(),
+                        cached_label: None,
+                        cached_description: None,
+                        cached_value: None,
+                    })))
+                 } else {
+                     debug!("AXFocusedUIElement attribute was not an AXUIElement for PID {}", pid);
+                     Err(AutomationError::NoFocusedElement(format!(
+                        "Application PID {} is frontmost, but has no focused UI element (or attribute type mismatch)",
+                        pid
+                    )))
+                 }
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to get AXFocusedUIElement attribute for PID {}: {:?}", pid, e);
+                 warn!("{}", error_msg);
+                Err(AutomationError::NoFocusedElement(error_msg))
+            }
+        }
+    }
+}
+
 impl UIElementImpl for MacOSUIElement {
     fn object_id(&self) -> usize {
         let stable_id = self.generate_stable_id();
@@ -252,7 +325,7 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn attributes(&self) -> UIElementAttributes {
-        let mut properties = HashMap::new();
+        let properties = HashMap::new();
 
         let mut attrs = UIElementAttributes {
             role: self.role(),
@@ -567,5 +640,20 @@ impl UIElementImpl for MacOSUIElement {
             direction, amount, center_x, center_y
         );
         Ok(())
+    }
+
+    fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
+        debug!("Fetching all attributes for element (simplified)");
+        // Directly return the result of attributes(), fixing the unused mut warning
+        Ok(self.attributes())
+    }
+
+    fn screenshot(&self) -> Result<String, AutomationError> {
+        // Call the utility function
+        super::utils::capture_element_screenshot(self)
+    }
+
+    fn select_text(&self) -> Result<(), AutomationError> {
+        interaction::select_text(self)
     }
 }

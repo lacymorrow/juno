@@ -1,0 +1,1 @@
+After every code modification made to Rust files, run `cargo check --manifest-path src-tauri/Cargo.toml`. Ensure the command completes successfully (exit code 0). If `cargo check` fails, address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
