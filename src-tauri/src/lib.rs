@@ -136,21 +136,26 @@ fn check_server_status(state: tauri::State<'_, AppState>) -> bool {
 // New command for developer tool: Get focused element info
 #[tauri::command]
 async fn dev_get_focused_element_info(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    // Use the call_tool method, similar to how submit_query does it.
-    // Assume the tool name is "get_focused_element_info" and it takes no input (Value::Null).
-    match state
+    println!("[DEV_TOOL] Attempting to call get_focused_element_info tool...");
+    let result = state
         .desktop
-        .call_tool("get_focused_element_info", Value::Null)
-    {
+        .call_tool("get_focused_element_info", Value::Null);
+
+    match result {
         Ok(result_value) => {
+            println!("[DEV_TOOL] get_focused_element_info tool succeeded.");
             // Serialize the resulting Value to JSON string
-            serde_json::to_string(&result_value)
-                .map_err(|e| format!("Failed to serialize element info result: {}", e))
+            serde_json::to_string(&result_value).map_err(|e| {
+                let err_msg = format!("Failed to serialize element info result: {}", e);
+                println!("[DEV_TOOL] Error: {}", err_msg);
+                err_msg
+            })
         }
-        Err(e) => Err(format!(
-            "Failed to call get_focused_element_info tool: {}",
-            e
-        )),
+        Err(e) => {
+            let err_msg = format!("Failed to call get_focused_element_info tool: {}", e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
     }
 }
 
