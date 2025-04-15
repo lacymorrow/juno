@@ -1,9 +1,8 @@
 use super::constants::{K_AXVALUE_CGPOINT_TYPE, K_AXVALUE_CGSIZE_TYPE};
 use super::element::MacOSUIElement;
 use super::ffi::AXValueGetValue;
-use super::utils::macos_role_to_generic_role;
 use crate::UIElementAttributes;
-use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes as AXAttrsTrait};
+use accessibility::AXUIElement;
 use core_foundation::array::{
     CFArrayGetCount, CFArrayGetTypeID, CFArrayGetValueAtIndex, __CFArray,
 };
@@ -22,6 +21,14 @@ pub(crate) fn parse_ax_attribute_value(
     name: &str,
     value: core_foundation::base::CFType,
 ) -> Option<serde_json::Value> {
+    // --- Start Added Logging ---
+    let value_type_id = value.type_of();
+    debug!(
+        "parse_ax_attribute_value: Processing attribute '{}', CFTypeID: {}",
+        name, value_type_id
+    );
+    // --- End Added Logging ---
+
     // Handle different types based on known attribute names and value types
     match name {
         // String values (text, identifiers, descriptions)
@@ -48,6 +55,12 @@ pub(crate) fn parse_ax_attribute_value(
                     if num.is_finite() {
                         return serde_json::Number::from_f64(num).map(Value::Number);
                     } else {
+                        // --- Start Added Logging ---
+                        debug!(
+                            "parse_ax_attribute_value: Numeric value for '{}' is non-finite (NaN/Infinity). Returning Null.",
+                            name
+                        );
+                        // --- End Added Logging ---
                         return Some(Value::Null);
                     }
                 }
@@ -125,42 +138,80 @@ pub(crate) fn parse_ax_attribute_value(
                         }
                     }
                     return Some(Value::Array(items));
+                } else {
+                    // --- Start Added Logging (moved inside else branch) ---
+                    debug!(
+                        "parse_ax_attribute_value: Failed to parse AXChildren attribute '{}'. Expected CFArray, got TypeID {}. Returning None.",
+                        name, type_id
+                    );
+                    // --- End Added Logging ---
+                    return None; // Return None directly from here
                 }
             }
-
-            return None;
         }
 
         _ => {}
     }
 
     // Fallback for unhandled types
+    // --- Start Added Logging ---
+    debug!(
+        "parse_ax_attribute_value: Attribute '{}' with CFTypeID {} was not handled by specific cases or failed downcasting. Returning None.",
+        name, value_type_id
+    );
+    // --- End Added Logging ---
     None
 }
 
 // Moved from MacOSUIElement implementation in element.rs
-pub(crate) fn get_element_attributes(element: &MacOSUIElement) -> UIElementAttributes {
+pub(crate) fn get_element_attributes(_element: &MacOSUIElement) -> UIElementAttributes {
+    // This function is no longer used directly to populate MacOSUIElement.attributes()
+    // It's kept temporarily for potential future use or reference, but its body
+    // has been effectively moved/merged into the fallback logic within
+    // MacOSUIElement::attributes() in element.rs.
+    // We return a default/empty struct to satisfy the signature.
     let properties = HashMap::new();
+    UIElementAttributes {
+        role: String::new(),
+        label: None,
+        value: None,
+        description: None,
+        properties,
+    }
+    // Original implementation commented out below for reference
+    /*
+    let mut properties = HashMap::new();
     let is_window = element
         .element
         .0
-        .role()
+        .role() // Keep this initial check for window determination, might be okay
         .map_or(false, |r| r.to_string() == "AXWindow");
 
-    // Determine role based on the raw AXRole first
-    let raw_role = element
-        .element
-        .0
-        .role()
-        .map(|r| r.to_string())
-        .unwrap_or_default();
+    // --- Start Refactor: Use attribute() consistently ---
+    let mut raw_role = String::new();
+    let role_attr = AXAttribute::new(&CFString::new("AXRole"));
+    if let Ok(value) = element.element.0.attribute(&role_attr) {
+        if let Some(cf_string) = value.downcast_into::<CFString>() {
+            raw_role = cf_string.to_string();
+        }
+    }
     let generic_role = macos_role_to_generic_role(&raw_role)
         .first()
         .unwrap_or(&raw_role)
         .to_string();
 
+    debug!(
+        "get_element_attributes: Fetched raw role via attribute(): '{}', determined generic role '{}'",
+        raw_role, generic_role
+    );
+    // --- End Refactor ---
+
     let mut attrs = UIElementAttributes {
-        role: generic_role.clone(), // Use the determined generic role
+        role: if is_window {
+            "window".to_string()
+        } else {
+            generic_role.clone()
+        },
         label: None,
         value: None,
         description: None,
@@ -168,7 +219,7 @@ pub(crate) fn get_element_attributes(element: &MacOSUIElement) -> UIElementAttri
     };
 
     if is_window {
-        attrs.role = "window".to_string(); // Explicitly set role for windows
+        // Window-specific logic remains largely the same, but uses attribute()
         let title_attrs = [
             "AXTitle",
             "AXTitleUIElement",
@@ -181,6 +232,10 @@ pub(crate) fn get_element_attributes(element: &MacOSUIElement) -> UIElementAttri
             if let Ok(value) = element.element.0.attribute(&title_attr) {
                 if let Some(cf_string) = value.downcast_into::<CFString>() {
                     attrs.label = Some(cf_string.to_string());
+                    debug!(
+                        "Window label set from {}: {:?}",
+                        title_attr_name, attrs.label
+                    );
                     break;
                 }
             }
@@ -189,92 +244,99 @@ pub(crate) fn get_element_attributes(element: &MacOSUIElement) -> UIElementAttri
         for attr_name in std_attrs {
             let attr = AXAttribute::new(&CFString::new(attr_name));
             if let Ok(value) = element.element.0.attribute(&attr) {
-                if let Some(cf_bool) = value.downcast_into::<CFBoolean>() {
-                    attrs.properties.insert(
-                        attr_name.to_string(),
-                        Some(serde_json::Value::String(format!("{:?}", cf_bool))),
-                    );
-                }
+                // Use parse_ax_attribute_value for consistency
+                let parsed_value = parse_ax_attribute_value(attr_name, value);
+                attrs.properties.insert(attr_name.to_string(), parsed_value);
+                debug!(
+                    "Window property {} set: {:?}",
+                    attr_name,
+                    attrs.properties.get(attr_name)
+                );
+            } else {
+                debug!("Window property {} not found or error.", attr_name);
             }
         }
     } else {
-        // --- Start Added Logging ---
-        debug!("Fetching attributes for non-window element.");
-        // --- End Added Logging ---
-        attrs.label = element.element.0.title().ok().map(|s| s.to_string());
-        // --- Start Added Logging ---
-        debug!("Attempted to get label via title(): {:?}", attrs.label);
-        // --- End Added Logging ---
+        // --- Start Refactor: Use attribute() for standard fields ---
+        debug!("Fetching attributes for non-window element using attribute().");
+
+        // Label
+        let title_attr = AXAttribute::new(&CFString::new("AXTitle"));
+        if let Ok(value) = element.element.0.attribute(&title_attr) {
+            if let Some(cf_string) = value.downcast_into::<CFString>() {
+                let title_str = cf_string.to_string();
+                if !title_str.is_empty() {
+                    attrs.label = Some(title_str);
+                }
+            }
+        }
+        debug!("Attempted label via AXTitle: {:?}", attrs.label);
+        // Try AXLabel if AXTitle didn't work or was empty
         if attrs.label.is_none() {
             let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
-            let label_result = element.element.0.attribute(&label_attr);
-            // --- Start Added Logging ---
-            debug!(
-                "Attempted to get label via AXLabel attribute: {:?}",
-                label_result
-            );
-            // --- End Added Logging ---
-            attrs.label = label_result
-                .ok()
-                .and_then(|val| val.downcast_into::<CFString>())
-                .map(|s| s.to_string());
-            // --- Start Added Logging ---
-            debug!("Final label after AXLabel check: {:?}", attrs.label);
-            // --- End Added Logging ---
-        }
-        let description_result = element.element.0.description();
-        // --- Start Added Logging ---
-        debug!("Attempted to get description(): {:?}", description_result);
-        // --- End Added Logging ---
-        attrs.description = description_result.ok().map(|s| s.to_string());
-
-        let value_attr = AXAttribute::new(&CFString::new("AXValue"));
-        let value_result = element.element.0.attribute(&value_attr);
-        // --- Start Added Logging ---
-        debug!(
-            "Attempted to get value via AXValue attribute: {:?}",
-            value_result
-        );
-        // --- End Added Logging ---
-        if let Ok(value) = value_result {
-            if let Some(cf_string) = value.clone().downcast_into::<CFString>() {
-                attrs.value = Some(cf_string.to_string());
-                // --- Start Added Logging ---
-                debug!("Got value as CFString: {:?}", attrs.value);
-                // --- End Added Logging ---
-            } else if let Some(cf_num) = value.clone().downcast_into::<CFNumber>() {
-                if let Some(num) = cf_num.to_i64() {
-                    attrs.value = Some(num.to_string());
-                    // --- Start Added Logging ---
-                    debug!("Got value as CFNumber (i64): {:?}", attrs.value);
-                    // --- End Added Logging ---
-                } else if let Some(num) = cf_num.to_f64() {
-                    attrs.value = Some(num.to_string());
-                    // --- Start Added Logging ---
-                    debug!("Got value as CFNumber (f64): {:?}", attrs.value);
-                    // --- End Added Logging ---
-                } else {
-                    // --- Start Added Logging ---
-                    debug!("Got value as CFNumber, but couldn't convert to i64 or f64.");
-                    // --- End Added Logging ---
+            if let Ok(value) = element.element.0.attribute(&label_attr) {
+                if let Some(cf_string) = value.downcast_into::<CFString>() {
+                    attrs.label = Some(cf_string.to_string());
                 }
-            } else {
-                // Potentially handle other AXValue types (e.g., boolean)
-                // --- Start Added Logging ---
-                let type_id = value.type_of();
-                debug!(
-                    "Got AXValue attribute, but it's not CFString or CFNumber. TypeID: {}",
-                    type_id
-                );
-                // --- End Added Logging ---
             }
-        } else {
-            // --- Start Added Logging ---
-            debug!("Failed to get AXValue attribute or it was None.");
-            // --- End Added Logging ---
+            debug!("Attempted label via AXLabel: {:?}", attrs.label);
         }
+
+        // Description
+        let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
+        if let Ok(value) = element.element.0.attribute(&desc_attr) {
+            if let Some(cf_string) = value.downcast_into::<CFString>() {
+                attrs.description = Some(cf_string.to_string());
+            }
+        }
+        debug!(
+            "Attempted description via AXDescription: {:?}",
+            attrs.description
+        );
+
+        // Value
+        let value_attr = AXAttribute::new(&CFString::new("AXValue"));
+        match element.element.0.attribute(&value_attr) {
+            Ok(value) => {
+                // Use the existing parse logic, but handle the direct result
+                if let Some(cf_string) = value.clone().downcast_into::<CFString>() {
+                    attrs.value = Some(cf_string.to_string());
+                    debug!("Got value as CFString via attribute(): {:?}", attrs.value);
+                } else if let Some(cf_num) = value.clone().downcast_into::<CFNumber>() {
+                    if let Some(num) = cf_num.to_i64() {
+                        attrs.value = Some(num.to_string());
+                        debug!(
+                            "Got value as CFNumber (i64) via attribute(): {:?}",
+                            attrs.value
+                        );
+                    } else if let Some(num) = cf_num.to_f64() {
+                        attrs.value = Some(num.to_string());
+                        debug!(
+                            "Got value as CFNumber (f64) via attribute(): {:?}",
+                            attrs.value
+                        );
+                    } else {
+                        debug!("Got value as CFNumber via attribute(), but couldn't convert to i64 or f64.");
+                    }
+                } else {
+                    let type_id = value.type_of();
+                    debug!(
+                        "Got AXValue attribute via attribute(), but it's not CFString or CFNumber. TypeID: {}",
+                        type_id
+                    );
+                }
+            }
+            Err(e) => {
+                debug!(
+                    "Failed to get AXValue attribute via attribute(). Error: {:?}",
+                    e
+                );
+            }
+        }
+        // --- End Refactor ---
     }
 
+    // Fetching other properties remains the same
     if let Ok(attr_names) = element.element.0.attribute_names() {
         for name in attr_names.iter() {
             let attr = AXAttribute::new(&name);
@@ -299,18 +361,25 @@ pub(crate) fn get_element_attributes(element: &MacOSUIElement) -> UIElementAttri
                         attrs.properties.insert(name_str, parsed_value);
                     }
                     Err(e) => {
+                        // --- Start Modified Logging ---
+                        // Log errors unless they are common "expected" failures
                         if !matches!(
                             e,
                             accessibility::Error::Ax(-25212) // attribute unsupported
                                 | accessibility::Error::Ax(-25205) // no value
                                 | accessibility::Error::Ax(-25204) // getting attribute failed (internal error)
                         ) {
-                            // debug!("Error getting property attribute '{}': {:?}", name_str, e);
+                            debug!("Error getting property attribute '{}': {:?}", name_str, e);
+                        } else {
+                            // Optionally log ignored errors at a lower level if needed
+                            // trace!("Ignoring expected error for property attribute '{}': {:?}", name_str, e);
                         }
+                        // --- End Modified Logging ---
                     }
                 }
             }
         }
     }
     attrs
+    */
 }

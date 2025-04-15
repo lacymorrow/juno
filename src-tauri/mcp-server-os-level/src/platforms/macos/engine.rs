@@ -10,17 +10,19 @@ use crate::platforms::tree_search::{
 };
 use crate::platforms::AccessibilityEngine;
 use crate::{AutomationError, Selector, UIElement};
-use accessibility::AXUIElementAttributes;
+use accessibility::{AXAttribute, AXUIElementAttributes};
 use accessibility_sys::kAXFocusedUIElementAttribute;
 use accessibility_sys::AXUIElementRef;
 use anyhow::Result;
 use core_foundation::base::CFType;
 use core_foundation::base::TCFType;
+use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use tracing::{debug, info, trace, warn};
+use libc;
+use tracing::{debug, trace, warn};
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -39,23 +41,22 @@ impl MacOSEngine {
         })
     }
 
-    pub(crate) fn wrap_element(&self, ax_element: ThreadSafeAXUIElement) -> UIElement {
-        let is_valid = match ax_element.0.role() {
-            Ok(_) => true,
-            Err(e) => {
-                debug!("Warning: Potentially invalid AXUIElement: {:?}", e);
-                false
-            }
-        };
-
-        if !is_valid {
-            debug!("Warning: Wrapping possibly invalid AXUIElement");
-        }
-
+    pub(crate) fn wrap_element(
+        &self,
+        ax_element: ThreadSafeAXUIElement,
+        role: Option<String>,
+        label: Option<String>,
+        description: Option<String>,
+        value: Option<String>,
+    ) -> UIElement {
         UIElement::new(Box::new(MacOSUIElement {
             element: ax_element,
             use_background_apps: self.use_background_apps,
             activate_app: self.activate_app,
+            cached_role: role.unwrap_or_default(),
+            cached_label: label,
+            cached_description: description,
+            cached_value: value,
         }))
     }
 
@@ -280,13 +281,13 @@ impl AccessibilityEngine for MacOSEngine {
             trace!("Creating AXUIElement for application with PID: {}", pid);
             let app_element = ThreadSafeAXUIElement::application(pid);
 
-            app_elements.push(self.wrap_element(app_element));
+            app_elements.push(self.wrap_element(app_element, None, None, None, None));
         }
 
         Ok(app_elements)
     }
     fn get_root_element(&self) -> UIElement {
-        self.wrap_element(self.system_wide.clone())
+        self.wrap_element(self.system_wide.clone(), None, None, None, None)
     }
 
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {
@@ -301,16 +302,46 @@ impl AccessibilityEngine for MacOSEngine {
         // Call attribute expecting a CFType result
         match self.system_wide.0.attribute(&cf_type_attribute) {
             Ok(focused_element_val) => {
+                // --- Start Added Logging ---
+                debug!("Successfully retrieved kAXFocusedUIElementAttribute as CFType.");
+                let cf_type_ref = focused_element_val.as_CFTypeRef();
+                debug!("CFTypeRef pointer: {:?}", cf_type_ref);
+                if cf_type_ref.is_null() {
+                    warn!("Focused element CFTypeRef is NULL, cannot proceed.");
+                    return Err(AutomationError::PlatformError(
+                        "Focused element CFTypeRef is NULL".to_string(),
+                    ));
+                }
+                // --- End Added Logging ---
+
                 // focused_element_val is CFType
                 // Convert the CFType result to AXUIElement
                 let focused_element = unsafe {
+                    // --- Start Added Logging ---
+                    debug!("Entering unsafe block to cast CFTypeRef to AXUIElementRef.");
+                    // --- End Added Logging ---
                     // Cast the *const c_void from as_CFTypeRef to the expected *mut __AXUIElement (AXUIElementRef)
                     let element_ref =
                         focused_element_val.as_CFTypeRef() as *mut libc::c_void as AXUIElementRef;
+                    // --- Start Added Logging ---
+                    debug!("AXUIElementRef pointer: {:?}", element_ref);
+                    if element_ref.is_null() {
+                        warn!("Casted AXUIElementRef is NULL, cannot wrap.");
+                        // Returning an error here might be safer than proceeding with a null ref
+                        return Err(AutomationError::PlatformError(
+                            "Casted AXUIElementRef is NULL".to_string(),
+                        ));
+                    }
+                    debug!("Wrapping AXUIElementRef using wrap_under_create_rule.");
+                    // --- End Added Logging ---
                     accessibility::AXUIElement::wrap_under_create_rule(element_ref)
                 };
 
                 // --- Start Added Logging ---
+                debug!("Successfully wrapped AXUIElement. Checking its validity.");
+                // --- End Added Logging ---
+
+                // --- Start Existing Logging ---
                 debug!("Raw focused element obtained:");
                 match focused_element.role() {
                     Ok(role) => debug!("  Raw Role: {}", role.to_string()),
@@ -335,13 +366,83 @@ impl AccessibilityEngine for MacOSEngine {
                     ),
                     Err(e) => debug!("  Error getting raw attribute names: {:?}", e),
                 }
-                // --- End Added Logging ---
+                // --- End Existing Logging ---
 
-                // Ensure the element is valid before wrapping
-                if focused_element.role().is_ok() {
-                    Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_element)))
+                // --- Start Fetching Core Attributes Early ---
+                let mut fetched_role = String::new();
+                let mut fetched_label = None;
+                let mut fetched_description = None;
+                let mut fetched_value = None;
+
+                // Fetch Role
+                let role_attr = AXAttribute::new(&CFString::new("AXRole"));
+                if let Ok(role_val) = focused_element.attribute(&role_attr) {
+                    if let Some(cf_string) = role_val.downcast_into::<CFString>() {
+                        fetched_role = cf_string.to_string();
+                    }
+                }
+                debug!("Pre-fetched Role: {}", fetched_role);
+
+                // Fetch Label (try AXTitle first, then AXLabel)
+                let title_attr = AXAttribute::new(&CFString::new("AXTitle"));
+                if let Ok(title_val) = focused_element.attribute(&title_attr) {
+                    if let Some(cf_string) = title_val.downcast_into::<CFString>() {
+                        let title_str = cf_string.to_string();
+                        if !title_str.is_empty() {
+                            fetched_label = Some(title_str);
+                        }
+                    }
+                }
+                if fetched_label.is_none() {
+                    let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
+                    if let Ok(label_val) = focused_element.attribute(&label_attr) {
+                        if let Some(cf_string) = label_val.downcast_into::<CFString>() {
+                            fetched_label = Some(cf_string.to_string());
+                        }
+                    }
+                }
+                debug!("Pre-fetched Label: {:?}", fetched_label);
+
+                // Fetch Description
+                let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
+                if let Ok(desc_val) = focused_element.attribute(&desc_attr) {
+                    if let Some(cf_string) = desc_val.downcast_into::<CFString>() {
+                        fetched_description = Some(cf_string.to_string());
+                    }
+                }
+                debug!("Pre-fetched Description: {:?}", fetched_description);
+
+                // Fetch Value
+                let value_attr = AXAttribute::new(&CFString::new("AXValue"));
+                if let Ok(value_val) = focused_element.attribute(&value_attr) {
+                    if let Some(cf_string) = value_val.clone().downcast_into::<CFString>() {
+                        fetched_value = Some(cf_string.to_string());
+                    } else if let Some(cf_num) = value_val.clone().downcast_into::<CFNumber>() {
+                        if let Some(num) = cf_num.to_i64() {
+                            fetched_value = Some(num.to_string());
+                        } else if let Some(num) = cf_num.to_f64() {
+                            fetched_value = Some(num.to_string());
+                        }
+                    }
+                    // Add other type checks for AXValue if necessary (e.g., boolean)
+                }
+                debug!("Pre-fetched Value: {:?}", fetched_value);
+                // --- End Fetching Core Attributes Early ---
+
+                // Ensure the element is still somewhat valid before wrapping
+                if !fetched_role.is_empty()
+                    || fetched_label.is_some()
+                    || fetched_description.is_some()
+                {
+                    Ok(self.wrap_element(
+                        ThreadSafeAXUIElement::new(focused_element),
+                        Some(fetched_role),
+                        fetched_label,
+                        fetched_description,
+                        fetched_value,
+                    ))
                 } else {
-                    debug!("Focused element obtained via CFType is invalid/inaccessible");
+                    debug!("Focused element obtained via CFType seems invalid/inaccessible based on pre-fetched attributes");
                     Err(AutomationError::PlatformError(
                         "Focused element is invalid or inaccessible.".to_string(),
                     ))
@@ -449,7 +550,13 @@ impl AccessibilityEngine for MacOSEngine {
                         )))
                     }
                 };
-                Ok(self.wrap_element(ThreadSafeAXUIElement::new(ax_ui_element)))
+                Ok(self.wrap_element(
+                    ThreadSafeAXUIElement::new(ax_ui_element),
+                    None,
+                    None,
+                    None,
+                    None,
+                ))
             }
             Selector::Id(id) => {
                 let id_owned = id.clone(); // Create an owned copy
@@ -474,7 +581,13 @@ impl AccessibilityEngine for MacOSEngine {
                         )))
                     }
                 };
-                Ok(self.wrap_element(ThreadSafeAXUIElement::new(ax_ui_element)))
+                Ok(self.wrap_element(
+                    ThreadSafeAXUIElement::new(ax_ui_element),
+                    None,
+                    None,
+                    None,
+                    None,
+                ))
             }
             Selector::Name(name) => {
                 let name_owned = name.clone(); // Create an owned copy
@@ -499,7 +612,13 @@ impl AccessibilityEngine for MacOSEngine {
                         )))
                     }
                 };
-                Ok(self.wrap_element(ThreadSafeAXUIElement::new(ax_ui_element)))
+                Ok(self.wrap_element(
+                    ThreadSafeAXUIElement::new(ax_ui_element),
+                    None,
+                    None,
+                    None,
+                    None,
+                ))
             }
 
             Selector::Text(text) => {
@@ -532,7 +651,13 @@ impl AccessibilityEngine for MacOSEngine {
                         )))
                     }
                 };
-                Ok(self.wrap_element(ThreadSafeAXUIElement::new(ax_ui_element)))
+                Ok(self.wrap_element(
+                    ThreadSafeAXUIElement::new(ax_ui_element),
+                    None,
+                    None,
+                    None,
+                    None,
+                ))
             }
             Selector::Attributes(_attrs) => Err(AutomationError::UnsupportedOperation(
                 "Attributes selector not implemented".to_string(),
@@ -618,7 +743,9 @@ impl AccessibilityEngine for MacOSEngine {
                 // Convert AXUIElements to UIElements
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e)))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
 
                 Ok(ui_elements)
@@ -634,7 +761,9 @@ impl AccessibilityEngine for MacOSEngine {
                 // Convert AXUIElements to UIElements
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e)))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
 
                 Ok(ui_elements)
@@ -650,7 +779,9 @@ impl AccessibilityEngine for MacOSEngine {
                 // Convert AXUIElements to UIElements
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e)))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
 
                 Ok(ui_elements)
@@ -666,7 +797,9 @@ impl AccessibilityEngine for MacOSEngine {
                 // Convert AXUIElements to UIElements
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e)))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
 
                 Ok(ui_elements)
@@ -751,7 +884,7 @@ impl AccessibilityEngine for MacOSEngine {
 
                             // Create element directly instead of full scan
                             let app_element = ThreadSafeAXUIElement::application(pid);
-                            return Ok(self.wrap_element(app_element));
+                            return Ok(self.wrap_element(app_element, None, None, None, None));
                         }
                     }
                 }
