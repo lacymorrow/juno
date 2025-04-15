@@ -1,0 +1,9 @@
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/libfdeflate-28b380efa890deba.rmeta: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/compress.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/decompress.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/huffman.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/tables.rs
+
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/fdeflate-28b380efa890deba.d: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/compress.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/decompress.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/huffman.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/tables.rs
+
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/lib.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/compress.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/decompress.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/huffman.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/fdeflate-0.3.7/src/tables.rs:

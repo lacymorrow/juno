@@ -1,5 +1,4 @@
 use super::actions::ClickMethodSelection;
-use super::attributes;
 use super::constants::*;
 use super::engine::MacOSEngine;
 use super::ffi::AXValueGetValue;

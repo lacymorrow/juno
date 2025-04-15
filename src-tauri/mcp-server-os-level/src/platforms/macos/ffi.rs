@@ -9,7 +9,9 @@ extern "C" {
 
     pub(crate) fn AXUIElementGetPid(element: *mut ::std::os::raw::c_void, pid: *mut i32) -> i32;
 
-    pub(crate) fn AXIsProcessTrustedWithOptions(options: core_foundation::dictionary::CFDictionaryRef) -> bool;
+    pub(crate) fn AXIsProcessTrustedWithOptions(
+        options: core_foundation::dictionary::CFDictionaryRef,
+    ) -> bool;
 }
 
 // Add these extern "C" declarations if not already present

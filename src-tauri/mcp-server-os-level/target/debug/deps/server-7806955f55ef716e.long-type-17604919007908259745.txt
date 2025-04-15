@@ -1,0 +1,1 @@
+fn(axum::extract::State<Arc<{type error}, {type error}>>, Json<open_url::OpenUrlRequest>) -> impl std::future::Future<Output = Result<Json<open_url::OpenUrlWithElementsResponse>, (axum::http::StatusCode, Json<serde_json::Value>)>> {open_url_handler}
