@@ -14,6 +14,7 @@ use core_foundation::string::CFString;
 use core_graphics::geometry::{CGPoint, CGSize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use tracing::debug;
 
 // Helper function to parse AXUIElement attribute values into appropriate types
 // Moved from utils.rs
@@ -197,31 +198,80 @@ pub(crate) fn get_element_attributes(element: &MacOSUIElement) -> UIElementAttri
             }
         }
     } else {
+        // --- Start Added Logging ---
+        debug!("Fetching attributes for non-window element.");
+        // --- End Added Logging ---
         attrs.label = element.element.0.title().ok().map(|s| s.to_string());
+        // --- Start Added Logging ---
+        debug!("Attempted to get label via title(): {:?}", attrs.label);
+        // --- End Added Logging ---
         if attrs.label.is_none() {
-            attrs.label = element
-                .element
-                .0
-                .attribute(&AXAttribute::new(&CFString::new("AXLabel")))
+            let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
+            let label_result = element.element.0.attribute(&label_attr);
+            // --- Start Added Logging ---
+            debug!(
+                "Attempted to get label via AXLabel attribute: {:?}",
+                label_result
+            );
+            // --- End Added Logging ---
+            attrs.label = label_result
                 .ok()
                 .and_then(|val| val.downcast_into::<CFString>())
                 .map(|s| s.to_string());
+            // --- Start Added Logging ---
+            debug!("Final label after AXLabel check: {:?}", attrs.label);
+            // --- End Added Logging ---
         }
-        attrs.description = element.element.0.description().ok().map(|s| s.to_string());
+        let description_result = element.element.0.description();
+        // --- Start Added Logging ---
+        debug!("Attempted to get description(): {:?}", description_result);
+        // --- End Added Logging ---
+        attrs.description = description_result.ok().map(|s| s.to_string());
 
         let value_attr = AXAttribute::new(&CFString::new("AXValue"));
-        if let Ok(value) = element.element.0.attribute(&value_attr) {
+        let value_result = element.element.0.attribute(&value_attr);
+        // --- Start Added Logging ---
+        debug!(
+            "Attempted to get value via AXValue attribute: {:?}",
+            value_result
+        );
+        // --- End Added Logging ---
+        if let Ok(value) = value_result {
             if let Some(cf_string) = value.clone().downcast_into::<CFString>() {
                 attrs.value = Some(cf_string.to_string());
-            } else if let Some(cf_num) = value.downcast_into::<CFNumber>() {
+                // --- Start Added Logging ---
+                debug!("Got value as CFString: {:?}", attrs.value);
+                // --- End Added Logging ---
+            } else if let Some(cf_num) = value.clone().downcast_into::<CFNumber>() {
                 if let Some(num) = cf_num.to_i64() {
                     attrs.value = Some(num.to_string());
+                    // --- Start Added Logging ---
+                    debug!("Got value as CFNumber (i64): {:?}", attrs.value);
+                    // --- End Added Logging ---
                 } else if let Some(num) = cf_num.to_f64() {
                     attrs.value = Some(num.to_string());
+                    // --- Start Added Logging ---
+                    debug!("Got value as CFNumber (f64): {:?}", attrs.value);
+                    // --- End Added Logging ---
+                } else {
+                    // --- Start Added Logging ---
+                    debug!("Got value as CFNumber, but couldn't convert to i64 or f64.");
+                    // --- End Added Logging ---
                 }
             } else {
                 // Potentially handle other AXValue types (e.g., boolean)
+                // --- Start Added Logging ---
+                let type_id = value.type_of();
+                debug!(
+                    "Got AXValue attribute, but it's not CFString or CFNumber. TypeID: {}",
+                    type_id
+                );
+                // --- End Added Logging ---
             }
+        } else {
+            // --- Start Added Logging ---
+            debug!("Failed to get AXValue attribute or it was None.");
+            // --- End Added Logging ---
         }
     }
 
