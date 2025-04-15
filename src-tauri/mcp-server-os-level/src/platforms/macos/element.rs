@@ -5,18 +5,20 @@ use super::ffi::AXValueGetValue;
 use super::interaction;
 use super::utils::macos_role_to_generic_role;
 use super::wrappers::ThreadSafeAXUIElement;
-use crate::platforms::macos::attributes::get_element_attributes;
+use crate::platforms::macos::attributes::parse_ax_attribute_value;
 use crate::platforms::tree_search::ElementsCollectorWithWindows;
 use crate::UIElementAttributes;
 use crate::{element::UIElementImpl, AutomationError, ClickResult, Locator, Selector, UIElement};
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes as AXAttrsTrait};
 use anyhow::Result;
 use core_foundation::base::TCFType;
+use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::event::{CGEvent, CGEventTapLocation};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::{CGPoint, CGSize};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use tracing::debug;
 
@@ -25,6 +27,10 @@ pub struct MacOSUIElement {
     pub(crate) element: ThreadSafeAXUIElement,
     pub(crate) use_background_apps: bool,
     pub(crate) activate_app: bool,
+    pub(crate) cached_role: String,
+    pub(crate) cached_label: Option<String>,
+    pub(crate) cached_description: Option<String>,
+    pub(crate) cached_value: Option<String>,
 }
 
 impl MacOSUIElement {
@@ -136,6 +142,10 @@ impl MacOSUIElement {
                     element: ThreadSafeAXUIElement::new(window.clone()),
                     use_background_apps: self.use_background_apps,
                     activate_app: self.activate_app,
+                    cached_role: String::new(),
+                    cached_label: None,
+                    cached_description: None,
+                    cached_value: None,
                 })));
             }
         }
@@ -145,6 +155,10 @@ impl MacOSUIElement {
                 element: ThreadSafeAXUIElement::new(window.clone()),
                 use_background_apps: self.use_background_apps,
                 activate_app: self.activate_app,
+                cached_role: String::new(),
+                cached_label: None,
+                cached_description: None,
+                cached_value: None,
             })));
         }
         match self.element.0.children() {
@@ -154,6 +168,10 @@ impl MacOSUIElement {
                         element: ThreadSafeAXUIElement::new(child.clone()),
                         use_background_apps: self.use_background_apps,
                         activate_app: self.activate_app,
+                        cached_role: String::new(),
+                        cached_label: None,
+                        cached_description: None,
+                        cached_value: None,
                     })));
                 }
                 Ok(all_children)
@@ -184,6 +202,10 @@ impl MacOSUIElement {
                         element: ThreadSafeAXUIElement::new(parent),
                         use_background_apps: self.use_background_apps,
                         activate_app: self.activate_app,
+                        cached_role: String::new(),
+                        cached_label: None,
+                        cached_description: None,
+                        cached_value: None,
                     }))))
                 } else {
                     Ok(None)
@@ -212,20 +234,111 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn role(&self) -> String {
-        let role = self
-            .element
-            .0
-            .role()
-            .map(|r| r.to_string())
-            .unwrap_or_default();
-        macos_role_to_generic_role(&role)
+        let mut role_to_use = self.cached_role.clone();
+        if role_to_use.is_empty() {
+            let role_attr = AXAttribute::new(&CFString::new("AXRole"));
+            if let Ok(role_val) = self.element.0.attribute(&role_attr) {
+                if let Some(cf_string) = role_val.downcast_into::<CFString>() {
+                    role_to_use = cf_string.to_string();
+                }
+            }
+            debug!("Role cache miss, fetched dynamically: {}", role_to_use);
+        }
+
+        macos_role_to_generic_role(&role_to_use)
             .first()
-            .unwrap_or(&role)
+            .unwrap_or(&role_to_use)
             .to_string()
     }
 
     fn attributes(&self) -> UIElementAttributes {
-        get_element_attributes(self)
+        let mut properties = HashMap::new();
+
+        let mut attrs = UIElementAttributes {
+            role: self.role(),
+            label: self.cached_label.clone().or_else(|| {
+                let mut fetched_label = None;
+                let title_attr = AXAttribute::new(&CFString::new("AXTitle"));
+                if let Ok(title_val) = self.element.0.attribute(&title_attr) {
+                    if let Some(cf_string) = title_val.downcast_into::<CFString>() {
+                        let title_str = cf_string.to_string();
+                        if !title_str.is_empty() {
+                            fetched_label = Some(title_str);
+                        }
+                    }
+                }
+                if fetched_label.is_none() {
+                    let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
+                    if let Ok(label_val) = self.element.0.attribute(&label_attr) {
+                        if let Some(cf_string) = label_val.downcast_into::<CFString>() {
+                            fetched_label = Some(cf_string.to_string());
+                        }
+                    }
+                }
+                debug!("Label cache miss, fetched dynamically: {:?}", fetched_label);
+                fetched_label
+            }),
+            value: self.cached_value.clone().or_else(|| {
+                let mut fetched_value = None;
+                let value_attr = AXAttribute::new(&CFString::new("AXValue"));
+                if let Ok(value_val) = self.element.0.attribute(&value_attr) {
+                    if let Some(cf_string) = value_val.clone().downcast_into::<CFString>() {
+                        fetched_value = Some(cf_string.to_string());
+                    } else if let Some(cf_num) = value_val.clone().downcast_into::<CFNumber>() {
+                        if let Some(num) = cf_num.to_i64() {
+                            fetched_value = Some(num.to_string());
+                        } else if let Some(num) = cf_num.to_f64() {
+                            fetched_value = Some(num.to_string());
+                        }
+                    }
+                }
+                debug!("Value cache miss, fetched dynamically: {:?}", fetched_value);
+                fetched_value
+            }),
+            description: self.cached_description.clone().or_else(|| {
+                let mut fetched_description = None;
+                let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
+                if let Ok(desc_val) = self.element.0.attribute(&desc_attr) {
+                    if let Some(cf_string) = desc_val.downcast_into::<CFString>() {
+                        fetched_description = Some(cf_string.to_string());
+                    }
+                }
+                debug!(
+                    "Description cache miss, fetched dynamically: {:?}",
+                    fetched_description
+                );
+                fetched_description
+            }),
+            properties,
+        };
+
+        if let Ok(attr_names) = self.element.0.attribute_names() {
+            for name in attr_names.iter() {
+                let attr = AXAttribute::new(&name);
+                let name_str = name.to_string();
+                if !["AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue"]
+                    .contains(&name_str.as_str())
+                {
+                    match self.element.0.attribute(&attr) {
+                        Ok(value) => {
+                            let parsed_value = parse_ax_attribute_value(&name_str, value);
+                            attrs.properties.insert(name_str, parsed_value);
+                        }
+                        Err(e) => {
+                            if !matches!(
+                                e,
+                                accessibility::Error::Ax(-25212)
+                                    | accessibility::Error::Ax(-25205)
+                                    | accessibility::Error::Ax(-25204)
+                            ) {
+                                debug!("Error getting property attribute '{}': {:?}", name_str, e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        attrs
     }
 
     fn children(&self) -> Result<Vec<UIElement>, AutomationError> {
@@ -374,6 +487,10 @@ impl UIElementImpl for MacOSUIElement {
             element: self.element.clone(),
             use_background_apps: self.use_background_apps,
             activate_app: self.activate_app,
+            cached_role: self.cached_role.clone(),
+            cached_label: self.cached_label.clone(),
+            cached_description: self.cached_description.clone(),
+            cached_value: self.cached_value.clone(),
         })
     }
 
