@@ -20,7 +20,7 @@ use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use tracing::{debug, trace};
+use tracing::{debug, info, trace, warn};
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -290,8 +290,11 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {
+        // Add an explicit info log to confirm entry
+        tracing::info!("Entering MacOSEngine::get_focused_element");
+
         // Create CFString from the attribute name literal
-        let attr_name = CFString::new(unsafe { kAXFocusedUIElementAttribute });
+        let attr_name = CFString::new(kAXFocusedUIElementAttribute);
         // Create the attribute struct for CFType (as this is what `new` provides)
         let cf_type_attribute = accessibility::AXAttribute::<CFType>::new(&attr_name);
 
@@ -306,6 +309,33 @@ impl AccessibilityEngine for MacOSEngine {
                         focused_element_val.as_CFTypeRef() as *mut libc::c_void as AXUIElementRef;
                     accessibility::AXUIElement::wrap_under_create_rule(element_ref)
                 };
+
+                // --- Start Added Logging ---
+                debug!("Raw focused element obtained:");
+                match focused_element.role() {
+                    Ok(role) => debug!("  Raw Role: {}", role.to_string()),
+                    Err(e) => debug!("  Error getting raw role: {:?}", e),
+                }
+                match focused_element.subrole() {
+                    Ok(subrole) => debug!("  Raw Subrole: {}", subrole.to_string()),
+                    Err(e) => debug!("  Error getting raw subrole: {:?}", e),
+                }
+                match focused_element.title() {
+                    Ok(title) => debug!("  Raw Title: {}", title.to_string()),
+                    Err(e) => debug!("  Error getting raw title: {:?}", e),
+                }
+                match focused_element.description() {
+                    Ok(desc) => debug!("  Raw Description: {}", desc.to_string()),
+                    Err(e) => debug!("  Error getting raw description: {:?}", e),
+                }
+                match focused_element.attribute_names() {
+                    Ok(names) => debug!(
+                        "  Raw Attribute Names: {:?}",
+                        names.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+                    ),
+                    Err(e) => debug!("  Error getting raw attribute names: {:?}", e),
+                }
+                // --- End Added Logging ---
 
                 // Ensure the element is valid before wrapping
                 if focused_element.role().is_ok() {

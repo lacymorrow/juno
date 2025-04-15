@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea"; // For displaying JSON
@@ -12,7 +12,18 @@ const DevToolsPanel: React.FC = () => {
   );
   const [isLoadingScreenshot, setIsLoadingScreenshot] = useState(false);
   const [isLoadingFocusInfo, setIsLoadingFocusInfo] = useState(false);
+  const [isDelayingFocusInfo, setIsDelayingFocusInfo] = useState(false); // New state for delay
   const [error, setError] = useState<string | null>(null);
+  const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
+
+  // Cleanup timeout on component unmount
+  useEffect(() => {
+    return () => {
+      if (delayTimeoutRef.current) {
+        clearTimeout(delayTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleCaptureScreenshot = async () => {
     setIsLoadingScreenshot(true);
@@ -29,10 +40,8 @@ const DevToolsPanel: React.FC = () => {
     }
   };
 
-  const handleGetFocusInfo = async () => {
+  const fetchAndSetFocusInfo = async () => {
     setIsLoadingFocusInfo(true);
-    setError(null);
-    setFocusedElementInfo(null); // Clear previous info
     try {
       const infoJsonString: string = await invoke(
         "dev_get_focused_element_info"
@@ -53,6 +62,26 @@ const DevToolsPanel: React.FC = () => {
     }
   };
 
+  const handleGetFocusInfo = async () => {
+    setError(null);
+    setFocusedElementInfo(null); // Clear previous info
+    await fetchAndSetFocusInfo();
+  };
+
+  const handleGetFocusInfoWithDelay = async () => {
+    if (isDelayingFocusInfo) return; // Prevent multiple clicks
+
+    setError(null);
+    setFocusedElementInfo(null); // Clear previous info
+    setIsDelayingFocusInfo(true);
+
+    delayTimeoutRef.current = setTimeout(async () => {
+      await fetchAndSetFocusInfo();
+      setIsDelayingFocusInfo(false);
+      delayTimeoutRef.current = null;
+    }, 5000); // 5-second delay
+  };
+
   return (
     <Card className="w-full max-w-2xl mx-auto my-4">
       <CardHeader>
@@ -67,17 +96,32 @@ const DevToolsPanel: React.FC = () => {
             <span className="font-medium">Error:</span> {error}
           </div>
         )}
-        <div className="flex space-x-4">
+        <div className="flex space-x-4 flex-wrap gap-y-2">
+          {" "}
+          {/* Added flex-wrap and gap-y */}
           <Button
             onClick={handleCaptureScreenshot}
-            disabled={isLoadingScreenshot}
+            disabled={isLoadingScreenshot || isDelayingFocusInfo}
           >
             {isLoadingScreenshot ? "Capturing..." : "Capture Screenshot"}
           </Button>
-          <Button onClick={handleGetFocusInfo} disabled={isLoadingFocusInfo}>
+          <Button
+            onClick={handleGetFocusInfo}
+            disabled={isLoadingFocusInfo || isDelayingFocusInfo}
+          >
             {isLoadingFocusInfo
               ? "Getting Info..."
-              : "Get Focused Element Info"}
+              : "Get Focused Element Info (Now)"}
+          </Button>
+          <Button
+            onClick={handleGetFocusInfoWithDelay}
+            disabled={
+              isDelayingFocusInfo || isLoadingFocusInfo || isLoadingScreenshot
+            }
+          >
+            {isDelayingFocusInfo
+              ? "Waiting 5s... (Switch Focus Now!)"
+              : "Get Focused Element Info (After 5s Delay)"}
           </Button>
         </div>
 
