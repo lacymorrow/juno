@@ -4,7 +4,7 @@ use computer_use_ai_sdk::{Desktop, ToolDefinition}; // Add ToolDefinition
 use dotenvy::dotenv; // Added for .env loading
 use reqwest::Client; // Add reqwest client
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value}; // Import the json! macro
 use std::env;
 use std::sync::Arc;
 
@@ -62,7 +62,7 @@ struct ToolResultBlock {
     #[serde(rename = "type")]
     type_: String, // Always "tool_result"
     tool_use_id: String,
-    content: String, // JSON string representation of the tool result
+    content: Value, // Can be string (old way, potentially phase out) or array of content blocks (text/image)
     #[serde(skip_serializing_if = "Option::is_none")]
     is_error: Option<bool>,
 }
@@ -316,15 +316,43 @@ async fn submit_query(
                         // Call the tool on the Desktop instance
                         let tool_result = desktop_arc.call_tool(name, input.clone());
 
-                        let (content_str, is_error) = match tool_result {
+                        let (result_content_value, is_error) = match tool_result {
                             Ok(result_value) => {
-                                let result_str = serde_json::to_string(&result_value)
-                                    .unwrap_or_else(|e| format!("{{\"error\": \"Failed to serialize tool result: {}\"}}", e));
                                 desktop_arc.log(
                                     "info",
-                                    format!("Tool '{}' success: {}", name, result_str),
+                                    format!("Tool '{}' success: {:?}", name, result_value),
                                 );
-                                (result_str, false)
+                                // Special handling for screenshot results
+                                if name == "captureScreenshot" {
+                                    if let Some(base64_data) = result_value
+                                        .get("screenshot_base64")
+                                        .and_then(|v| v.as_str())
+                                    {
+                                        let image_block = json!({
+                                            "type": "image",
+                                            "source": {
+                                                "type": "base64",
+                                                "media_type": "image/png",
+                                                "data": base64_data
+                                            }
+                                        });
+                                        // Per API spec, tool result content should be an ARRAY of blocks
+                                        (Value::Array(vec![image_block]), false)
+                                    } else {
+                                        // Screenshot tool succeeded but didn't return expected data?
+                                        let error_msg = format!("Tool '{}' succeeded but returned unexpected data: {:?}", name, result_value);
+                                        desktop_arc.log("error", error_msg.clone());
+                                        (json!([{ "type": "text", "text": error_msg }]), true)
+                                        // Send error text back
+                                    }
+                                } else {
+                                    // For other tools, wrap the result in a text block within an array
+                                    let result_str = serde_json::to_string(&result_value)
+                                        .unwrap_or_else(|e| {
+                                            format!("Failed to serialize tool result: {}", e)
+                                        });
+                                    (json!([{ "type": "text", "text": result_str }]), false)
+                                }
                             }
                             Err(e) => {
                                 println!("Tool execution error: {}", e);
@@ -333,14 +361,15 @@ async fn submit_query(
                                 }))
                                 .unwrap_or_default();
                                 desktop_arc.log("error", format!("Tool '{}' failed: {}", name, e));
-                                (error_str, true)
+                                // Send error back as a text block in an array
+                                (json!([{ "type": "text", "text": error_str }]), true)
                             }
                         };
 
                         tool_results.push(ToolResultBlock {
                             type_: "tool_result".to_string(),
                             tool_use_id: id.clone(),
-                            content: content_str,
+                            content: result_content_value, // Use the Value directly
                             is_error: Some(is_error),
                         });
                     } else {
