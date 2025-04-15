@@ -15,11 +15,14 @@ run app with:
 - Status: In Progress
 - Summary: Current implementation fails to interact reliably with web content due to limitations of the Accessibility API (AXUIElement) within web views. The agent cannot "see" the DOM.
 - Next Steps:
-    1.  Implement screenshot functionality in Rust using `core_graphics`. (Status: **In Progress** - `capture_screenshot` function added to `macos/utils.rs`)
-    2.  Expose screenshots via a Tauri command, returning base64 encoded image data.
+    1.  Implement screenshot functionality in Rust using `core_graphics`. (Status: **Done**)
+        - Summary: Added `capture_screenshot` function to `src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs` using `core_graphics`.
+    2.  Expose screenshots via a Tauri command, returning base64 encoded image data. (Status: **Done**)
+        - Summary: Added `capture_screenshot_command` to `src-tauri/src/lib.rs`, registered it, and handled PNG/Base64 encoding. Included conditional compilation for macOS.
     3.  Update agent tools/prompts to request and utilize screenshots for visual context, especially for web interactions.
     4.  Refine element finding logic to combine visual analysis (from screenshots) with accessibility data.
-    5.  Set a standard browser User-Agent in `tauri.conf.json` to prevent potential website compatibility issues.
+    5.  Set a standard browser User-Agent in `tauri.conf.json` to prevent potential website compatibility issues. (Status: **Done**)
+        - Summary: Added a standard Chrome on macOS User-Agent string to `tauri.conf.json` under `app.windows`.
 
 ### Task 3: Implement Missing macOS Control Features
 - Status: TODO

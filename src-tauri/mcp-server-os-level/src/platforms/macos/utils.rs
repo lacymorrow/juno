@@ -1,9 +1,14 @@
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::AutomationError;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes}; // Import AXUIElementAttributes trait
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use core_foundation::base::TCFType; // Import TCFType trait
 use core_foundation::string::CFString;
-use tracing::debug;
+use core_graphics::display::{CGDisplay, CGDisplayBounds, CGMainDisplayID};
+use core_graphics::image::CGImage;
+use image::{ImageBuffer, ImageFormat}; // Use ImageFormat instead of ImageOutputFormat. Removed unused Pixel, RgbaImage.
+use std::io::Cursor; // Added for image encoding
+use tracing::debug; // Added base64 import
 
 // Helper function to get PID from an AXUIElement
 pub(crate) fn get_pid_for_element(element: &ThreadSafeAXUIElement) -> i32 {
@@ -199,4 +204,96 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
     }
 
     contains_in_title || contains_in_desc
+}
+
+/// Captures a screenshot of the main display and encodes it as base64 PNG.
+pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
+    let cg_image = capture_screenshot_cgimage()?; // Renamed internal function
+
+    // Get image dimensions
+    let width = cg_image.width();
+    let height = cg_image.height();
+
+    // Get raw pixel data
+    let data = cg_image.data(); // Returns CFDataRef directly
+    let bytes = data.bytes(); // &[u8]
+
+    // Ensure data length matches expected size (RGBA)
+    let expected_len = width * height * 4;
+    if bytes.len() < expected_len {
+        // Allow for extra padding bytes
+        return Err(AutomationError::PlatformError(format!(
+            "Screenshot data length mismatch: expected at least {}, got {}",
+            expected_len,
+            bytes.len()
+        )));
+    }
+
+    // Create an RgbaImage from the raw bytes
+    // We need to handle potential byte order issues and alpha channel position (BGRA vs RGBA)
+    // Assuming macOS provides BGRA data based on common practices
+    let mut img_buffer = ImageBuffer::new(width as u32, height as u32);
+
+    for y in 0..height {
+        for x in 0..width {
+            let index = (y * cg_image.bytes_per_row()) + (x * 4); // Use bytes_per_row for correct indexing
+            if index + 3 >= bytes.len() {
+                // Avoid out-of-bounds access if data is shorter than expected for the last pixel(s)
+                // This might happen with padding bytes at the end of rows.
+                // We can log a warning or simply stop processing pixels.
+                // For now, let's stop processing to avoid panic.
+                tracing::warn!(
+                    "Reached end of screenshot data prematurely at ({}, {}), index {}",
+                    x,
+                    y,
+                    index
+                );
+                break; // Break inner loop
+            }
+            let b = bytes[index];
+            let g = bytes[index + 1];
+            let r = bytes[index + 2];
+            let a = bytes[index + 3];
+            img_buffer.put_pixel(x as u32, y as u32, image::Rgba([r, g, b, a]));
+        }
+        if y < height - 1
+            && (y * cg_image.bytes_per_row()) + (cg_image.bytes_per_row() - 1) >= bytes.len()
+        {
+            // If we broke the inner loop due to reaching end of data, break outer loop too.
+            tracing::warn!(
+                "Stopping screenshot processing prematurely due to data length issues after row {}",
+                y
+            );
+            break; // Break outer loop
+        }
+    }
+
+    // Encode the image to PNG format in memory
+    let mut png_data = Vec::new();
+    {
+        // Scope to ensure Cursor is dropped before reading png_data
+        let mut writer = Cursor::new(&mut png_data);
+        img_buffer
+            .write_to(&mut writer, ImageFormat::Png)
+            .map_err(|e| {
+                AutomationError::Internal(format!("Failed to encode screenshot to PNG: {}", e))
+            })?;
+    } // Cursor is dropped here
+
+    // Encode the PNG data to base64
+    let base64_string = BASE64_STANDARD.encode(&png_data);
+
+    Ok(base64_string)
+}
+
+/// Captures a screenshot of the main display as a CGImage. (Internal use)
+fn capture_screenshot_cgimage() -> Result<CGImage, AutomationError> {
+    unsafe {
+        let main_display_id = CGMainDisplayID();
+        let image_ref = CGDisplay::screenshot(CGDisplayBounds(main_display_id), 0, 0, 0)
+            .ok_or_else(|| {
+                AutomationError::PlatformError("Failed to capture screenshot".to_string())
+            })?;
+        Ok(image_ref)
+    }
 }

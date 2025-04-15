@@ -3,15 +3,16 @@
 //! This module provides a cross-platform API for automating desktop applications
 //! through accessibility APIs, inspired by Playwright's web automation model.
 
-use std::sync::{Arc, Mutex};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::time::{SystemTime, UNIX_EPOCH};
-use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-mod element;
+// Make element module public
+pub mod element;
 mod errors;
 mod locator;
 pub mod platforms;
@@ -19,6 +20,8 @@ mod selector;
 #[cfg(test)]
 mod tests;
 
+// Now UIElement is publicly accessible via computer_use_ai_sdk::element::UIElement
+// We still re-export it for convenience
 pub use element::{UIElement, UIElementAttributes};
 pub use errors::AutomationError;
 pub use locator::Locator;
@@ -59,6 +62,7 @@ pub struct ToolDefinition {
 // --- End Tool Definition Structures ---
 
 // Define a new struct to hold click result information - move to module level
+#[derive(Debug)]
 pub struct ClickResult {
     pub method: String,
     pub coordinates: Option<(f64, f64)>,
@@ -300,51 +304,83 @@ impl Desktop {
     pub fn call_tool(&self, name: &str, args: Value) -> Result<Value, AutomationError> {
         match name {
             "open_application" => {
-                let app_name = args.get("app_name")
+                let app_name = args
+                    .get("app_name")
                     .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'app_name' argument".to_string()))?;
+                    .ok_or_else(|| {
+                        AutomationError::InvalidArgument(
+                            "Missing or invalid 'app_name' argument".to_string(),
+                        )
+                    })?;
                 self.open_application(app_name)?;
-                Ok(serde_json::json!({"status": "success", "message": format!("Application '{}' opened.", app_name)}))
+                Ok(
+                    serde_json::json!({"status": "success", "message": format!("Application '{}' opened.", app_name)}),
+                )
             }
             "open_url" => {
-                let url = args.get("url")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'url' argument".to_string()))?;
+                let url = args.get("url").and_then(|v| v.as_str()).ok_or_else(|| {
+                    AutomationError::InvalidArgument(
+                        "Missing or invalid 'url' argument".to_string(),
+                    )
+                })?;
                 let browser = args.get("browser").and_then(|v| v.as_str()); // Optional
                 self.open_url(url, browser)?;
-                Ok(serde_json::json!({"status": "success", "message": format!("URL '{}' opened.", url)}))
+                Ok(
+                    serde_json::json!({"status": "success", "message": format!("URL '{}' opened.", url)}),
+                )
             }
-             "get_focused_element_info" => {
+            "get_focused_element_info" => {
                 let element = self.focused_element()?;
                 let attributes = element.attributes();
                 // Convert attributes to JSON value
-                let result_json = serde_json::to_value(attributes)
-                    .map_err(|e| AutomationError::Internal(format!("Failed to serialize element attributes: {}", e)))?;
+                let result_json = serde_json::to_value(attributes).map_err(|e| {
+                    AutomationError::Internal(format!(
+                        "Failed to serialize element attributes: {}",
+                        e
+                    ))
+                })?;
                 Ok(result_json)
             }
             "find_element" => {
-                let selector_str = args.get("selector")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
+                let selector_str =
+                    args.get("selector")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            AutomationError::InvalidArgument(
+                                "Missing or invalid 'selector' argument".to_string(),
+                            )
+                        })?;
                 let selector: Selector = selector_str.into();
                 let element_option = self.locator(selector).first()?;
                 if let Some(element) = element_option {
                     let attributes = element.attributes();
-                    let result_json = serde_json::to_value(attributes)
-                         .map_err(|e| AutomationError::Internal(format!("Failed to serialize element attributes: {}", e)))?;
-                     Ok(serde_json::json!({
-                        "status": "success",
-                        "element_found": true,
-                        "attributes": result_json
-                     }))
+                    let result_json = serde_json::to_value(attributes).map_err(|e| {
+                        AutomationError::Internal(format!(
+                            "Failed to serialize element attributes: {}",
+                            e
+                        ))
+                    })?;
+                    Ok(serde_json::json!({
+                       "status": "success",
+                       "element_found": true,
+                       "attributes": result_json
+                    }))
                 } else {
-                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
+                    Err(AutomationError::ElementNotFound(format!(
+                        "Element not found for selector: {}",
+                        selector_str
+                    )))
                 }
             }
             "click" => {
-                let selector_str = args.get("selector")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
+                let selector_str =
+                    args.get("selector")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            AutomationError::InvalidArgument(
+                                "Missing or invalid 'selector' argument".to_string(),
+                            )
+                        })?;
                 let selector: Selector = selector_str.into();
                 let element_option = self.locator(selector).first()?;
                 if let Some(element) = element_option {
@@ -355,53 +391,90 @@ impl Desktop {
                         "coordinates": click_result.coordinates
                     }))
                 } else {
-                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
+                    Err(AutomationError::ElementNotFound(format!(
+                        "Element not found for selector: {}",
+                        selector_str
+                    )))
                 }
             }
-             "type_text" => {
-                 let selector_str = args.get("selector")
-                     .and_then(|v| v.as_str())
-                     .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
-                 let text_to_type = args.get("text")
-                     .and_then(|v| v.as_str())
-                     .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'text' argument".to_string()))?;
+            "type_text" => {
+                let selector_str =
+                    args.get("selector")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            AutomationError::InvalidArgument(
+                                "Missing or invalid 'selector' argument".to_string(),
+                            )
+                        })?;
+                let text_to_type = args.get("text").and_then(|v| v.as_str()).ok_or_else(|| {
+                    AutomationError::InvalidArgument(
+                        "Missing or invalid 'text' argument".to_string(),
+                    )
+                })?;
                 let selector: Selector = selector_str.into();
-                 let element_option = self.locator(selector).first()?;
-                 if let Some(element) = element_option {
-                     element.type_text(text_to_type)?;
-                     Ok(serde_json::json!({
-                         "status": "success",
-                         "message": format!("Typed text into element matching selector '{}'", selector_str)
-                     }))
-                 } else {
-                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
-                 }
-             }
-             "get_element_attributes" => {
-                  let selector_str = args.get("selector")
-                      .and_then(|v| v.as_str())
-                      .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
-                  let selector: Selector = selector_str.into();
-                  let element_option = self.locator(selector).first()?;
-                   if let Some(element) = element_option {
-                      let attributes = element.attributes();
-                      let result_json = serde_json::to_value(attributes)
-                          .map_err(|e| AutomationError::Internal(format!("Failed to serialize element attributes: {}", e)))?;
-                      Ok(result_json)
-                  } else {
-                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
-                  }
-              }
-             "scroll_element" => {
-                let selector_str = args.get("selector")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
-                let direction = args.get("direction")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'direction' argument".to_string()))?;
-                let amount = args.get("amount")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'amount' argument".to_string()))?;
+                let element_option = self.locator(selector).first()?;
+                if let Some(element) = element_option {
+                    element.type_text(text_to_type)?;
+                    Ok(serde_json::json!({
+                        "status": "success",
+                        "message": format!("Typed text into element matching selector '{}'", selector_str)
+                    }))
+                } else {
+                    Err(AutomationError::ElementNotFound(format!(
+                        "Element not found for selector: {}",
+                        selector_str
+                    )))
+                }
+            }
+            "get_element_attributes" => {
+                let selector_str =
+                    args.get("selector")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            AutomationError::InvalidArgument(
+                                "Missing or invalid 'selector' argument".to_string(),
+                            )
+                        })?;
+                let selector: Selector = selector_str.into();
+                let element_option = self.locator(selector).first()?;
+                if let Some(element) = element_option {
+                    let attributes = element.attributes();
+                    let result_json = serde_json::to_value(attributes).map_err(|e| {
+                        AutomationError::Internal(format!(
+                            "Failed to serialize element attributes: {}",
+                            e
+                        ))
+                    })?;
+                    Ok(result_json)
+                } else {
+                    Err(AutomationError::ElementNotFound(format!(
+                        "Element not found for selector: {}",
+                        selector_str
+                    )))
+                }
+            }
+            "scroll_element" => {
+                let selector_str =
+                    args.get("selector")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            AutomationError::InvalidArgument(
+                                "Missing or invalid 'selector' argument".to_string(),
+                            )
+                        })?;
+                let direction =
+                    args.get("direction")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            AutomationError::InvalidArgument(
+                                "Missing or invalid 'direction' argument".to_string(),
+                            )
+                        })?;
+                let amount = args.get("amount").and_then(|v| v.as_f64()).ok_or_else(|| {
+                    AutomationError::InvalidArgument(
+                        "Missing or invalid 'amount' argument".to_string(),
+                    )
+                })?;
                 let selector: Selector = selector_str.into();
                 let element_option = self.locator(selector).first()?;
                 if let Some(element) = element_option {
@@ -411,12 +484,33 @@ impl Desktop {
                         "message": format!("Scrolled element matching selector '{}'", selector_str)
                     }))
                 } else {
-                    Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
+                    Err(AutomationError::ElementNotFound(format!(
+                        "Element not found for selector: {}",
+                        selector_str
+                    )))
                 }
             }
-            _ => Err(AutomationError::UnsupportedOperation(format!("Tool '{}' not recognized.", name))),
+            _ => Err(AutomationError::UnsupportedOperation(format!(
+                "Tool '{}' not recognized.",
+                name
+            ))),
         }
     }
+
+    // --- Screenshot Functionality ---
+    #[cfg(target_os = "macos")]
+    pub fn capture_screenshot_base64(&self) -> Result<String, AutomationError> {
+        // Call the platform-specific function that now handles encoding
+        platforms::macos::utils::capture_and_encode_screenshot()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn capture_screenshot_base64(&self) -> Result<String, AutomationError> {
+        Err(AutomationError::UnsupportedOperation(
+            "Screenshot capture is only supported on macOS currently.".to_string(),
+        ))
+    }
+    // --- End Screenshot Functionality ---
 
     // --- End New Methods ---
 }

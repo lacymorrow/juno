@@ -1,0 +1,11 @@
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/libbitflags-2e0968a11ee6ceb3.rmeta: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/iter.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/parser.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/traits.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/public.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/internal.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/external.rs
+
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/bitflags-2e0968a11ee6ceb3.d: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/iter.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/parser.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/traits.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/public.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/internal.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/external.rs
+
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/lib.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/iter.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/parser.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/traits.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/public.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/internal.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/bitflags-2.9.0/src/external.rs:
