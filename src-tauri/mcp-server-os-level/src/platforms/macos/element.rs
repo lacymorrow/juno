@@ -312,32 +312,74 @@ impl UIElementImpl for MacOSUIElement {
             properties,
         };
 
-        if let Ok(attr_names) = self.element.0.attribute_names() {
-            for name in attr_names.iter() {
-                let attr = AXAttribute::new(&name);
-                let name_str = name.to_string();
-                if !["AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue"]
-                    .contains(&name_str.as_str())
+        // Define a list of potentially useful attributes to fetch if available
+        let standard_attrs_to_fetch = [
+            "AXURL",
+            "AXDOMIdentifier",
+            "AXEnabled",
+            "AXFocused", // Note: AXFocused might be app-level, but check anyway
+            "AXParent",
+            "AXWindow",
+            "AXTopLevelUIElement",
+            "AXSelected",
+            "AXPlaceholderValue", // Often useful for input fields
+            "AXIdentifier",       // Standard UI element identifier
+            "AXHelp",
+            "AXFilename",  // For document-based apps/windows
+            "AXDocument",  // For document URI/path
+            "AXMain",      // Is it the main window?
+            "AXMinimized", // Is the window minimized?
+            "AXPosition",  // Already handled by bounds(), but might be useful raw
+            "AXSize",      // Already handled by bounds(), but might be useful raw
+        ];
+
+        // Fetch attribute names only once
+        if let Ok(attr_names_cf) = self.element.0.attribute_names() {
+            // Convert CFStringRef array to Vec<String> for easier comparison
+            let attr_names: Vec<String> = attr_names_cf.iter().map(|s| s.to_string()).collect();
+            let available_attr_names: std::collections::HashSet<String> =
+                attr_names.into_iter().collect();
+
+            for name_str in standard_attrs_to_fetch {
+                // Skip core attributes already handled (or attempted via cache)
+                if !["AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue"].contains(&name_str)
                 {
-                    match self.element.0.attribute(&attr) {
-                        Ok(value) => {
-                            let parsed_value = parse_ax_attribute_value(&name_str, value);
-                            attrs.properties.insert(name_str, parsed_value);
-                        }
-                        Err(e) => {
-                            if !matches!(
-                                e,
-                                accessibility::Error::Ax(-25212)
-                                    | accessibility::Error::Ax(-25205)
-                                    | accessibility::Error::Ax(-25204)
-                            ) {
-                                debug!("Error getting property attribute '{}': {:?}", name_str, e);
+                    // Check if the attribute is listed as available by the element
+                    if available_attr_names.contains(name_str) {
+                        let attr = AXAttribute::new(&CFString::new(name_str));
+                        match self.element.0.attribute(&attr) {
+                            Ok(value) => {
+                                let parsed_value = parse_ax_attribute_value(name_str, value);
+                                attrs
+                                    .properties
+                                    .insert(name_str.to_string(), parsed_value.clone());
+                                debug!("Fetched property '{}': {:?}", name_str, parsed_value);
+                            }
+                            Err(e) => {
+                                // Log errors only if they are unexpected (not 'unsupported' or 'no value')
+                                if !matches!(
+                                    e,
+                                    accessibility::Error::Ax(-25212) // attribute unsupported
+                                        | accessibility::Error::Ax(-25205) // no value
+                                        | accessibility::Error::Ax(-25204) // getting attribute failed (internal error)
+                                ) {
+                                    debug!(
+                                        "Error getting property attribute '{}': {:?}",
+                                        name_str, e
+                                    );
+                                }
                             }
                         }
+                    } else {
+                        // Optional: Log attributes that were in standard_attrs_to_fetch but not available
+                        // trace!("Attribute '{}' from standard list is not available for this element.", name_str);
                     }
                 }
             }
+        } else {
+            debug!("Failed to retrieve attribute names for element.");
         }
+
         attrs
     }
 
