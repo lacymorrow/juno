@@ -1,28 +1,30 @@
 use std::{
     net::SocketAddr,
     sync::Arc,
+    io::ErrorKind,
 };
 
 use axum::{routing::post, Router};
 use tokio::sync::Mutex;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{error, info, level_filters::LevelFilter};
-
-// Declare the server module
-mod server;
-
-// Use imports relative to the server module
+use computer_use_ai_sdk::Desktop;
 use server::handlers::click_by_index::click_by_index_handler;
 use server::handlers::input_control::input_control_handler;
 use server::handlers::list_elements_and_attributes::list_elements_and_attributes_handler;
-use server::handlers::mcp::mcp_handler;
-// MCP helpers are not needed here
-use computer_use_ai_sdk::Desktop;
+use server::handlers::mcp::{
+    handle_execute_tool_function, handle_initialize, mcp_error_response,
+};
 use server::handlers::open_application::open_application_handler;
 use server::handlers::open_url::open_url_handler;
 use server::handlers::press_key_by_index::press_key_by_index_handler;
 use server::handlers::type_by_index::type_by_index_handler;
-use server::types::*; // Import types from the server module // Import Desktop
+use server::types::{AppState, MCPRequest};
+use serde_json::{self, json, Value};
+use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+
+// Declare the server module
+mod server;
 
 // ================ Main ================
 
@@ -63,12 +65,99 @@ async fn main() -> anyhow::Result<()> {
 
     if use_stdio {
         info!("running in STDIO mode for MCP");
-        // TODO: Implement or re-integrate STDIO mode logic
-        // run_stdio_mode(app_state).await?;
-        eprintln!("STDIO mode is not fully implemented yet."); // Placeholder
+        // Call the new STDIO mode function
+        run_stdio_mode(app_state).await?;
     } else {
         info!("running in HTTP mode on port 8080");
         run_http_server(app_state).await?;
+    }
+
+    Ok(())
+}
+
+// New function to handle STDIO mode
+async fn run_stdio_mode(state: Arc<AppState>) -> anyhow::Result<()> {
+    let stdin = stdin();
+    let mut reader = BufReader::new(stdin);
+    let stdout = stdout();
+    let mut writer = BufWriter::new(stdout);
+    let mut line_buffer = String::new();
+
+    info!("STDIO mode ready. Waiting for JSON MCP requests on stdin...");
+
+    loop {
+        line_buffer.clear();
+        match reader.read_line(&mut line_buffer).await {
+            Ok(0) => {
+                info!("stdin closed, exiting STDIO mode.");
+                break; // EOF
+            }
+            Ok(_) => {
+                // Attempt to parse the line as an MCPRequest
+                let response_json = match serde_json::from_str::<MCPRequest>(&line_buffer) {
+                    Ok(request) => {
+                        let request_id = request.id.clone(); // Clone id for error handling
+                        match request.method.as_str() {
+                            "initialize" => handle_initialize(request.id).into_inner(),
+                            "executeToolFunction" => {
+                                if let Some(params) = request.params {
+                                    // Need to await the async function here
+                                    handle_execute_tool_function(state.clone(), request.id, params).await.into_inner()
+                                } else {
+                                    mcp_error_response(request_id, -32602, "invalid params".to_string(), None).into_inner()
+                                }
+                            }
+                            _ => mcp_error_response(
+                                request_id,
+                                -32601,
+                                "method not found".to_string(),
+                                None,
+                            ).into_inner(),
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse stdin line as MCPRequest JSON: {}. Line: {}", e, line_buffer.trim());
+                        // Construct a basic MCP error response if possible, otherwise skip
+                        // Try to extract ID if it was partially valid JSON
+                        let id_val = serde_json::from_str::<Value>(&line_buffer)
+                            .ok()
+                            .and_then(|v| v.get("id").cloned())
+                            .unwrap_or(Value::Null);
+                        mcp_error_response(id_val, -32700, "parse error".to_string(), Some(json!({ "error_details": e.to_string() }))).into_inner()
+                    }
+                };
+
+                // Serialize the response back to JSON string
+                match serde_json::to_string(&response_json) {
+                    Ok(response_str) => {
+                        if let Err(e) = writer.write_all(response_str.as_bytes()).await {
+                            error!("Failed to write response to stdout: {}", e);
+                            break; // Exit if we can't write
+                        }
+                        if let Err(e) = writer.write_all(b"\n").await { // Add newline separator
+                            error!("Failed to write newline to stdout: {}", e);
+                            break;
+                        }
+                        if let Err(e) = writer.flush().await {
+                            error!("Failed to flush stdout: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to serialize MCP response to JSON: {}", e);
+                        // Cannot send error back if serialization fails
+                    }
+                }
+            }
+            Err(ref e) if e.kind() == ErrorKind::BrokenPipe => {
+                info!("stdin pipe broken, exiting STDIO mode.");
+                break;
+            }
+            Err(e) => {
+                error!("Error reading from stdin: {}", e);
+                break;
+            }
+        }
     }
 
     Ok(())

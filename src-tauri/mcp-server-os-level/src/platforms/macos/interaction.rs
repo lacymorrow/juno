@@ -13,6 +13,8 @@ use core_graphics::event::{
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
+use clipboard_macos::Clipboard; // Import clipboard_macos
+// use pasteboard_macos::Pasteboard; // Ensure this import is removed or commented out
 use std::collections::HashMap;
 use tracing::{debug, warn};
 
@@ -471,4 +473,46 @@ pub(crate) fn scroll(
 pub(crate) fn select_text(_element: &MacOSUIElement) -> Result<(), AutomationError> {
     warn!("select_text function is not yet implemented for macOS");
     Ok(())
+}
+
+/// Gets the current text content from the system clipboard.
+pub(crate) fn get_clipboard_contents() -> Result<String, AutomationError> {
+    // clipboard_macos likely uses a static method or a context struct
+    // Based on docs.rs, it seems to use a Clipboard struct
+    match Clipboard::new() {
+        Ok(clipboard) => match clipboard.read() {
+            Ok(content) => {
+                debug!("Retrieved clipboard content (length: {})", content.len());
+                Ok(content)
+            }
+            Err(e) => Err(AutomationError::PlatformError(format!(
+                "Failed to read string from clipboard: {:?}",
+                e
+            ))),
+        },
+        Err(e) => Err(AutomationError::PlatformError(format!(
+            "Failed to access clipboard: {:?}",
+            e
+        ))),
+    }
+}
+
+/// Sets the system clipboard text content.
+pub(crate) fn set_clipboard_contents(text: &str) -> Result<(), AutomationError> {
+    match Clipboard::new() {
+        Ok(mut clipboard) => match clipboard.write(text.to_string()) {
+            Ok(_) => {
+                debug!("Set clipboard content (length: {})", text.len());
+                Ok(())
+            }
+            Err(e) => Err(AutomationError::PlatformError(format!(
+                "Failed to write string to clipboard: {:?}",
+                e
+            ))),
+        },
+        Err(e) => Err(AutomationError::PlatformError(format!(
+            "Failed to access clipboard: {:?}",
+            e
+        ))),
+    }
 }

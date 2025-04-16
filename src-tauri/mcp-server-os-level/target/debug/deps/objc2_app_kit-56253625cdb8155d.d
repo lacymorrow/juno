@@ -1,0 +1,9 @@
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/libobjc2_app_kit-56253625cdb8155d.rmeta: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/generated/mod.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/generated/NSPasteboard.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/../examples/delegate.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/../examples/nspasteboard.rs
+
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/objc2_app_kit-56253625cdb8155d.d: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/generated/mod.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/generated/NSPasteboard.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/../examples/delegate.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/../examples/nspasteboard.rs
+
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/lib.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/generated/mod.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/generated/NSPasteboard.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/../examples/delegate.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-app-kit-0.2.2/src/../examples/nspasteboard.rs:
