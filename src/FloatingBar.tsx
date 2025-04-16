@@ -43,37 +43,33 @@ const FloatingBar: React.FC = () => {
   return (
     <div
       data-tauri-drag-region // Make the bar draggable
-      className={`fixed bottom-10 left-1/2 -translate-x-1/2 w-[350px] h-[40px] bg-neutral-800/80 backdrop-blur-sm rounded-lg shadow-lg transition-all duration-300 ease-in-out overflow-hidden flex items-center px-2 ${
-        isExpanded ? "!h-[80px]" : ""
-      }`} // Start smaller, expand on focus
+      className={`w-screen h-screen bg-neutral-900 transition-all duration-300 ease-in-out overflow-hidden flex flex-col items-center justify-center px-4`} // Changed classes for full screen, added background, vertical centering
       style={
         {
           // Add styles for the gooey effect container if needed later
         }
       }
     >
-      {/* Basic Input Form - expand on focus */}
-      <form onSubmit={handleSubmit} className="w-full h-full flex items-center">
+      {/* Basic Input Form - now centered */}
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-md h-auto flex items-center bg-neutral-800/80 backdrop-blur-sm rounded-lg shadow-lg p-4 mb-4" // Added background, padding, max-width, margin
+      >
         <input
           type="text"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          onFocus={handleFocus}
-          // onBlur={handleBlur} // Enable if blur-to-collapse is desired
+          // Removed onFocus/onBlur related to expansion as it's always "expanded" now
           placeholder={isLoading ? "Thinking..." : "Enter your command..."}
           disabled={isLoading}
-          className={`w-full h-full bg-transparent text-white placeholder-neutral-400 focus:outline-none transition-opacity duration-300 ${
-            !isExpanded && !isLoading
-              ? "opacity-0 pointer-events-none"
-              : "opacity-100"
-          }`}
+          className={`w-full h-10 bg-transparent text-white placeholder-neutral-400 focus:outline-none px-2`} // Simplified classes, ensure padding
         />
-        {/* Show submit icon only when expanded and not loading */}
-        {isExpanded && !isLoading && (
+        {!isLoading && ( // Show button if not loading
           <button
             type="submit"
             className="text-neutral-400 hover:text-white transition-colors ml-2 p-1"
             aria-label="Submit"
+            disabled={!inputValue.trim()} // Disable if input is empty
           >
             {/* Basic Send Icon (replace with actual icon later) */}
             <svg
@@ -94,9 +90,11 @@ const FloatingBar: React.FC = () => {
         )}
       </form>
 
-      {/* Gooey Loading Indicator */}
+      {/* Gooey Loading Indicator - Centered */}
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-neutral-800/90 pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center bg-neutral-900/50 pointer-events-none">
+          {" "}
+          {/* Adjusted background */}
           <GooeyLoader />
         </div>
       )}
