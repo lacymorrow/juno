@@ -1,6 +1,7 @@
 use thiserror::Error;
+use serde::{Deserialize, Serialize};
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Serialize, Deserialize)]
 pub enum AutomationError {
     #[error("Element not found: {0}")]
     ElementNotFound(String),
@@ -40,4 +41,7 @@ pub enum AutomationError {
         width: f64,
         height: f64,
     },
+
+    #[error("Initialization failed: {0}")]
+    InitializationError(String),
 }

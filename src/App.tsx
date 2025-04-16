@@ -1,10 +1,22 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
-import { Send, Server, BotMessageSquare, Bug } from "lucide-react"; // Icons
+import {
+  Send,
+  Server,
+  BotMessageSquare,
+  Bug,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react"; // Icons
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
 import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"; // Import Shadcn Card
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable"; // Import Resizable components
 import { cn } from "@/lib/utils"; // Shadcn utility
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
 
@@ -35,7 +47,7 @@ function App() {
     "checking" | "connected" | "error"
   >("checking");
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
+  const [isDevPanelOpen, setIsDevPanelOpen] = useState(false); // State for collapsible panel
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
@@ -286,6 +298,16 @@ function App() {
     };
   }, [currentAudio]);
 
+  // Scroll conversation to bottom
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [conversation]);
+
+  // Scroll logs to bottom
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
+
   return (
     <div className="container mx-auto p-4 h-screen flex flex-col bg-background text-foreground">
       {/* Header */}
@@ -312,141 +334,145 @@ function App() {
               ? "Connection Error"
               : "Connecting..."}
           </div>
+          {/* Toggle Dev Panel Button */}
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setShowLogs(!showLogs)}
-            title={showLogs ? "Hide Logs" : "Show Logs"}
+            onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
+            title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
           >
-            <Bug size={18} />
+            {isDevPanelOpen ? (
+              <PanelLeftClose size={18} />
+            ) : (
+              <PanelLeftOpen size={18} />
+            )}
           </Button>
         </div>
       </header>
 
-      {/* Main Content Area (Chat + Optional Logs) */}
-      <div className="flex-grow flex overflow-hidden">
-        {/* Chat Area */}
-        <div className="flex-grow flex flex-col h-full pr-2">
-          <ScrollArea className="flex-grow mb-4 border rounded-md p-3">
-            {conversation.map((msg, index) => (
-              <div
-                key={index}
-                className={`mb-3 ${
-                  msg.role === "user" ? "text-right" : "text-left"
-                }`}
-              >
-                <span
-                  className={cn(
-                    "inline-block px-3 py-1.5 rounded-lg",
-                    msg.role === "user"
-                      ? "bg-primary text-primary-foreground"
-                      : msg.role === "assistant"
-                      ? "bg-muted"
-                      : "bg-secondary text-secondary-foreground text-xs italic"
-                  )}
+      {/* Main Content Area (Resizable Chat + Dev Panel) */}
+      <ResizablePanelGroup
+        direction="horizontal"
+        className="flex-grow rounded-lg border overflow-hidden"
+      >
+        {/* Chat Panel */}
+        <ResizablePanel defaultSize={75} minSize={30}>
+          <div className="flex flex-col h-full p-4">
+            {/* Conversation Area */}
+            <ScrollArea className="flex-grow mb-4 -mr-4 pr-4">
+              {" "}
+              {/* Adjust margin/padding for scrollbar */}
+              {conversation.map((msg, index) => (
+                <div
+                  key={index}
+                  className={`mb-3 flex ${
+                    msg.role === "user" ? "justify-end" : "justify-start"
+                  }`}
                 >
-                  {msg.content}
-                </span>
-              </div>
-            ))}
-            <div ref={conversationEndRef} />
-          </ScrollArea>
+                  <span
+                    className={cn(
+                      "inline-block max-w-[80%] px-3 py-1.5 rounded-lg", // Added max-width
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : msg.role === "assistant"
+                        ? "bg-muted"
+                        : "bg-secondary text-secondary-foreground text-xs italic"
+                    )}
+                  >
+                    {msg.content}
+                  </span>
+                </div>
+              ))}
+              <div ref={conversationEndRef} />
+            </ScrollArea>
 
-          {/* Input Form */}
-          <form onSubmit={handleSubmit} className="flex gap-2 flex-shrink-0">
-            <Input
-              type="text"
-              placeholder={
-                isProcessing ? "Processing..." : "Enter your query..."
-              }
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              disabled={isProcessing || serverStatus !== "connected"}
-              className="flex-grow"
-            />
-            <Button
-              type="submit"
-              disabled={
-                isProcessing || serverStatus !== "connected" || !query.trim()
-              }
+            {/* Input Form */}
+            <form
+              onSubmit={handleSubmit}
+              className="flex gap-2 flex-shrink-0 mt-auto"
             >
-              <Send size={18} />
-            </Button>
-          </form>
-        </div>
+              <Input
+                type="text"
+                placeholder={
+                  isProcessing ? "Processing..." : "Enter your query..."
+                }
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                disabled={isProcessing || serverStatus !== "connected"}
+                className="flex-grow"
+              />
+              <Button
+                type="submit"
+                disabled={
+                  isProcessing || serverStatus !== "connected" || !query.trim()
+                }
+              >
+                <Send size={18} />
+              </Button>
+            </form>
+          </div>
+        </ResizablePanel>
 
-        {/* Logs Panel (Conditional) */}
-        {showLogs && (
-          <div className="flex-shrink-0 w-1/3 h-full pl-2 border-l">
-            <Card className="h-full flex flex-col">
+        {/* Resizable Handle */}
+        <ResizableHandle withHandle />
+
+        {/* Dev Tools & Logs Panel (Collapsible) */}
+        <ResizablePanel
+          collapsible
+          collapsedSize={0} // Completely collapses
+          minSize={15} // Minimum size when expanded
+          defaultSize={25} // Default size when expanded
+          className={cn(isDevPanelOpen ? "block" : "hidden")} // Control visibility
+        >
+          <div className="flex flex-col h-full">
+            {/* Consolidated DevTools and Logs */}
+            <Card className="h-full flex flex-col border-0 rounded-none">
+              {" "}
+              {/* Adjust styling as needed */}
               <CardHeader className="flex-shrink-0">
-                <CardTitle className="text-lg">Logs</CardTitle>
+                <CardTitle className="text-lg">
+                  Developer Tools & Logs
+                </CardTitle>
               </CardHeader>
               <CardContent className="flex-grow overflow-hidden p-0">
-                <ScrollArea className="h-full p-3">
-                  {logs.map((log, index) => (
-                    <div
-                      key={index}
-                      className={cn(
-                        "text-xs mb-1 font-mono whitespace-pre-wrap",
-                        getLogColorClass(log.level)
-                      )}
-                    >
-                      <span className="text-muted-foreground mr-1">
-                        [{formatTimestamp(log.timestamp)}]
-                      </span>
-                      <span className="font-semibold mr-1">
-                        [{log.level.toUpperCase()}]
-                      </span>
-                      {log.message}
-                    </div>
-                  ))}
-                  <div ref={logsEndRef} />
-                </ScrollArea>
+                {/* Container for both DevToolsPanel and Logs */}
+                <div className="flex flex-col h-full">
+                  {/* DevToolsPanel Component */}
+                  <div className="p-3 border-b">
+                    {" "}
+                    {/* Add padding and border */}
+                    <DevToolsPanel />
+                  </div>
+
+                  {/* Logs Area */}
+                  <ScrollArea className="flex-grow p-3">
+                    {" "}
+                    {/* Logs take remaining space */}
+                    {logs.map((log, index) => (
+                      <div
+                        key={index}
+                        className={cn(
+                          "text-xs mb-1 font-mono whitespace-pre-wrap",
+                          getLogColorClass(log.level)
+                        )}
+                      >
+                        <span className="text-muted-foreground mr-1">
+                          [{formatTimestamp(log.timestamp)}]
+                        </span>
+                        <span className="font-semibold mr-1">
+                          [{log.level.toUpperCase()}]
+                        </span>
+                        {log.message}
+                      </div>
+                    ))}
+                    <div ref={logsEndRef} />
+                  </ScrollArea>
+                </div>
               </CardContent>
             </Card>
           </div>
-        )}
-      </div>
-
-      {/* Developer Tools Panel - Added Here */}
-      <DevToolsPanel />
-
-      {/* Logs Section */}
-      <div className="mt-auto p-4 border-t">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="text-lg font-semibold">Logs</h2>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setShowLogs(!showLogs)}
-          >
-            <Bug className="h-4 w-4" />
-          </Button>
-        </div>
-        {showLogs && (
-          <ScrollArea className="h-40 w-full rounded-md border p-2 bg-gray-50 dark:bg-gray-900">
-            {logs.map((log, index) => (
-              <div
-                key={index}
-                className={cn(
-                  "text-xs mb-1 flex items-start",
-                  getLogColorClass(log.level)
-                )}
-              >
-                <span className="font-mono mr-2 flex-shrink-0">
-                  [{formatTimestamp(log.timestamp)}]
-                </span>
-                <span className="font-mono mr-1 flex-shrink-0">
-                  [{log.level.toUpperCase()}]
-                </span>
-                <span className="break-words">{log.message}</span>
-              </div>
-            ))}
-            <div ref={logsEndRef} /> {/* Scroll anchor */}
-          </ScrollArea>
-        )}
-      </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }
