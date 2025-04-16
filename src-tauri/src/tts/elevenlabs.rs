@@ -1,6 +1,7 @@
 use serde::Serialize;
 use reqwest::{Client, header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE}};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use tracing::{debug, error, info, warn};
 
 // Bring AppState and Desktop into scope from the crate root
 use crate::{AppState, Desktop}; // Assuming AppState is made pub(crate) or pub in lib.rs
@@ -25,18 +26,13 @@ pub(crate) struct ElevenLabsRequest {
 #[tauri::command]
 pub async fn invoke_elevenlabs_tts(text_to_speak: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
     let desktop_arc: Arc<Desktop> = state.desktop.clone(); // Explicitly type desktop_arc
-    desktop_arc.log("info", format!("Invoking ElevenLabs TTS for text: \"{}\"", text_to_speak));
+    info!("Invoking ElevenLabs TTS for text: \"{}\"", text_to_speak);
 
-    let api_key = match std::env::var("ELEVENLABS_API_KEY") {
-        Ok(key) => key,
-        Err(_) => {
-            let err_msg = "ELEVENLABS_API_KEY not found in environment variables.".to_string();
-            desktop_arc.log("error", err_msg.clone());
-            return Err(err_msg);
-        }
-    };
+    let api_key = std::env::var("ELEVENLABS_API_KEY")
+        .map_err(|_| "ELEVENLABS_API_KEY not configured.".to_string())?;
+    let voice_id = std::env::var("ELEVENLABS_VOICE_ID")
+        .unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string()); // Default voice ID
 
-    let voice_id = "21m00Tcm4TlvDq8ikWAM"; // Example Voice ID (Rachel)
     let url = format!("https://api.elevenlabs.io/v1/text-to-speech/{}", voice_id);
 
     let request_body = ElevenLabsRequest {
@@ -54,7 +50,7 @@ pub async fn invoke_elevenlabs_tts(text_to_speak: String, state: tauri::State<'_
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert("xi-api-key", HeaderValue::from_str(&api_key).map_err(|e| {
         let err_msg = format!("Invalid ElevenLabs API key format: {}", e);
-        desktop_arc.log("error", err_msg.clone());
+        error!("{}", err_msg);
         err_msg
     })?);
 
@@ -67,42 +63,37 @@ pub async fn invoke_elevenlabs_tts(text_to_speak: String, state: tauri::State<'_
     {
         Ok(res) => res,
         Err(e) => {
-            let err_msg = format!("Request to ElevenLabs API failed: {}", e);
-            desktop_arc.log("error", err_msg.clone());
+            let err_msg = format!("HTTP request to ElevenLabs failed: {}", e);
+            error!("{}", err_msg);
             return Err(err_msg);
         }
     };
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Failed to read error body".to_string());
-        let err_msg = format!(
-            "ElevenLabs API request failed with status {}: {}",
-            status,
-            error_text
-        );
-        desktop_arc.log("error", err_msg.clone());
+        let error_body = match response.text().await {
+            Ok(body) => body,
+            Err(_) => "Failed to read error body".to_string(),
+        };
+        let err_msg = format!("ElevenLabs API error: {} - {}", status, error_body);
+        error!("{}", err_msg);
         return Err(err_msg);
     }
 
     // Read the response body as bytes
-    let audio_bytes = match response.bytes().await {
-        Ok(bytes) => bytes,
+    match response.bytes().await {
+        Ok(audio_bytes) => {
+            // Encode the audio bytes to base64
+            let base64_audio = BASE64_STANDARD.encode(&audio_bytes);
+            info!("Successfully received and encoded ElevenLabs audio.");
+            Ok(base64_audio)
+        }
         Err(e) => {
             let err_msg = format!("Failed to read ElevenLabs audio bytes: {}", e);
-            desktop_arc.log("error", err_msg.clone());
-            return Err(err_msg);
+            error!("{}", err_msg);
+            Err(err_msg)
         }
-    };
-
-    // Encode bytes to base64
-    let base64_audio = BASE64_STANDARD.encode(&audio_bytes);
-    desktop_arc.log("info", "Successfully received and encoded ElevenLabs audio.".to_string());
-
-    Ok(base64_audio)
+    }
 }
 // --- End ElevenLabs TTS Command ---
 

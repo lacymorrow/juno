@@ -7,7 +7,7 @@ use super::ClickResult;
 
 /// A high-level API for finding and interacting with UI elements
 pub struct Locator {
-    engine: Arc<dyn AccessibilityEngine>,
+    engine: Arc<dyn AccessibilityEngine + Send + Sync>,
     selector: Selector,
     timeout: Duration,
     root: Option<UIElement>,
@@ -15,7 +15,7 @@ pub struct Locator {
 
 impl Locator {
     /// Create a new locator with the given selector
-    pub(crate) fn new(engine: Arc<dyn AccessibilityEngine>, selector: Selector) -> Self {
+    pub fn new(engine: Arc<dyn AccessibilityEngine + Send + Sync>, selector: Selector) -> Self {
         Self {
             engine,
             selector,

@@ -12,11 +12,17 @@ use image::{GenericImageView, ImageFormat};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::io::Cursor;
 use computer_use_ai_sdk::AutomationError;
+use tracing_subscriber::{fmt, EnvFilter};
+use tracing::{debug, error, info, warn};
 
 // Correct V2 Imports
-use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, MenuItemKind};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
-use tauri::{Manager, WindowEvent};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuBuilder, MenuItemKind};
+use tauri::tray::{TrayIconEvent, MouseButton, MouseButtonState};
+use tauri::{Manager, WindowEvent, Wry, Emitter, Listener};
+use tauri::menu::MenuItemBuilder;
+
+// Import Image from tauri
+use tauri::image::Image;
 
 // Only include macos specific imports when targeting macos
 #[cfg(target_os = "macos")]
@@ -312,8 +318,7 @@ async fn submit_query(
             Ok(res) => res,
             Err(e) => {
                 let err_msg = format!("HTTP request to Anthropic failed: {}", e);
-                println!("Error: {}", err_msg);
-                desktop_arc.log("error", err_msg.clone());
+                error!("Error: {}", err_msg);
                 return Err(err_msg);
             }
         };
@@ -325,8 +330,7 @@ async fn submit_query(
                 .await
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
             let err_msg = format!("Anthropic API error: {} - {}", status, body);
-            println!("Error: {}", err_msg);
-            desktop_arc.log("error", err_msg.clone());
+            error!("Error: {}", err_msg);
             return Err(err_msg);
         }
 
@@ -347,17 +351,12 @@ async fn submit_query(
             Ok(res) => res,
             Err(e) => {
                 let err_msg = format!("Failed to parse Anthropic JSON response: {}", e);
-                println!("Error: {}", err_msg);
-                desktop_arc.log("error", err_msg.clone());
+                error!("Error: {}", err_msg);
                 return Err(err_msg);
             }
         };
 
-        println!("Anthropic Raw Response: {:?}", anthropic_response);
-        desktop_arc.log(
-            "debug",
-            format!("Anthropic Raw Response: {:?}", anthropic_response),
-        );
+        debug!("Anthropic Raw Response: {:?}", anthropic_response);
 
         let filtered_content: Vec<AnthropicContentBlock> = anthropic_response
             .content
@@ -370,8 +369,7 @@ async fn submit_query(
             Ok(v) => v,
             Err(e) => {
                 let err_msg = format!("Failed to serialize assistant content: {}", e);
-                println!("Error: {}", err_msg);
-                desktop_arc.log("error", err_msg.clone());
+                error!("Error: {}", err_msg);
                 return Err(err_msg);
             }
         };
@@ -396,20 +394,13 @@ async fn submit_query(
                     if let (Some(id), Some(name), Some(input)) =
                         (&block.id, &block.name, &block.input)
                     {
-                        println!("Executing tool: {} with input: {:?}", name, input);
-                        desktop_arc.log(
-                            "info",
-                            format!("Executing tool: {} with input: {:?}", name, input),
-                        );
+                        info!("Executing tool: {} with input: {:?}", name, input);
 
                         let tool_result = desktop_arc.call_tool(name, input.clone());
 
                         let (result_content_value, is_error) = match tool_result {
                             Ok(result_value) => {
-                                desktop_arc.log(
-                                    "info",
-                                    format!("Tool '{}' success: {:?}", name, result_value),
-                                );
+                                info!("Tool '{}' success: {:?}", name, result_value);
                                 if name == "captureScreenshot" {
                                     if let Some(base64_data) = result_value
                                         .get("screenshot_base64")
@@ -431,10 +422,8 @@ async fn submit_query(
                                                         let new_height = (height as f32 * scale).round() as u32;
 
                                                         let resized_img = if scale < 1.0 {
-                                                             desktop_arc.log("info", format!("Resizing screenshot from {}x{} to {}x{}", width, height, new_width, new_height));
                                                              img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
                                                         } else {
-                                                             desktop_arc.log("info", format!("Screenshot dimensions {}x{} are within limits, not resizing.", width, height));
                                                              img
                                                         };
 
@@ -443,21 +432,21 @@ async fn submit_query(
                                                             Ok(_) => BASE64_STANDARD.encode(&png_bytes),
                                                             Err(e) => {
                                                                 let err_msg = format!("Failed to encode resized image to PNG: {}", e);
-                                                                desktop_arc.log("error", err_msg.clone());
+                                                                error!("{}", err_msg);
                                                                 base64_data.to_string()
                                                             }
                                                         }
                                                     }
                                                     Err(e) => {
                                                         let err_msg = format!("Failed to load image from screenshot bytes: {}", e);
-                                                        desktop_arc.log("error", err_msg.clone());
+                                                        error!("{}", err_msg);
                                                         base64_data.to_string()
                                                     }
                                                 }
                                             }
                                             Err(e) => {
                                                 let err_msg = format!("Failed to decode base64 screenshot data: {}", e);
-                                                desktop_arc.log("error", err_msg.clone());
+                                                error!("{}", err_msg);
                                                 base64_data.to_string()
                                             }
                                         };
@@ -473,7 +462,7 @@ async fn submit_query(
                                         (Value::Array(vec![image_block]), false)
                                     } else {
                                         let error_msg = format!("Tool '{}' succeeded but returned unexpected data: {:?}", name, result_value);
-                                        desktop_arc.log("error", error_msg.clone());
+                                        error!("{}", error_msg);
                                         (json!([{ "type": "text", "text": error_msg }]), true)
                                     }
                                 } else {
@@ -490,7 +479,7 @@ async fn submit_query(
                                     "error": format!("Tool execution failed: {}", e)
                                 }))
                                 .unwrap_or_default();
-                                desktop_arc.log("error", format!("Tool '{}' failed: {}", name, e));
+                                error!("Tool '{}' failed: {}", name, e);
                                 (json!([{ "type": "text", "text": error_str }]), true)
                             }
                         };
@@ -504,14 +493,12 @@ async fn submit_query(
                     } else {
                         let warn_msg =
                             format!("Warning: Received incomplete tool_use block: {:?}", block);
-                        println!("{}", warn_msg);
-                        desktop_arc.log("warn", warn_msg);
+                        warn!("{}", warn_msg);
                     }
                 }
                 _ => {
                     let warn_msg = format!("Warning: Unknown content block type: {}", block.type_);
-                    println!("{}", warn_msg);
-                    desktop_arc.log("warn", warn_msg);
+                    warn!("{}", warn_msg);
                 }
             }
         }
@@ -521,8 +508,7 @@ async fn submit_query(
                 Ok(v) => v,
                 Err(e) => {
                     let err_msg = format!("Failed to serialize tool results: {}", e);
-                    println!("Error: {}", err_msg);
-                    desktop_arc.log("error", err_msg.clone());
+                    error!("Error: {}", err_msg);
                     return Err(err_msg);
                 }
             };
@@ -535,16 +521,9 @@ async fn submit_query(
             if anthropic_response.stop_reason == "end_turn"
                 || anthropic_response.stop_reason == "stop_sequence"
             {
-                println!(
+                info!(
                     "Agent loop finished. Stop reason: {}",
                     anthropic_response.stop_reason
-                );
-                desktop_arc.log(
-                    "info",
-                    format!(
-                        "Agent loop finished. Stop reason: {}",
-                        anthropic_response.stop_reason
-                    ),
                 );
                 break;
             } else {
@@ -552,37 +531,29 @@ async fn submit_query(
                     "Warning: Loop continued without tool calls but stop reason was: {}",
                     anthropic_response.stop_reason
                 );
-                println!("{}", warn_msg);
-                desktop_arc.log("warn", warn_msg);
+                warn!("{}", warn_msg);
             }
         }
 
         if iteration == MAX_ITERATIONS - 1 {
             let warn_msg = "Warning: Max iterations reached without final answer.".to_string();
-            println!("{}", warn_msg);
-            desktop_arc.log("warn", warn_msg);
+            warn!("{}", warn_msg);
             final_response_text.push_str("\n[Agent reached maximum iterations]");
         }
     }
 
     let final_text = final_response_text.trim().to_string();
-    desktop_arc.log("info", format!("Final agent text response: {}", final_text));
+    info!("Final agent text response: {}", final_text);
 
     let audio_result = tts::elevenlabs::invoke_elevenlabs_tts(final_text.clone(), state).await;
 
     let audio_base64 = match audio_result {
         Ok(base64) => {
-            desktop_arc.log(
-                "info",
-                "TTS successful, including audio in response.".to_string(),
-            );
+            info!("TTS successful, including audio in response.");
             Some(base64)
         }
         Err(e) => {
-            desktop_arc.log(
-                "error",
-                format!("TTS failed: {}. Returning response without audio.", e),
-            );
+            error!("TTS failed: {}. Returning response without audio.", e);
             None
         }
     };
@@ -595,13 +566,8 @@ async fn submit_query(
 
 // Command to get logs from the backend buffer
 #[tauri::command]
-async fn get_logs(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    let logs = state.desktop.get_logs();
-    let formatted_logs = logs
-        .into_iter()
-        .map(|log| format!("[{}] {}", log.level, log.message))
-        .collect();
-    Ok(formatted_logs)
+async fn get_logs(_state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(vec!["Log viewing is deprecated. Logs are now output to the terminal using the tracing library.".to_string()])
 }
 
 // --- Dev Tool Commands ---
@@ -684,32 +650,36 @@ async fn dev_type_text(
 
 #[tauri::command]
 async fn dev_press_key(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     key: String
 ) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
-        println!("[DEV_TOOL] Attempting to press key: '{}'", key);
-        let err_msg = format!("[DEV_TOOL] Pressing key ('{}') not implemented yet for macOS Desktop.", key);
-        println!("{}", err_msg);
-        Err(err_msg)
-        // TODO: Implement actual key press logic, potentially using desktop.press_key(...)
-        // match state.desktop.press_key(&key) {
-        //      Ok(_) => {
-        //         let success_msg = format!("[DEV_TOOL] Pressed key '{}' successfully.", key);
-        //         println!("{}", success_msg);
-        //         Ok(success_msg)
-        //     }
-        //     Err(e) => {
-        //         let err_msg = format!("[DEV_TOOL] Failed to press key '{}': {}", key, e);
-        //         println!("{}", err_msg);
-        //         Err(err_msg)
-        //     }
-        // }
-        // TODO: Check if desktop.press_key exists and handles errors correctly.
-        // let err_msg = format!("[DEV_TOOL] Pressing key ('{}') not implemented yet for macOS Desktop.", key);
-        // println!("{}", err_msg);
-        // Err(err_msg)
+        println!("[DEV_TOOL] Attempting to press key '{}' on focused element", key);
+
+        // Get the currently focused element
+        let focused_element = match state.desktop.focused_element() {
+            Ok(element) => element,
+            Err(e) => {
+                let err_msg = format!("[DEV_TOOL] Failed to get focused element: {}", e);
+                println!("{}", err_msg);
+                return Err(err_msg);
+            }
+        };
+
+        // Press the key on the focused element
+        match focused_element.press_key(&key) {
+             Ok(_) => {
+                let success_msg = format!("[DEV_TOOL] Pressed key '{}' successfully on focused element.", key);
+                println!("{}", success_msg);
+                Ok(success_msg)
+            }
+            Err(e) => {
+                let err_msg = format!("[DEV_TOOL] Failed to press key '{}' on focused element: {}", key, e);
+                println!("{}", err_msg);
+                Err(err_msg)
+            }
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -759,34 +729,40 @@ async fn dev_open_url(state: tauri::State<'_, AppState>, url: String) -> Result<
 
 #[tauri::command]
 async fn dev_scroll_window(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     direction: String,
-    _amount_str: Option<String>
+    amount_str: Option<String>
 ) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         println!("[DEV_TOOL] Attempting to scroll window: '{}'", direction);
-        let err_msg = format!("[DEV_TOOL] Scrolling window ('{}') not implemented yet for macOS Desktop.", direction);
-        println!("{}", err_msg);
-        Err(err_msg)
-        // TODO: Implement actual scroll logic, potentially using desktop.scroll(...)
-        // TODO: Parse amount_str if needed by the SDK's scroll method
-        // match state.desktop.scroll_window(&direction, None) { // Assuming scroll_window takes direction and optional amount
-        //      Ok(_) => {
-        //         let success_msg = format!("[DEV_TOOL] Scrolled window '{}' successfully.", direction);
-        //         println!("{}", success_msg);
-        //         Ok(success_msg)
-        //     }
-        //     Err(e) => {
-        //         let err_msg = format!("[DEV_TOOL] Failed to scroll window '{}': {}", direction, e);
-        //         println!("{}", err_msg);
-        //         Err(err_msg)
-        //     }
-        // }
-        // TODO: Check if desktop.scroll_window exists, handles amount, and manages errors.
-        // let err_msg = format!("[DEV_TOOL] Scrolling window ('{}') not implemented yet for macOS Desktop.", direction);
-        // println!("{}", err_msg);
-        // Err(err_msg)
+
+        // Parse the amount, default to a reasonable value (e.g., 3 lines) if not provided or invalid
+        let amount: f64 = amount_str
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(3.0); // Default scroll amount
+
+        // Access the engine through the Desktop state
+        // We need to downcast the engine trait object to the specific macOS engine
+        let engine = state.desktop.engine();
+        if let Some(macos_engine) = engine.as_any().downcast_ref::<computer_use_ai_sdk::platforms::macos::engine::MacOSEngine>() {
+            match macos_engine.scroll_at_current_position(&direction, amount) {
+                 Ok(_) => {
+                    let success_msg = format!("[DEV_TOOL] Scrolled window '{}' by {} successfully.", direction, amount);
+                    println!("{}", success_msg);
+                    Ok(success_msg)
+                }
+                Err(e) => {
+                    let err_msg = format!("[DEV_TOOL] Failed to scroll window '{}': {}", direction, e);
+                    println!("{}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        } else {
+            let err_msg = "[DEV_TOOL] Failed to get macOS engine instance.".to_string();
+            println!("{}", err_msg);
+            Err(err_msg)
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -890,7 +866,11 @@ fn run_check_accessibility() -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt::init();
+    // Explicitly initialize tracing with INFO level by default
+    // tracing_subscriber::fmt::init(); // Remove this line
+    fmt()
+        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
+        .init();
     dotenv().ok();
     let cli = Cli::parse();
 
@@ -922,94 +902,15 @@ pub fn run() {
     println!("No test flags detected, launching Tauri application...");
     let desktop_arc = Arc::new(desktop_instance);
 
-    tauri::Builder::default()
-        .manage(AppState { desktop: desktop_arc })
-        .setup(|app| {
-            let app_handle = app.handle().clone();
+    // Create the AppState
+    let app_state = AppState {
+        desktop: desktop_arc.clone(),
+    };
 
-            // --- System Tray Setup ---
-            let quit_item = MenuItemBuilder::with_id("quit", "Quit DotDot").build(&app_handle)?;
-            let toggle_item = MenuItemBuilder::with_id("toggle_panel", "Show Panel").build(&app_handle)?;
-            let separator = PredefinedMenuItem::separator(&app_handle)?;
-            let tray_menu = MenuBuilder::new(&app_handle)
-                .items(&[&toggle_item, &separator, &quit_item])
-                .build()?;
-
-            let _tray_icon = TrayIconBuilder::new()
-                .menu(&tray_menu)
-                .tooltip("DotDot AI Agent")
-                .on_tray_icon_event(move |tray, event| {
-                    let app = tray.app_handle();
-                    let menu_handle = app.menu().unwrap();
-                    match event {
-                        TrayIconEvent::Click { button, button_state, .. } => {
-                            if button == MouseButton::Left && button_state == MouseButtonState::Up {
-                                 if let Some(window) = app.get_webview_window("main") {
-                                    let is_visible = window.is_visible().unwrap_or(false);
-                                    if let Some(MenuItemKind::MenuItem(item)) = menu_handle.get("toggle_panel") {
-                                        if is_visible {
-                                            window.hide().unwrap(); item.set_text("Show Panel").unwrap();
-                                        } else {
-                                            window.show().unwrap(); window.set_focus().unwrap(); item.set_text("Hide Panel").unwrap();
-                                        }
-                                    }
-                                } else { println!("Error: Main window not found for click toggle."); }
-                             }
-                        }
-                        _ => { /*println!("Unhandled TrayIconEvent: {:?}", event);*/ }
-                    }
-                 })
-                .on_menu_event(move |app, event| {
-                     match event.id.0.as_str() {
-                         "quit" => { app.exit(0); }
-                         "toggle_panel" => {
-                             if let Some(window) = app.get_webview_window("main") {
-                                let is_visible = window.is_visible().unwrap_or(false);
-                                if let Some(MenuItemKind::MenuItem(item)) = app.menu().unwrap().get(&event.id) {
-                                    if is_visible {
-                                        window.hide().unwrap(); item.set_text("Show Panel").unwrap();
-                                    } else {
-                                        window.show().unwrap(); window.set_focus().unwrap(); item.set_text("Hide Panel").unwrap();
-                                    }
-                                }
-                             } else { println!("Error: Main window not found for menu toggle."); }
-                         }
-                         _ => {}
-                     }
-                })
-                .build(&app_handle)?;
-            // --- End System Tray Setup ---
-
-            // --- Window Event Handling ---
-            let main_window = app.get_webview_window("main")
-               .ok_or_else(|| "Fatal: Main window not found during setup".to_string())?;
-
-            let window_event_handle = app.handle().clone();
-            main_window.on_window_event(move |event| {
-                match event {
-                    WindowEvent::CloseRequested { api, .. } => {
-                        api.prevent_close();
-                        let window = window_event_handle.get_webview_window("main").unwrap();
-                        window.hide().unwrap();
-                        if let Some(MenuItemKind::MenuItem(item)) = window_event_handle.menu().unwrap().get("toggle_panel") {
-                            item.set_text("Show Panel").unwrap();
-                        }
-                    }
-                    _ => {}
-                }
-            });
-            // --- End Window Event Handling ---
-
-            // Check for floating bar window
-            if let Some(_floating_bar) = app.get_webview_window("floating-bar") {
-                println!("Floating bar window found.");
-            } else {
-                eprintln!("Warning: Floating bar window not found during setup.");
-            }
-
-            Ok(())
-        })
+    // --- Tauri Application Builder ---
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(app_state) // Manage the AppState
         .invoke_handler(tauri::generate_handler![
             greet,
             list_apps,
@@ -1026,19 +927,165 @@ pub fn run() {
             dev_press_key,
             dev_open_application,
             dev_open_url,
-            dev_scroll_window
+            dev_scroll_window,
+            tts::stop_speech // Ensure this is the correct name exported by the tts module
         ])
-        .build(tauri::generate_context!())
-        .expect("Error building Tauri application")
-        .run(|_app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { api, .. } => {
-                 // Keep app running on manual exit request (e.g., Cmd+Q)
-                 // The tray icon's Quit item handles graceful exit via app.exit(0)
-                 println!("Exit requested via UI/shortcut, preventing default exit.");
-                 api.prevent_exit();
+        .on_menu_event(|app, event| { // Attach menu event handler directly
+            let window = app.get_webview_window("main").unwrap();
+            match event.id.as_ref() {
+                "quit" => {
+                    println!("[Menu] Quit requested.");
+                    app.exit(0);
+                }
+                "toggle" => { // Keep toggle for floating bar if needed elsewhere, or remove if only tray controls it
+                    println!("[Menu] Toggle floating bar requested.");
+                    if let Some(window) = app.get_webview_window("floating-bar") {
+                        match window.is_visible() {
+                            Ok(true) => window.hide().unwrap(),
+                            Ok(false) => {
+                                window.show().unwrap();
+                                window.set_focus().unwrap();
+                            },
+                            Err(e) => eprintln!("[Menu Error] checking floating bar visibility: {}", e),
+                        }
+                    } else {
+                         eprintln!("[Menu Error] Floating bar window not found for toggle.");
+                    }
+                }
+                "toggle_panel" => {
+                    println!("[Menu] Toggle panel requested.");
+                    let main_window_visible = window.is_visible().unwrap_or(false);
+                    if main_window_visible {
+                        window.hide().unwrap();
+                        // Optionally update menu item text - requires mutable access or rebuilding menu
+                        if let Some(MenuItemKind::MenuItem(item)) = app.menu().unwrap().get("toggle_panel") {
+                            item.set_text("Show Panel").unwrap();
+                        }
+                    } else {
+                        window.show().unwrap();
+                        window.set_focus().unwrap();
+                         // Optionally update menu item text
+                        if let Some(MenuItemKind::MenuItem(item)) = app.menu().unwrap().get("toggle_panel") {
+                            item.set_text("Hide Panel").unwrap();
+                        }
+                    }
+                }
+                _ => {
+                     println!("[Menu] Unhandled event: {:?}", event.id);
+                }
             }
-            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| { // Attach tray event handler directly
+            // Use if let for specific event types
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                .. // Ignore other fields like position, rect
+            } = event
+            {
+                println!("[Tray] Left click detected.");
+                let app = tray.app_handle();
+                // Toggle the floating bar window on left click
+                if let Some(window) = app.get_webview_window("floating-bar") {
+                    match window.is_visible() {
+                        Ok(true) => window.hide().unwrap(),
+                        Ok(false) => {
+                            window.show().unwrap();
+                            window.set_focus().unwrap();
+                            println!("[Tray] Floating bar shown and focused.");
+                        },
+                        Err(e) => eprintln!("[Tray Error] checking floating bar visibility: {}", e),
+                    }
+                } else {
+                     eprintln!("[Tray Error] Floating bar window not found on left click.");
+                }
+            }
+            // No longer handle RightClick here
+            // else if let TrayIconEvent::RightClick { ... } = event { ... }
+            // Optionally handle other events here
+            // else {
+            //     println!("[Tray] Unhandled event: {:?}", event);
+            // }
+        })
+        .setup(|app| {
+            // --- Tray Icon Setup ---
+            let app_handle = app.handle().clone();
+
+            // 1. Build the menu
+            let toggle_panel_item = MenuItemBuilder::new("Show Panel") // Start with Show Panel
+                .id("toggle_panel")
+                .build(&app_handle)
+                .expect("Failed to build toggle_panel item");
+            let quit_item = PredefinedMenuItem::quit(&app_handle, Some("Quit dotdot"))
+                .expect("Failed to build quit item");
+
+            let menu = Menu::with_items(&app_handle, &[
+                &toggle_panel_item,
+                &quit_item,
+            ]).expect("Failed to build tray menu");
+
+            // 2. Build the TrayIcon
+            // Load icon bytes
+            let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/tray-Template.png");
+            let icon_bytes = std::fs::read(&icon_path).expect("Failed to read icon file");
+            let icon = Image::from_bytes(&icon_bytes).expect("Failed to create image from bytes");
+
+            let _tray = tauri::tray::TrayIconBuilder::new() // Use qualified path
+                .menu(&menu)
+                .icon(icon)
+                .icon_as_template(true)
+                .tooltip("dotdot") // Add tooltip
+                // Use show_menu_on_left_click instead of deprecated menu_on_left_click
+                .show_menu_on_left_click(false)
+                // .on_menu_event(...) // Optional specific handler - relying on global one
+                // Pass handle as reference
+                .build(&app_handle)
+                .expect("Failed to build tray icon");
+            // --- End Tray Icon Setup ---
+
+            // --- Original Setup Code ---
+            // Ensure the main window exists before proceeding with event handling setup
+            let main_window = app.get_webview_window("main")
+               .ok_or_else(|| "Fatal: Main window not found during setup".to_string())?;
+
+            let window_event_handle = app.handle().clone();
+            main_window.on_window_event(move |event| {
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let window = window_event_handle.get_webview_window("main").unwrap();
+                        window.hide().unwrap();
+                        tracing::info!("[INFO] Main window hidden via close request.");
+                        // Update menu item text when window is closed via 'X'
+                        // This needs access to the menu item handle, which is tricky here.
+                        // Consider updating the text *when the menu is built* instead,
+                        // or fetching the handle via app_handle.tray_by_id(&id)?.get_item(&item_id)
+                        // if tray id is known/stored.
+                        // For simplicity, removing this update attempt for now.
+                        // if let Some(MenuItemKind::MenuItem(item)) = window_event_handle.menu().unwrap().get("toggle_panel") {
+                        //     item.set_text("Show Panel").unwrap();
+                        //     tracing::info!("[INFO] Toggle panel menu item text set to 'Show Panel' due to close request.");
+                        // }
+                    }
+                    _ => {}
+                }
+            });
+            // --- End Window Event Handling ---
+
+            // Check for floating bar window
+            if let Some(_floating_bar) = app.get_webview_window("floating-bar") {
+                println!("Floating bar window found.");
+            } else {
+                eprintln!("Warning: Floating bar window not found during setup.");
+            }
+
+            Ok(())
         });
+
+    // Run the application
+    builder
+        .run(tauri::generate_context!()) // Use the context generated by tauri-build
+        .expect("error while running tauri application");
 }
 
 // Unit tests module
