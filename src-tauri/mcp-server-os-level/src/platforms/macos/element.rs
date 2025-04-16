@@ -22,6 +22,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use tracing::{debug, warn};
+use core_graphics::event::{CGEventType, CGMouseButton, CGEventFlags};
+use super::interaction::get_application;
 
 #[derive(Debug)]
 pub struct MacOSUIElement {
@@ -488,15 +490,104 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn right_click(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedOperation(
-            "Right-click not yet implemented for macOS".to_string(),
-        ))
+        // Implementation adapted from interaction::click_mouse_simulation
+        match self.bounds() {
+            Ok((x, y, width, height)) => {
+                let center_x = x + width / 2.0;
+                let center_y = y + height / 2.0;
+                let point = CGPoint::new(center_x, center_y);
+                let source =
+                    CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+                        AutomationError::PlatformError("Failed to create event source for right-click".to_string())
+                    })?;
+
+                // Optional: Move mouse first
+                let mouse_move = CGEvent::new_mouse_event(
+                    source.clone(),
+                    CGEventType::MouseMoved,
+                    point,
+                    CGMouseButton::Right, // Button doesn't matter for move
+                )
+                .map_err(|_| {
+                    AutomationError::PlatformError("Failed to create mouse move event for right-click".to_string())
+                })?;
+                mouse_move.post(CGEventTapLocation::HID);
+                std::thread::sleep(std::time::Duration::from_millis(50)); // Small delay
+
+                // Right Mouse Down
+                debug!("Right mouse down at ({}, {})", center_x, center_y);
+                let mouse_down = CGEvent::new_mouse_event(
+                    source.clone(),
+                    CGEventType::RightMouseDown,
+                    point,
+                    CGMouseButton::Right,
+                )
+                .map_err(|_| {
+                    AutomationError::PlatformError("Failed to create right mouse down event".to_string())
+                })?;
+                mouse_down.post(CGEventTapLocation::HID);
+                std::thread::sleep(std::time::Duration::from_millis(50)); // Small delay
+
+                // Right Mouse Up
+                debug!("Right mouse up at ({}, {})", center_x, center_y);
+                let mouse_up = CGEvent::new_mouse_event(
+                    source,
+                    CGEventType::RightMouseUp,
+                    point,
+                    CGMouseButton::Right,
+                )
+                .map_err(|_| {
+                    AutomationError::PlatformError("Failed to create right mouse up event".to_string())
+                })?;
+                mouse_up.post(CGEventTapLocation::HID);
+
+                debug!(
+                    "Performed simulated right mouse click at ({}, {})",
+                    center_x, center_y
+                );
+                Ok(())
+            }
+            Err(e) => Err(AutomationError::PlatformError(format!(
+                "Failed to determine element bounds for right-click: {}",
+                e
+            ))),
+        }
     }
 
     fn hover(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedOperation(
-            "Hover not yet implemented for macOS".to_string(),
-        ))
+        // Implementation adapted from interaction::click_mouse_simulation
+        match self.bounds() {
+            Ok((x, y, width, height)) => {
+                let center_x = x + width / 2.0;
+                let center_y = y + height / 2.0;
+                let point = CGPoint::new(center_x, center_y);
+                let source =
+                    CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+                        AutomationError::PlatformError("Failed to create event source for hover".to_string())
+                    })?;
+
+                // Mouse Move
+                let mouse_move = CGEvent::new_mouse_event(
+                    source,
+                    CGEventType::MouseMoved,
+                    point,
+                    CGMouseButton::Left, // Button doesn't matter for move
+                )
+                .map_err(|_| {
+                    AutomationError::PlatformError("Failed to create mouse move event for hover".to_string())
+                })?;
+                mouse_move.post(CGEventTapLocation::HID);
+                 // Maybe a small delay is good practice even for hover
+                std::thread::sleep(std::time::Duration::from_millis(20));
+
+                debug!("Performed simulated hover at ({}, {})", center_x, center_y);
+                Ok(())
+            }
+             Err(e) => Err(AutomationError::PlatformError(format!(
+                "Failed to determine element bounds for hover: {}",
+                e
+            ))),
+        }
     }
 
     fn focus(&self) -> Result<(), AutomationError> {

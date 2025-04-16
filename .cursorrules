@@ -1,1 +1,8 @@
+@Web
+@https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
+@main.rs
+We have this A.I. Anthropic Computer Use Bot.
+We want it to have a complete implementation. Some of the computer use  functions are stubbed in.
+Find any incomplete functions in the Mac platform, Also make sure that you research anthropic computer use and look to see if we're missing anything completely.
+
 After every code modification made to Rust files, run `cargo check --manifest-path src-tauri/Cargo.toml`. Ensure the command completes successfully (exit code 0). If `cargo check` fails, address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.

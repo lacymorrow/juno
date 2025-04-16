@@ -1,0 +1,10 @@
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/libobjc2_encode-42661be537b715b2.rmeta: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/encoding.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/encoding_box.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/helper.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/parse.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/static_str.rs
+
+/Users/lmorrow/repo/dotdot/src-tauri/mcp-server-os-level/target/debug/deps/objc2_encode-42661be537b715b2.d: /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/lib.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/encoding.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/encoding_box.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/helper.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/parse.rs /Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/static_str.rs
+
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/lib.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/encoding.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/encoding_box.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/helper.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/parse.rs:
+/Users/lmorrow/.cargo/registry/src/index.crates.io-6f17d22bba15001f/objc2-encode-4.1.0/src/static_str.rs:
