@@ -16,7 +16,7 @@ use computer_use_ai_sdk::AutomationError;
 // Correct V2 Imports
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, MenuItemKind};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
-use tauri::{Manager, WindowEvent}; // Remove unused Runtime import
+use tauri::{Manager, WindowEvent};
 
 // Only include macos specific imports when targeting macos
 #[cfg(target_os = "macos")]
@@ -659,6 +659,22 @@ async fn dev_type_text(
         println!("{}", err_msg);
         Err(err_msg)
         // TODO: Implement actual typing logic, potentially using desktop.type_text(...)
+        // match state.desktop.type_text(&text) {
+        //     Ok(_) => {
+        //         let success_msg = format!("[DEV_TOOL] Typed text '{}' successfully.", text);
+        //         println!("{}", success_msg);
+        //         Ok(success_msg)
+        //     }
+        //     Err(e) => {
+        //         let err_msg = format!("[DEV_TOOL] Failed to type text '{}': {}", text, e);
+        //         println!("{}", err_msg);
+        //         Err(err_msg)
+        //     }
+        // }
+        // TODO: Check if desktop.type_text exists and handles errors correctly.
+        // let err_msg = format!("[DEV_TOOL] Typing text ('{}') not implemented yet for macOS Desktop.", text);
+        // println!("{}", err_msg);
+        // Err(err_msg)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -678,6 +694,22 @@ async fn dev_press_key(
         println!("{}", err_msg);
         Err(err_msg)
         // TODO: Implement actual key press logic, potentially using desktop.press_key(...)
+        // match state.desktop.press_key(&key) {
+        //      Ok(_) => {
+        //         let success_msg = format!("[DEV_TOOL] Pressed key '{}' successfully.", key);
+        //         println!("{}", success_msg);
+        //         Ok(success_msg)
+        //     }
+        //     Err(e) => {
+        //         let err_msg = format!("[DEV_TOOL] Failed to press key '{}': {}", key, e);
+        //         println!("{}", err_msg);
+        //         Err(err_msg)
+        //     }
+        // }
+        // TODO: Check if desktop.press_key exists and handles errors correctly.
+        // let err_msg = format!("[DEV_TOOL] Pressing key ('{}') not implemented yet for macOS Desktop.", key);
+        // println!("{}", err_msg);
+        // Err(err_msg)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -738,6 +770,23 @@ async fn dev_scroll_window(
         println!("{}", err_msg);
         Err(err_msg)
         // TODO: Implement actual scroll logic, potentially using desktop.scroll(...)
+        // TODO: Parse amount_str if needed by the SDK's scroll method
+        // match state.desktop.scroll_window(&direction, None) { // Assuming scroll_window takes direction and optional amount
+        //      Ok(_) => {
+        //         let success_msg = format!("[DEV_TOOL] Scrolled window '{}' successfully.", direction);
+        //         println!("{}", success_msg);
+        //         Ok(success_msg)
+        //     }
+        //     Err(e) => {
+        //         let err_msg = format!("[DEV_TOOL] Failed to scroll window '{}': {}", direction, e);
+        //         println!("{}", err_msg);
+        //         Err(err_msg)
+        //     }
+        // }
+        // TODO: Check if desktop.scroll_window exists, handles amount, and manages errors.
+        // let err_msg = format!("[DEV_TOOL] Scrolling window ('{}') not implemented yet for macOS Desktop.", direction);
+        // println!("{}", err_msg);
+        // Err(err_msg)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -889,7 +938,6 @@ pub fn run() {
             let _tray_icon = TrayIconBuilder::new()
                 .menu(&tray_menu)
                 .tooltip("DotDot AI Agent")
-                // .icon(...) // TODO: Add icon loading
                 .on_tray_icon_event(move |tray, event| {
                     let app = tray.app_handle();
                     let menu_handle = app.menu().unwrap();
