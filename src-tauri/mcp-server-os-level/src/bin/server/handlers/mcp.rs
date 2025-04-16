@@ -13,6 +13,9 @@ use crate::server::types::{
     TypeByIndexRequest,
 };
 
+// Import the element cache type
+use crate::server::types::ElementCache;
+
 // Update handler imports
 use crate::server::handlers::click_by_index::click_by_index_handler;
 use crate::server::handlers::input_control::input_control_handler;
@@ -177,6 +180,29 @@ pub fn handle_initialize(id: Value) -> JsonResponse<Value> {
             description: "Captures a screenshot of the main display and returns it as a base64 encoded PNG string.".to_string(),
             parameters: json!({ "type": "object", "properties": {}, "required": [] }),
         },
+        ToolFunctionDefinition {
+            name: "rightClickByIndex".to_string(),
+            description: "perform a right-click (context menu click) on a ui element by its index. evaluate success by checking if the expected context menu or action occurred.".to_string(),
+            parameters: click_by_index_schema.clone(),
+        },
+        ToolFunctionDefinition {
+            name: "hoverByIndex".to_string(),
+            description: "move the mouse cursor over a ui element by its index without clicking. evaluate success by checking if hover effects (tooltips, highlighting) appear.".to_string(),
+            parameters: click_by_index_schema.clone(),
+        },
+        ToolFunctionDefinition {
+            name: "scrollByIndex".to_string(),
+            description: "scroll the view containing a specific ui element (identified by its index) up, down, left, or right by a given amount (number of lines/units). evaluate success by checking if the content scrolled as expected.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "element_index": {"type": "integer"},
+                    "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+                    "amount": {"type": "number"}
+                },
+                "required": ["element_index", "direction", "amount"]
+            }),
+        },
     ];
 
     let capabilities = ServerCapabilities {
@@ -201,360 +227,298 @@ pub async fn handle_execute_tool_function(
     id: Value,
     params: Value,
 ) -> JsonResponse<Value> {
-    // Parse the params
-    let execute_params: ExecuteToolFunctionParams = match serde_json::from_value(params) {
-        Ok(p) => p,
+    info!("handling execute tool function: {:?}", params);
+
+    let tool_call: ExecuteToolFunctionParams = match serde_json::from_value(params.clone()) {
+        Ok(call) => call,
         Err(e) => {
-            error!("invalid params: {}", e);
-            return mcp_error_response(id, -32602, format!("invalid params: {}", e), None);
+            error!("failed to parse tool function params: {}", e);
+            return mcp_error_response(
+                id,
+                -32602,
+                "invalid params".to_string(),
+                Some(json!({ "error": e.to_string() })),
+            );
         }
     };
 
-    info!(
-        "executing tool function: {} with args: {}",
-        execute_params.function, execute_params.arguments
-    );
+    let tool_name = tool_call.name;
+    let tool_input = tool_call.input;
 
-    // Execute the appropriate function
-    match execute_params.function.as_str() {
-        "listInteractableElementsByIndex" => {
-            let request: ListInteractableElementsRequest =
-                match serde_json::from_value(execute_params.arguments) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("invalid arguments: {}", e);
-                        return mcp_error_response(
-                            id,
-                            -32602,
-                            format!("invalid arguments: {}", e),
-                            None,
-                        );
-                    }
-                };
+    info!("executing tool: {} with input: {}", tool_name, tool_input);
 
-            match list_elements_and_attributes_handler(State(state.clone()), Json(request)).await {
-                Ok(response) => JsonResponse(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "elements": response.0.elements,
-                        "stats": response.0.stats,
-                        "cache_info": response.0.cache_info,
-                        "processing_time_seconds": response.0.processing_time_seconds
-                    }
-                })),
-                Err((status, error_json)) => mcp_error_response(
-                    id,
-                    status.as_u16() as i32,
-                    error_json.0["error"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string(),
-                    None,
-                ),
-            }
-        }
+    // Match on the tool name and call the appropriate handler or SDK function
+    let result = match tool_name.as_str() {
         "clickByIndex" => {
-            let request: ClickByIndexRequest =
-                match serde_json::from_value(execute_params.arguments) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("invalid arguments: {}", e);
-                        return mcp_error_response(
-                            id,
-                            -32602,
-                            format!("invalid arguments: {}", e),
-                            None,
-                        );
-                    }
-                };
-
-            match click_by_index_handler(State(state.clone()), Json(request)).await {
-                Ok(response) => JsonResponse(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "click": {
-                            "success": response.0.click.success,
-                            "message": response.0.click.message
-                        },
-                        "elements": response.0.elements,
-                        "ui_state_changed": true,
-                        "action_timestamp": chrono::Utc::now().to_rfc3339(),
-                        "evaluation_hints": [
-                            "check if expected ui elements appeared",
-                            "verify if target element state changed",
-                            "look for new controls or content that should be available after this action"
-                        ]
-                    }
-                })),
-                Err((status, error_json)) => mcp_error_response(
-                    id,
-                    status.as_u16() as i32,
-                    error_json.0["error"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string(),
-                    None,
-                ),
-            }
-        }
-        "typeByIndex" => {
-            let request: TypeByIndexRequest = match serde_json::from_value(execute_params.arguments)
-            {
-                Ok(r) => r,
+            let click_params: ClickByIndexRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
                 Err(e) => {
-                    error!("invalid arguments: {}", e);
                     return mcp_error_response(
                         id,
                         -32602,
-                        format!("invalid arguments: {}", e),
+                        format!("invalid input for {}: {}", tool_name, e),
                         None,
                     );
                 }
             };
+             // Call the existing handler logic - this assumes handlers return Result<JsonResponse<Value>, (StatusCode, JsonResponse<Value>)>)
+             // We need to adapt this to return Result<Value, AutomationError> or similar for MCP
+             // For now, let's call the SDK directly, assuming elements are cached.
+            execute_element_action(state, click_params.element_index, |el| el.click()).await
 
-            match type_by_index_handler(State(state.clone()), Json(request)).await {
-                Ok(response) => JsonResponse(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "type_action": {
-                            "success": response.0.type_action.success,
-                            "message": response.0.type_action.message
-                        },
-                        "elements": response.0.elements,
-                        "ui_state_changed": true,
-                        "action_timestamp": chrono::Utc::now().to_rfc3339(),
-                        "evaluation_hints": [
-                            "check if text field contains the typed content",
-                            "verify if any new ui elements appeared in response to input",
-                            "look for validation messages or response content"
-                        ]
-                    }
-                })),
-                Err((status, error_json)) => mcp_error_response(
-                    id,
-                    status.as_u16() as i32,
-                    error_json.0["error"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string(),
-                    None,
-                ),
-            }
+        }
+        "typeByIndex" => {
+            let type_params: TypeByIndexRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
+            };
+             execute_element_action(state, type_params.element_index, |el| el.type_text(&type_params.text)).await
         }
         "pressKeyByIndex" => {
-            let request: PressKeyByIndexRequest =
-                match serde_json::from_value(execute_params.arguments) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("invalid arguments: {}", e);
-                        return mcp_error_response(
-                            id,
-                            -32602,
-                            format!("invalid arguments: {}", e),
-                            None,
-                        );
-                    }
-                };
-
-            match press_key_by_index_handler(State(state.clone()), Json(request)).await {
-                Ok(response) => JsonResponse(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "press_key": {
-                            "success": response.0.press_key.success,
-                            "message": response.0.press_key.message
-                        },
-                        "elements": response.0.elements,
-                        "ui_state_changed": true,
-                        "action_timestamp": chrono::Utc::now().to_rfc3339(),
-                        "evaluation_hints": [
-                            "check if expected keyboard shortcut effects occurred",
-                            "verify if target element state changed as expected",
-                            "look for new interface elements that appeared after key press"
-                        ]
-                    }
-                })),
-                Err((status, error_json)) => mcp_error_response(
-                    id,
-                    status.as_u16() as i32,
-                    error_json.0["error"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string(),
-                    None,
-                ),
-            }
+            let press_params: PressKeyByIndexRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
+            };
+            execute_element_action(state, press_params.element_index, |el| el.press_key(&press_params.key_combo)).await
         }
         "openApplication" => {
-            let request: OpenApplicationRequest =
-                match serde_json::from_value(execute_params.arguments) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("invalid arguments: {}", e);
-                        return mcp_error_response(
-                            id,
-                            -32602,
-                            format!("invalid arguments: {}", e),
-                            None,
-                        );
-                    }
-                };
-
-            match open_application_handler(State(state), Json(request)).await {
-                Ok(response) => JsonResponse(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "application": {
-                            "success": response.0.application.success,
-                            "message": response.0.application.message
-                        },
-                        "elements": response.0.elements,
-                        "ui_state_changed": true,
-                        "action_timestamp": chrono::Utc::now().to_rfc3339(),
-                        "evaluation_hints": [
-                            "verify the application window is visible in elements",
-                            "check for typical controls and interface elements of this application",
-                            "confirm the application is in its expected initial state"
-                        ]
-                    }
-                })),
-                Err((status, error_json)) => mcp_error_response(
-                    id,
-                    status.as_u16() as i32,
-                    error_json.0["error"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string(),
-                    None,
-                ),
-            }
+            let open_app_params: OpenApplicationRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
+            };
+             // This handler likely needs different logic (doesn't operate on cached index)
+             // Re-use list_elements logic for now
+             // TODO: Refactor this for better separation
+             let list_req = ListInteractableElementsRequest {
+                 app_name: open_app_params.app_name,
+                 use_background_apps: open_app_params.use_background_apps,
+                 activate_app: open_app_params.activate_app,
+                 cache_id: None, // Ensure we get fresh elements after opening
+             };
+             match list_elements_and_attributes_handler(State(state), Json(list_req)).await {
+                 Ok(response) => Ok(response.into_inner()), // Extract the inner value
+                 Err((status, response)) => Err(AutomationError::PlatformError(format!(
+                     "Failed to list elements after opening app ({}): {}",
+                     status,
+                     response.0.to_string()
+                 ))),
+             }
         }
         "openUrl" => {
-            let types_request: OpenUrlRequest =
-                match serde_json::from_value(execute_params.arguments) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("invalid arguments: {}", e);
-                        return mcp_error_response(
-                            id,
-                            -32602,
-                            format!("invalid arguments: {}", e),
-                            None,
-                        );
-                    }
-                };
-
-            // Convert from types::OpenUrlRequest to the handler's OpenUrlRequest
-            let request = crate::server::handlers::open_url::OpenUrlRequest {
-                url: types_request.url,
-                browser: types_request.browser,
+            let open_url_params: OpenUrlRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
             };
-
-            match open_url_handler(State(state.clone()), Json(request)).await {
-                Ok(response) => JsonResponse(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "url": {
-                            "success": response.0.url.success,
-                            "message": response.0.url.message
-                        },
-                        "elements": response.0.elements,
-                        "ui_state_changed": true,
-                        "action_timestamp": chrono::Utc::now().to_rfc3339(),
-                        "evaluation_hints": [
-                            "check for browser controls and expected page content",
-                            "verify page title or key elements from the requested site",
-                            "look for signs the page has fully loaded"
-                        ]
-                    }
-                })),
-                Err((status, error_json)) => mcp_error_response(
-                    id,
-                    status.as_u16() as i32,
-                    error_json.0["error"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string(),
-                    None,
-                ),
-            }
+             // Similar to openApplication, needs to re-list elements
+             // TODO: Refactor - use a dedicated function maybe?
+             match open_url_handler(State(state.clone()), Json(open_url_params)).await {
+                 Ok(response) => Ok(response.into_inner()),
+                 Err((status, response)) => Err(AutomationError::PlatformError(format!(
+                     "Failed to list elements after opening URL ({}): {}",
+                     status,
+                     response.0.to_string()
+                 ))),
+             }
         }
         "inputControl" => {
-            let request: InputControlRequest =
-                match serde_json::from_value(execute_params.arguments) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        error!("invalid arguments: {}", e);
-                        return mcp_error_response(
-                            id,
-                            -32602,
-                            format!("invalid arguments: {}", e),
-                            None,
-                        );
-                    }
-                };
-
-            match input_control_handler(State(state.clone()), Json(request)).await {
-                Ok(response) => JsonResponse(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "input": {
-                            "success": response.0.input.success
-                        },
-                        "elements": response.0.elements,
-                        "ui_state_changed": true,
-                        "action_timestamp": chrono::Utc::now().to_rfc3339(),
-                        "evaluation_hints": [
-                            "check if the ui responded appropriately to the input action",
-                            "verify cursor position changed for mouse moves",
-                            "look for content changes after text input or clicks"
-                        ]
-                    }
-                })),
-                Err((status, error_json)) => mcp_error_response(
-                    id,
-                    status.as_u16() as i32,
-                    error_json.0["error"]
-                        .as_str()
-                        .unwrap_or("unknown error")
-                        .to_string(),
-                    None,
-                ),
+            let input_params: InputControlRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
+            };
+            // Similar to openApplication, needs to re-list elements
+             match input_control_handler(State(state.clone()), Json(input_params)).await {
+                 Ok(response) => Ok(response.into_inner()),
+                 Err((status, response)) => Err(AutomationError::PlatformError(format!(
+                     "Failed to list elements after input control ({}): {}",
+                     status,
+                     response.0.to_string()
+                 ))),
+             }
+        }
+        // Add cases for new tools
+        "rightClickByIndex" => {
+            let click_params: ClickByIndexRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
+            };
+            execute_element_action(state, click_params.element_index, |el| el.right_click()).await
+        }
+        "hoverByIndex" => {
+            let click_params: ClickByIndexRequest = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
+            };
+            execute_element_action(state, click_params.element_index, |el| el.hover()).await
+        }
+        "scrollByIndex" => {
+             #[derive(serde::Deserialize)]
+             struct ScrollParams {
+                 element_index: usize,
+                 direction: String,
+                 amount: f64,
+             }
+            let scroll_params: ScrollParams = match serde_json::from_value(tool_input) {
+                Ok(p) => p,
+                Err(e) => {
+                    return mcp_error_response(
+                        id,
+                        -32602,
+                        format!("invalid input for {}: {}", tool_name, e),
+                        None,
+                    );
+                }
+            };
+             execute_element_action(state, scroll_params.element_index, |el| {
+                 el.scroll(&scroll_params.direction, scroll_params.amount)
+             })
+             .await
+        }
+        "captureScreenshot" => {
+            // This tool doesn't fit the execute_element_action pattern
+            // Requires platform-specific logic or a different approach
+            #[cfg(target_os = "macos")]
+            {
+                use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
+                match capture_and_encode_screenshot() {
+                     Ok(base64_string) => Ok(json!({ "screenshot_base64": base64_string })),
+                     Err(e) => Err(e),
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                 Err(AutomationError::UnsupportedPlatform)
             }
         }
-        "captureScreenshot" => match state.desktop.capture_screenshot_base64() {
-            Ok(base64_image) => JsonResponse(json!({
+
+        _ => Err(AutomationError::ToolNotFound(tool_name)),
+    };
+
+    // Convert result to MCP JSON response
+    match result {
+        Ok(value) => {
+            info!("tool {} executed successfully", tool_name);
+            // Assuming the successful result should just be wrapped
+            JsonResponse(json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "result": {
-                    "screenshot": base64_image,
-                    "format": "base64_png",
-                    "message": "Screenshot captured successfully."
+                "result": value
+            }))
+        }
+        Err(e) => {
+            error!("tool {} execution failed: {}", tool_name, e);
+            match e {
+                AutomationError::ElementNotFound(msg) => {
+                    mcp_error_response(id, -32001, "element not found".to_string(), Some(json!({ "details": msg })))
                 }
-            })),
-            Err(e) => {
-                error!(
-                    "Failed to capture screenshot: {}. Error type: {:?}",
-                    e,
-                    std::any::TypeId::of::<AutomationError>()
-                );
-                let error_message = format!("Failed to capture screenshot: {}", e);
-                mcp_error_response(id, -32000, error_message, None)
+                AutomationError::CacheMiss(msg) => {
+                    mcp_error_response(id, -32002, "cache miss".to_string(), Some(json!({ "details": msg })))
+                }
+                AutomationError::ToolNotFound(tool) => {
+                     mcp_error_response(id, -32601, "method not found".to_string(), Some(json!({ "tool_name": tool })))
+                }
+                AutomationError::InvalidArgument(msg) => {
+                     mcp_error_response(id, -32602, "invalid params".to_string(), Some(json!({ "details": msg })))
+                }
+                AutomationError::UnsupportedOperation(msg) => {
+                    mcp_error_response(id, -32603, "unsupported operation".to_string(), Some(json!({ "details": msg })))
+                }
+                 AutomationError::UnsupportedPlatform => {
+                    mcp_error_response(id, -32003, "unsupported platform".to_string(), None)
+                }
+                _ => { // Generic platform error or other
+                    mcp_error_response(id, -32000, "tool execution error".to_string(), Some(json!({ "details": e.to_string() })))
+                }
             }
-        },
-        _ => mcp_error_response(
-            id,
-            -32601,
-            format!("function not found: {}", execute_params.function),
-            None,
-        ),
+        }
+    }
+}
+
+// Helper function to execute an action on an element from the cache
+async fn execute_element_action<F, Fut>(
+    state: Arc<AppState>,
+    element_index: usize,
+    action: F,
+) -> Result<Value, AutomationError>
+where
+    F: FnOnce(computer_use_ai_sdk::UIElement) -> Fut,
+    Fut: std::future::Future<Output = Result<T, AutomationError>>,
+    T: serde::Serialize, // Action result needs to be serializable (even if it's just () -> null)
+{
+    let cache_guard = state.element_cache.lock().await;
+    if let Some(cache_info) = &*cache_guard {
+        if let Some(element) = cache_info.elements.get(element_index) {
+            // Clone the element to operate on it
+            let element_clone = element.clone();
+            // Execute the action
+            match action(element_clone).await {
+                Ok(result) => {
+                     // Serialize the action's result to JSON Value
+                    serde_json::to_value(result).map_err(|e| {
+                         AutomationError::SerializationError(format!("Failed to serialize action result: {}", e))
+                    })
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            Err(AutomationError::ElementNotFound(format!(
+                "Index {} out of bounds for cached elements (count: {})",
+                element_index,
+                cache_info.elements.len()
+            )))
+        }
+    } else {
+        Err(AutomationError::CacheMiss(
+            "Element cache is empty. Please list elements first.".to_string(),
+        ))
     }
 }
 
