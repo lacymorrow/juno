@@ -10,6 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{debug, error, info, warn};
 
 // Make element module public
 pub mod element;
@@ -70,54 +71,55 @@ pub struct ClickResult {
 }
 
 /// The main entry point for UI automation
+#[derive(Clone)]
 pub struct Desktop {
-    engine: Arc<dyn platforms::AccessibilityEngine>,
-    log_buffer: Arc<Mutex<Vec<LogEntry>>>,
-    max_logs: usize,
+    engine: Arc<dyn platforms::AccessibilityEngine + Send + Sync>,
+    use_background_apps: bool,
+    activate_app: bool,
 }
 
 impl Desktop {
-    /// Create a new instance with the default platform-specific implementation
+    /// Initializes the Desktop environment.
     pub fn new(use_background_apps: bool, activate_app: bool) -> Result<Self, AutomationError> {
-        let boxed_engine = platforms::create_engine(use_background_apps, activate_app)?;
-        let engine = Arc::from(boxed_engine);
-        Ok(Self {
-            engine,
-            log_buffer: Arc::new(Mutex::new(Vec::new())),
-            max_logs: 1000,
-        })
-    }
+        let engine_result = if cfg!(target_os = "macos") {
+            info!("Initializing macOS engine...");
+            platforms::macos::MacOSEngine::new(use_background_apps, activate_app)
+                .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
+        } else if cfg!(target_os = "windows") {
+            info!("Initializing Windows engine...");
+            #[cfg(target_os = "windows")]
+            {
+                platforms::windows::WindowsEngine::new()
+                    .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                 // Ensure the Err type matches the other branches
+                 Err(AutomationError::UnsupportedPlatform("Windows engine not supported on this platform".to_string()))
+            }
+        } else {
+            Err(AutomationError::UnsupportedPlatform("Platform not supported".to_string()))
+        };
 
-    // Internal log function
-    pub fn log(&self, level: &str, message: String) {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        let mut buffer = self.log_buffer.lock().unwrap();
-        buffer.push(LogEntry {
-            timestamp,
-            level: level.to_string(),
-            message,
-        });
-
-        // Trim old logs if buffer exceeds max size
-        if buffer.len() > self.max_logs {
-            let excess = buffer.len() - self.max_logs;
-            buffer.drain(0..excess);
+        match engine_result {
+            Ok(engine) => {
+                info!("Desktop engine initialized successfully.");
+                Ok(Self {
+                    engine,
+                    use_background_apps,
+                    activate_app,
+                })
+            }
+            Err(e) => {
+                error!("Failed to initialize desktop engine: {}", e);
+                Err(e)
+            }
         }
     }
 
-    /// Get log entries from the buffer
-    pub fn get_logs(&self) -> Vec<LogEntry> {
-        self.log_buffer.lock().unwrap().clone()
-    }
-
-    /// Clear the log buffer
-    pub fn clear_logs(&self) {
-        self.log_buffer.lock().unwrap().clear();
-        self.log("info", "Log buffer cleared.".to_string());
+    /// Returns a reference to the underlying accessibility engine.
+    pub fn engine(&self) -> Arc<dyn platforms::AccessibilityEngine + Send + Sync> {
+        self.engine.clone()
     }
 
     /// Get the root UI element representing the entire desktop

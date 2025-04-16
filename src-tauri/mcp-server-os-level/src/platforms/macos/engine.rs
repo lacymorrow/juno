@@ -243,7 +243,7 @@ impl MacOSEngine {
         Ok(())
     }
 
-    pub(crate) fn scroll_at_current_position(
+    pub fn scroll_at_current_position(
         &self,
         direction: &str,
         amount: f64,
