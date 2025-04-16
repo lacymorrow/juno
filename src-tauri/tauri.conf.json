@@ -12,9 +12,23 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "dotdot",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "visible": false
+      },
+      {
+        "label": "floating-bar",
+        "url": "/floating-bar",
+        "width": 350,
+        "height": 40,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visible": true
       }
     ],
     "security": {

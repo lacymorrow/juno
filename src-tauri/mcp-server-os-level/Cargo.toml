@@ -39,6 +39,7 @@ core-foundation = "0.10.0"
 core-graphics = { version = "0.24.0", features = ["highsierra"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
+clipboard_macos = "0.1"
 
 # Add Windows dependencies if needed
 [target.'cfg(target_os = "windows")'.dependencies]
