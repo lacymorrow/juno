@@ -885,7 +885,7 @@ async fn dev_get_clipboard(state: tauri::State<'_, AppState>) -> Result<String, 
 
 #[tauri::command]
 async fn dev_set_clipboard(content: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    info!("Executing dev_set_clipboard");
+    info!("Executing dev_set_clipboard {}", content);
     state.desktop.set_clipboard_content(&content)
         .map_err(|e| format!("Error setting clipboard content: {}", e))
 }
