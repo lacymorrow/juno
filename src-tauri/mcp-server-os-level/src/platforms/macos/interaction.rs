@@ -650,3 +650,38 @@ pub(crate) fn release_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<()
 
     Ok(())
 }
+
+pub(crate) fn press_key_with_modifier(key_code: CGKeyCode, modifier_flags: CGEventFlags) -> Result<(), AutomationError> {
+    debug!("Pressing key: {} with modifiers: {:?}", key_code, modifier_flags);
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
+
+    let event_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
+    event_down.set_flags(modifier_flags);
+    event_down.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+
+    let event_up = CGEvent::new_keyboard_event(source, key_code, false)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
+    event_up.set_flags(modifier_flags);
+    event_up.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+
+    debug!("Key press simulated for key code: {}", key_code);
+    Ok(())
+}
+
+// --- Old/Internal key sequence logic (if needed for reference, keep private) ---
+fn press_key_sequence(keys: &[(CGKeyCode, Option<CGEventFlags>)]) -> Result<(), AutomationError> {
+    // Placeholder implementation or keep the original logic if needed internally
+    debug!("Internal press_key_sequence called (currently placeholder)");
+    // Example: iterate through keys and simulate presses
+    for (key_code, modifier_flags_opt) in keys {
+        let modifier_flags = modifier_flags_opt.unwrap_or_else(CGEventFlags::empty);
+        // Simulate key down
+        // Simulate key up
+        debug!("Simulating press for key: {} with flags: {:?}", key_code, modifier_flags);
+    }
+    Ok(())
+}
