@@ -162,6 +162,31 @@ impl Desktop {
         self.engine.type_text(text)
     }
 
+    /// Get the current clipboard content
+    pub fn get_clipboard_content(&self) -> Result<String, AutomationError> {
+        self.engine.get_clipboard_content()
+    }
+
+    /// Set the clipboard content
+    pub fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError> {
+        self.engine.set_clipboard_content(content)
+    }
+
+    /// Hold down a modifier key.
+    pub fn hold_key(&self, key: &str) -> Result<(), AutomationError> {
+        self.engine.hold_key(key)
+    }
+
+    /// Release a modifier key.
+    pub fn release_key(&self, key: &str) -> Result<(), AutomationError> {
+        self.engine.release_key(key)
+    }
+
+    /// Wait for a specified duration.
+    pub fn wait(&self, duration_ms: u64) -> Result<(), AutomationError> {
+        self.engine.wait(duration_ms)
+    }
+
     // /// Scroll at a specific position on screen
     // pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
     //     self.engine.scroll_at_position(x, y, direction, amount)
@@ -306,15 +331,19 @@ impl Desktop {
             },
             ToolDefinition {
                 name: "typeText".to_string(),
-                description: "Types the given text globally, simulating keyboard input. Does not require focusing a specific element.".to_string(),
+                description: "Types the given text into the currently focused element, or globally if no element is focused.".to_string(),
                 input_schema: ToolInputSchema {
                     type_: "object".to_string(),
-                    properties: [
-                        ("text".to_string(), ToolParameter {
+                    properties: [(
+                        "text".to_string(),
+                        ToolParameter {
                             type_: "string".to_string(),
                             description: "The text to type.".to_string(),
-                        })
-                    ].iter().cloned().collect(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
                     required: vec!["text".to_string()],
                 },
             },
@@ -327,11 +356,93 @@ impl Desktop {
                     required: Vec::new(),
                 },
             },
+            ToolDefinition {
+                name: "getClipboard".to_string(),
+                description: "Gets the current content of the system clipboard.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::new(), // No input parameters
+                    required: Vec::new(),
+                },
+            },
+            ToolDefinition {
+                name: "setClipboard".to_string(),
+                description: "Sets the system clipboard to the specified text content.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "content".to_string(),
+                        ToolParameter {
+                            type_: "string".to_string(),
+                            description: "The text content to set the clipboard to.".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["content".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "holdKey".to_string(),
+                description: "Holds down a specified modifier key (Shift, Command/Cmd/Meta, Control/Ctrl, Option/Alt). The key remains held until 'releaseKey' is called.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "key".to_string(),
+                        ToolParameter {
+                            type_: "string".to_string(),
+                            description: "The modifier key to hold (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["key".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "releaseKey".to_string(),
+                description: "Releases a previously held modifier key.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "key".to_string(),
+                        ToolParameter {
+                            type_: "string".to_string(),
+                            description: "The modifier key to release (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["key".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "wait".to_string(),
+                description: "Pauses execution for a specified number of milliseconds.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "duration_ms".to_string(),
+                        ToolParameter {
+                            type_: "number".to_string(), // Use number for duration
+                            description: "The duration to wait in milliseconds.".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["duration_ms".to_string()],
+                },
+            },
         ]
     }
 
-    /// Call a specific tool by name with JSON arguments
+    /// Call a specific tool by name with given arguments
     pub fn call_tool(&self, name: &str, args: Value) -> Result<Value, AutomationError> {
+        info!("Calling tool: {} with args: {:?}", name, args);
         match name {
             "open_application" => {
                 let app_name = args
@@ -360,16 +471,11 @@ impl Desktop {
                 )
             }
             "typeText" => {
-                let text_to_type = args.get("text").and_then(|v| v.as_str()).ok_or_else(|| {
-                    AutomationError::InvalidArgument(
-                        "Missing or invalid 'text' argument for typeText tool".to_string(),
-                    )
+                let text = args["text"].as_str().ok_or_else(|| {
+                    AutomationError::InvalidArgument("Missing or invalid 'text' argument".to_string())
                 })?;
-                self.type_text(text_to_type)?;
-                Ok(serde_json::json!({
-                    "status": "success",
-                    "message": format!("Typed global text.")
-                }))
+                self.type_text(text)?;
+                Ok(Value::Null)
             }
             "get_focused_element_info" => {
                 let element = self.focused_element()?;
@@ -545,10 +651,42 @@ impl Desktop {
                     "format": "png"
                 }))
             }
-            _ => Err(AutomationError::UnsupportedOperation(format!(
-                "Tool '{}' not recognized.",
-                name
-            ))),
+            "getClipboard" => {
+                let content = self.get_clipboard_content()?;
+                Ok(Value::String(content))
+            }
+            "setClipboard" => {
+                let content = args["content"].as_str().ok_or_else(|| {
+                    AutomationError::InvalidArgument("Missing or invalid 'content' argument".to_string())
+                })?;
+                self.set_clipboard_content(content)?;
+                Ok(Value::String("Clipboard content set successfully.".to_string()))
+            }
+            "holdKey" => {
+                let key = args["key"].as_str().ok_or_else(|| {
+                    AutomationError::InvalidArgument("Missing or invalid 'key' argument for holdKey".to_string())
+                })?;
+                self.hold_key(key)?;
+                Ok(Value::String(format!("Key '{}' held successfully.", key)))
+            }
+            "releaseKey" => {
+                let key = args["key"].as_str().ok_or_else(|| {
+                    AutomationError::InvalidArgument("Missing or invalid 'key' argument for releaseKey".to_string())
+                })?;
+                self.release_key(key)?;
+                Ok(Value::String(format!("Key '{}' released successfully.", key)))
+            }
+            "wait" => {
+                let duration_ms = args["duration_ms"].as_u64().ok_or_else(|| {
+                    AutomationError::InvalidArgument("Missing or invalid 'duration_ms' argument for wait (must be a non-negative integer)".to_string())
+                })?;
+                self.wait(duration_ms)?;
+                Ok(Value::String(format!("Waited for {} ms.", duration_ms)))
+            }
+            _ => {
+                error!("Unknown tool called: {}", name);
+                Err(AutomationError::ToolNotFound(name.to_string()))
+            }
         }
     }
 

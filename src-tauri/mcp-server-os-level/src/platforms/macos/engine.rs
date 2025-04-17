@@ -18,11 +18,17 @@ use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
-use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventFlags, CGEventType, CGMouseButton, CGKeyCode};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use libc;
 use std::collections::BTreeMap;
 use tracing::{debug, trace, warn};
+use crate::platforms::macos::interaction::{self, press_key};
+use crate::platforms::macos::utils::capture_and_encode_screenshot;
+use crate::platforms::macos::constants::{
+    COMMAND_KEYCODE, CONTROL_KEYCODE, OPTION_KEYCODE, SHIFT_KEYCODE, // Key codes
+    MODIFIER_COMMAND, MODIFIER_SHIFT, MODIFIER_OPTION, MODIFIER_CONTROL // Modifier flags
+};
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -1223,27 +1229,52 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn type_text(&self, text: &str) -> Result<(), AutomationError> {
-        debug!("Typing text globally: {}", text);
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-            AutomationError::PlatformError("Failed to create event source for typing".to_string())
-        })?;
+        // For global typing, we don't have a specific element context
+        // We will simulate key presses directly
+        interaction::type_text_global(text)
+    }
 
-        for char_code in text.encode_utf16() {
-            // Use the same key simulation logic as in interaction::type_text fallback
-            let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
-                .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
-            key_down.post(CGEventTapLocation::HID);
+    fn get_clipboard_content(&self) -> Result<String, AutomationError> {
+        interaction::get_clipboard_contents()
+    }
 
-            // Optional small delay between key down and key up
-            std::thread::sleep(std::time::Duration::from_millis(10));
+    fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError> {
+        interaction::set_clipboard_contents(content)
+    }
 
-            let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
-                .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
-            key_up.post(CGEventTapLocation::HID);
+    fn hold_key(&self, key: &str) -> Result<(), AutomationError> {
+        let lower_key = key.to_lowercase();
+        let (key_code, flags) = match lower_key.as_str() {
+            "shift" => (SHIFT_KEYCODE, MODIFIER_SHIFT),
+            "cmd" | "command" | "meta" => (COMMAND_KEYCODE, MODIFIER_COMMAND),
+            "ctrl" | "control" => (CONTROL_KEYCODE, MODIFIER_CONTROL),
+            "alt" | "option" => (OPTION_KEYCODE, MODIFIER_OPTION),
+            _ => return Err(AutomationError::InvalidArgument(format!(
+                "Unsupported or non-modifier key for hold_key: {}",
+                key
+            ))),
+        };
+        interaction::hold_key(key_code, flags)
+    }
 
-            // Optional small delay between characters
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+    fn release_key(&self, key: &str) -> Result<(), AutomationError> {
+        let lower_key = key.to_lowercase();
+        let (key_code, flags) = match lower_key.as_str() {
+             "shift" => (SHIFT_KEYCODE, MODIFIER_SHIFT),
+            "cmd" | "command" | "meta" => (COMMAND_KEYCODE, MODIFIER_COMMAND),
+            "ctrl" | "control" => (CONTROL_KEYCODE, MODIFIER_CONTROL),
+            "alt" | "option" => (OPTION_KEYCODE, MODIFIER_OPTION),
+            _ => return Err(AutomationError::InvalidArgument(format!(
+                "Unsupported or non-modifier key for release_key: {}",
+                key
+            ))),
+        };
+        interaction::release_key(key_code, flags)
+    }
+
+    fn wait(&self, duration_ms: u64) -> Result<(), AutomationError> {
+        debug!("Waiting for {} milliseconds", duration_ms);
+        std::thread::sleep(std::time::Duration::from_millis(duration_ms));
         Ok(())
     }
 

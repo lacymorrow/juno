@@ -44,4 +44,10 @@ pub enum AutomationError {
 
     #[error("Initialization failed: {0}")]
     InitializationError(String),
+
+    #[error("Unsupported selector: {0}")]
+    UnsupportedSelector(String),
+
+    #[error("Tool not found: {0}")]
+    ToolNotFound(String),
 }

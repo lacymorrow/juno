@@ -62,6 +62,21 @@ pub trait AccessibilityEngine: Send + Sync + Any {
 
     /// Type text
     fn type_text(&self, text: &str) -> Result<(), AutomationError>;
+
+    /// Get clipboard content
+    fn get_clipboard_content(&self) -> Result<String, AutomationError>;
+
+    /// Set clipboard content
+    fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError>;
+
+    /// Hold down a modifier key
+    fn hold_key(&self, key: &str) -> Result<(), AutomationError>;
+
+    /// Release a modifier key
+    fn release_key(&self, key: &str) -> Result<(), AutomationError>;
+
+    /// Wait for a specified duration
+    fn wait(&self, duration_ms: u64) -> Result<(), AutomationError>;
 }
 
 #[cfg(target_os = "linux")]
