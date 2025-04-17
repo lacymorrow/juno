@@ -84,6 +84,42 @@ pub trait AccessibilityEngine: Send + Sync + Any {
 
     /// Get the UI tree starting from a specific app or the focused one
     fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError>;
+
+    /// Get the current mouse cursor position.
+    fn cursor_position(&self) -> Result<(f64, f64), AutomationError>;
+
+    /// Move the mouse cursor to the specified coordinates.
+    fn mouse_move(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate pressing the left mouse button down at the specified coordinates.
+    fn left_mouse_down(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate releasing the left mouse button at the specified coordinates.
+    fn left_mouse_up(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate a standard left click (down + up) at specified coordinates.
+    fn left_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate a right click (down + up) at specified coordinates.
+    fn right_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate a middle click (down + up) at specified coordinates.
+    fn middle_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate a double left click at the specified coordinates.
+    fn double_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate a triple left click at the specified coordinates.
+    fn triple_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Simulate dragging with the left mouse button from a start point to an end point.
+    fn left_click_drag(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+    ) -> Result<(), AutomationError>;
 }
 
 #[cfg(target_os = "linux")]
