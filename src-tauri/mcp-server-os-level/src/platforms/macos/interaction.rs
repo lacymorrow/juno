@@ -17,6 +17,8 @@ use clipboard_macos::Clipboard; // Import clipboard_macos
 // use pasteboard_macos::Pasteboard; // Ensure this import is removed or commented out
 use std::collections::HashMap;
 use tracing::{debug, warn};
+use std::thread;
+use std::time::Duration;
 
 // --- Moved from element.rs --- //
 
@@ -225,54 +227,62 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
     })
 }
 
+// RAII guard to restore clipboard content
+struct ClipboardGuard {
+    original_content: Option<String>,
+}
+
+impl ClipboardGuard {
+    fn new() -> Result<Self, AutomationError> {
+        let original_content = match Clipboard::new() {
+            Ok(clipboard) => clipboard.read().ok(), // Ignore read errors, proceed without restore maybe? Or error out? Let's ignore for now.
+            Err(_) => None, // Ignore errors getting clipboard instance
+        };
+        Ok(Self { original_content })
+    }
+}
+
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        if let Some(content) = &self.original_content {
+            match Clipboard::new() {
+                Ok(mut clipboard) => {
+                    if let Err(e) = clipboard.write(content.clone()) {
+                        warn!("Failed to restore clipboard content: {:?}", e);
+                    } else {
+                        debug!("Successfully restored clipboard content.");
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to get clipboard instance for restoring: {:?}", e);
+                }
+            }
+        }
+    }
+}
+
+/// Types text into the specified UI element.
+///
+/// Attempts to set the value directly using AXValue first. If that fails,
+/// it falls back to using the clipboard and simulating Cmd+V (Paste).
 pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), AutomationError> {
     match focus(element) {
         Ok(_) => debug!("Successfully focused element for typing"),
         Err(e) => {
-            debug!("Focus failed, but continuing with type_text: {:?}", e);
+            warn!("Focus failed before typing, attempting anyway: {:?}", e);
+            // Attempting to click as a fallback focus mechanism
             if let Err(click_err) = click_auto(element) {
-                debug!("Click also failed: {:?}", click_err);
+                 warn!("Fallback click also failed: {:?}", click_err);
+                 // Decide if we should proceed or error out here.
+                 // Let's proceed cautiously, AXValue might still work if focus is weird.
+            } else {
+                 // Add a small delay after fallback click before trying to type
+                 thread::sleep(Duration::from_millis(100));
             }
         }
     }
-    let is_web_input = {
-        let role = element.role().to_lowercase(); // Assuming role() is still on MacOSUIElement
-        role.contains("web") || role.contains("generic")
-    };
-    if is_web_input {
-        debug!("Detected web input, using specialized handling for type_text");
-        for attr_name in &["AXValue", "AXValueAttribute", "AXText"] {
-            let cf_string = CFString::new(text);
-            unsafe {
-                let element_ref = element.element.0.as_concrete_TypeRef();
-                let attr_str = CFString::new(attr_name);
-                let attr_str_ref = attr_str.as_concrete_TypeRef();
-                let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
-                let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
-                if result == 0 {
-                    debug!("Successfully set text using {}", attr_name);
-                    return Ok(());
-                }
-            }
-        }
-        debug!("Setting AXValue/AXText attributes failed for web input, falling back to keyboard simulation");
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-            AutomationError::PlatformError("Failed to create event source for typing".to_string())
-        })?;
-        for char_code in text.encode_utf16() {
-            let key_down =
-                CGEvent::new_keyboard_event(source.clone(), char_code, true).map_err(|_| {
-                    AutomationError::PlatformError("Failed to create key down event".to_string())
-                })?;
-            key_down.post(CGEventTapLocation::HID);
-            let key_up =
-                CGEvent::new_keyboard_event(source.clone(), char_code, false).map_err(|_| {
-                    AutomationError::PlatformError("Failed to create key up event".to_string())
-                })?;
-            key_up.post(CGEventTapLocation::HID);
-        }
-        return Ok(());
-    }
+
+    // --- Try AXValue first ---
     let cf_string = CFString::new(text);
     unsafe {
         let element_ref = element.element.0.as_concrete_TypeRef();
@@ -280,64 +290,123 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
         let attr_str_ref = attr_str.as_concrete_TypeRef();
         let value_ref = cf_string.as_concrete_TypeRef() as CFTypeRef;
         let result = AXUIElementSetAttributeValue(element_ref as AXUIElementRef, attr_str_ref as CFStringRef, value_ref);
-        if result != 0 {
-            let error = accessibility::Error::from(accessibility::Error::Ax(result));
-            debug!(
-                "Failed to set native text value via AXValue: {:?}, trying keyboard simulation",
-                error
-            );
-            let source =
-                CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-                    AutomationError::PlatformError(
-                        "Failed to create event source for typing".to_string(),
-                    )
-                })?;
-            for char_code in text.encode_utf16() {
-                let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
-                    .map_err(|_| {
-                        AutomationError::PlatformError(
-                            "Failed to create key down event".to_string(),
-                        )
-                    })?;
-                key_down.post(CGEventTapLocation::HID);
-                let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
-                    .map_err(|_| {
-                        AutomationError::PlatformError("Failed to create key up event".to_string())
-                    })?;
-                key_up.post(CGEventTapLocation::HID);
-            }
+
+        if result == 0 {
+            debug!("Successfully set text value via AXValue");
             return Ok(());
+        } else {
+            let error = accessibility::Error::from(accessibility::Error::Ax(result));
+            debug!("Failed to set text via AXValue: {:?}. Falling back to clipboard paste.", error);
         }
-        debug!("Successfully set native text value via AXValue");
     }
+
+    // --- Fallback to Clipboard Paste ---
+    debug!("Attempting clipboard paste for text: '{}'", text);
+    let _guard = ClipboardGuard::new()?; // Restore clipboard automatically on scope exit
+
+    // Set clipboard
+    match Clipboard::new() {
+        Ok(mut clipboard) => {
+            if let Err(e) = clipboard.write(text.to_string()) {
+                return Err(AutomationError::PlatformError(format!(
+                    "Failed to write to clipboard before paste: {:?}",
+                    e
+                )));
+            }
+            debug!("Successfully set clipboard content.");
+        }
+        Err(e) => {
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to access clipboard before paste: {:?}",
+                e
+            )));
+        }
+    }
+
+    // Give clipboard time to process
+    thread::sleep(Duration::from_millis(100));
+
+    // Simulate Cmd+V
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for paste".to_string()))?;
+
+    let key_code_v = KEY_V; // Assuming KEY_V is defined in constants
+    let cmd_flag = MODIFIER_COMMAND; // Assuming MODIFIER_COMMAND is defined
+
+    // Press Cmd+V
+    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key down event for paste".to_string()))?;
+    key_down.set_flags(cmd_flag);
+    key_down.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+
+    // Release Cmd+V
+    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key up event for paste".to_string()))?;
+    key_up.set_flags(cmd_flag);
+    key_up.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+
+    debug!("Successfully simulated Cmd+V paste.");
+
+    // Clipboard restored by ClipboardGuard automatically
     Ok(())
 }
 
-/// Types text globally using keyboard simulation.
+/// Types text globally using clipboard paste (Cmd+V).
 ///
-/// This function simulates key presses for each character in the input string.
+/// This function simulates key presses for Cmd+V after setting the clipboard.
 /// It does not require focusing a specific UI element beforehand.
 pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
-    debug!("Typing text globally: {}", text);
+    debug!("Typing text globally via clipboard paste: {}", text);
+
+    let _guard = ClipboardGuard::new()?; // Restore clipboard automatically
+
+    // Set clipboard
+    match Clipboard::new() {
+        Ok(mut clipboard) => {
+             if let Err(e) = clipboard.write(text.to_string()) {
+                return Err(AutomationError::PlatformError(format!(
+                    "Failed to write to clipboard before global paste: {:?}",
+                    e
+                )));
+            }
+             debug!("Successfully set clipboard content for global paste.");
+        },
+        Err(e) => return Err(AutomationError::PlatformError(format!(
+            "Failed to access clipboard before global paste: {:?}",
+            e
+        )))
+    }
+
+    // Give clipboard time to process
+    thread::sleep(Duration::from_millis(100));
+
+    // Simulate Cmd+V
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-        AutomationError::PlatformError("Failed to create event source for typing".to_string())
+        AutomationError::PlatformError("Failed to create event source for global paste".to_string())
     })?;
 
-    for char_code in text.encode_utf16() {
-        let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
-            .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
-        key_down.post(CGEventTapLocation::HID);
+    let key_code_v = KEY_V;
+    let cmd_flag = MODIFIER_COMMAND;
 
-        // Optional small delay between key down and key up
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    // Press Cmd+V
+    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code_v, true)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key down event for global paste".to_string()))?;
+    key_down.set_flags(cmd_flag);
+    key_down.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
 
-        let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
-            .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
-        key_up.post(CGEventTapLocation::HID);
+    // Release Cmd+V
+    let key_up = CGEvent::new_keyboard_event(source, key_code_v, false)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key up event for global paste".to_string()))?;
+    key_up.set_flags(cmd_flag);
+    key_up.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
 
-        // Optional small delay between characters
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    debug!("Successfully simulated global Cmd+V paste.");
+
+    // Clipboard restored by ClipboardGuard automatically
     Ok(())
 }
 
@@ -499,6 +568,7 @@ pub(crate) fn scroll(
 }
 
 pub(crate) fn select_text(_element: &MacOSUIElement) -> Result<(), AutomationError> {
+    // TODO: Implement select_text using AXSelectText action or Cmd+A simulation
     warn!("select_text function is not yet implemented for macOS");
     Ok(())
 }
@@ -553,7 +623,7 @@ pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), A
     )?;
 
     // Create keyboard event for key down
-    let mut key_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
+    let key_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
         .map_err(|_| AutomationError::PlatformError("Failed to create key down event for hold_key".to_string()))?;
 
     // Set the appropriate flags for the modifier key itself
@@ -571,7 +641,7 @@ pub(crate) fn release_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<()
     )?;
 
     // Create keyboard event for key up
-    let mut key_up = CGEvent::new_keyboard_event(source, key_code, false)
+    let key_up = CGEvent::new_keyboard_event(source, key_code, false)
         .map_err(|_| AutomationError::PlatformError("Failed to create key up event for release_key".to_string()))?;
 
     // Set the flags for the key up event (usually should have the modifier flag being released)

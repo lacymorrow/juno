@@ -15,6 +15,7 @@ pub(crate) const KEY_ARROW_LEFT: u16 = 123;
 pub(crate) const KEY_ARROW_RIGHT: u16 = 124;
 pub(crate) const KEY_ARROW_DOWN: u16 = 125;
 pub(crate) const KEY_ARROW_UP: u16 = 126;
+pub(crate) const KEY_V: u16 = 9;
 
 // Add these constants for modifier keys
 pub(crate) const MODIFIER_COMMAND: CGEventFlags = CGEventFlags::CGEventFlagCommand;

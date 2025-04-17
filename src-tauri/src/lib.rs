@@ -734,11 +734,21 @@ async fn dev_scroll_window(
 ) -> Result<(), String> {
     println!("[DEV_TOOL] Attempting to scroll window {}...", direction);
 
-    // Validate direction string
+    // Validate direction string and determine the effective direction for the SDK call
     let lower_direction = direction.to_lowercase();
-    if lower_direction != "up" && lower_direction != "down" {
-         return Err(format!("Invalid scroll direction: {}. Must be 'up' or 'down'.", direction));
-    }
+    #[cfg(target_os = "macos")]
+    let effective_direction = match lower_direction.as_str() {
+        "up" => "down", // Invert for macOS: UI "up" means scroll content down
+        "down" => "up",   // Invert for macOS: UI "down" means scroll content up
+        _ => return Err(format!("Invalid scroll direction: {}. Must be 'up' or 'down'.", direction)),
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let effective_direction = match lower_direction.as_str() {
+         "up" => "up",
+         "down" => "down",
+        _ => return Err(format!("Invalid scroll direction: {}. Must be 'up' or 'down'.", direction)),
+    };
 
     // Parse amount, default to a reasonable value (e.g., 3.0 units)
     let amount: f64 = match amount_str {
@@ -750,21 +760,21 @@ async fn dev_scroll_window(
     };
 
     #[cfg(target_os = "macos")]
-    // Use the engine's scroll_at_current_position method which takes &str
-    let result = state.desktop.engine().scroll_at_current_position(&lower_direction, amount);
+    // Use the engine's scroll_at_current_position method with the inverted direction
+    let result = state.desktop.engine().scroll_at_current_position(effective_direction, amount);
 
     #[cfg(not(target_os = "macos"))]
-    let result = Err(AutomationError::UnsupportedPlatform);
+    let result = Err(AutomationError::UnsupportedPlatform); // Keep original behavior for non-macOS
 
     match result {
         Ok(_) => {
-            println!("[DEV_TOOL] scroll_window {} succeeded.", direction);
+            println!("[DEV_TOOL] scroll_window {} (effective: {}) succeeded.", direction, effective_direction);
             let scroll_msg = format!("Scrolled window {} by {}", direction, amount);
             send_dev_tool_notification(&app, "Scroll", &scroll_msg)?;
             Ok(())
         }
         Err(e) => {
-            let err_msg = format!("Failed to scroll window {}: {}", direction, e);
+            let err_msg = format!("Failed to scroll window {} (effective: {}): {}", direction, effective_direction, e);
             println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
