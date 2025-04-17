@@ -22,8 +22,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use tracing::{debug, warn};
-use core_graphics::event::{CGEventType, CGMouseButton, CGEventFlags};
-use super::interaction::get_application;
+use core_graphics::event::{CGEventType, CGMouseButton};
 
 #[derive(Debug)]
 pub struct MacOSUIElement {
