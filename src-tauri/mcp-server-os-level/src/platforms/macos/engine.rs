@@ -18,17 +18,18 @@ use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
-use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, CGEventFlags};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use libc;
 use std::collections::BTreeMap;
 use tracing::{debug, trace, warn};
 use crate::platforms::macos::interaction::{self};
-use crate::platforms::macos::utils::capture_and_encode_screenshot;
 use crate::platforms::macos::constants::{
     COMMAND_KEYCODE, CONTROL_KEYCODE, OPTION_KEYCODE, SHIFT_KEYCODE, // Key codes
-    MODIFIER_COMMAND, MODIFIER_SHIFT, MODIFIER_OPTION, MODIFIER_CONTROL // Modifier flags
+    MODIFIER_COMMAND, MODIFIER_SHIFT, MODIFIER_OPTION, MODIFIER_CONTROL, // Modifier flags
+    key_name_to_keycode, modifier_name_to_flags // Mapping functions
 };
+use serde_json::{json, Value as JsonValue};
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -271,6 +272,46 @@ impl MacOSEngine {
         let current_pos = event.location();
 
         self.scroll_at_position(current_pos.x, current_pos.y, direction, amount)
+    }
+
+    // Method to get the UI tree, starting from the focused application or a specified one
+    pub fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError> {
+        debug!("Getting UI tree for app: {:?}", app_name);
+        let root_element = match app_name {
+            Some(name) => self.get_application_by_name(name)?,
+            None => self.get_focused_element()?, // Get focused element as root if no app specified
+        };
+
+        // Use the internal recursive function to build the tree
+        self.build_element_tree(&root_element, 0)
+    }
+
+    // Recursive helper to build the JSON representation of the UI tree
+    fn build_element_tree(&self, element: &UIElement, depth: usize) -> Result<JsonValue, AutomationError> {
+        const MAX_DEPTH: usize = 10; // Limit recursion depth
+        if depth > MAX_DEPTH {
+            return Ok(json!({ "error": "Max recursion depth reached" }));
+        }
+
+        let attributes = element.attributes();
+        let mut children_json = Vec::new();
+
+        if let Ok(children) = element.children() {
+            for child in children {
+                match self.build_element_tree(&child, depth + 1) {
+                    Ok(child_json) => children_json.push(child_json),
+                    Err(e) => {
+                        warn!("Error building child tree: {}", e);
+                        children_json.push(json!({ "error": format!("Failed to get child attributes: {}", e) }));
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "attributes": attributes,
+            "children": children_json
+        }))
     }
 }
 
@@ -1273,12 +1314,31 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn wait(&self, duration_ms: u64) -> Result<(), AutomationError> {
-        debug!("Waiting for {} milliseconds", duration_ms);
+        debug!("waiting for {} milliseconds", duration_ms);
         std::thread::sleep(std::time::Duration::from_millis(duration_ms));
         Ok(())
     }
 
+    fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError> {
+        self.get_ui_tree(app_name) // Call the struct's method
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
+        debug!("pressing key: {} with modifier: {:?}", key_name, modifier);
+
+        let key_code = key_name_to_keycode(key_name)
+            .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid key name: {}", key_name)))?;
+
+        let modifier_flags = match modifier {
+            Some(mod_name) => modifier_name_to_flags(mod_name)
+                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?,
+            None => CGEventFlags::empty(),
+        };
+
+        interaction::press_key_with_modifier(key_code, modifier_flags)
     }
 }

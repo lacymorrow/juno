@@ -9,8 +9,9 @@ use serde_json;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc};
-use std::time::{};
+use std::str::FromStr;
 use tracing::{error, info};
+use serde_json::{json, from_value};
 
 // Make element module public
 pub mod element;
@@ -201,9 +202,188 @@ impl Desktop {
 
     /// List available tools for the LLM
     pub fn list_tools(&self) -> Vec<ToolDefinition> {
+        let mut tools = vec![
+            // --- Standard Tools ---
+            ToolDefinition {
+                name: "getUiTree".to_string(),
+                description: "Get the UI element tree for the specified application or the currently focused one.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert(
+                            "application_name".to_string(),
+                            ToolParameter {
+                                type_: "string".to_string(),
+                                description: "Optional name of the application to get the tree for. If omitted, uses the focused application.".to_string(),
+                            },
+                        );
+                        props
+                    },
+                    required: vec![], // application_name is optional
+                },
+            },
+            ToolDefinition {
+                name: "captureScreenshot".to_string(),
+                description: "Captures a screenshot of the entire screen and returns it as a base64 encoded PNG.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::new(),
+                    required: Vec::new(),
+                },
+            },
+            ToolDefinition {
+                name: "getClipboard".to_string(),
+                description: "Gets the current content of the system clipboard.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::new(), // No input parameters
+                    required: Vec::new(),
+                },
+            },
+            ToolDefinition {
+                name: "setClipboard".to_string(),
+                description: "Sets the system clipboard to the specified text content.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "content".to_string(),
+                        ToolParameter {
+                            type_: "string".to_string(),
+                            description: "The text content to set the clipboard to.".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["content".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "holdKey".to_string(),
+                description: "Holds down a specified modifier key (Shift, Command/Cmd/Meta, Control/Ctrl, Option/Alt). The key remains held until 'releaseKey' is called.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "key".to_string(),
+                        ToolParameter {
+                            type_: "string".to_string(),
+                            description: "The modifier key to hold (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["key".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "releaseKey".to_string(),
+                description: "Releases a previously held modifier key.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "key".to_string(),
+                        ToolParameter {
+                            type_: "string".to_string(),
+                            description: "The modifier key to release (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["key".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "wait".to_string(),
+                description: "Pauses execution for a specified number of milliseconds.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [(
+                        "duration_ms".to_string(),
+                        ToolParameter {
+                            type_: "number".to_string(), // Use number for duration
+                            description: "The duration to wait in milliseconds.".to_string(),
+                        },
+                    )]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                    required: vec!["duration_ms".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "findElementsBySelector".to_string(),
+                description: "Finds UI elements matching a specified selector (e.g., role, title, description). Returns a list of element attributes.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert(
+                            "selector".to_string(),
+                            ToolParameter {
+                                type_: "string".to_string(),
+                                description: "The selector string (e.g., 'button[title=\"OK\"]').".to_string(),
+                            },
+                        );
+                        // Optional root element ID might be added here later
+                        props
+                    },
+                    required: vec!["selector".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "getElementAttributes".to_string(),
+                description: "Gets the accessibility attributes of a UI element specified by a selector.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert(
+                            "selector".to_string(),
+                            ToolParameter {
+                                type_: "string".to_string(),
+                                description: "The selector string for the element (e.g., 'button[title=\"OK\"]').".to_string(),
+                            },
+                        );
+                        // Optional root element ID might be added here later
+                        props
+                    },
+                    required: vec!["selector".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "pressKey".to_string(),
+                description: "Presses a single key with an optional modifier key (e.g., Command, Shift, Option, Control). Common key names include 'return', 'enter', 'tab', 'space', 'delete', 'backspace', 'escape', 'left', 'right', 'up', 'down'. For letters/numbers, use the character itself (e.g., 'a', '1').".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert(
+                            "key".to_string(),
+                            ToolParameter {
+                                type_: "string".to_string(),
+                                description: "The name of the key to press (e.g., 'enter', 'a', 'tab').".to_string(),
+                            },
+                        );
+                        props.insert(
+                            "modifier".to_string(),
+                            ToolParameter {
+                                type_: "string".to_string(),
+                                description: "Optional modifier key (e.g., 'command', 'shift', 'option', 'control').".to_string(),
+                            },
+                        );
+                        props
+                    },
+                    required: vec!["key".to_string()], // key is required, modifier is optional
+                },
+            },
+        ];
+
         // Manually define the tools available from this Desktop instance
         // This should reflect the public methods of Desktop and UIElement potentially
-        vec![
+        tools.extend(vec![
             ToolDefinition {
                 name: "open_application".to_string(),
                 description: "Opens an application specified by its name.".to_string(),
@@ -347,102 +527,15 @@ impl Desktop {
                     required: vec!["text".to_string()],
                 },
             },
-            ToolDefinition {
-                name: "captureScreenshot".to_string(),
-                description: "Captures a screenshot of the main display and returns it as a base64 encoded PNG string.".to_string(),
-                input_schema: ToolInputSchema {
-                    type_: "object".to_string(),
-                    properties: HashMap::new(),
-                    required: Vec::new(),
-                },
-            },
-            ToolDefinition {
-                name: "getClipboard".to_string(),
-                description: "Gets the current content of the system clipboard.".to_string(),
-                input_schema: ToolInputSchema {
-                    type_: "object".to_string(),
-                    properties: HashMap::new(), // No input parameters
-                    required: Vec::new(),
-                },
-            },
-            ToolDefinition {
-                name: "setClipboard".to_string(),
-                description: "Sets the system clipboard to the specified text content.".to_string(),
-                input_schema: ToolInputSchema {
-                    type_: "object".to_string(),
-                    properties: [(
-                        "content".to_string(),
-                        ToolParameter {
-                            type_: "string".to_string(),
-                            description: "The text content to set the clipboard to.".to_string(),
-                        },
-                    )]
-                    .iter()
-                    .cloned()
-                    .collect(),
-                    required: vec!["content".to_string()],
-                },
-            },
-            ToolDefinition {
-                name: "holdKey".to_string(),
-                description: "Holds down a specified modifier key (Shift, Command/Cmd/Meta, Control/Ctrl, Option/Alt). The key remains held until 'releaseKey' is called.".to_string(),
-                input_schema: ToolInputSchema {
-                    type_: "object".to_string(),
-                    properties: [(
-                        "key".to_string(),
-                        ToolParameter {
-                            type_: "string".to_string(),
-                            description: "The modifier key to hold (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
-                        },
-                    )]
-                    .iter()
-                    .cloned()
-                    .collect(),
-                    required: vec!["key".to_string()],
-                },
-            },
-            ToolDefinition {
-                name: "releaseKey".to_string(),
-                description: "Releases a previously held modifier key.".to_string(),
-                input_schema: ToolInputSchema {
-                    type_: "object".to_string(),
-                    properties: [(
-                        "key".to_string(),
-                        ToolParameter {
-                            type_: "string".to_string(),
-                            description: "The modifier key to release (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
-                        },
-                    )]
-                    .iter()
-                    .cloned()
-                    .collect(),
-                    required: vec!["key".to_string()],
-                },
-            },
-            ToolDefinition {
-                name: "wait".to_string(),
-                description: "Pauses execution for a specified number of milliseconds.".to_string(),
-                input_schema: ToolInputSchema {
-                    type_: "object".to_string(),
-                    properties: [(
-                        "duration_ms".to_string(),
-                        ToolParameter {
-                            type_: "number".to_string(), // Use number for duration
-                            description: "The duration to wait in milliseconds.".to_string(),
-                        },
-                    )]
-                    .iter()
-                    .cloned()
-                    .collect(),
-                    required: vec!["duration_ms".to_string()],
-                },
-            },
-        ]
+        ]);
+
+        tools
     }
 
     /// Call a specific tool by name with given arguments
     pub fn call_tool(&self, name: &str, args: Value) -> Result<Value, AutomationError> {
-        info!("Calling tool: {} with args: {:?}", name, args);
+        info!("Calling tool: {} with args: {}", name, args);
+
         match name {
             "open_application" => {
                 let app_name = args
@@ -638,29 +731,68 @@ impl Desktop {
                     )))
                 }
             }
-            "captureScreenshot" => {
-                if !args.is_null() && !args.as_object().map_or(true, |m| m.is_empty()) {
-                    return Err(AutomationError::InvalidArgument(
-                        "captureScreenshot tool does not accept any arguments.".to_string(),
-                    ));
+            "getUiTree" => {
+                #[derive(Deserialize)]
+                struct GetUiTreeArgs {
+                    application_name: Option<String>,
                 }
-                let base64_image = self.capture_screenshot_base64()?;
-                Ok(serde_json::json!({
-                    "status": "success",
-                    "screenshot_base64": base64_image,
-                    "format": "png"
-                }))
+                let parsed_args: GetUiTreeArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse getUiTree args: {}", e)))?;
+                self.engine.get_ui_tree(parsed_args.application_name.as_deref())
+            }
+            "findElementsBySelector" => {
+                #[derive(Deserialize)]
+                struct FindArgs {
+                    selector: String,
+                    // root_element_id: Option<String>, // TODO: Add support for root element ID
+                }
+                let parsed_args: FindArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse findElementsBySelector args: {}", e)))?;
+                let selector = Selector::from_str(&parsed_args.selector)?;
+                // TODO: Implement finding root element by ID if provided
+                let elements = self.engine.find_elements(&selector, None)?;
+                let element_attributes: Vec<_> = elements.iter().map(|el| el.attributes()).collect();
+                Ok(json!(element_attributes))
+            }
+            "getElementAttributes" => {
+                #[derive(Deserialize)]
+                struct GetAttributesArgs {
+                    selector: String,
+                    // root_element_id: Option<String>, // TODO: Add support for root element ID
+                }
+                let parsed_args: GetAttributesArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse getElementAttributes args: {}", e)))?;
+                let selector = Selector::from_str(&parsed_args.selector)?;
+                // TODO: Implement finding root element by ID if provided
+                let element = self.engine.find_element(&selector, None)?;
+                Ok(json!(element.attributes()))
+            }
+            "captureScreenshot" => {
+                // No arguments expected for captureScreenshot
+                self.capture_screenshot_base64().map(|base64_str| json!({ "screenshot_base64": base64_str }))
             }
             "getClipboard" => {
                 let content = self.get_clipboard_content()?;
-                Ok(Value::String(content))
+                Ok(json!({ "content": content }))
             }
             "setClipboard" => {
-                let content = args["content"].as_str().ok_or_else(|| {
-                    AutomationError::InvalidArgument("Missing or invalid 'content' argument".to_string())
-                })?;
-                self.set_clipboard_content(content)?;
-                Ok(Value::String("Clipboard content set successfully.".to_string()))
+                #[derive(Deserialize)]
+                struct SetClipboardArgs {
+                    content: String,
+                }
+                let parsed_args: SetClipboardArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse setClipboard args: {}", e)))?;
+                self.set_clipboard_content(&parsed_args.content)?;
+                Ok(json!({ "status": "success" }))
+            }
+            "pressKey" => {
+                #[derive(Deserialize)]
+                struct PressKeyArgs {
+                    key: String,
+                    modifier: Option<String>,
+                }
+                let parsed_args: PressKeyArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse pressKey args: {}", e)))?;
+                self.engine.press_key(&parsed_args.key, parsed_args.modifier.as_deref())?;
+                Ok(json!({
+                    "status": "success",
+                    "details": format!("Pressed key '{}' with modifier '{}'", parsed_args.key, parsed_args.modifier.as_deref().unwrap_or("none"))
+                }))
             }
             "holdKey" => {
                 let key = args["key"].as_str().ok_or_else(|| {

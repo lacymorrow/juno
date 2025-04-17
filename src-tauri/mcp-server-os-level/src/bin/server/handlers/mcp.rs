@@ -136,6 +136,127 @@ pub fn handle_initialize(id: Value) -> JsonResponse<Value> {
                             "data": { "type": "string" }
                         },
                         "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["Wait"] },
+                            "data": { "type": "integer", "description": "Duration to wait in milliseconds" }
+                        },
+                        "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["LeftClickDrag"] },
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "start_x": { "type": "number" },
+                                    "start_y": { "type": "number" },
+                                    "end_x": { "type": "number" },
+                                    "end_y": { "type": "number" }
+                                },
+                                "required": ["start_x", "start_y", "end_x", "end_y"],
+                                "description": "Start and end coordinates for the drag"
+                            }
+                        },
+                        "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["MiddleClick"] },
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "x": { "type": "number" },
+                                    "y": { "type": "number" }
+                                },
+                                "required": ["x", "y"],
+                                "description": "Coordinates for the middle click"
+                            }
+                        },
+                        "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["DoubleClick"] },
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "x": { "type": "number" },
+                                    "y": { "type": "number" }
+                                },
+                                "required": ["x", "y"],
+                                "description": "Coordinates for the double click"
+                            }
+                        },
+                        "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["TripleClick"] },
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "x": { "type": "number" },
+                                    "y": { "type": "number" }
+                                },
+                                "required": ["x", "y"],
+                                "description": "Coordinates for the triple click"
+                            }
+                        },
+                        "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["HoldKey"] },
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "key": { "type": "string", "description": "Key name or code" },
+                                    "duration": { "type": "integer", "description": "Duration to hold in milliseconds" }
+                                },
+                                "required": ["key", "duration"]
+                            }
+                        },
+                        "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["LeftMouseDown"] },
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "x": { "type": "number" },
+                                    "y": { "type": "number" }
+                                },
+                                "required": [], // Coordinates optional, can press down at current location
+                                "description": "Optional coordinates for where to press down"
+                            }
+                        },
+                        "required": ["type", "data"]
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "type": { "type": "string", "enum": ["LeftMouseUp"] },
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "x": { "type": "number" },
+                                    "y": { "type": "number" }
+                                },
+                                "required": [], // Coordinates optional, can release at current location
+                                "description": "Optional coordinates for where to release"
+                            }
+                        },
+                        "required": ["type", "data"]
                     }
                 ]
             }
@@ -172,7 +293,7 @@ pub fn handle_initialize(id: Value) -> JsonResponse<Value> {
         },
         ToolFunctionDefinition {
             name: "inputControl".to_string(),
-            description: "perform direct input control actions with these formats: KeyPress(string keyCode/name), MouseMove({x:number, y:number}), MouseClick(string 'left'/'right'), WriteText(string text). returns updated element list. evaluate success by confirming ui responded to the input as expected.".to_string(),
+            description: "perform direct input control actions: KeyPress(key), MouseMove({x,y}), MouseClick(button), WriteText(text), Wait(ms), LeftClickDrag({start_x,start_y,end_x,end_y}), MiddleClick({x,y}), DoubleClick({x,y}), TripleClick({x,y}), HoldKey({key,duration}), LeftMouseDown({x?,y?}), LeftMouseUp({x?,y?}). returns updated element list. evaluate success by confirming ui responded as expected.".to_string(),
             parameters: input_control_schema,
         },
         ToolFunctionDefinition {
@@ -349,26 +470,177 @@ pub async fn handle_execute_tool_function(
              }
         }
         "inputControl" => {
-            let input_params: InputControlRequest = match serde_json::from_value(tool_input) {
+            // Deserialize the action part first to determine the type
+            #[derive(serde::Deserialize, Debug)]
+            struct ActionType {
+                #[serde(rename = "type")]
+                action_type: String,
+            }
+            #[derive(serde::Deserialize, Debug)]
+            struct InputControlAction {
+                action: ActionType,
+            }
+
+            let action_wrapper: InputControlAction = match serde_json::from_value(tool_input.clone()) {
                 Ok(p) => p,
                 Err(e) => {
                     return mcp_error_response(
                         id,
                         -32602,
-                        format!("invalid input for {}: {}", tool_name, e),
+                        format!("invalid input structure for {}: {}", tool_name, e),
                         None,
                     );
                 }
             };
-            // Similar to openApplication, needs to re-list elements
-             match input_control_handler(State(state.clone()), Json(input_params)).await {
-                 Ok(response) => Ok(response.into_inner()),
-                 Err((status, response)) => Err(AutomationError::PlatformError(format!(
-                     "Failed to list elements after input control ({}): {}",
-                     status,
-                     response.0.to_string()
-                 ))),
-             }
+
+            // Match on the specific action type
+            match action_wrapper.action.action_type.as_str() {
+                "KeyPress" | "MouseMove" | "MouseClick" | "WriteText" => {
+                    // Original handler logic for existing actions
+                    let input_params: InputControlRequest = match serde_json::from_value(tool_input) {
+                         Ok(p) => p,
+                         Err(e) => {
+                             return mcp_error_response(
+                                 id,
+                                 -32602,
+                                 format!("invalid input params for {}: {}", tool_name, e),
+                                 None,
+                             );
+                         }
+                    };
+                    // Reuse the existing handler
+                    match input_control_handler(State(state.clone()), Json(input_params)).await {
+                        Ok(response) => Ok(response.into_inner()),
+                        Err((status, response)) => Err(AutomationError::PlatformError(format!(
+                            "Failed to list elements after input control ({}): {}",
+                            status,
+                            response.0.to_string()
+                        ))),
+                    }
+                }
+                "Wait" => {
+                    #[derive(serde::Deserialize, Debug)]
+                    struct WaitData {
+                        #[serde(rename = "type")]
+                        _type: String, // Consume the type field
+                        data: u64, // Duration in milliseconds
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct WaitAction {
+                       action: WaitData,
+                    }
+
+                    let wait_params: WaitAction = match serde_json::from_value(tool_input) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            return mcp_error_response(
+                                id,
+                                -32602,
+                                format!("invalid input params for Wait action: {}", e),
+                                None,
+                            );
+                        }
+                    };
+
+                    // Call the wait function from the desktop engine
+                    match state.desktop.wait(wait_params.action.data) {
+                        Ok(_) => Ok(json!(null)), // Return null for success
+                        Err(e) => Err(e),
+                    }
+                }
+                "LeftClickDrag" => {
+                    #[derive(serde::Deserialize, Debug)]
+                    struct DragData {
+                        start_x: f64, start_y: f64, end_x: f64, end_y: f64,
+                    }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct DragAction { action: struct { #[serde(rename = "type")] _type: String, data: DragData } }
+                    let params: DragAction = match serde_json::from_value(tool_input) {
+                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for LeftClickDrag: {}", e), None),
+                    };
+                    match state.desktop.drag(params.action.data.start_x, params.action.data.start_y, params.action.data.end_x, params.action.data.end_y) {
+                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    }
+                }
+                 "MiddleClick" => {
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordData { x: f64, y: f64 }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordAction { action: struct { #[serde(rename = "type")] _type: String, data: CoordData } }
+                    let params: CoordAction = match serde_json::from_value(tool_input) {
+                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for MiddleClick: {}", e), None),
+                    };
+                    match state.desktop.middle_click(params.action.data.x, params.action.data.y) {
+                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    }
+                }
+                "DoubleClick" => {
+                     #[derive(serde::Deserialize, Debug)]
+                    struct CoordData { x: f64, y: f64 }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordAction { action: struct { #[serde(rename = "type")] _type: String, data: CoordData } }
+                    let params: CoordAction = match serde_json::from_value(tool_input) {
+                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for DoubleClick: {}", e), None),
+                    };
+                    match state.desktop.double_click(params.action.data.x, params.action.data.y) {
+                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    }
+                }
+                "TripleClick" => {
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordData { x: f64, y: f64 }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct CoordAction { action: struct { #[serde(rename = "type")] _type: String, data: CoordData } }
+                    let params: CoordAction = match serde_json::from_value(tool_input) {
+                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for TripleClick: {}", e), None),
+                    };
+                    match state.desktop.triple_click(params.action.data.x, params.action.data.y) {
+                         Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    }
+                }
+                 "HoldKey" => {
+                    #[derive(serde::Deserialize, Debug)]
+                    struct HoldKeyData { key: String, duration: u64 }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct HoldKeyAction { action: struct { #[serde(rename = "type")] _type: String, data: HoldKeyData } }
+                    let params: HoldKeyAction = match serde_json::from_value(tool_input) {
+                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for HoldKey: {}", e), None),
+                    };
+                    match state.desktop.hold_key(&params.action.data.key, params.action.data.duration) {
+                        Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    }
+                }
+                "LeftMouseDown" => {
+                    #[derive(serde::Deserialize, Debug)]
+                    struct MouseDownData { x: Option<f64>, y: Option<f64> }
+                    #[derive(serde::Deserialize, Debug)]
+                    struct MouseDownAction { action: struct { #[serde(rename = "type")] _type: String, data: MouseDownData } }
+                    let params: MouseDownAction = match serde_json::from_value(tool_input) {
+                        Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for LeftMouseDown: {}", e), None),
+                    };
+                    match state.desktop.mouse_down("left", params.action.data.x, params.action.data.y) {
+                         Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    }
+                }
+                 "LeftMouseUp" => {
+                    #[derive(serde::Deserialize, Debug)]
+                    struct MouseUpData { x: Option<f64>, y: Option<f64> }
+                     #[derive(serde::Deserialize, Debug)]
+                    struct MouseUpAction { action: struct { #[serde(rename = "type")] _type: String, data: MouseUpData } }
+                    let params: MouseUpAction = match serde_json::from_value(tool_input) {
+                         Ok(p) => p, Err(e) => return mcp_error_response(id, -32602, format!("invalid params for LeftMouseUp: {}", e), None),
+                    };
+                    match state.desktop.mouse_up("left", params.action.data.x, params.action.data.y) {
+                         Ok(_) => Ok(json!(null)), Err(e) => Err(e),
+                    }
+                }
+                _ => {
+                    Err(AutomationError::InvalidArgument(format!(
+                        "Unsupported action type for inputControl: {}",
+                        action_wrapper.action.action_type
+                    )))
+                }
+            }
         }
         // Add cases for new tools
         "rightClickByIndex" => {
