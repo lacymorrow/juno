@@ -38,5 +38,35 @@ pub const FUNCTION_KEYCODE: CGKeyCode = 63; // Fn key
 
 // Add other key codes as needed...
 
+// Helper function to map key name string to CGKeyCode
+pub(crate) fn key_name_to_keycode(key_name: &str) -> Option<CGKeyCode> {
+    match key_name.to_lowercase().as_str() {
+        "return" | "enter" => Some(KEY_RETURN),
+        "tab" => Some(KEY_TAB),
+        "space" => Some(KEY_SPACE),
+        "delete" | "backspace" => Some(KEY_DELETE),
+        "escape" => Some(KEY_ESCAPE),
+        "left" | "arrowleft" => Some(KEY_ARROW_LEFT),
+        "right" | "arrowright" => Some(KEY_ARROW_RIGHT),
+        "down" | "arrowdown" => Some(KEY_ARROW_DOWN),
+        "up" | "arrowup" => Some(KEY_ARROW_UP),
+        "v" => Some(KEY_V),
+        // Add more mappings as needed
+        _ => None,
+    }
+}
+
+// Helper function to map modifier name string to CGEventFlags
+pub(crate) fn modifier_name_to_flags(modifier_name: &str) -> Option<CGEventFlags> {
+    match modifier_name.to_lowercase().as_str() {
+        "command" | "cmd" => Some(MODIFIER_COMMAND),
+        "shift" => Some(MODIFIER_SHIFT),
+        "option" | "alt" => Some(MODIFIER_OPTION),
+        "control" | "ctrl" => Some(MODIFIER_CONTROL),
+        "function" | "fn" => Some(MODIFIER_FN),
+        _ => None,
+    }
+}
+
 // Window role constants
 // ... (rest of the file remains the same) ...

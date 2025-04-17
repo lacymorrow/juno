@@ -2,6 +2,7 @@
 
 use clap::Parser;
 use computer_use_ai_sdk::{Desktop, ToolDefinition};
+use computer_use_ai_sdk::AutomationError;
 use dotenvy::dotenv;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,6 @@ use std::sync::Arc;
 use image::{GenericImageView, ImageFormat};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::io::Cursor;
-use computer_use_ai_sdk::AutomationError;
 use tracing_subscriber::{fmt, EnvFilter};
 use tracing::{debug, error, info, warn};
 use tauri_plugin_notification::NotificationExt;
@@ -21,6 +21,7 @@ use tauri::tray::{TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::{WindowEvent, Wry, Emitter, Listener};
 use tauri::menu::MenuItemBuilder;
 use tauri::image::Image;
+use std::fs;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -90,6 +91,38 @@ struct ToolResultBlock {
 struct SubmitQueryResult {
     text: String,
     audio_base64: Option<String>,
+}
+
+// Tool function for find and replace in a file (Moved before submit_query)
+fn str_replace_editor(file_path: String, find_text: String, replace_text: String) -> Result<String, String> {
+    info!(file_path = %file_path, find = %find_text, "Attempting str_replace_editor");
+
+    // Read the file content
+    let content = match fs::read_to_string(&file_path) {
+        Ok(c) => c,
+        Err(e) => {
+            let err_msg = format!("Failed to read file '{}': {}", file_path, e);
+            error!(error = %err_msg, "str_replace_editor failed");
+            return Err(err_msg);
+        }
+    };
+
+    // Perform the replacement
+    let new_content = content.replace(&find_text, &replace_text);
+
+    // Write the new content back to the file
+    match fs::write(&file_path, new_content) {
+        Ok(_) => {
+            let success_msg = format!("Successfully updated file '{}'", file_path);
+            info!(success_msg);
+            Ok(success_msg)
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to write file '{}': {}", file_path, e);
+            error!(error = %err_msg, "str_replace_editor failed");
+            Err(err_msg)
+        }
+    }
 }
 
 #[tauri::command]
@@ -400,7 +433,46 @@ async fn submit_query(
                     {
                         info!("Executing tool: {} with input: {:?}", name, input);
 
-                        let tool_result = desktop_arc.call_tool(name, input.clone());
+                        let tool_result = match name.as_str() {
+                            "openApplication" => {
+                                let app_name = input.get("application_name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                if let Some(name) = app_name {
+                                    desktop_arc.open_application(&name)
+                                        .map(|_| json!({ "status": format!("Successfully opened {}", name) }))
+                                } else {
+                                    Err(AutomationError::InvalidArgument("Missing required parameter: application_name".to_string()))
+                                }
+                            }
+                            "str_replace_editor" => {
+                                let file_path = input.get("file_path").and_then(|v| v.as_str()).map(String::from);
+                                let find_text = input.get("find").and_then(|v| v.as_str()).map(String::from);
+                                let replace_text = input.get("replace").and_then(|v| v.as_str()).map(String::from);
+
+                                match (file_path, find_text, replace_text) {
+                                    (Some(fp), Some(find), Some(replace)) => {
+                                        str_replace_editor(fp, find, replace)
+                                            .map(|msg| json!({ "status": msg }))
+                                            .map_err(|e| AutomationError::Internal(e))
+                                    }
+                                    _ => Err(AutomationError::InvalidArgument(
+                                        "Missing required parameters: file_path, find, replace".to_string()
+                                    )),
+                                }
+                            }
+                            "dev_get_clipboard_content" => desktop_arc.get_clipboard_content()
+                                .map(|content| json!({ "content": content }))
+                                .map_err(|e| AutomationError::Internal(format!("Clipboard error: {}", e))),
+                            "dev_set_clipboard_content" => {
+                                let content = input.get("content").and_then(|v| v.as_str());
+                                if let Some(content) = content {
+                                    desktop_arc.set_clipboard_content(content)
+                                        .map(|_| json!({ "status": "Clipboard set successfully" }))
+                                } else {
+                                    Err(AutomationError::InvalidArgument("Missing required parameter: content".to_string()))
+                                }
+                            }
+                            _ => desktop_arc.call_tool(name, input.clone()),
+                        };
 
                         let (result_content_value, is_error) = match tool_result {
                             Ok(result_value) => {
