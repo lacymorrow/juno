@@ -157,6 +157,11 @@ impl Desktop {
         self.engine.open_url(url, browser)
     }
 
+    /// Type text globally using keyboard simulation.
+    pub fn type_text(&self, text: &str) -> Result<(), AutomationError> {
+        self.engine.type_text(text)
+    }
+
     // /// Scroll at a specific position on screen
     // pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
     //     self.engine.scroll_at_position(x, y, direction, amount)
@@ -300,6 +305,20 @@ impl Desktop {
                 },
             },
             ToolDefinition {
+                name: "typeText".to_string(),
+                description: "Types the given text globally, simulating keyboard input. Does not require focusing a specific element.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: [
+                        ("text".to_string(), ToolParameter {
+                            type_: "string".to_string(),
+                            description: "The text to type.".to_string(),
+                        })
+                    ].iter().cloned().collect(),
+                    required: vec!["text".to_string()],
+                },
+            },
+            ToolDefinition {
                 name: "captureScreenshot".to_string(),
                 description: "Captures a screenshot of the main display and returns it as a base64 encoded PNG string.".to_string(),
                 input_schema: ToolInputSchema {
@@ -339,6 +358,18 @@ impl Desktop {
                 Ok(
                     serde_json::json!({"status": "success", "message": format!("URL '{}' opened.", url)}),
                 )
+            }
+            "typeText" => {
+                let text_to_type = args.get("text").and_then(|v| v.as_str()).ok_or_else(|| {
+                    AutomationError::InvalidArgument(
+                        "Missing or invalid 'text' argument for typeText tool".to_string(),
+                    )
+                })?;
+                self.type_text(text_to_type)?;
+                Ok(serde_json::json!({
+                    "status": "success",
+                    "message": format!("Typed global text.")
+                }))
             }
             "get_focused_element_info" => {
                 let element = self.focused_element()?;
