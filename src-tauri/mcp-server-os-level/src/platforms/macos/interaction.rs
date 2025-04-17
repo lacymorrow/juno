@@ -227,6 +227,220 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
     })
 }
 
+// --- New Mouse Functions ---
+
+/// Get the current mouse cursor position.
+pub(crate) fn get_cursor_position() -> Result<(f64, f64), AutomationError> {
+    // 1. Create an event source.
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for cursor position".to_string()))?;
+
+    // 2. Create a null mouse event (MouseMoved seems appropriate) using the source.
+    //    The specific type and point might not matter if we only need location.
+    let event = CGEvent::new_mouse_event(
+        source,
+        CGEventType::MouseMoved, // Or any other type?
+        CGPoint::new(0.0, 0.0), // Dummy point
+        CGMouseButton::Left, // Dummy button
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create CGEvent for cursor position".to_string()))?;
+
+    // 3. Get the location from the created event.
+    let location = event.location();
+    debug!("Retrieved cursor position: ({}, {})", location.x, location.y);
+    Ok((location.x, location.y))
+}
+
+/// Move the mouse cursor to the specified coordinates.
+pub(crate) fn mouse_move(x: f64, y: f64) -> Result<(), AutomationError> {
+    let point = CGPoint::new(x, y);
+    debug!("Moving mouse to ({}, {})", x, y);
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse move".to_string()))?;
+
+    let event = CGEvent::new_mouse_event(source, CGEventType::MouseMoved, point, CGMouseButton::Left) // Button doesn't matter for move
+        .map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+
+    event.post(CGEventTapLocation::HID);
+    // Optional: Add a small delay after moving
+    // std::thread::sleep(std::time::Duration::from_millis(10));
+    Ok(())
+}
+
+/// Simulate pressing the left mouse button down at the specified coordinates.
+pub(crate) fn left_mouse_down(x: f64, y: f64) -> Result<(), AutomationError> {
+    let point = CGPoint::new(x, y);
+    debug!("Left mouse down at ({}, {})", x, y);
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse down".to_string()))?;
+
+    let event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseDown, point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create left mouse down event".to_string()))?;
+
+    event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
+/// Simulate releasing the left mouse button at the specified coordinates.
+pub(crate) fn left_mouse_up(x: f64, y: f64) -> Result<(), AutomationError> {
+    let point = CGPoint::new(x, y);
+    debug!("Left mouse up at ({}, {})", x, y);
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse up".to_string()))?;
+
+    let event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create left mouse up event".to_string()))?;
+
+    event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
+/// Simulate a standard left click (down + up) at specified coordinates.
+pub(crate) fn left_click(x: f64, y: f64) -> Result<(), AutomationError> {
+    debug!("Performing left click at ({}, {})", x, y);
+    mouse_move(x, y)?; // Ensure cursor is at the correct position
+    std::thread::sleep(std::time::Duration::from_millis(20)); // Short pause after move
+    left_mouse_down(x, y)?;
+    std::thread::sleep(std::time::Duration::from_millis(50)); // Pause between down and up
+    left_mouse_up(x, y)?;
+    Ok(())
+}
+
+/// Simulate a right click (down + up) at specified coordinates.
+pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
+    let point = CGPoint::new(x, y);
+    debug!("Performing right click at ({}, {})", x, y);
+    mouse_move(x, y)?; // Ensure cursor is at the correct position
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for right click".to_string()))?;
+
+    let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::RightMouseDown, point, CGMouseButton::Right)
+        .map_err(|_| AutomationError::PlatformError("Failed to create right mouse down event".to_string()))?;
+    down_event.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let up_event = CGEvent::new_mouse_event(source, CGEventType::RightMouseUp, point, CGMouseButton::Right)
+        .map_err(|_| AutomationError::PlatformError("Failed to create right mouse up event".to_string()))?;
+    up_event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
+/// Simulate a middle click (down + up) at specified coordinates.
+pub(crate) fn middle_click(x: f64, y: f64) -> Result<(), AutomationError> {
+    let point = CGPoint::new(x, y);
+    debug!("Performing middle click at ({}, {})", x, y);
+    mouse_move(x, y)?; // Ensure cursor is at the correct position
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for middle click".to_string()))?;
+
+    let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::OtherMouseDown, point, CGMouseButton::Center)
+        .map_err(|_| AutomationError::PlatformError("Failed to create middle mouse down event".to_string()))?;
+    down_event.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let up_event = CGEvent::new_mouse_event(source, CGEventType::OtherMouseUp, point, CGMouseButton::Center)
+        .map_err(|_| AutomationError::PlatformError("Failed to create middle mouse up event".to_string()))?;
+    up_event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
+/// Simulate a double click at the specified coordinates.
+pub(crate) fn double_click(x: f64, y: f64) -> Result<(), AutomationError> {
+    let point = CGPoint::new(x, y);
+    debug!("Performing double click at ({}, {})", x, y);
+    mouse_move(x, y)?;
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for double click".to_string()))?;
+
+    // First click (down)
+    let down1 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create double click down1 event".to_string()))?;
+    down1.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
+    down1.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // First click (up)
+    let up1 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create double click up1 event".to_string()))?;
+    up1.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
+    up1.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(50)); // Double click interval
+
+    // Second click (down)
+    let down2 = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create double click down2 event".to_string()))?;
+    down2.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 2);
+    down2.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Second click (up)
+    let up2 = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create double click up2 event".to_string()))?;
+    up2.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 2);
+    up2.post(CGEventTapLocation::HID);
+
+    Ok(())
+}
+
+/// Simulate a triple click at the specified coordinates.
+pub(crate) fn triple_click(x: f64, y: f64) -> Result<(), AutomationError> {
+    debug!("Performing triple click at ({}, {})", x, y);
+    // We can build triple click by calling double_click then single click
+    // Note: Timing between clicks is crucial for OS recognition.
+    double_click(x, y)?; // Perform double click first
+    std::thread::sleep(std::time::Duration::from_millis(50)); // Interval before the third click
+    left_click(x, y)?; // Perform the third click
+    // Adjust click state field if needed, but often OS handles it based on timing
+    Ok(())
+}
+
+/// Simulate dragging with the left mouse button from a start point to an end point.
+pub(crate) fn left_click_drag(
+    start_x: f64,
+    start_y: f64,
+    end_x: f64,
+    end_y: f64,
+) -> Result<(), AutomationError> {
+    let start_point = CGPoint::new(start_x, start_y);
+    let end_point = CGPoint::new(end_x, end_y);
+    debug!(
+        "Performing left click drag from ({}, {}) to ({}, {})",
+        start_x, start_y, end_x, end_y
+    );
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for drag".to_string()))?;
+
+    // 1. Move to start position
+    mouse_move(start_x, start_y)?;
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    // 2. Press left button down
+    let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, start_point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create drag down event".to_string()))?;
+    down_event.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(100)); // Hold briefly before dragging
+
+    // 3. Move to end position (drag event)
+    let drag_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDragged, end_point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create drag move event".to_string()))?;
+    drag_event.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(100)); // Pause at end position
+
+    // 4. Release left button
+    let up_event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, end_point, CGMouseButton::Left)
+        .map_err(|_| AutomationError::PlatformError("Failed to create drag up event".to_string()))?;
+    up_event.post(CGEventTapLocation::HID);
+
+    Ok(())
+}
+
 // RAII guard to restore clipboard content
 struct ClipboardGuard {
     original_content: Option<String>,

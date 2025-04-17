@@ -27,7 +27,6 @@ use crate::platforms::macos::interaction::{self};
 use crate::platforms::macos::constants::{
     COMMAND_KEYCODE, CONTROL_KEYCODE, OPTION_KEYCODE, SHIFT_KEYCODE, // Key codes
     MODIFIER_COMMAND, MODIFIER_SHIFT, MODIFIER_OPTION, MODIFIER_CONTROL, // Modifier flags
-    key_name_to_keycode, modifier_name_to_flags // Mapping functions
 };
 use serde_json::{json, Value as JsonValue};
 
@@ -1330,15 +1329,62 @@ impl AccessibilityEngine for MacOSEngine {
     fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
         debug!("pressing key: {} with modifier: {:?}", key_name, modifier);
 
-        let key_code = key_name_to_keycode(key_name)
+        let key_code = super::constants::key_name_to_keycode(key_name)
             .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid key name: {}", key_name)))?;
 
         let modifier_flags = match modifier {
-            Some(mod_name) => modifier_name_to_flags(mod_name)
+            Some(mod_name) => super::constants::modifier_name_to_flags(mod_name)
                 .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?,
             None => CGEventFlags::empty(),
         };
 
         interaction::press_key_with_modifier(key_code, modifier_flags)
+    }
+
+    /// Get the current mouse cursor position.
+    fn cursor_position(&self) -> Result<(f64, f64), AutomationError> {
+        interaction::get_cursor_position()
+    }
+
+    fn mouse_move(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::mouse_move(x, y)
+    }
+
+    fn left_mouse_down(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::left_mouse_down(x, y)
+    }
+
+    fn left_mouse_up(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::left_mouse_up(x, y)
+    }
+
+    fn left_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::left_click(x, y)
+    }
+
+    fn right_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::right_click(x, y)
+    }
+
+    fn middle_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::middle_click(x, y)
+    }
+
+    fn double_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::double_click(x, y)
+    }
+
+    fn triple_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        interaction::triple_click(x, y)
+    }
+
+    fn left_click_drag(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+    ) -> Result<(), AutomationError> {
+        interaction::left_click_drag(start_x, start_y, end_x, end_y)
     }
 }

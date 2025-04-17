@@ -283,6 +283,7 @@ dependencies = [
  "base64",
  "chrono",
  "clipboard_macos",
+ "cocoa",
  "core-foundation 0.10.0",
  "core-graphics",
  "dotenvy",
