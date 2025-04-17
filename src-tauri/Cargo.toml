@@ -34,6 +34,7 @@ image = "0.25.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.5.11", features = ["derive"] }
+tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
