@@ -82,6 +82,7 @@ const DevToolsPanel: React.FC = () => {
   const [waitDuration, setWaitDuration] = useState<string>("1000"); // Wait duration in ms
 
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
+  const [delayMessage, setDelayMessage] = useState<string | null>(null); // State for delay message
 
   // Cleanup timeout on component unmount
   useEffect(() => {
@@ -123,6 +124,33 @@ const DevToolsPanel: React.FC = () => {
       }
     }
     return result;
+  };
+
+  // Helper function to invoke commands with a delay for focus switching
+  const invokeCommandWithDelay = async (
+    command: string,
+    args: any,
+    loadingKey: keyof LoadingStates,
+    delayMs: number = 5000
+  ) => {
+    if (loadingStates[loadingKey]) return; // Prevent multiple clicks
+
+    setError(null);
+    setDelayMessage(null); // Clear previous delay message
+    setLoadingStates((prev) => ({ ...prev, [loadingKey]: true }));
+    setDelayMessage(`Waiting ${delayMs / 1000}s... Switch focus now!`); // Indicate delay
+
+    // Clear any existing timeout
+    if (delayTimeoutRef.current) {
+      clearTimeout(delayTimeoutRef.current);
+    }
+
+    delayTimeoutRef.current = setTimeout(async () => {
+      setDelayMessage(null); // Clear waiting message
+      await invokeCommand(command, args); // Use the original invokeCommand internally
+      setLoadingStates((prev) => ({ ...prev, [loadingKey]: false })); // Clear loading state after execution
+      delayTimeoutRef.current = null;
+    }, delayMs);
   };
 
   const handleCaptureScreenshot = async () => {
@@ -194,27 +222,32 @@ const DevToolsPanel: React.FC = () => {
     setFocusedElementInfo(null); // Clear previous info
     setLoadingStates((prev) => ({ ...prev, focusDelay: true }));
 
-    setError("Waiting 5s... Switch focus now!"); // Using error state for now
+    // Use delayMessage instead of error for the waiting indication
+    setDelayMessage("Waiting 5s... Switch focus now!");
+    // setError("Waiting 5s... Switch focus now!"); // Using error state for now
 
     delayTimeoutRef.current = setTimeout(async () => {
-      setError(null); // Clear the waiting message
+      // setError(null); // Clear the waiting message
+      setDelayMessage(null); // Clear the waiting message
       await fetchAndSetFocusInfo();
       setLoadingStates((prev) => ({ ...prev, focusDelay: false }));
       delayTimeoutRef.current = null;
     }, 5000); // 5-second delay
   };
 
-  // Specific handlers using invokeCommand
+  // Specific handlers using invokeCommand or invokeCommandWithDelay
   const handleClickFocused = () =>
-    invokeCommand("dev_click_focused_element", {}, "clickFocus");
+    invokeCommandWithDelay("dev_click_focused_element", {}, "clickFocus");
 
-  // Modified handleTypeText to add a delay
+  // handleTypeText already has a manual delay implementation, kept for reference or potential refactor
   const handleTypeText = () => {
     if (loadingStates.typeText) return; // Prevent multiple clicks
 
     setError(null);
+    setDelayMessage(null);
     setLoadingStates((prev) => ({ ...prev, typeText: true }));
-    setError("Waiting 5s... Switch focus to target element now!"); // Indicate delay
+    // setError("Waiting 5s... Switch focus to target element now!"); // Indicate delay
+    setDelayMessage("Waiting 5s... Switch focus to target element now!"); // Indicate delay
 
     // Clear any existing timeout
     if (delayTimeoutRef.current) {
@@ -222,7 +255,8 @@ const DevToolsPanel: React.FC = () => {
     }
 
     delayTimeoutRef.current = setTimeout(async () => {
-      setError(null); // Clear waiting message
+      // setError(null); // Clear waiting message
+      setDelayMessage(null); // Clear waiting message
       await invokeCommand("dev_type_text", { text: textToType }); // Pass loadingKey manually handled
       setLoadingStates((prev) => ({ ...prev, typeText: false })); // Clear loading state after execution
       delayTimeoutRef.current = null;
@@ -230,18 +264,19 @@ const DevToolsPanel: React.FC = () => {
   };
 
   const handlePressKey = () =>
-    invokeCommand("dev_press_key", { key: keyToPress }, "pressKey");
+    invokeCommandWithDelay("dev_press_key", { key: keyToPress }, "pressKey");
 
   const handleOpenApp = () =>
     invokeCommand("dev_open_application", { appName: appToOpen }, "openApp");
   const handleOpenUrl = () =>
     invokeCommand("dev_open_url", { url: urlToOpen }, "openUrl");
   const handleScroll = (direction: "up" | "down") =>
-    invokeCommand("dev_scroll_window", { direction }, "scroll");
+    invokeCommandWithDelay("dev_scroll_window", { direction }, "scroll");
 
   // New handlers
   const handleGlobalTypeText = () =>
-    invokeCommand(
+    invokeCommandWithDelay(
+      // Add delay here too
       "dev_global_type_text",
       { text: globalTextToType },
       "globalTypeText"
@@ -249,7 +284,7 @@ const DevToolsPanel: React.FC = () => {
 
   const handleGetClipboard = async () => {
     setClipboardResult(null); // Clear previous result
-    const content = await invokeCommand<string>(
+    const content = await invokeCommand<string>( // No delay needed
       "dev_get_clipboard",
       {},
       "getClipboard"
@@ -268,10 +303,14 @@ const DevToolsPanel: React.FC = () => {
     );
 
   const handleHoldKey = () =>
-    invokeCommand("dev_hold_key", { key: modifierKey }, "holdKey");
+    invokeCommandWithDelay("dev_hold_key", { key: modifierKey }, "holdKey");
 
   const handleReleaseKey = () =>
-    invokeCommand("dev_release_key", { key: modifierKey }, "releaseKey");
+    invokeCommandWithDelay(
+      "dev_release_key",
+      { key: modifierKey },
+      "releaseKey"
+    );
 
   const handleWait = () => {
     const duration = parseInt(waitDuration, 10);
@@ -279,7 +318,7 @@ const DevToolsPanel: React.FC = () => {
       setError("Invalid wait duration. Please enter a non-negative number.");
       return;
     }
-    invokeCommand("dev_wait", { durationMs: duration }, "wait");
+    invokeCommand("dev_wait", { durationMs: duration }, "wait"); // No delay needed
   };
 
   return (
@@ -295,6 +334,15 @@ const DevToolsPanel: React.FC = () => {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      {/* Display Delay Message */}
+      {delayMessage && (
+        <Alert variant="info" className="p-2 text-xs">
+          <AlertTitle className="text-xs font-semibold">
+            Action Delay
+          </AlertTitle>
+          <AlertDescription>{delayMessage}</AlertDescription>
+        </Alert>
+      )}
       {/* Vision Context Section */}
       <h3 className="text-base font-semibold border-b pb-1">
         {" "}
@@ -307,14 +355,18 @@ const DevToolsPanel: React.FC = () => {
           size="sm" // Smaller button
           onClick={handleCaptureScreenshot}
           disabled={loadingStates.screenshot || loadingStates.focusDelay}
+          title="Capture Screenshot"
         >
+          <Maximize2 size={14} className="mr-1" />
           {loadingStates.screenshot ? "..." : "Screenshot"} {/* Shorter text */}
         </Button>
         <Button
           size="sm"
           onClick={handleGetFocusInfo}
           disabled={loadingStates.focusInfo || loadingStates.focusDelay}
+          title="Get Focused Element Info"
         >
+          <Maximize2 size={14} className="mr-1" />
           {loadingStates.focusInfo ? "..." : "Focus Info"}
         </Button>
         <Button
@@ -327,6 +379,7 @@ const DevToolsPanel: React.FC = () => {
           }
           title="Get Focused Element Info (After 5s Delay)" // Use title for long text
         >
+          <Maximize2 size={14} className="mr-1" />
           {loadingStates.focusDelay ? "Waiting..." : "Focus Info (5s)"}
         </Button>
         <Button
@@ -402,10 +455,10 @@ const DevToolsPanel: React.FC = () => {
             title="Click Focused Element" // Tooltip
           >
             <MousePointerClick size={14} className="mr-1" /> {/* Icon */}
-            {loadingStates.clickFocus ? "..." : "Click"}
+            {loadingStates.clickFocus ? "Waiting..." : "Click"}
           </Button>
           <span className="text-xs text-muted-foreground flex-1">
-            Clicks the OS-focused element.
+            Clicks the OS-focused element (after 5s delay).
           </span>
         </div>
         {/* Type Text */}
@@ -418,7 +471,7 @@ const DevToolsPanel: React.FC = () => {
             title="Type Text"
           >
             <Keyboard size={14} className="mr-1" />
-            {loadingStates.typeText ? "..." : "Type"}
+            {loadingStates.typeText ? "Waiting..." : "Type"}
           </Button>
           <Input
             id="text-to-type"
@@ -438,7 +491,7 @@ const DevToolsPanel: React.FC = () => {
             title="Press Key Combination"
           >
             <Keyboard size={14} className="mr-1" />
-            {loadingStates.pressKey ? "..." : "Press"}
+            {loadingStates.pressKey ? "Waiting..." : "Press"}
           </Button>
           <Input
             id="key-to-press"
@@ -459,7 +512,8 @@ const DevToolsPanel: React.FC = () => {
             title="Scroll Up"
           >
             <ArrowUpDown size={14} className="mr-1" />{" "}
-            {/* Generic scroll icon */} Up
+            {/* Generic scroll icon */}
+            {loadingStates.scroll ? "Waiting..." : "Up"}
           </Button>
           <Button
             onClick={() => handleScroll("down")}
@@ -468,10 +522,11 @@ const DevToolsPanel: React.FC = () => {
             size="sm"
             title="Scroll Down"
           >
-            <ArrowUpDown size={14} className="mr-1" /> Down
+            <ArrowUpDown size={14} className="mr-1" />
+            {loadingStates.scroll ? "Waiting..." : "Down"}
           </Button>
           <span className="text-xs text-muted-foreground flex-1">
-            Focused window.
+            Focused window (after 5s delay).
           </span>
         </div>
       </div>
@@ -538,7 +593,7 @@ const DevToolsPanel: React.FC = () => {
             title="Type Text Globally"
           >
             <Keyboard size={14} className="mr-1" />
-            {loadingStates.globalTypeText ? "..." : "Global Type"}
+            {loadingStates.globalTypeText ? "Waiting..." : "Global Type"}
           </Button>
           <Input
             id="global-text-to-type"
@@ -558,7 +613,7 @@ const DevToolsPanel: React.FC = () => {
             title="Hold Key"
           >
             <Hand size={14} className="mr-1" />
-            {loadingStates.holdKey ? "..." : "Hold"}
+            {loadingStates.holdKey ? "Waiting..." : "Hold"}
           </Button>
           <Input
             id="modifier-key"
@@ -578,8 +633,11 @@ const DevToolsPanel: React.FC = () => {
             title="Release Key"
           >
             <Hand size={14} className="mr-1" />
-            {loadingStates.releaseKey ? "..." : "Release"}
+            {loadingStates.releaseKey ? "Waiting..." : "Release"}
           </Button>
+          <span className="text-xs text-muted-foreground flex-1">
+            Releases held key (after 5s delay). Requires a preceding 'Hold'.
+          </span>
         </div>
         {/* Wait */}
         <div className="flex items-center gap-2">
