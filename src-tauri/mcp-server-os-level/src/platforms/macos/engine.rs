@@ -18,12 +18,12 @@ use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
-use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventFlags, CGEventType, CGMouseButton, CGKeyCode};
+use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use libc;
 use std::collections::BTreeMap;
 use tracing::{debug, trace, warn};
-use crate::platforms::macos::interaction::{self, press_key};
+use crate::platforms::macos::interaction::{self};
 use crate::platforms::macos::utils::capture_and_encode_screenshot;
 use crate::platforms::macos::constants::{
     COMMAND_KEYCODE, CONTROL_KEYCODE, OPTION_KEYCODE, SHIFT_KEYCODE, // Key codes
