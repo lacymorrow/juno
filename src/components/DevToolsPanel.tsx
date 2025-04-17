@@ -13,6 +13,10 @@ import {
   ExternalLink, // Example icon
   AppWindow, // Example icon
   ArrowUpDown, // Example icon
+  Clipboard, // Added
+  ClipboardPaste, // Added
+  Hand, // Added for Hold/Release
+  Timer, // Added for Wait
 } from "lucide-react"; // Import some icons
 
 // Helper type for tracking loading states
@@ -27,6 +31,13 @@ type LoadingStates = {
   openApp: boolean;
   openUrl: boolean;
   scroll: boolean;
+  // New loading states
+  globalTypeText: boolean;
+  getClipboard: boolean;
+  setClipboard: boolean;
+  holdKey: boolean;
+  releaseKey: boolean;
+  wait: boolean;
 };
 
 const DevToolsPanel: React.FC = () => {
@@ -48,6 +59,12 @@ const DevToolsPanel: React.FC = () => {
     openApp: false,
     openUrl: false,
     scroll: false,
+    globalTypeText: false,
+    getClipboard: false,
+    setClipboard: false,
+    holdKey: false,
+    releaseKey: false,
+    wait: false,
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +73,13 @@ const DevToolsPanel: React.FC = () => {
   const [keyToPress, setKeyToPress] = useState<string>("Return"); // e.g., Return, Tab, cmd+s
   const [appToOpen, setAppToOpen] = useState<string>("TextEdit");
   const [urlToOpen, setUrlToOpen] = useState<string>("https://www.google.com");
+  // New input states
+  const [globalTextToType, setGlobalTextToType] =
+    useState<string>("Global text");
+  const [clipboardContent, setClipboardContent] = useState<string>(""); // For setting
+  const [clipboardResult, setClipboardResult] = useState<string | null>(null); // For displaying get result
+  const [modifierKey, setModifierKey] = useState<string>("shift"); // For hold/release
+  const [waitDuration, setWaitDuration] = useState<string>("1000"); // Wait duration in ms
 
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
 
@@ -68,20 +92,28 @@ const DevToolsPanel: React.FC = () => {
     };
   }, []);
 
-  // Generic handler to invoke a command and update loading/error
-  const invokeCommand = async (
+  // Generic handler to invoke a command and update loading/error/info
+  const invokeCommand = async <T = any,>(
     command: string,
     args?: any,
     loadingKey?: keyof LoadingStates
-  ) => {
-    if (loadingKey && loadingStates[loadingKey]) return; // Prevent concurrent calls for the same key
+  ): Promise<T | null> => {
+    if (loadingKey && loadingStates[loadingKey]) return null; // Prevent concurrent calls
     setError(null);
     if (loadingKey) {
       setLoadingStates((prev) => ({ ...prev, [loadingKey]: true }));
     }
 
+    let result: T | null = null;
     try {
-      await invoke(command, args);
+      result = await invoke<T>(command, args);
+      // Call notification command on success instead of setting info state
+      // Assuming a command 'show_notification_command' exists in Rust
+      // Adjust title/body as needed
+      invoke("show_notification_command", {
+        title: "Success",
+        body: `Command '${command}' executed.`,
+      }).catch(console.error); // Log error if notification fails
     } catch (err: any) {
       console.error(`Failed to invoke ${command}:`, err);
       setError(`Failed command '${command}': ${err?.message || err}`);
@@ -90,6 +122,7 @@ const DevToolsPanel: React.FC = () => {
         setLoadingStates((prev) => ({ ...prev, [loadingKey]: false }));
       }
     }
+    return result;
   };
 
   const handleCaptureScreenshot = async () => {
@@ -184,6 +217,49 @@ const DevToolsPanel: React.FC = () => {
     invokeCommand("dev_open_url", { url: urlToOpen }, "openUrl");
   const handleScroll = (direction: "up" | "down") =>
     invokeCommand("dev_scroll_window", { direction }, "scroll");
+
+  // New handlers
+  const handleGlobalTypeText = () =>
+    invokeCommand(
+      "dev_global_type_text",
+      { text: globalTextToType },
+      "globalTypeText"
+    );
+
+  const handleGetClipboard = async () => {
+    setClipboardResult(null); // Clear previous result
+    const content = await invokeCommand<string>(
+      "dev_get_clipboard",
+      {},
+      "getClipboard"
+    );
+    if (content !== null) {
+      // Check if invoke succeeded
+      setClipboardResult(content);
+    }
+  };
+
+  const handleSetClipboard = () =>
+    invokeCommand(
+      "dev_set_clipboard",
+      { content: clipboardContent },
+      "setClipboard"
+    );
+
+  const handleHoldKey = () =>
+    invokeCommand("dev_hold_key", { key: modifierKey }, "holdKey");
+
+  const handleReleaseKey = () =>
+    invokeCommand("dev_release_key", { key: modifierKey }, "releaseKey");
+
+  const handleWait = () => {
+    const duration = parseInt(waitDuration, 10);
+    if (isNaN(duration) || duration < 0) {
+      setError("Invalid wait duration. Please enter a non-negative number.");
+      return;
+    }
+    invokeCommand("dev_wait", { durationMs: duration }, "wait");
+  };
 
   return (
     <div className="w-full space-y-3 text-sm">
@@ -424,6 +500,129 @@ const DevToolsPanel: React.FC = () => {
             onChange={(e) => setUrlToOpen(e.target.value)}
             className="h-8 text-xs flex-1"
             placeholder="https://..."
+          />
+        </div>
+      </div>
+      <Separator className="my-3" />
+      {/* Global Actions Section */}
+      <h3 className="text-base font-semibold border-b pb-1">Global Actions</h3>
+      <div className="space-y-2">
+        {/* Global Type Text */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleGlobalTypeText}
+            disabled={loadingStates.globalTypeText}
+            variant="outline"
+            title="Type Text Globally"
+          >
+            <Keyboard size={14} className="mr-1" />
+            {loadingStates.globalTypeText ? "..." : "Global Type"}
+          </Button>
+          <Input
+            id="global-text-to-type"
+            value={globalTextToType}
+            onChange={(e) => setGlobalTextToType(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Text to type globally"
+          />
+        </div>
+        {/* Hold/Release Key */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleHoldKey}
+            disabled={loadingStates.holdKey}
+            variant="outline"
+            title="Hold Key"
+          >
+            <Hand size={14} className="mr-1" />
+            {loadingStates.holdKey ? "..." : "Hold"}
+          </Button>
+          <Input
+            id="modifier-key"
+            value={modifierKey}
+            onChange={(e) => setModifierKey(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Modifier key (shift, cmd)"
+          />
+        </div>
+        {/* Release Key */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleReleaseKey}
+            disabled={loadingStates.releaseKey}
+            variant="outline"
+            title="Release Key"
+          >
+            <Hand size={14} className="mr-1" />
+            {loadingStates.releaseKey ? "..." : "Release"}
+          </Button>
+        </div>
+        {/* Wait */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleWait}
+            disabled={loadingStates.wait}
+            variant="outline"
+            title="Wait"
+          >
+            <Timer size={14} className="mr-1" />
+            {loadingStates.wait ? "..." : "Wait"}
+          </Button>
+          <Input
+            id="wait-duration"
+            value={waitDuration}
+            onChange={(e) => setWaitDuration(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Wait duration (ms)"
+          />
+        </div>
+      </div>
+      <Separator className="my-3" />
+      {/* Clipboard Section */}
+      <h3 className="text-base font-semibold border-b pb-1">Clipboard</h3>
+      <div className="space-y-2">
+        {/* Get Clipboard */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleGetClipboard}
+            disabled={loadingStates.getClipboard}
+            variant="outline"
+            title="Get Clipboard"
+          >
+            <Clipboard size={14} className="mr-1" />
+            {loadingStates.getClipboard ? "Getting..." : "Get Clipboard"}
+          </Button>
+        </div>
+        {clipboardResult !== null && (
+          <div className="mt-1 border rounded-md p-2 bg-muted text-muted-foreground text-xs">
+            <p className="font-mono break-all">
+              {clipboardResult || "(Empty)"}
+            </p>
+          </div>
+        )}
+        {/* Set Clipboard */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleSetClipboard}
+            disabled={loadingStates.setClipboard}
+            variant="outline"
+            title="Set Clipboard"
+          >
+            <ClipboardPaste size={14} className="mr-1" />
+            {loadingStates.setClipboard ? "..." : "Set Clipboard"}
+          </Button>
+          <Input
+            id="clipboard-content"
+            value={clipboardContent}
+            onChange={(e) => setClipboardContent(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Text to set clipboard"
           />
         </div>
       </div>
