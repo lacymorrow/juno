@@ -207,10 +207,31 @@ const DevToolsPanel: React.FC = () => {
   // Specific handlers using invokeCommand
   const handleClickFocused = () =>
     invokeCommand("dev_click_focused_element", {}, "clickFocus");
-  const handleTypeText = () =>
-    invokeCommand("dev_type_text", { text: textToType }, "typeText");
+
+  // Modified handleTypeText to add a delay
+  const handleTypeText = () => {
+    if (loadingStates.typeText) return; // Prevent multiple clicks
+
+    setError(null);
+    setLoadingStates((prev) => ({ ...prev, typeText: true }));
+    setError("Waiting 5s... Switch focus to target element now!"); // Indicate delay
+
+    // Clear any existing timeout
+    if (delayTimeoutRef.current) {
+      clearTimeout(delayTimeoutRef.current);
+    }
+
+    delayTimeoutRef.current = setTimeout(async () => {
+      setError(null); // Clear waiting message
+      await invokeCommand("dev_type_text", { text: textToType }); // Pass loadingKey manually handled
+      setLoadingStates((prev) => ({ ...prev, typeText: false })); // Clear loading state after execution
+      delayTimeoutRef.current = null;
+    }, 5000); // 5-second delay
+  };
+
   const handlePressKey = () =>
     invokeCommand("dev_press_key", { key: keyToPress }, "pressKey");
+
   const handleOpenApp = () =>
     invokeCommand("dev_open_application", { appName: appToOpen }, "openApp");
   const handleOpenUrl = () =>

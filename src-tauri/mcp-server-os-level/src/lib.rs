@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, info, warn};
+use std::sync::{Arc};
+use std::time::{};
+use tracing::{error, info};
 
 // Make element module public
 pub mod element;

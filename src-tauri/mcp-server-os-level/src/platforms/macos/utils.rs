@@ -506,3 +506,16 @@ pub fn check_accessibility_permissions() -> bool {
         AXIsProcessTrustedWithOptions(std::ptr::null())
     }
 }
+
+pub fn get_display_bounds(display_id: Option<CGDirectDisplayID>) -> Result<CGRect, AutomationError> {
+    unsafe {
+        // Use unwrap_or_else with a closure for unsafe call
+        let target_display_id = display_id.unwrap_or_else(|| CGMainDisplayID() );
+        let bounds = CGDisplayBounds(target_display_id);
+        if bounds.size.width == 0.0 || bounds.size.height == 0.0 {
+            Err(AutomationError::PlatformError(format!("Invalid display bounds for display ID: {:?}", target_display_id)))
+        } else {
+            Ok(bounds)
+        }
+    }
+}
