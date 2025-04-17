@@ -2,6 +2,7 @@ use crate::element::UIElement;
 use crate::{AutomationError, Selector};
 use anyhow::Result;
 use std::any::Any;
+use serde_json::Value as JsonValue;
 
 /// The common trait that all platform-specific engines must implement
 pub trait AccessibilityEngine: Send + Sync + Any {
@@ -77,6 +78,12 @@ pub trait AccessibilityEngine: Send + Sync + Any {
 
     /// Wait for a specified duration
     fn wait(&self, duration_ms: u64) -> Result<(), AutomationError>;
+
+    /// Press a single key with an optional modifier
+    fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError>;
+
+    /// Get the UI tree starting from a specific app or the focused one
+    fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError>;
 }
 
 #[cfg(target_os = "linux")]

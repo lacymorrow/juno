@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::str::FromStr;
+use crate::AutomationError;
 
 /// Represents ways to locate a UI element
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -48,5 +50,16 @@ impl From<&str> for Selector {
             _ if s.starts_with("text:") => Selector::Text(s[5..].to_string()),
             _ => Selector::Name(s.to_string()),
         }
+    }
+}
+
+// Implement FromStr for Selector
+impl FromStr for Selector {
+    type Err = AutomationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Reuse the logic from the existing From<&str> implementation
+        // Note: This simple parsing might need refinement for complex selectors
+        Ok(Selector::from(s))
     }
 }
