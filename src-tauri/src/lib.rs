@@ -859,6 +859,48 @@ fn run_check_accessibility() -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+async fn dev_global_type_text(text: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    info!("Executing dev_global_type_text with text: {}", text);
+    state.desktop.type_text(&text)
+        .map_err(|e| format!("Error typing global text: {}", e))
+}
+
+#[tauri::command]
+async fn dev_get_clipboard(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    info!("Executing dev_get_clipboard");
+    state.desktop.get_clipboard_content()
+        .map_err(|e| format!("Error getting clipboard content: {}", e))
+}
+
+#[tauri::command]
+async fn dev_set_clipboard(content: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    info!("Executing dev_set_clipboard");
+    state.desktop.set_clipboard_content(&content)
+        .map_err(|e| format!("Error setting clipboard content: {}", e))
+}
+
+#[tauri::command]
+async fn dev_hold_key(key: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    info!("Executing dev_hold_key with key: {}", key);
+    state.desktop.hold_key(&key)
+        .map_err(|e| format!("Error holding key '{}': {}", key, e))
+}
+
+#[tauri::command]
+async fn dev_release_key(key: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    info!("Executing dev_release_key with key: {}", key);
+    state.desktop.release_key(&key)
+        .map_err(|e| format!("Error releasing key '{}': {}", key, e))
+}
+
+#[tauri::command]
+async fn dev_wait(duration_ms: u64, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    info!("Executing dev_wait for {} ms", duration_ms);
+    state.desktop.wait(duration_ms)
+        .map_err(|e| format!("Error during wait: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Explicitly initialize tracing with INFO level by default
@@ -924,7 +966,12 @@ pub fn run() {
             dev_open_application,
             dev_open_url,
             dev_scroll_window,
-            tts::stop_speech // Ensure this is the correct name exported by the tts module
+            dev_global_type_text,
+            dev_get_clipboard,
+            dev_set_clipboard,
+            dev_hold_key,
+            dev_release_key,
+            dev_wait
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();

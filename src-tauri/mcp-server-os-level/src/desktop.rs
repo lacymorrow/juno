@@ -84,4 +84,14 @@ impl Desktop {
     pub fn scroll_at_current_position(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
         self.engine.scroll_at_current_position(direction, amount)
     }
+
+    // /// Get the current clipboard content
+    // pub fn get_clipboard_content(&self) -> Result<String, AutomationError> {
+    //     self.engine.get_clipboard_content()
+    // }
+    //
+    // /// Set the clipboard content
+    // pub fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError> {
+    //     self.engine.set_clipboard_content(content)
+    // }
 }
