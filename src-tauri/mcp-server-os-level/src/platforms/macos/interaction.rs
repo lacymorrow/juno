@@ -313,6 +313,34 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
     Ok(())
 }
 
+/// Types text globally using keyboard simulation.
+///
+/// This function simulates key presses for each character in the input string.
+/// It does not require focusing a specific UI element beforehand.
+pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
+    debug!("Typing text globally: {}", text);
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for typing".to_string())
+    })?;
+
+    for char_code in text.encode_utf16() {
+        let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
+            .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
+        key_down.post(CGEventTapLocation::HID);
+
+        // Optional small delay between key down and key up
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
+            .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
+        key_up.post(CGEventTapLocation::HID);
+
+        // Optional small delay between characters
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    Ok(())
+}
+
 fn get_key_code(key: &str) -> Result<u16, AutomationError> {
     let key_map: HashMap<&str, u16> = [
         ("return", KEY_RETURN),
@@ -515,4 +543,40 @@ pub(crate) fn set_clipboard_contents(text: &str) -> Result<(), AutomationError> 
             e
         ))),
     }
+}
+
+/// Holds down a specified modifier key.
+pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), AutomationError> {
+    debug!("Holding key: code={}, flags={:?}", key_code, flags);
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_|
+        AutomationError::PlatformError("Failed to create event source for hold_key".to_string())
+    )?;
+
+    // Create keyboard event for key down
+    let mut key_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key down event for hold_key".to_string()))?;
+
+    // Set the appropriate flags for the modifier key itself
+    key_down.set_flags(flags);
+    key_down.post(CGEventTapLocation::HID);
+
+    Ok(())
+}
+
+/// Releases a specified modifier key.
+pub(crate) fn release_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), AutomationError> {
+    debug!("Releasing key: code={}, flags={:?}", key_code, flags);
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_|
+        AutomationError::PlatformError("Failed to create event source for release_key".to_string())
+    )?;
+
+    // Create keyboard event for key up
+    let mut key_up = CGEvent::new_keyboard_event(source, key_code, false)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key up event for release_key".to_string()))?;
+
+    // Set the flags for the key up event (usually should have the modifier flag being released)
+    key_up.set_flags(flags);
+    key_up.post(CGEventTapLocation::HID);
+
+    Ok(())
 }

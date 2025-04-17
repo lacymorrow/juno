@@ -1,4 +1,5 @@
 use core_graphics::event::CGEventFlags;
+use core_graphics::event::CGKeyCode;
 
 // Add these constant definitions instead - these are the official values from Apple's headers
 pub(crate) const K_AXVALUE_CGPOINT_TYPE: u32 = 1;
@@ -21,3 +22,20 @@ pub(crate) const MODIFIER_SHIFT: CGEventFlags = CGEventFlags::CGEventFlagShift;
 pub(crate) const MODIFIER_OPTION: CGEventFlags = CGEventFlags::CGEventFlagAlternate;
 pub(crate) const MODIFIER_CONTROL: CGEventFlags = CGEventFlags::CGEventFlagControl;
 pub(crate) const MODIFIER_FN: CGEventFlags = CGEventFlags::CGEventFlagSecondaryFn;
+
+// Modifier Key Codes (Example values - verify these or use direct mapping)
+// These are often used for identifying the key itself, not setting flags.
+pub const COMMAND_KEYCODE: CGKeyCode = 55;
+pub const SHIFT_KEYCODE: CGKeyCode = 56;
+pub const CAPS_LOCK_KEYCODE: CGKeyCode = 57;
+pub const OPTION_KEYCODE: CGKeyCode = 58; // Alt/Option
+pub const CONTROL_KEYCODE: CGKeyCode = 59;
+pub const RIGHT_SHIFT_KEYCODE: CGKeyCode = 60;
+pub const RIGHT_OPTION_KEYCODE: CGKeyCode = 61;
+pub const RIGHT_CONTROL_KEYCODE: CGKeyCode = 62;
+pub const FUNCTION_KEYCODE: CGKeyCode = 63; // Fn key
+
+// Add other key codes as needed...
+
+// Window role constants
+// ... (rest of the file remains the same) ...

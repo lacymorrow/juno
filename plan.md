@@ -58,19 +58,44 @@ This section tracks the steps taken and planned for the implementation.
 
 *   **[Done] Implement Global `typeText`:**
     *   Added `type_text` method to `AccessibilityEngine` trait.
-    *   Implemented `type_text` in `MacOSEngine` using Core Graphics keyboard event simulation.
-    *   Added `type_text` method to `Desktop` struct.
-    *   Added `typeText` tool definition and handler to `Desktop::list_tools` and `Desktop::call_tool`.
+    *   Implemented `type_text` in `MacOSEngine` using Core Graphics keyboard event simulation (via `interaction::type_text_global`).
+    *   Added `type_text` method to `Desktop` struct in `lib.rs`.
+    *   Added `typeText` tool definition and handler to `Desktop::list_tools` and `Desktop::call_tool` in `lib.rs`.
     *   Ensured `cargo check` passes.
     *   *Summary:* Implemented the ability for the agent to type text globally without needing a specific target element, using macOS keyboard event simulation.
 
+*   **[Done] Implement Clipboard Tools:**
+    *   Identified existing `get_clipboard_contents` and `set_clipboard_contents` in `macos::interaction` using `clipboard-macos`.
+    *   Added `get_clipboard_content` and `set_clipboard_content` methods to `AccessibilityEngine` trait (`platforms/mod.rs`).
+    *   Implemented these methods in `MacOSEngine` (`macos/engine.rs`).
+    *   Added corresponding methods to `Desktop` struct implementation in `lib.rs`.
+    *   Added `getClipboard` and `setClipboard` tool definitions to `list_tools` in `lib.rs`.
+    *   Added handlers for `getClipboard` and `setClipboard` in `call_tool` in `lib.rs`.
+    *   Added missing `ToolNotFound` variant to `AutomationError` enum (`errors.rs`).
+    *   Fixed module path issues related to `utils` vs `macos_utils`.
+    *   Ensured `cargo check` passes.
+    *   *Summary:* Added tools for getting and setting the system clipboard content.
+
+*   **[Done] Implement `holdKey`/`releaseKey`:**
+    *   Added `hold_key` and `release_key` functions to `macos::interaction` using `CGEvent`.
+    *   Added `hold_key` and `release_key` methods to `AccessibilityEngine` trait.
+    *   Implemented these methods in `MacOSEngine`, parsing modifier key names and using constants defined in `macos::constants` for key codes and modifier flags.
+    *   Exposed `hold_key` and `release_key` via `Desktop` struct in `lib.rs`.
+    *   Added `holdKey` and `releaseKey` tool definitions and handlers to `lib.rs`.
+    *   Fixed issues with `CGEventFlags` constants usage by importing and using `MODIFIER_*` constants from `constants.rs`.
+    *   Ensured `cargo check` passes.
+    *   *Summary:* Added tools to simulate holding and releasing modifier keys (Shift, Command, Control, Option/Alt).
+
+*   **[Done] Implement `wait`:**
+    *   Added `wait` method to `AccessibilityEngine` trait.
+    *   Implemented `wait` in `MacOSEngine` using `std::thread::sleep`.
+    *   Exposed `wait` via `Desktop` struct in `lib.rs`.
+    *   Added `wait` tool definition and handler to `lib.rs`.
+    *   Ensured `cargo check` passes.
+    *   *Summary:* Added a tool to pause execution for a specified duration in milliseconds.
+
 *   **Next Steps:**
-    *   Implement `getClipboard` and `setClipboard` functionality in `macos::interaction` and expose via `Desktop`.
-    *   Add `getClipboard` and `setClipboard` tool definitions.
-    *   Implement `holdKey` and `releaseKey` functionality.
-    *   Add `holdKey` and `releaseKey` tool definitions.
-    *   Implement `wait` functionality.
-    *   Add `wait` tool definition.
+    *   Implement missing mouse actions (e.g., `cursor_position`, `mouse_move`, `left_mouse_down/up`, coordinate-based `left_click`, `right_click`, `middle_click`, `double_click`, `triple_click`, `left_click_drag`).
     *   Implement `text_editor` tool functionality.
     *   Implement `bash` tool functionality.
     *   Address `cargo check` warnings.
