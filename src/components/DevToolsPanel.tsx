@@ -38,6 +38,8 @@ type LoadingStates = {
   holdKey: boolean;
   releaseKey: boolean;
   wait: boolean;
+  findElement: boolean;
+  clickElement: boolean;
 };
 
 const DevToolsPanel: React.FC = () => {
@@ -65,6 +67,8 @@ const DevToolsPanel: React.FC = () => {
     holdKey: false,
     releaseKey: false,
     wait: false,
+    findElement: false,
+    clickElement: false,
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +84,12 @@ const DevToolsPanel: React.FC = () => {
   const [clipboardResult, setClipboardResult] = useState<string | null>(null); // For displaying get result
   const [modifierKey, setModifierKey] = useState<string>("shift"); // For hold/release
   const [waitDuration, setWaitDuration] = useState<string>("1000"); // Wait duration in ms
+
+  // Added state for selector-based actions
+  const [selectorString, setSelectorString] = useState<string>("button:OK");
+  const [findElementResult, setFindElementResult] = useState<string | null>(
+    null
+  );
 
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
   const [delayMessage, setDelayMessage] = useState<string | null>(null); // State for delay message
@@ -321,6 +331,34 @@ const DevToolsPanel: React.FC = () => {
     invokeCommand("dev_wait", { durationMs: duration }, "wait"); // No delay needed
   };
 
+  // Handler for finding element by selector
+  const handleFindElement = async () => {
+    setFindElementResult(null); // Clear previous result
+    const result = await invokeCommandWithDelay<string>(
+      "dev_find_element_by_selector",
+      { selectorStr: selectorString },
+      "findElement"
+    );
+    if (result !== null) {
+      try {
+        const parsedInfo = JSON.parse(result);
+        setFindElementResult(JSON.stringify(parsedInfo, null, 2));
+      } catch (parseError) {
+        console.error("Failed to parse find element result JSON:", parseError);
+        setFindElementResult(result); // Show raw string if JSON parsing fails
+        setError("Received find element result, but failed to parse as JSON.");
+      }
+    }
+  };
+
+  // Handler for clicking element by selector
+  const handleClickElement = () =>
+    invokeCommandWithDelay(
+      "dev_click_element_by_selector",
+      { selectorStr: selectorString },
+      "clickElement"
+    );
+
   return (
     <div className="w-full space-y-3 text-sm">
       {" "}
@@ -336,7 +374,10 @@ const DevToolsPanel: React.FC = () => {
       )}
       {/* Display Delay Message */}
       {delayMessage && (
-        <Alert variant="info" className="p-2 text-xs">
+        <Alert
+          variant="default"
+          className="p-2 text-xs border-blue-500 text-blue-700 dark:border-blue-400 dark:text-blue-300"
+        >
           <AlertTitle className="text-xs font-semibold">
             Action Delay
           </AlertTitle>
@@ -601,7 +642,7 @@ const DevToolsPanel: React.FC = () => {
             onChange={(e) => setGlobalTextToType(e.target.value)}
             className="h-8 text-xs flex-1"
             placeholder="Text to type globally"
-          />
+          ></Input>
         </div>
         {/* Hold/Release Key */}
         <div className="flex items-center gap-2">
@@ -659,6 +700,54 @@ const DevToolsPanel: React.FC = () => {
             placeholder="Wait duration (ms)"
           />
         </div>
+      </div>
+      <Separator className="my-3" />
+      {/* Element Selector Section */}
+      <h3 className="text-base font-semibold border-b pb-1">
+        Element Selector
+      </h3>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Input
+            id="selector-string"
+            value={selectorString}
+            onChange={(e) => setSelectorString(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Selector (e.g., button:Submit, Name:Username, #id)"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleFindElement}
+            disabled={loadingStates.findElement || loadingStates.clickElement}
+            variant="outline"
+            title="Find Element by Selector"
+          >
+            <Maximize2 size={14} className="mr-1" /> {/* Reuse icon? */}
+            {loadingStates.findElement ? "Finding..." : "Find Element"}
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleClickElement}
+            disabled={loadingStates.clickElement || loadingStates.findElement}
+            variant="outline"
+            title="Click Element by Selector"
+          >
+            <MousePointerClick size={14} className="mr-1" />
+            {loadingStates.clickElement ? "Waiting..." : "Click Element"}
+          </Button>
+        </div>
+        {findElementResult && (
+          <div className="mt-2 border rounded-md p-2">
+            <h4 className="text-xs font-semibold mb-1">Find Element Result:</h4>
+            <ScrollArea className="h-28 w-full rounded-md border p-2">
+              <pre className="text-xs whitespace-pre-wrap break-words">
+                <code>{findElementResult}</code>
+              </pre>
+            </ScrollArea>
+          </div>
+        )}
       </div>
       <Separator className="my-3" />
       {/* Clipboard Section */}

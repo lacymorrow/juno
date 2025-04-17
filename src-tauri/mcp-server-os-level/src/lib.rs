@@ -188,6 +188,62 @@ impl Desktop {
         self.engine.wait(duration_ms)
     }
 
+    /// Get the current mouse cursor position.
+    pub fn cursor_position(&self) -> Result<(f64, f64), AutomationError> {
+        self.engine.cursor_position()
+    }
+
+    /// Move the mouse cursor to the specified coordinates.
+    pub fn mouse_move(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.mouse_move(x, y)
+    }
+
+    /// Simulate pressing the left mouse button down at the specified coordinates.
+    pub fn left_mouse_down(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.left_mouse_down(x, y)
+    }
+
+    /// Simulate releasing the left mouse button at the specified coordinates.
+    pub fn left_mouse_up(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.left_mouse_up(x, y)
+    }
+
+    /// Simulate a standard left click (down + up) at specified coordinates.
+    pub fn left_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.left_click(x, y)
+    }
+
+    /// Simulate a right click (down + up) at specified coordinates.
+    pub fn right_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.right_click(x, y)
+    }
+
+    /// Simulate a middle click (down + up) at specified coordinates.
+    pub fn middle_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.middle_click(x, y)
+    }
+
+    /// Simulate a double left click at the specified coordinates.
+    pub fn double_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.double_click(x, y)
+    }
+
+    /// Simulate a triple left click at the specified coordinates.
+    pub fn triple_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.triple_click(x, y)
+    }
+
+    /// Simulate dragging with the left mouse button from a start point to an end point.
+    pub fn left_click_drag(
+        &self,
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+    ) -> Result<(), AutomationError> {
+        self.engine.left_click_drag(start_x, start_y, end_x, end_y)
+    }
+
     // /// Scroll at a specific position on screen
     // pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
     //     self.engine.scroll_at_position(x, y, direction, amount)
@@ -297,14 +353,14 @@ impl Desktop {
             },
             ToolDefinition {
                 name: "wait".to_string(),
-                description: "Pauses execution for a specified number of milliseconds.".to_string(),
+                description: "Wait for a specified duration in milliseconds before proceeding.".to_string(),
                 input_schema: ToolInputSchema {
                     type_: "object".to_string(),
                     properties: [(
                         "duration_ms".to_string(),
                         ToolParameter {
-                            type_: "number".to_string(), // Use number for duration
-                            description: "The duration to wait in milliseconds.".to_string(),
+                            type_: "number".to_string(),
+                            description: "The number of milliseconds to wait.".to_string(),
                         },
                     )]
                     .iter()
@@ -377,6 +433,143 @@ impl Desktop {
                         props
                     },
                     required: vec!["key".to_string()], // key is required, modifier is optional
+                },
+            },
+            ToolDefinition {
+                name: "cursorPosition".to_string(),
+                description: "Gets the current position (x, y coordinates) of the mouse cursor on the screen.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::new(), // No input parameters
+                    required: Vec::new(),
+                },
+            },
+            ToolDefinition {
+                name: "mouseMove".to_string(),
+                description: "Moves the mouse cursor to the specified (x, y) coordinates on the screen.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The target x-coordinate.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The target y-coordinate.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "leftMouseDown".to_string(),
+                description: "Simulates pressing the left mouse button down at the specified (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The x-coordinate for the mouse down event.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The y-coordinate for the mouse down event.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "leftMouseUp".to_string(),
+                description: "Simulates releasing the left mouse button at the specified (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The x-coordinate for the mouse up event.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The y-coordinate for the mouse up event.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "leftClick".to_string(),
+                description: "Simulates a standard left mouse click (down then up) at the specified (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The x-coordinate to click at.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The y-coordinate to click at.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "rightClick".to_string(),
+                description: "Simulates a standard right mouse click (down then up) at the specified (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The x-coordinate to click at.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The y-coordinate to click at.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "middleClick".to_string(),
+                description: "Simulates a standard middle mouse click (down then up) at the specified (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The x-coordinate to click at.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The y-coordinate to click at.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "doubleClick".to_string(),
+                description: "Simulates a double left mouse click at the specified (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The x-coordinate to double click at.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The y-coordinate to double click at.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "tripleClick".to_string(),
+                description: "Simulates a triple left mouse click at the specified (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "The x-coordinate to triple click at.".to_string() });
+                        props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "The y-coordinate to triple click at.".to_string() });
+                        props
+                    },
+                    required: vec!["x".to_string(), "y".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "leftClickDrag".to_string(),
+                description: "Simulates dragging the mouse with the left button held down, from start (x, y) to end (x, y) coordinates.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert("start_x".to_string(), ToolParameter { type_: "number".to_string(), description: "The starting x-coordinate of the drag.".to_string() });
+                        props.insert("start_y".to_string(), ToolParameter { type_: "number".to_string(), description: "The starting y-coordinate of the drag.".to_string() });
+                        props.insert("end_x".to_string(), ToolParameter { type_: "number".to_string(), description: "The ending x-coordinate of the drag.".to_string() });
+                        props.insert("end_y".to_string(), ToolParameter { type_: "number".to_string(), description: "The ending y-coordinate of the drag.".to_string() });
+                        props
+                    },
+                    required: vec!["start_x".to_string(), "start_y".to_string(), "end_x".to_string(), "end_y".to_string()],
                 },
             },
         ];
@@ -809,11 +1002,80 @@ impl Desktop {
                 Ok(Value::String(format!("Key '{}' released successfully.", key)))
             }
             "wait" => {
-                let duration_ms = args["duration_ms"].as_u64().ok_or_else(|| {
-                    AutomationError::InvalidArgument("Missing or invalid 'duration_ms' argument for wait (must be a non-negative integer)".to_string())
-                })?;
-                self.wait(duration_ms)?;
-                Ok(Value::String(format!("Waited for {} ms.", duration_ms)))
+                #[derive(Deserialize)]
+                struct WaitArgs {
+                    duration_ms: u64,
+                }
+                let args: WaitArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing wait args: {}", e)))?;
+                self.wait(args.duration_ms)?;
+                Ok(json!(null))
+            }
+            "cursorPosition" => {
+                let (x, y) = self.cursor_position()?;
+                Ok(json!({ "x": x, "y": y }))
+            }
+            "mouseMove" => {
+                #[derive(Deserialize)]
+                struct MouseMoveArgs { x: f64, y: f64 }
+                let args: MouseMoveArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing mouseMove args: {}", e)))?;
+                self.mouse_move(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "leftMouseDown" => {
+                #[derive(Deserialize)]
+                struct MouseDownArgs { x: f64, y: f64 }
+                let args: MouseDownArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftMouseDown args: {}", e)))?;
+                self.left_mouse_down(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "leftMouseUp" => {
+                #[derive(Deserialize)]
+                struct MouseUpArgs { x: f64, y: f64 }
+                let args: MouseUpArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftMouseUp args: {}", e)))?;
+                self.left_mouse_up(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "leftClick" => {
+                #[derive(Deserialize)]
+                struct ClickArgs { x: f64, y: f64 }
+                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftClick args: {}", e)))?;
+                self.left_click(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "rightClick" => {
+                #[derive(Deserialize)]
+                struct ClickArgs { x: f64, y: f64 }
+                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing rightClick args: {}", e)))?;
+                self.right_click(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "middleClick" => {
+                #[derive(Deserialize)]
+                struct ClickArgs { x: f64, y: f64 }
+                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing middleClick args: {}", e)))?;
+                self.middle_click(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "doubleClick" => {
+                #[derive(Deserialize)]
+                struct ClickArgs { x: f64, y: f64 }
+                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing doubleClick args: {}", e)))?;
+                self.double_click(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "tripleClick" => {
+                #[derive(Deserialize)]
+                struct ClickArgs { x: f64, y: f64 }
+                let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing tripleClick args: {}", e)))?;
+                self.triple_click(args.x, args.y)?;
+                Ok(json!(null))
+            }
+            "leftClickDrag" => {
+                #[derive(Deserialize)]
+                struct DragArgs { start_x: f64, start_y: f64, end_x: f64, end_y: f64 }
+                let args: DragArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftClickDrag args: {}", e)))?;
+                self.left_click_drag(args.start_x, args.start_y, args.end_x, args.end_y)?;
+                Ok(json!(null))
             }
             _ => {
                 error!("Unknown tool called: {}", name);
