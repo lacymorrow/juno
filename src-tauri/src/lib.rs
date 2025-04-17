@@ -16,9 +16,9 @@ use tracing_subscriber::{fmt, EnvFilter};
 use tracing::{debug, error, info, warn};
 use tauri_plugin_notification::NotificationExt;
 use tauri::{AppHandle, Manager, State};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuBuilder, MenuItemKind};
+use tauri::menu::{Menu, PredefinedMenuItem, MenuBuilder, MenuItemKind};
 use tauri::tray::{TrayIconEvent, MouseButton, MouseButtonState};
-use tauri::{WindowEvent, Wry, Emitter, Listener};
+use tauri::{WindowEvent, Wry};
 use tauri::menu::MenuItemBuilder;
 use tauri::image::Image;
 use std::fs;
@@ -33,6 +33,9 @@ use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
 use computer_use_ai_sdk::platforms::macos::element::get_focused_element_ns_workspace;
 
 mod tts;
+
+// Added for selector parsing
+use computer_use_ai_sdk::Selector;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -810,9 +813,8 @@ async fn dev_scroll_window(
     let lower_direction = direction.to_lowercase();
     #[cfg(target_os = "macos")]
     let effective_direction = match lower_direction.as_str() {
-        "up" => "down", // Invert for macOS: UI "up" means scroll content down
-        "down" => "up",   // Invert for macOS: UI "down" means scroll content up
-        _ => return Err(format!("Invalid scroll direction: {}. Must be 'up' or 'down'.", direction)),
+        "up" | "down" | "left" | "right" => lower_direction.as_str(), // Use direction directly
+        _ => return Err(format!("Invalid scroll direction: '{}'. Must be 'up', 'down', 'left', or 'right'.", direction)),
     };
 
     #[cfg(not(target_os = "macos"))]
@@ -983,6 +985,82 @@ async fn dev_wait(duration_ms: u64, state: tauri::State<'_, AppState>) -> Result
         .map_err(|e| format!("Error during wait: {}", e))
 }
 
+// New command to find element by selector
+#[tauri::command]
+async fn dev_find_element_by_selector(
+    selector_str: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    println!("[DEV_TOOL] Finding element by selector: {}", selector_str);
+    let selector: Selector = selector_str.as_str().into(); // Use From<&str> for Selector
+
+    match state.desktop.locator(selector).first() {
+        Ok(Some(element)) => {
+            println!("[DEV_TOOL] Found element: {:?}", element.attributes());
+            let attrs = element.attributes();
+            serde_json::to_string_pretty(&attrs).map_err(|e| {
+                let err_msg = format!("Failed to serialize found element attributes: {}", e);
+                println!("[DEV_TOOL] Error: {}", err_msg);
+                err_msg
+            })
+        }
+        Ok(None) => {
+            let err_msg = format!("Element not found for selector: {}", selector_str);
+            println!("[DEV_TOOL] Info: {}", err_msg);
+            Err(err_msg)
+        }
+        Err(e) => {
+            let err_msg = format!("Error finding element for selector '{}': {}", selector_str, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+// New command to click an element found by selector
+#[tauri::command]
+async fn dev_click_element_by_selector(
+    app: AppHandle,
+    selector_str: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Clicking element by selector: {}", selector_str);
+    let selector: Selector = selector_str.as_str().into();
+
+    match state.desktop.locator(selector).first() {
+        Ok(Some(element)) => {
+            println!("[DEV_TOOL] Found element, attempting click...");
+            match element.click() {
+                Ok(click_result) => {
+                    println!("[DEV_TOOL] Click successful: {:?}", click_result);
+                     let click_msg = format!("Clicked element matching: {}", selector_str);
+                     send_dev_tool_notification(&app, "Click Element", &click_msg)?;
+                    Ok(())
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to click element found by selector '{}': {}", selector_str, e);
+                    println!("[DEV_TOOL] Error: {}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        }
+        Ok(None) => {
+            let err_msg = format!("Element not found for click selector: {}", selector_str);
+            println!("[DEV_TOOL] Info: {}", err_msg);
+            Err(err_msg)
+        }
+        Err(e) => {
+            let err_msg = format!(
+                "Error finding element before click for selector '{}': {}",
+                selector_str,
+                e
+            );
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Explicitly initialize tracing with INFO level by default
@@ -1053,7 +1131,9 @@ pub fn run() {
             dev_set_clipboard,
             dev_hold_key,
             dev_release_key,
-            dev_wait
+            dev_wait,
+            dev_find_element_by_selector,
+            dev_click_element_by_selector,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
