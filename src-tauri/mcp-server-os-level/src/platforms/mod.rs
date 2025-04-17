@@ -59,6 +59,9 @@ pub trait AccessibilityEngine: Send + Sync + Any {
         direction: &str,
         amount: f64,
     ) -> Result<(), AutomationError>;
+
+    /// Type text
+    fn type_text(&self, text: &str) -> Result<(), AutomationError>;
 }
 
 #[cfg(target_os = "linux")]
