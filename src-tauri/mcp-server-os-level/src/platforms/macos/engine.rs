@@ -1222,6 +1222,31 @@ impl AccessibilityEngine for MacOSEngine {
         self.scroll_at_current_position(direction, amount)
     }
 
+    fn type_text(&self, text: &str) -> Result<(), AutomationError> {
+        debug!("Typing text globally: {}", text);
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("Failed to create event source for typing".to_string())
+        })?;
+
+        for char_code in text.encode_utf16() {
+            // Use the same key simulation logic as in interaction::type_text fallback
+            let key_down = CGEvent::new_keyboard_event(source.clone(), char_code, true)
+                .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
+            key_down.post(CGEventTapLocation::HID);
+
+            // Optional small delay between key down and key up
+            std::thread::sleep(std::time::Duration::from_millis(10));
+
+            let key_up = CGEvent::new_keyboard_event(source.clone(), char_code, false)
+                .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
+            key_up.post(CGEventTapLocation::HID);
+
+            // Optional small delay between characters
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        Ok(())
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

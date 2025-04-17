@@ -303,11 +303,6 @@ function App() {
     conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversation]);
 
-  // Scroll logs to bottom
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
-
   return (
     <div className="container mx-auto p-4 h-screen flex flex-col bg-background text-foreground">
       {/* Header */}
@@ -422,55 +417,49 @@ function App() {
           collapsedSize={0} // Completely collapses
           minSize={15} // Minimum size when expanded
           defaultSize={25} // Default size when expanded
-          className={cn(isDevPanelOpen ? "block" : "hidden")} // Control visibility
+          className={cn(
+            isDevPanelOpen ? "block" : "hidden",
+            "overflow-hidden" // Ensure panel itself doesn't scroll
+          )}
         >
-          <div className="flex flex-col h-full">
-            {/* Consolidated DevTools and Logs */}
-            <Card className="h-full flex flex-col border-0 rounded-none">
+          {/* Apply ScrollArea directly inside the panel */}
+          <ScrollArea className="h-full w-full p-3">
+            {" "}
+            {/* Full size and padding */}
+            {/* Title (replaces CardHeader) */}
+            <h2 className="text-lg font-semibold mb-3 border-b pb-2">
+              Developer Tools & Logs
+            </h2>
+            {/* DevToolsPanel Component */}
+            <div className="border-b pb-3 mb-3">
               {" "}
-              {/* Adjust styling as needed */}
-              <CardHeader className="flex-shrink-0">
-                <CardTitle className="text-lg">
-                  Developer Tools & Logs
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex-grow overflow-hidden p-0">
-                {/* Container for both DevToolsPanel and Logs */}
-                <div className="flex flex-col h-full">
-                  {/* DevToolsPanel Component */}
-                  <div className="p-3 border-b">
-                    {" "}
-                    {/* Add padding and border */}
-                    <DevToolsPanel />
-                  </div>
-
-                  {/* Logs Area */}
-                  <ScrollArea className="flex-grow p-3">
-                    {" "}
-                    {/* Logs take remaining space */}
-                    {logs.map((log, index) => (
-                      <div
-                        key={index}
-                        className={cn(
-                          "text-xs mb-1 font-mono whitespace-pre-wrap",
-                          getLogColorClass(log.level)
-                        )}
-                      >
-                        <span className="text-muted-foreground mr-1">
-                          [{formatTimestamp(log.timestamp)}]
-                        </span>
-                        <span className="font-semibold mr-1">
-                          [{log.level.toUpperCase()}]
-                        </span>
-                        {log.message}
-                      </div>
-                    ))}
-                    <div ref={logsEndRef} />
-                  </ScrollArea>
+              {/* Spacing and border */}
+              <DevToolsPanel />
+            </div>
+            {/* Logs Area */}
+            <div className="flex-grow">
+              {" "}
+              {/* Logs take remaining space */}
+              {logs.map((log, index) => (
+                <div
+                  key={index}
+                  className={cn(
+                    "text-xs mb-1 font-mono whitespace-pre-wrap",
+                    getLogColorClass(log.level)
+                  )}
+                >
+                  <span className="text-muted-foreground mr-1">
+                    [{formatTimestamp(log.timestamp)}]
+                  </span>
+                  <span className="font-semibold mr-1">
+                    [{log.level.toUpperCase()}]
+                  </span>
+                  {log.message}
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              ))}
+              <div ref={logsEndRef} />
+            </div>
+          </ScrollArea>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

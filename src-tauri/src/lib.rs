@@ -14,32 +14,24 @@ use std::io::Cursor;
 use computer_use_ai_sdk::AutomationError;
 use tracing_subscriber::{fmt, EnvFilter};
 use tracing::{debug, error, info, warn};
-
-// Correct V2 Imports
+use tauri_plugin_notification::NotificationExt;
+use tauri::{AppHandle, Manager, State};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, MenuBuilder, MenuItemKind};
 use tauri::tray::{TrayIconEvent, MouseButton, MouseButtonState};
-use tauri::{Manager, WindowEvent, Wry, Emitter, Listener};
+use tauri::{WindowEvent, Wry, Emitter, Listener};
 use tauri::menu::MenuItemBuilder;
-
-// Import Image from tauri
 use tauri::image::Image;
 
-// Only include macos specific imports when targeting macos
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
 
-// Need access to the specific element type
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
 
-// Import the new function
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::element::get_focused_element_ns_workspace;
 
-// Declare the tts module
 mod tts;
-
-// --- CLI Argument Parsing ---
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -60,12 +52,9 @@ struct Cli {
     // test_screenshot: bool,
 }
 
-// Define a struct to hold the application state
 pub(crate) struct AppState {
     desktop: Arc<Desktop>,
 }
-
-// --- Anthropic API Structures ---
 
 #[derive(Serialize, Clone)]
 struct AnthropicMessage {
@@ -87,7 +76,6 @@ struct AnthropicContentBlock {
     input: Option<Value>,
 }
 
-// Structure for tool results (sent back to Anthropic)
 #[derive(Serialize)]
 struct ToolResultBlock {
     #[serde(rename = "type")]
@@ -98,39 +86,41 @@ struct ToolResultBlock {
     is_error: Option<bool>,
 }
 
-// Structure for the combined result of submit_query
 #[derive(Serialize)]
 struct SubmitQueryResult {
     text: String,
     audio_base64: Option<String>,
 }
 
-// --- End Anthropic API Structures ---
-
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-// Command to capture a screenshot (macOS only for now)
 #[cfg(target_os = "macos")]
 #[tauri::command]
-async fn capture_screenshot_command() -> Result<String, String> {
+async fn capture_screenshot_command(app: tauri::AppHandle) -> Result<String, String> {
     match macos_utils::capture_and_encode_screenshot() {
-        Ok(base64_string) => Ok(base64_string),
+        Ok(base64_string) => {
+            // Send notification on success
+            app.notification()
+                .builder()
+                .title("Screenshot")
+                .body("Screenshot captured successfully.")
+                .show()
+                .map_err(|e| format!("Failed to send notification: {}", e))?;
+            Ok(base64_string)
+        }
         Err(e) => Err(format!("Failed to capture screenshot: {}", e)),
     }
 }
 
-// Stub command for non-macos platforms
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-async fn capture_screenshot_command() -> Result<String, String> {
+async fn capture_screenshot_command(_app: tauri::AppHandle) -> Result<String, String> {
     Err("Screenshot capture is only supported on macOS currently.".to_string())
 }
 
-// New command to list applications using the managed state
 #[tauri::command]
 async fn list_apps(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
     match state.desktop.applications() {
@@ -149,16 +139,14 @@ async fn list_apps(state: tauri::State<'_, AppState>) -> Result<Vec<String>, Str
     }
 }
 
-// Command to check if the backend (Desktop instance) initialized
 #[tauri::command]
 fn check_server_status(state: tauri::State<'_, AppState>) -> bool {
     let _ = state.desktop;
     true
 }
 
-// New command for developer tool: Get focused element info
 #[tauri::command]
-async fn dev_get_focused_element_info(_state: tauri::State<'_, AppState>) -> Result<String, String> {
+async fn dev_get_focused_element_info(app: tauri::AppHandle, _state: tauri::State<'_, AppState>) -> Result<String, String> {
     println!("[DEV_TOOL] Attempting to get focused element info using NSWorkspace...");
 
     #[cfg(target_os = "macos")]
@@ -170,6 +158,14 @@ async fn dev_get_focused_element_info(_state: tauri::State<'_, AppState>) -> Res
     match result {
         Ok(element) => {
             println!("[DEV_TOOL] get_focused_element_info (NSWorkspace) succeeded.");
+            // Send notification on success
+             app.notification()
+                .builder()
+                .title("Focus Info")
+                .body("Focused element info retrieved.")
+                .show()
+                .map_err(|e| format!("Failed to send notification: {}", e))?;
+
             let attrs = element.attributes();
             serde_json::to_string_pretty(&attrs).map_err(|e| {
                 let err_msg = format!("Failed to serialize element info result: {}", e);
@@ -185,11 +181,11 @@ async fn dev_get_focused_element_info(_state: tauri::State<'_, AppState>) -> Res
     }
 }
 
-// New command for capturing element screenshot (macOS only for now)
 #[cfg(target_os = "macos")]
 #[tauri::command]
 async fn capture_element_screenshot_command(
-    _state: tauri::State<'_, AppState>,
+    app: AppHandle,
+    _state: State<'_, AppState>,
 ) -> Result<String, String> {
     println!("[DEV_TOOL] Capturing focused element screenshot using NSWorkspace method...");
 
@@ -213,15 +209,24 @@ async fn capture_element_screenshot_command(
 
     match macos_utils::capture_element_screenshot(macos_element) {
         Ok(base64_string) => {
-             println!("[DEV_TOOL] Element screenshot captured successfully.");
-             Ok(base64_string)
+            println!("[DEV_TOOL] Element screenshot captured successfully.");
+            // Send notification on success
+            app.notification()
+                .builder()
+                .title("Element Screenshot")
+                .body("Focused element screenshot captured.")
+                .show()
+                .map_err(|e| format!("Failed to send notification: {}", e))?;
+            Ok(base64_string)
         },
         Err(e) => {
             match e {
                 AutomationError::ZeroElementDimensions { role, label, x, y, width, height } => {
                     let user_friendly_err_msg = format!(
                         "Error: The focused element ('{}', Label: '{}') reported zero or negative dimensions ({}, {}, {}, {}) and could not be captured.",
-                        role, label, x, y, width, height // Use label directly as it's a String
+                        role,
+                        label,
+                        x, y, width, height
                     );
                     println!("[DEV_TOOL] Error: {}", user_friendly_err_msg);
                     Err(user_friendly_err_msg)
@@ -236,16 +241,15 @@ async fn capture_element_screenshot_command(
     }
 }
 
-// Stub command for non-macos platforms
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 async fn capture_element_screenshot_command(
+    _app: tauri::AppHandle,
     _state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     Err("Element screenshot capture is only supported on macOS currently.".to_string())
 }
 
-// Updated command to handle user queries with agent loop and TTS
 #[tauri::command]
 async fn submit_query(
     query: String,
@@ -564,44 +568,49 @@ async fn submit_query(
     })
 }
 
-// Command to get logs from the backend buffer
 #[tauri::command]
 async fn get_logs(_state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
     Ok(vec!["Log viewing is deprecated. Logs are now output to the terminal using the tracing library.".to_string()])
 }
 
-// --- Dev Tool Commands ---
+fn send_dev_tool_notification(app: &tauri::AppHandle, title: &str, body: &str) -> Result<(), String> {
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| format!("Failed to send notification: {}", e))
+}
 
 #[tauri::command]
 async fn dev_click_focused_element(
-    _state: tauri::State<'_, AppState>
-) -> Result<String, String> {
+    app: AppHandle,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to click focused element...");
+
     #[cfg(target_os = "macos")]
     {
-        println!("[DEV_TOOL] Attempting to click focused element...");
-
-        let element = match get_focused_element_ns_workspace(false, true) {
+        // Get the focused element first
+        let focused_element = match state.desktop.focused_element() {
             Ok(el) => el,
             Err(e) => {
-                let err_msg = format!("[DEV_TOOL] Failed to get focused element for click: {}", e);
-                println!("{}", err_msg);
+                let err_msg = format!("Failed to get focused element for click: {}", e);
+                println!("[DEV_TOOL] Error: {}", err_msg);
                 return Err(err_msg);
             }
         };
 
-        let attrs = element.attributes();
-        println!("[DEV_TOOL] Clicking element: Role={}, Label={:?}, Desc={:?}",
-                 attrs.role, attrs.label, attrs.description);
-
-        match element.click() {
-            Ok(_) => {
-                let success_msg = "[DEV_TOOL] Click focused element succeeded.".to_string();
-                println!("{}", success_msg);
-                Ok(success_msg)
+        // Now click the element
+        match focused_element.click() {
+             Ok(_) => {
+                println!("[DEV_TOOL] click_focused_element succeeded.");
+                send_dev_tool_notification(&app, "Click", "Clicked focused element.")?;
+                Ok(())
             }
-            Err(e) => {
-                let err_msg = format!("[DEV_TOOL] Failed to click focused element: {}", e);
-                println!("{}", err_msg);
+             Err(e) => {
+                 let err_msg = format!("Failed to call click_focused_element: {}", e);
+                println!("[DEV_TOOL] Error: {}", err_msg);
                 Err(err_msg)
             }
         }
@@ -609,119 +618,108 @@ async fn dev_click_focused_element(
 
     #[cfg(not(target_os = "macos"))]
     {
-        Err("Click focused element is only supported on macOS.".to_string())
+        Err(AutomationError::UnsupportedPlatform.to_string())
     }
 }
 
 #[tauri::command]
 async fn dev_type_text(
-    _state: tauri::State<'_, AppState>,
+    app: AppHandle,
+    state: State<'_, AppState>,
     text: String
-) -> Result<String, String> {
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to type text: {}", text);
+
     #[cfg(target_os = "macos")]
-    {
-        println!("[DEV_TOOL] Attempting to type text: '{}'", text);
-        let err_msg = format!("[DEV_TOOL] Typing text ('{}') not implemented yet for macOS Desktop.", text);
-        println!("{}", err_msg);
-        Err(err_msg)
-        // TODO: Implement actual typing logic, potentially using desktop.type_text(...)
-        // match state.desktop.type_text(&text) {
-        //     Ok(_) => {
-        //         let success_msg = format!("[DEV_TOOL] Typed text '{}' successfully.", text);
-        //         println!("{}", success_msg);
-        //         Ok(success_msg)
-        //     }
-        //     Err(e) => {
-        //         let err_msg = format!("[DEV_TOOL] Failed to type text '{}': {}", text, e);
-        //         println!("{}", err_msg);
-        //         Err(err_msg)
-        //     }
-        // }
-        // TODO: Check if desktop.type_text exists and handles errors correctly.
-        // let err_msg = format!("[DEV_TOOL] Typing text ('{}') not implemented yet for macOS Desktop.", text);
-        // println!("{}", err_msg);
-        // Err(err_msg)
-    }
+    let result = state.desktop.type_text(&text);
+
     #[cfg(not(target_os = "macos"))]
-    {
-        Err("Type text is only supported on macOS currently.".to_string())
-    }
-}
+    let result = Err(AutomationError::UnsupportedPlatform);
 
-#[tauri::command]
-async fn dev_press_key(
-    state: tauri::State<'_, AppState>,
-    key: String
-) -> Result<String, String> {
-    #[cfg(target_os = "macos")]
-    {
-        println!("[DEV_TOOL] Attempting to press key '{}' on focused element", key);
-
-        // Get the currently focused element
-        let focused_element = match state.desktop.focused_element() {
-            Ok(element) => element,
-            Err(e) => {
-                let err_msg = format!("[DEV_TOOL] Failed to get focused element: {}", e);
-                println!("{}", err_msg);
-                return Err(err_msg);
-            }
-        };
-
-        // Press the key on the focused element
-        match focused_element.press_key(&key) {
-             Ok(_) => {
-                let success_msg = format!("[DEV_TOOL] Pressed key '{}' successfully on focused element.", key);
-                println!("{}", success_msg);
-                Ok(success_msg)
-            }
-            Err(e) => {
-                let err_msg = format!("[DEV_TOOL] Failed to press key '{}' on focused element: {}", key, e);
-                println!("{}", err_msg);
-                Err(err_msg)
-            }
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err("Press key is only supported on macOS currently.".to_string())
-    }
-}
-
-#[tauri::command]
-async fn dev_open_application(state: tauri::State<'_, AppState>, app_name: String) -> Result<String, String> {
-    println!("[DEV_TOOL] Attempting to open application: '{}'", app_name);
-    match state.desktop.open_application(&app_name) {
-         Ok(_) => {
-            let success_msg = format!("[DEV_TOOL] Opened application '{}' successfully.", app_name);
-            println!("{}", success_msg);
-            Ok(success_msg)
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] type_text succeeded.");
+             send_dev_tool_notification(&app, "Type Text", &format!("Typed: \"{}\"", text))?;
+            Ok(())
         }
         Err(e) => {
-            let err_msg = format!("[DEV_TOOL] Failed to open application '{}': {}", app_name, e);
-            println!("{}", err_msg);
+            let err_msg = format!("Failed to call type_text: {}", e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
     }
 }
 
 #[tauri::command]
-async fn dev_open_url(state: tauri::State<'_, AppState>, url: String) -> Result<String, String> {
-    println!("[DEV_TOOL] Attempting to open URL: '{}'", url);
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        let err_msg = "[DEV_TOOL] Invalid URL format. Must start with http:// or https://".to_string();
-        println!("{}", err_msg);
-        return Err(err_msg);
+async fn dev_press_key(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: String
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to press key sequence: {}", key);
+
+    #[cfg(target_os = "macos")]
+    {
+         // Get the focused element first
+        let focused_element = match state.desktop.focused_element() {
+            Ok(el) => el,
+            Err(e) => {
+                let err_msg = format!("Failed to get focused element for key press: {}", e);
+                println!("[DEV_TOOL] Error: {}", err_msg);
+                return Err(err_msg);
+            }
+        };
+
+        // Press key on the element
+        match focused_element.press_key(&key) {
+             Ok(_) => {
+                println!("[DEV_TOOL] press_key succeeded for: {}", key);
+                send_dev_tool_notification(&app, "Press Key", &format!("Pressed key(s): {}", key))?; // Send notification
+                Ok(())
+            }
+            Err(e) => {
+                let err_msg = format!("Failed to call press_key for '{}': {}", key, e);
+                println!("[DEV_TOOL] Error: {}", err_msg);
+                Err(err_msg)
+            }
+        }
     }
 
-    match state.desktop.open_url(&url, None) {
-         Ok(_) => {
-            let success_msg = format!("[DEV_TOOL] Opened URL '{}' successfully.", url);
-            println!("{}", success_msg);
-            Ok(success_msg)
+    #[cfg(not(target_os = "macos"))]
+    {
+         Err(AutomationError::UnsupportedPlatform.to_string())
+    }
+}
+
+#[tauri::command]
+async fn dev_open_application(app: tauri::AppHandle, state: tauri::State<'_, AppState>, app_name: String) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to open application: {}", app_name);
+    match state.desktop.open_application(&app_name) {
+        Ok(_) => {
+            println!("[DEV_TOOL] open_application succeeded for: {}", app_name);
+            send_dev_tool_notification(&app, "Open App", &format!("Opened application: {}", app_name))?;
+            Ok(())
         }
         Err(e) => {
-            let err_msg = format!("[DEV_TOOL] Failed to open URL '{}': {}", url, e);
-            println!("{}", err_msg);
+            let err_msg = format!("Failed to open application '{}': {}", app_name, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+async fn dev_open_url(app: AppHandle, state: State<'_, AppState>, url: String) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to open URL: {}", url);
+    match state.desktop.open_url(&url, None) {
+        Ok(_) => {
+            println!("[DEV_TOOL] open_url succeeded for: {}", url);
+            send_dev_tool_notification(&app, "Open URL", &format!("Opened URL: {}", url))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to open URL '{}': {}", url, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
     }
@@ -729,51 +727,50 @@ async fn dev_open_url(state: tauri::State<'_, AppState>, url: String) -> Result<
 
 #[tauri::command]
 async fn dev_scroll_window(
-    state: tauri::State<'_, AppState>,
+    app: AppHandle,
+    state: State<'_, AppState>,
     direction: String,
     amount_str: Option<String>
-) -> Result<String, String> {
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to scroll window {}...", direction);
+
+    // Validate direction string
+    let lower_direction = direction.to_lowercase();
+    if lower_direction != "up" && lower_direction != "down" {
+         return Err(format!("Invalid scroll direction: {}. Must be 'up' or 'down'.", direction));
+    }
+
+    // Parse amount, default to a reasonable value (e.g., 3.0 units)
+    let amount: f64 = match amount_str {
+        Some(s) => match s.parse::<f64>() {
+            Ok(num) => num,
+            Err(_) => return Err(format!("Invalid scroll amount: '{}'. Must be a number.", s)),
+        },
+        None => 3.0, // Default scroll amount
+    };
+
     #[cfg(target_os = "macos")]
-    {
-        println!("[DEV_TOOL] Attempting to scroll window: '{}'", direction);
+    // Use the engine's scroll_at_current_position method which takes &str
+    let result = state.desktop.engine().scroll_at_current_position(&lower_direction, amount);
 
-        // Parse the amount, default to a reasonable value (e.g., 3 lines) if not provided or invalid
-        let amount: f64 = amount_str
-            .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(3.0); // Default scroll amount
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
 
-        // Access the engine through the Desktop state
-        // We need to downcast the engine trait object to the specific macOS engine
-        let engine = state.desktop.engine();
-        if let Some(macos_engine) = engine.as_any().downcast_ref::<computer_use_ai_sdk::platforms::macos::engine::MacOSEngine>() {
-            match macos_engine.scroll_at_current_position(&direction, amount) {
-                 Ok(_) => {
-                    let success_msg = format!("[DEV_TOOL] Scrolled window '{}' by {} successfully.", direction, amount);
-                    println!("{}", success_msg);
-                    Ok(success_msg)
-                }
-                Err(e) => {
-                    let err_msg = format!("[DEV_TOOL] Failed to scroll window '{}': {}", direction, e);
-                    println!("{}", err_msg);
-                    Err(err_msg)
-                }
-            }
-        } else {
-            let err_msg = "[DEV_TOOL] Failed to get macOS engine instance.".to_string();
-            println!("{}", err_msg);
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] scroll_window {} succeeded.", direction);
+            let scroll_msg = format!("Scrolled window {} by {}", direction, amount);
+            send_dev_tool_notification(&app, "Scroll", &scroll_msg)?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to scroll window {}: {}", direction, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
     }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err("Scroll window is only supported on macOS currently.".to_string())
-    }
 }
 
-// --- End Dev Tool Commands ---
-
-// Helper function to run the focused element test
 #[cfg(target_os = "macos")]
 fn run_test_focused_element(desktop: &Desktop) -> Result<(), String> {
     println!("--- Running Test: Get Focused Element (Original Method) ---");
@@ -806,7 +803,6 @@ fn run_test_focused_element(desktop: &Desktop) -> Result<(), String> {
     }
 }
 
-// New helper function for NSWorkspace method
 #[cfg(target_os = "macos")]
 fn run_test_focused_element_ns() -> Result<(), String> {
     use computer_use_ai_sdk::platforms::macos::element::get_focused_element_ns_workspace;
@@ -863,7 +859,6 @@ fn run_check_accessibility() -> Result<(), String> {
     }
 }
 
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Explicitly initialize tracing with INFO level by default
@@ -910,6 +905,7 @@ pub fn run() {
     // --- Tauri Application Builder ---
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(app_state) // Manage the AppState
         .invoke_handler(tauri::generate_handler![
             greet,
