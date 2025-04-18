@@ -1,15 +1,24 @@
+use computer_use_ai_sdk::Desktop;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
-use computer_use_ai_sdk::Desktop;
-
 
 // Application state structure
 #[allow(dead_code)] // Allow dead code for potentially unused fields
-pub(crate) struct AppState {
-    pub(crate) desktop: Arc<Desktop>,
+pub struct AppState {
+    pub desktop: Arc<Desktop>,
     // State for text_editor_undo_edit
-    pub(crate) last_edited_file: Mutex<Option<PathBuf>>,
-    pub(crate) previous_content: Mutex<Option<Option<String>>>, // Option<Option<String>>: None=no undo, Some(None)=last was create, Some(Some(content))=last was edit
+    pub last_edited_file: Mutex<Option<PathBuf>>,
+    pub previous_content: Mutex<Option<Option<String>>>,
+}
+
+impl AppState {
+    pub fn new(desktop: Arc<Desktop>) -> Self {
+        Self {
+            desktop,
+            last_edited_file: Mutex::new(None),
+            previous_content: Mutex::new(None),
+        }
+    }
 }
 
 // Helper function to update undo state
