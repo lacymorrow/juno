@@ -2,19 +2,17 @@ use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::time::Duration;
 use tokio; // Ensure tokio is available for sleep
-use crate::state::AppState; // Use correct path
 use std::sync::Arc; // Required for Desktop Arc
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn}; // Import tracing macros
-use tauri::State;
-use computer_use_ai_sdk::Desktop;
+use std::env;
+use base64::Engine;
 
 // --- Replicate API Structures ---
 #[derive(Serialize)]
 pub(crate) struct ReplicateInput { // Make pub(crate) if only used within the crate
     text: String,
-    speaker: u32,
-    max_audio_length_ms: u32,
+    speaker_wav: Option<String>, // Optional: URL to a speaker reference audio
 }
 
 #[derive(Serialize)]
@@ -27,7 +25,7 @@ pub(crate) struct ReplicateRequest {
 pub(crate) struct ReplicateInitialResponse {
     id: String,
     status: String,
-    urls: Option<ReplicateUrls>,
+    urls: ReplicateUrls,
 }
 
 #[derive(Deserialize, Debug)]
@@ -38,156 +36,164 @@ pub(crate) struct ReplicateUrls {
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct ReplicatePollingResponse {
-    #[allow(dead_code)] // Allow dead code, might be useful later
-    id: String,
+pub(crate) struct ReplicateStatusResponse {
     status: String,
-    output: Option<String>,
-    #[allow(dead_code)] // Allow dead code, might be useful later
-    logs: Option<String>,
-    error: Option<String>,
+    output: Option<String>, // URL to the generated audio
+    error: Option<String>, // Capture error messages
 }
 // --- End Replicate API Structures ---
 
 // Command to invoke Replicate TTS
 #[tauri::command]
 pub async fn invoke_replicate_tts(
-    text_to_speak: String,
-    state: State<'_, AppState>, // Rename _state to state
+    text: String,
 ) -> Result<String, String> {
-    info!("Invoking Replicate TTS for text: {}", text_to_speak);
-    #[allow(unused_variables)]
-    let desktop_arc: Arc<Desktop> = state.desktop.clone(); // Use the renamed state
-
-    let api_key = std::env::var("REPLICATE_API_KEY")
-        .map_err(|_| "REPLICATE_API_KEY not configured.".to_string())?;
+    info!("Invoking Replicate TTS for text: {}", text);
+    let api_key = env::var("REPLICATE_API_KEY")
+        .map_err(|_| "REPLICATE_API_KEY environment variable not set".to_string())?;
+    let model_version = env::var("REPLICATE_MODEL_VERSION")
+        .map_err(|_| "REPLICATE_MODEL_VERSION environment variable not set".to_string())?;
+    let speaker_wav_url = env::var("REPLICATE_SPEAKER_WAV_URL").ok(); // Optional
 
     let client = Client::new();
-    let replicate_model_version = "3e59b10a9894c54ae5f2fc0347e3a2f5c82f0574407e53a7d9f76ec7c502ad03";
-    let replicate_api_url = "https://api.replicate.com/v1/predictions";
+    let start_url = "https://api.replicate.com/v1/predictions";
 
     let request_payload = ReplicateRequest {
-        version: replicate_model_version.to_string(),
+        version: model_version,
         input: ReplicateInput {
-            text: text_to_speak,
-            speaker: 0,
-            max_audio_length_ms: 30000,
+            text: text.clone(), // Clone text for logging
+            speaker_wav: speaker_wav_url,
         },
     };
 
-    debug!("Sending Replicate TTS request: {:?}", serde_json::to_string(&request_payload).unwrap_or_default());
+    info!("Starting Replicate prediction with payload: {{ version: {}, input: {{ text: '{}...', speaker_wav: {:?} }} }}",
+           request_payload.version, text.chars().take(20).collect::<String>(), request_payload.input.speaker_wav);
 
-    // 1. Start the prediction job
+    // 1. Start the prediction
     let initial_response = client
-        .post(replicate_api_url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .post(start_url)
+        .header("Authorization", format!("Token {}", api_key))
         .header("Content-Type", "application/json")
         .json(&request_payload)
         .send()
         .await;
 
-    let initial_response = match initial_response {
+    let initial_res = match initial_response {
         Ok(res) => res,
         Err(e) => {
-            let err_msg = format!("HTTP request to start Replicate job failed: {}", e);
+            let err_msg = format!("Failed to send initial request to Replicate: {}", e);
             error!("{}", err_msg);
             return Err(err_msg);
         }
     };
 
-    if !initial_response.status().is_success() {
-        let status = initial_response.status();
-        let body = initial_response.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
-        let err_msg = format!("Replicate API error starting job: {} - {}", status, body);
+    if !initial_res.status().is_success() {
+        let status = initial_res.status();
+        let error_body = initial_res.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
+        let err_msg = format!("Replicate initial API request failed: {} - {}", status, error_body);
         error!("{}", err_msg);
         return Err(err_msg);
     }
 
-    let initial_data: ReplicateInitialResponse = match initial_response.json().await {
+    let initial_data = match initial_res.json::<ReplicateInitialResponse>().await {
         Ok(data) => data,
         Err(e) => {
-            let err_msg = format!("Failed to parse Replicate start response JSON: {}", e);
+            let err_msg = format!("Failed to parse Replicate initial response: {}", e);
             error!("{}", err_msg);
             return Err(err_msg);
         }
     };
 
-    info!("Replicate job started: ID={}, Status={}", initial_data.id, initial_data.status);
-
-    let get_url = match initial_data.urls {
-        Some(urls) => urls.get,
-        None => {
-            let err_msg = "Missing 'get' URL in Replicate response".to_string();
-            error!("{}", err_msg);
-            return Err(err_msg);
-        }
-    };
+    let get_url = initial_data.urls.get;
+    info!("Replicate prediction started (ID: {}). Polling status at: {}", initial_data.id, get_url);
 
     // 2. Poll for the result
-    let max_polls = 30;
-    let poll_interval = Duration::from_secs(2);
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await; // Wait before polling
 
-    for _ in 0..max_polls {
-        sleep(poll_interval).await;
-        debug!("Polling Replicate job status: {}", get_url);
-
-        let poll_response = client
+        let status_response = client
             .get(&get_url)
-            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Authorization", format!("Token {}", api_key))
             .send()
             .await;
 
-        let poll_response = match poll_response {
+        let status_res = match status_response {
             Ok(res) => res,
             Err(e) => {
-                warn!("Replicate polling request failed: {}", e);
-                continue;
+                warn!("Failed to poll Replicate status (URL: {}): {}. Retrying...", get_url, e);
+                continue; // Retry polling
             }
         };
 
-        if !poll_response.status().is_success() {
-            let status = poll_response.status();
-            let body = poll_response.text().await.unwrap_or_else(|_| "Failed to read polling error body".to_string());
-            warn!("Replicate polling error response: {} - {}", status, body);
-            continue;
+        if !status_res.status().is_success() {
+            let status = status_res.status();
+            let error_body = status_res.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
+            warn!("Replicate status polling failed: {} - {}. Retrying...", status, error_body);
+            continue; // Retry polling
         }
 
-        let poll_data: ReplicatePollingResponse = match poll_response.json().await {
+        let status_data = match status_res.json::<ReplicateStatusResponse>().await {
             Ok(data) => data,
             Err(e) => {
-                warn!("Failed to parse Replicate polling JSON response: {}", e);
-                continue;
+                warn!("Failed to parse Replicate status response: {}. Retrying...", e);
+                continue; // Retry polling
             }
         };
 
-        debug!("Replicate poll status: {}", poll_data.status);
+        info!("Current Replicate prediction status: {:?}", status_data.status);
 
-        match poll_data.status.as_str() {
+        match status_data.status.as_str() {
             "succeeded" => {
-                if let Some(audio_url) = poll_data.output {
-                    info!("Replicate job succeeded. Audio URL: {}", audio_url);
-                    return Ok(audio_url);
+                if let Some(output_url) = status_data.output {
+                    info!("Replicate prediction succeeded. Downloading audio from: {}", output_url);
+                    // 3. Download the audio file
+                    match client.get(&output_url).send().await {
+                        Ok(audio_res) => {
+                            if audio_res.status().is_success() {
+                                match audio_res.bytes().await {
+                                    Ok(audio_bytes) => {
+                                        let base64_audio = base64::engine::general_purpose::STANDARD.encode(&audio_bytes);
+                                        info!("Successfully downloaded and encoded Replicate audio ({} bytes).", audio_bytes.len());
+                                        return Ok(base64_audio);
+                                    }
+                                    Err(e) => {
+                                        let err_msg = format!("Failed to read Replicate audio bytes: {}", e);
+                                        error!("{}", err_msg);
+                                        return Err(err_msg);
+                                    }
+                                }
+                            } else {
+                                let err_msg = format!("Failed to download Replicate audio file (status: {}). URL: {}", audio_res.status(), output_url);
+                                error!("{}", err_msg);
+                                return Err(err_msg);
+                            }
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Failed to send request to download Replicate audio: {}", e);
+                            error!("{}", err_msg);
+                            return Err(err_msg);
+                        }
+                    }
                 } else {
-                    let err_msg = "Replicate job succeeded but no output URL found".to_string();
+                    let err_msg = "Replicate prediction succeeded but no output URL was provided.".to_string();
                     error!("{}", err_msg);
                     return Err(err_msg);
                 }
             }
             "failed" | "canceled" => {
-                let error_detail = poll_data.error.unwrap_or_else(|| "No error details provided".to_string());
-                let err_msg = format!("Replicate job {}: {}", poll_data.status, error_detail);
+                let error_message = status_data.error.unwrap_or_else(|| "Unknown error".to_string());
+                let err_msg = format!("Replicate prediction {}: {}", status_data.status, error_message);
                 error!("{}", err_msg);
                 return Err(err_msg);
             }
-            "starting" | "processing" => continue,
-            _ => {
-                warn!("Unexpected Replicate job status: {}", poll_data.status);
+            "processing" | "starting" => { // Continue polling
                 continue;
+            }
+            _ => { // Unknown status
+                let err_msg = format!("Unknown Replicate prediction status: {}", status_data.status);
+                error!("{}", err_msg);
+                return Err(err_msg);
             }
         }
     }
-
-    let err_msg = "Replicate job timed out after polling.".to_string();
-    error!("{}", err_msg);
-    Err(err_msg)
 }
