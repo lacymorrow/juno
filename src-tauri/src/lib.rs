@@ -180,13 +180,13 @@ pub fn run() {
                 .id("toggle_panel")
                 .build(&app_handle)
                 .expect("Failed to build toggle_panel item");
-            let quit_item = PredefinedMenuItem::quit(&app_handle, Some("Quit dotdot"))
+            let quit_item = PredefinedMenuItem::quit(&app_handle, Some("Quit Juno"))
                 .expect("Failed to build quit item");
 
             let menu = Menu::with_items(&app_handle, &[
                 &toggle_panel_item,
                 &quit_item,
-            ]).expect("Failed to build tray menu");
+            ]).expect("Failed to create menu");
 
             let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/tray-Template.png");
             let icon_bytes = std::fs::read(&icon_path).expect("Failed to read icon file");
@@ -196,7 +196,7 @@ pub fn run() {
                 .menu(&menu)
                 .icon(icon)
                 .icon_as_template(true)
-                .tooltip("dotdot")
+                .tooltip("Juno")
                 .show_menu_on_left_click(false)
                 .build(&app_handle)
                 .expect("Failed to build tray icon");

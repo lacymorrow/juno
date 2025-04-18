@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "dotdot",
+  "productName": "Juno",
   "version": "0.1.0",
-  "identifier": "com.dotdot.app",
+  "identifier": "com.juno.app",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "dotdot",
+        "title": "Juno",
         "width": 800,
         "height": 600,
         "visible": true
