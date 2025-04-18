@@ -12,6 +12,8 @@ use std::sync::{Arc};
 use std::str::FromStr;
 use tracing::{error, info};
 use serde_json::{json, from_value};
+use std::fs;
+use std::process::Command;
 
 // Make element module public
 pub mod element;
@@ -75,7 +77,9 @@ pub struct ClickResult {
 #[derive(Clone)]
 pub struct Desktop {
     engine: Arc<dyn platforms::AccessibilityEngine + Send + Sync>,
+    #[allow(dead_code)] // Keep field, might be used for platform differences or config later
     use_background_apps: bool,
+    #[allow(dead_code)] // Keep field, might be used for platform differences or config later
     activate_app: bool,
 }
 
@@ -572,6 +576,73 @@ impl Desktop {
                     required: vec!["start_x".to_string(), "start_y".to_string(), "end_x".to_string(), "end_y".to_string()],
                 },
             },
+            // --- Text Editor Tools ---
+            ToolDefinition {
+                name: "text_editor_view".to_string(),
+                description: "View the content of a specified file.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::from([
+                        ("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path to the file to view.".to_string() }),
+                    ]),
+                    required: vec!["file_path".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "text_editor_create".to_string(),
+                description: "Create a new file, optionally with initial content. Fails if the file already exists.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::from([
+                        ("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path where the new file should be created.".to_string() }),
+                        ("content".to_string(), ToolParameter { type_: "string".to_string(), description: "Optional initial text content for the file.".to_string() }),
+                    ]),
+                    required: vec!["file_path".to_string()], // Content is optional
+                },
+            },
+            ToolDefinition {
+                name: "text_editor_str_replace".to_string(),
+                description: "Find and replace all occurrences of a string within a specified file.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::from([
+                        ("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path to the file to modify.".to_string() }),
+                        ("find".to_string(), ToolParameter { type_: "string".to_string(), description: "The exact string to find.".to_string() }),
+                        ("replace".to_string(), ToolParameter { type_: "string".to_string(), description: "The string to replace occurrences with.".to_string() }),
+                    ]),
+                    required: vec!["file_path".to_string(), "find".to_string(), "replace".to_string()],
+                },
+            },
+            ToolDefinition {
+                name: "text_editor_insert".to_string(),
+                description: "Insert text into a file at a specific 1-based line number. If line is null or out of bounds, appends to the end.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::from([
+                        ("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path to the file to modify.".to_string() }),
+                        ("text".to_string(), ToolParameter { type_: "string".to_string(), description: "The text to insert.".to_string() }),
+                        ("line".to_string(), ToolParameter { type_: "integer".to_string(), description: "The 1-based line number to insert before. Null or out of bounds appends.".to_string() }),
+                    ]),
+                    required: vec!["file_path".to_string(), "text".to_string()], // line is optional implicitly by nullability
+                },
+            },
+            // --- End Text Editor Tools ---
+
+            // --- Bash Tool ---
+            ToolDefinition {
+                name: "bash".to_string(),
+                description: "Executes a shell command and returns its stdout and stderr.".to_string(),
+                input_schema: ToolInputSchema {
+                    type_: "object".to_string(),
+                    properties: HashMap::from([
+                        ("command".to_string(), ToolParameter { type_: "string".to_string(), description: "The shell command to execute.".to_string() }),
+                        // Timeout parameter included in schema but not yet implemented in handler
+                        ("timeout".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional timeout in seconds for the command execution.".to_string() }),
+                    ]),
+                    required: vec!["command".to_string()],
+                },
+            },
+            // --- End Bash Tool ---
         ];
 
         // Manually define the tools available from this Desktop instance
@@ -1077,6 +1148,123 @@ impl Desktop {
                 self.left_click_drag(args.start_x, args.start_y, args.end_x, args.end_y)?;
                 Ok(json!(null))
             }
+            // --- Text Editor Handlers ---
+            "text_editor_view" => {
+                #[derive(Deserialize)]
+                struct TextViewArgs { file_path: String }
+                let parsed_args: TextViewArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_view args: {}", e)))?;
+                match fs::read_to_string(&parsed_args.file_path) {
+                    Ok(content) => Ok(json!({ "content": content })),
+                    Err(e) => Err(AutomationError::Internal(format!("Failed to read file '{}': {}", parsed_args.file_path, e))),
+                }
+            }
+            "text_editor_create" => {
+                #[derive(Deserialize)]
+                struct TextCreateArgs { file_path: String, content: Option<String> }
+                let parsed_args: TextCreateArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_create args: {}", e)))?;
+                match fs::OpenOptions::new().write(true).create_new(true).open(&parsed_args.file_path) {
+                    Ok(mut file) => {
+                        use std::io::Write; // Import Write trait here
+                        let content_to_write = parsed_args.content.unwrap_or_default();
+                        match file.write_all(content_to_write.as_bytes()) {
+                            Ok(_) => Ok(json!({ "status": format!("File '{}' created successfully.", parsed_args.file_path) })),
+                            Err(e) => Err(AutomationError::Internal(format!("Failed to write initial content to file '{}': {}", parsed_args.file_path, e))),
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        Err(AutomationError::Internal(format!("File '{}' already exists. Cannot create.", parsed_args.file_path)))
+                    }
+                    Err(e) => {
+                        Err(AutomationError::Internal(format!("Failed to create file '{}': {}", parsed_args.file_path, e)))
+                    }
+                }
+            }
+            "text_editor_str_replace" => {
+                #[derive(Deserialize)]
+                struct TextReplaceArgs { file_path: String, find: String, replace: String }
+                let parsed_args: TextReplaceArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_str_replace args: {}", e)))?;
+                let content = match fs::read_to_string(&parsed_args.file_path) {
+                    Ok(c) => c,
+                    Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for replacement: {}", parsed_args.file_path, e))),
+                };
+                let new_content = content.replace(&parsed_args.find, &parsed_args.replace);
+                match fs::write(&parsed_args.file_path, new_content) {
+                    Ok(_) => Ok(json!({ "status": format!("File '{}' updated successfully with replacements.", parsed_args.file_path) })),
+                    Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.file_path, e))),
+                }
+            }
+            "text_editor_insert" => {
+                #[derive(Deserialize)]
+                struct TextInsertArgs { file_path: String, text: String, line: Option<usize> }
+                let parsed_args: TextInsertArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing text_editor_insert args: {}", e)))?;
+                let content = match fs::read_to_string(&parsed_args.file_path) {
+                    Ok(c) => c,
+                    Err(e) => return Err(AutomationError::Internal(format!("Failed to read file '{}' for insertion: {}", parsed_args.file_path, e))),
+                };
+
+                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                let insertion_point = match parsed_args.line {
+                    // Convert 1-based line to 0-based index, clamp to valid range (0 to lines.len())
+                    Some(line_num_1_based) => line_num_1_based.saturating_sub(1).min(lines.len()),
+                    None => lines.len(), // Append if line is null
+                };
+
+                lines.insert(insertion_point, parsed_args.text);
+
+                // Join lines, ensuring newline at the end if original content had one or if inserting into empty file
+                let new_content = lines.join("\n");
+                // A simple heuristic: add newline if original content ended with one or if it was empty
+                let final_content = if content.ends_with('\n') || content.is_empty() {
+                    format!("{}\n", new_content)
+                } else {
+                    new_content
+                };
+
+                match fs::write(&parsed_args.file_path, final_content) {
+                    Ok(_) => Ok(json!({ "status": format!("Text inserted successfully into file '{}' at line {}.", parsed_args.file_path, insertion_point + 1) })),
+                    Err(e) => Err(AutomationError::Internal(format!("Failed to write updated content to file '{}': {}", parsed_args.file_path, e))),
+                }
+            }
+            // --- End Text Editor Handlers ---
+
+            // --- Bash Handler ---
+            "bash" => {
+                #[derive(Deserialize)]
+                struct BashArgs { command: String, timeout: Option<u64> } // Timeout in seconds
+                let parsed_args: BashArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing bash args: {}", e)))?;
+
+                // Basic implementation without timeout handling for now
+                if parsed_args.timeout.is_some() {
+                    info!("Bash tool timeout parameter specified but not yet implemented.");
+                }
+
+                // Determine shell based on OS
+                let shell_cmd = if cfg!(target_os = "windows") {
+                    ("cmd", vec!["/C".to_string(), parsed_args.command])
+                } else {
+                    // Assume Unix-like shell (sh)
+                    ("sh", vec!["-c".to_string(), parsed_args.command])
+                };
+
+                match Command::new(shell_cmd.0).args(&shell_cmd.1).output() {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        let status_code = output.status.code();
+                        Ok(json!({
+                            "stdout": stdout,
+                            "stderr": stderr,
+                            "exit_code": status_code,
+                            "success": output.status.success()
+                        }))
+                    }
+                    Err(e) => {
+                        Err(AutomationError::Internal(format!("Failed to execute bash command '{}': {}", shell_cmd.1.join(" "), e)))
+                    }
+                }
+            }
+            // --- End Bash Handler ---
+
             _ => {
                 error!("Unknown tool called: {}", name);
                 Err(AutomationError::ToolNotFound(name.to_string()))
@@ -1101,3 +1289,4 @@ impl Desktop {
 
     // --- End New Methods ---
 }
+
