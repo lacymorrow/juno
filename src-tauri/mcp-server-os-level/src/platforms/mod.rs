@@ -120,6 +120,27 @@ pub trait AccessibilityEngine: Send + Sync + Any {
         end_x: f64,
         end_y: f64,
     ) -> Result<(), AutomationError>;
+
+    /// Get the title of the currently focused window.
+    fn get_window_title(&self) -> Result<String, AutomationError>;
+
+    /// Get a list of all open window elements (could be filtered by app in implementation).
+    fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError>;
+
+    /// Close the currently focused window.
+    fn close_window(&self) -> Result<(), AutomationError>;
+
+    /// Maximize the currently focused window.
+    fn maximize_window(&self) -> Result<(), AutomationError>;
+
+    /// Minimize the currently focused window.
+    fn minimize_window(&self) -> Result<(), AutomationError>;
+
+    /// Resize the currently focused window.
+    fn resize_window(&self, width: f64, height: f64) -> Result<(), AutomationError>;
+
+    /// Move the currently focused window.
+    fn move_window(&self, x: f64, y: f64) -> Result<(), AutomationError>;
 }
 
 #[cfg(target_os = "linux")]
