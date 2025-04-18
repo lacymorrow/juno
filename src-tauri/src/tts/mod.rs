@@ -13,23 +13,32 @@ pub fn stop_speech() {
     println!("[TTS] Stop speech requested (not implemented).");
 }
 
-// Central TTS invocation function
+// Central TTS invocation function (used by Tauri commands, selects based on env var)
+#[tauri::command]
 pub async fn invoke_tts(
     text: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // TODO: Add logic to select provider (e.g., based on env var or config)
-    // For now, defaulting to system TTS.
+    // Select provider based on env var or config
     let provider = std::env::var("TTS_PROVIDER").unwrap_or_else(|_| "system".to_string());
-    info!("Using TTS provider: {}", provider);
+    info!("Using TTS provider from environment: {}", provider);
+    invoke_tts_for_provider(text, Some(state), &provider).await
+}
 
+// Invoke TTS for a specific provider name (used by CLI test and invoke_tts)
+pub async fn invoke_tts_for_provider(
+    text: String,
+    _state: Option<State<'_, AppState>>,
+    provider: &str,
+) -> Result<String, String> {
+    info!("Invoking TTS for provider: {}", provider);
     match provider.to_lowercase().as_str() {
-        "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text, state).await,
-        "replicate" => replicate::invoke_replicate_tts(text, state).await,
-        "system" => system::invoke_system_tts(text, state).await,
+        "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
+        "replicate" => replicate::invoke_replicate_tts(text).await,
+        "system" => system::invoke_system_tts(text).await,
         _ => {
-            warn!("Unknown TTS_PROVIDER: '{}'. Defaulting to system TTS.", provider);
-            system::invoke_system_tts(text, state).await
+            warn!("Unknown TTS provider specified: '{}'. Cannot invoke.", provider);
+            Err(format!("Unknown TTS provider: {}", provider))
         }
     }
 }
