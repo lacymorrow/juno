@@ -1,6 +1,4 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 fn main() {
-    dotdot_lib::run()
+    // Ensure the library name matches the `name` field in `[lib]` section of Cargo.toml
+    dotdot_lib::run();
 }

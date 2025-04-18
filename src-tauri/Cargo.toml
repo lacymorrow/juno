@@ -36,6 +36,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.5.11", features = ["derive"] }
 tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 wait-timeout = "0.2"
+futures-util = "0.3.31"
+futures = "0.3"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
