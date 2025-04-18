@@ -1,11 +1,15 @@
 use serde::Serialize;
 use reqwest::{Client, header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE}};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info};
+use serde_json::json;
+#[allow(unused_imports)] // desktop_arc is intentionally unused now
+use computer_use_ai_sdk::{Desktop, AutomationError};
+use std::sync::Arc;
+use tauri::State;
 
 // Bring AppState and Desktop into scope from the crate root
 use crate::{AppState, Desktop}; // Assuming AppState is made pub(crate) or pub in lib.rs
-use std::sync::Arc; // Required for Desktop Arc
 
 // --- ElevenLabs API Structures ---
 #[derive(Serialize)]
@@ -24,9 +28,11 @@ pub(crate) struct ElevenLabsRequest {
 
 // --- ElevenLabs TTS Command ---
 #[tauri::command]
-pub async fn invoke_elevenlabs_tts(text_to_speak: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let desktop_arc: Arc<Desktop> = state.desktop.clone(); // Explicitly type desktop_arc
+pub async fn invoke_elevenlabs_tts(text_to_speak: String, state: State<'_, AppState>) -> Result<String, String> {
     info!("Invoking ElevenLabs TTS for text: \"{}\"", text_to_speak);
+
+    #[allow(unused_variables)] // desktop_arc is intentionally unused now
+    let desktop_arc: Arc<Desktop> = state.desktop.clone(); // Explicitly type desktop_arc
 
     let api_key = std::env::var("ELEVENLABS_API_KEY")
         .map_err(|_| "ELEVENLABS_API_KEY not configured.".to_string())?;

@@ -15,7 +15,7 @@ use std::io::Cursor;
 use tracing_subscriber::{fmt, EnvFilter};
 use tracing::{debug, error, info, warn};
 use tauri_plugin_notification::NotificationExt;
-use tauri::{AppHandle, Manager, State, Wry};
+use tauri::{AppHandle, Manager, State};
 use tauri::menu::{Menu, PredefinedMenuItem, MenuItemKind};
 use tauri::tray::{TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::{WindowEvent};
@@ -62,10 +62,13 @@ struct Cli {
     // test_screenshot: bool,
 }
 
+#[allow(dead_code)] // Allow dead code for potentially unused fields
 pub(crate) struct AppState {
     desktop: Arc<Desktop>,
     // State for text_editor_undo_edit
+    #[allow(dead_code)] // Temporarily allow, seems used by call_tool
     last_edited_file: Mutex<Option<PathBuf>>,
+    #[allow(dead_code)] // Temporarily allow, seems used by call_tool
     previous_content: Mutex<Option<Option<String>>>, // Option<Option<String>>: None=no undo, Some(None)=last was create, Some(Some(content))=last was edit
 }
 
@@ -386,13 +389,16 @@ async fn submit_query(
         // New Anthropic Response structure matching API
         #[derive(Deserialize, Debug)]
         struct AnthropicUsage {
+            #[allow(dead_code)] // Allow dead code for potentially unused fields
             input_tokens: u32,
+            #[allow(dead_code)] // Allow dead code for potentially unused fields
             output_tokens: u32,
         }
         #[derive(Deserialize, Debug)]
         struct AnthropicResponse { // Shadowing the previous struct is fine here
             content: Vec<AnthropicContentBlock>,
             stop_reason: String,
+            #[allow(dead_code)] // Allow dead code for potentially unused fields
             usage: AnthropicUsage,
         }
 
@@ -865,6 +871,7 @@ async fn dev_scroll_window(
 }
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Allow dead code as this is a test/debug function
 fn run_test_focused_element(desktop: &Desktop) -> Result<(), String> {
     println!("--- Running Test: Get Focused Element (Original Method) ---");
     match desktop.focused_element() {
@@ -897,6 +904,7 @@ fn run_test_focused_element(desktop: &Desktop) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Allow dead code as this is a test/debug function
 fn run_test_focused_element_ns() -> Result<(), String> {
     use computer_use_ai_sdk::platforms::macos::element::get_focused_element_ns_workspace;
 
@@ -931,6 +939,7 @@ fn run_test_focused_element_ns() -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Allow dead code as this is a test/debug function
 fn run_check_accessibility() -> Result<(), String> {
     println!("--- Running Test: Check Accessibility Permissions ---");
     match computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions(true)
@@ -953,6 +962,7 @@ fn run_check_accessibility() -> Result<(), String> {
 }
 
 // Helper function to update undo state
+#[allow(dead_code)] // Temporarily allow, seems used by call_tool
 fn update_undo_state(state: &AppState, file_path: PathBuf, previous_content: Option<String>) {
     *state.last_edited_file.lock().unwrap() = Some(file_path);
     *state.previous_content.lock().unwrap() = Some(previous_content);
@@ -1122,7 +1132,7 @@ pub fn run() {
     };
 
     // --- Tauri Application Builder ---
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .manage(app_state) // Manage the AppState
@@ -1330,9 +1340,10 @@ mod tests {
     }
 }
 
+#[allow(unused_variables)] // desktop parameter is not used currently
 fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
     // Keep existing tools and add new ones
-    let mut tools = vec![
+    let tools = vec![
         // --- Existing Tools (Corrected Construction) ---
         ToolDefinition {
             name: "get_focused_element_info".to_string(),
@@ -1751,6 +1762,7 @@ fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
 }
 
 // Helper to extract string param or return error JSON
+#[allow(dead_code)] // Allow dead code for helper potentially used by call_tool
 fn get_string_param(input: &Value, key: &str) -> Result<String, Value> {
     input[key]
         .as_str()
@@ -1759,6 +1771,7 @@ fn get_string_param(input: &Value, key: &str) -> Result<String, Value> {
 }
 
 // Helper to extract optional string param (Corrected)
+#[allow(dead_code)] // Allow dead code for helper potentially used by call_tool
 fn get_optional_string_param(input: &Value, key: &str) -> Result<Option<String>, Value> {
     match input.get(key) {
         Some(value) => {
@@ -1776,6 +1789,7 @@ fn get_optional_string_param(input: &Value, key: &str) -> Result<Option<String>,
 
 
 // Helper to extract f64 param or return error JSON
+#[allow(dead_code)] // Allow dead code for helper potentially used by call_tool
 fn get_f64_param(input: &Value, key: &str) -> Result<f64, Value> {
     input[key]
         .as_f64()
@@ -1783,6 +1797,7 @@ fn get_f64_param(input: &Value, key: &str) -> Result<f64, Value> {
 }
 
 // Helper to extract u64 param or return error JSON
+#[allow(dead_code)] // Allow dead code for helper potentially used by call_tool
 fn get_u64_param(input: &Value, key: &str) -> Result<u64, Value> {
     input[key]
         .as_u64()
@@ -1790,6 +1805,7 @@ fn get_u64_param(input: &Value, key: &str) -> Result<u64, Value> {
 }
 
 // Helper to extract i64 param or return error JSON
+#[allow(dead_code)] // Allow dead code for helper potentially used by call_tool
 fn get_i64_param(input: &Value, key: &str) -> Result<i64, Value> {
     input[key]
         .as_i64()
@@ -1797,6 +1813,7 @@ fn get_i64_param(input: &Value, key: &str) -> Result<i64, Value> {
 }
 
 // Helper function to get an optional u64 parameter from JSON
+#[allow(dead_code)] // Allow dead code for helper potentially used by call_tool
 fn get_optional_u64_param(input: &Value, key: &str) -> Result<Option<u64>, Value> {
     match input.get(key) {
         Some(value) => {
@@ -1814,6 +1831,7 @@ fn get_optional_u64_param(input: &Value, key: &str) -> Result<Option<u64>, Value
 }
 
 // Tool call dispatcher (Corrected Error Handling and Return Type)
+#[allow(dead_code)] // Allow dead code for helper potentially used by submit_query
 async fn call_tool(
     desktop: &Arc<Desktop>,
     app_handle: &AppHandle,
@@ -2319,6 +2337,7 @@ async fn call_tool(
 }
 
 // Wrapper function to integrate call_tool result into Anthropic flow
+#[allow(dead_code)] // Allow dead code for helper potentially used by submit_query
 async fn handle_tool_call(
     desktop: &Arc<Desktop>,
     app_handle: &AppHandle,
