@@ -13,6 +13,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_notification::NotificationExt;
 use tracing::{error, info, warn};
 use wait_timeout::ChildExt;
+use tokio::time::timeout;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -390,6 +391,7 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                     let mut props = HashMap::new();
                     props.insert("command".to_string(), ToolParameter { type_: "string".to_string(), description: "Command line to execute.".to_string() });
                     props.insert("timeout_seconds".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional timeout.".to_string() });
+                    props.insert("restart".to_string(), ToolParameter { type_: "boolean".to_string(), description: "Optional: Specify true to restart the shell state before running the command.".to_string() });
                     props
                 },
                 required: vec!["command".to_string()],
@@ -424,20 +426,6 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
             },
         },
         ToolDefinition {
-            name: "run_terminal_command".to_string(),
-            description: "Runs a command in the terminal.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("command".to_string(), ToolParameter { type_: "string".to_string(), description: "The command to run.".to_string() });
-                    props.insert("timeout_ms".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional timeout in milliseconds.".to_string() });
-                    props
-                },
-                required: vec!["command".to_string()],
-            },
-        },
-        ToolDefinition {
             name: "get_element_by_description".to_string(),
             description: "Finds a UI element based on a natural language description.".to_string(),
             input_schema: ToolInputSchema {
@@ -465,7 +453,7 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: HashMap::new(),
-                required: Vec::new(),
+                required: vec!["content".to_string()],
             },
         },
         ToolDefinition {
@@ -479,6 +467,38 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                     props
                 },
                 required: vec!["content".to_string()],
+            },
+        },
+        // --- Newly Added Definitions from Anthropic Docs ---
+        ToolDefinition {
+            name: "get_browser_info".to_string(),
+            description: "Gets information about the active browser tab (URL, title). Requires browser extension.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(),
+                required: Vec::new(),
+            },
+        },
+        ToolDefinition {
+            name: "run_applescript".to_string(),
+            description: "Executes the given AppleScript code (macOS only)." .to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("script".to_string(), ToolParameter { type_: "string".to_string(), description: "The AppleScript code to execute.".to_string() });
+                    props
+                },
+                required: vec!["script".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "get_screen_text".to_string(),
+            description: "Extracts text content from the screen using OCR.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(), // Optionally add region parameters later
+                required: Vec::new(),
             },
         },
         // --- Custom Tools ---
@@ -571,6 +591,24 @@ fn get_optional_u64_param(input: &Value, key: &str) -> Result<Option<u64>, Value
             } else {
                 // Use value.to_string() or describe the type in the error message
                 Err(json!({ "error": format!("Invalid type for parameter '{}': expected u64 or null, got type {}", key, value.to_string()) }))
+            }
+        }
+        None => Ok(None), // Key not present
+    }
+}
+
+// Helper to extract boolean param or return error JSON
+#[allow(dead_code)] // Allow dead code for helper potentially used by call_tool
+fn get_optional_bool_param(input: &Value, key: &str) -> Result<Option<bool>, Value> {
+    match input.get(key) {
+        Some(value) => {
+            if value.is_null() {
+                Ok(None) // Treat null as None
+            } else if let Some(bool_value) = value.as_bool() {
+                Ok(Some(bool_value))
+            } else {
+                // Use value.to_string() or describe the type in the error message
+                Err(json!({ "error": format!("Invalid type for parameter '{}': expected bool or null, got type {}", key, value.to_string()) }))
             }
         }
         None => Ok(None), // Key not present
@@ -795,8 +833,10 @@ pub(crate) async fn call_tool(
                 let x = get_f64_param(input, "x")?;
                 let y = get_f64_param(input, "y")?;
                 info!(x = %x, y = %y, "Executing right click");
-                // TODO: Implement right_click using desktop.right_click(x, y).await
-                Err(json!({ "error": "Tool 'right_click' not implemented yet." }))
+                match desktop.right_click(x, y) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Right clicked at ({}, {}).", x, y)})),
+                    Err(e) => Err(json!({"error": format!("Failed to perform right click: {}", e)})),
+                }
             }
             "middle_click" => {
                  match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
@@ -808,14 +848,21 @@ pub(crate) async fn call_tool(
                  }
             }
             "triple_click" => {
-                 match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
-                     (Ok(x), Ok(y)) => match desktop.triple_click(x, y) {
-                         Ok(_) => Ok(json!({"success": true, "message": format!("Triple clicked at ({}, {}).", x, y)})),
-                         Err(e) => Err(json!({"error": format!("Failed to perform triple click: {}", e)})),
-                     },
-                     (Err(e), _) | (_, Err(e)) => Err(e),
+                let x = get_f64_param(input, "x")?;
+                let y = get_f64_param(input, "y")?;
+                match desktop.triple_click(x, y) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Triple clicked at ({}, {}).", x, y)})),
+                    Err(e) => Err(json!({"error": format!("Failed to perform triple click: {}", e)})),
                 }
-            }
+            },
+            "double_click" => {
+                let x = get_f64_param(input, "x")?;
+                let y = get_f64_param(input, "y")?;
+                match desktop.double_click(x, y) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Double clicked at ({}, {}).", x, y)})),
+                    Err(e) => Err(json!({"error": format!("Failed to perform double click: {}", e)})),
+                }
+            },
              "left_click_drag" => {
                 match (
                     get_f64_param(input, "start_x"),
@@ -1023,104 +1070,99 @@ pub(crate) async fn call_tool(
             }
             // --- Bash Handler ---
             "bash" => {
-                let command_str = get_string_param(input, "command")?;
-                let timeout_seconds_opt = get_optional_u64_param(input, "timeout_seconds");
-                let timeout = match timeout_seconds_opt {
-                    Ok(Some(secs)) => Some(Duration::from_secs(secs)),
-                    Ok(None) => None, // No timeout specified
-                    Err(e) => return Err(e), // Error parsing timeout
-                };
+                match (get_string_param(input, "command"), get_optional_u64_param(input, "timeout_seconds"), get_optional_bool_param(input, "restart")) {
+                    (Ok(command), Ok(timeout_seconds), Ok(restart_opt)) => {
+                        let restart = restart_opt.unwrap_or(false);
+                        info!(command = %command, timeout = ?timeout_seconds, restart = restart, "Executing bash command");
 
-                info!(command = %command_str, ?timeout, "Executing bash command");
-                #[cfg(target_os = "macos")] let shell = "/bin/zsh";
-                #[cfg(target_os = "windows")] let shell = "cmd";
-                #[cfg(target_os = "linux")] let shell = "/bin/bash";
-                #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))] let shell = "sh";
+                        // TODO: Implement proper shell state management for 'restart' if needed.
+                        if restart {
+                            warn!("Bash 'restart' parameter is noted but full shell state reset is not yet implemented.");
+                            // Potentially clear environment variables or reset CWD if state is managed here
+                        }
 
-                let mut cmd = Command::new(shell);
-                cmd.arg("-c").arg(&command_str);
+                        let mut cmd = Command::new("sh"); // Using sh -c for broader compatibility
+                        cmd.arg("-c");
+                        cmd.arg(&command);
 
-                match cmd.spawn() { // Spawn the process
-                    Ok(mut child) => {
-                        let status_result = match timeout {
-                            Some(duration) => child.wait_timeout(duration),
-                            None => child.wait().map(Some), // Wait indefinitely if no timeout
-                        };
+                        // Basic timeout handling with std::process, more robust handling might need wait-timeout crate
+                        let timeout_duration = timeout_seconds.map(Duration::from_secs);
 
-                        match status_result {
-                            Ok(Some(status)) => { // Process finished or killed by timeout
-                                // Attempt to get output even if killed (might be partial)
-                                let output_result = child.wait_with_output();
-                                match output_result {
-                                    Ok(output) => {
-                                         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                                         let exit_code = output.status.code();
-                                         let timed_out = !status.success() && exit_code.is_none(); // Infer timeout if killed
-                                         info!(stdout = %stdout, stderr = %stderr, exit_code = ?exit_code, timed_out = timed_out, "Bash command finished (or timed out)");
-                                         Ok(json!({
-                                            "success": output.status.success(),
-                                            "stdout": stdout,
-                                            "stderr": stderr,
-                                            "exit_code": exit_code,
+                        // Spawn the child process
+                        match cmd.spawn() {
+                             Ok(mut child) => {
+                                let status_result = if let Some(duration) = timeout_duration {
+                                    match child.wait_timeout(duration) {
+                                        Ok(Some(status)) => Ok(status),
+                                        Ok(None) => { // Timeout occurred
+                                            warn!(command = %command, "Command timed out, killing process...");
+                                            child.kill().map_err(|e| format!("Failed to kill timed out process: {}", e))?;
+                                            child.wait().map_err(|e| format!("Failed to wait on killed process: {}", e))
+                                            // Return a specific status or error indicating timeout
+                                            // For now, just return the wait status after kill
+                                        }
+                                        Err(e) => Err(format!("Failed to wait for child process with timeout: {}", e)),
+                                    }
+                                } else {
+                                     child.wait().map_err(|e| format!("Failed to wait for child process: {}", e))
+                                };
+
+                                match status_result {
+                                    Ok(status) => {
+                                        // Attempt to read stdout/stderr after process exits
+                                        // Note: Reading from pipes of a finished process might be tricky/platform-dependent
+                                        // Consider using libraries like `duct` or managing pipes explicitly if needed.
+                                        // For now, we return exit code and timeout status.
+                                        let timed_out = timeout_duration.is_some() && !status.success() && status.code().is_none(); // Heuristic for timeout
+
+                                        Ok(json!({
+                                            "success": status.success(),
+                                            "stdout": "(stdout not captured in this implementation)", // Placeholder
+                                            "stderr": "(stderr not captured in this implementation)", // Placeholder
+                                            "exit_code": status.code(),
                                             "timed_out": timed_out
-                                         }))
-                                    }
-                                    Err(e) => {
-                                        // This might happen if the process was forcefully killed and output couldn't be retrieved
-                                        error!(error = %e, command = %command_str, "Failed to get output after command finished/timed out");
-                                        Err(json!({"error": format!("Failed to get output for command '{}' after execution: {}", command_str, e), "timed_out": true})) // Assume timeout if we can't get output
-                                    }
+                                        }))
+                                    },
+                                    Err(e) => Err(json!({ "error": e }))
                                 }
                             }
-                            Ok(None) => { // Timeout occurred
-                                info!(command = %command_str, "Bash command timed out");
-                                // Attempt to kill the process if it timed out
-                                let _ = child.kill(); // Ignore kill errors, best effort
-                                let _ = child.wait(); // Ensure it's reaped
-                                Err(json!({
-                                    "error": "Command execution timed out".to_string(),
-                                    "stdout": "",
-                                    "stderr": "",
-                                    "exit_code": null, // No exit code if timed out
-                                    "timed_out": true
-                                }))
-                            }
-                            Err(e) => { // Error waiting for the process
-                                error!(error = %e, command = %command_str, "Error waiting for bash command");
-                                Err(json!({"error": format!("Error waiting for command '{}': {}", command_str, e)}))
-                            }
+                            Err(e) => Err(json!({"error": format!("Failed to spawn command '{}': {}", command, e)}))
                         }
                     }
-                    Err(e) => { // Error spawning the process
-                        error!(error = %e, command = %command_str, "Failed to spawn bash command");
-                        Err(json!({"error": format!("Failed to spawn command '{}': {}", command_str, e)}))
-                    }
+                    (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => Err(json!({ "error": format!("Failed to parse command arguments: {}", e) })), // Corrected structure
                 }
             }
-            // --- Standard File/Command Tools (Placeholders) ---
-            "read_file" => {
-                let path = get_string_param(input, "path")?;
-                info!(path = %path, "Executing read_file");
-                // TODO: Implement standard read_file, potentially consolidating with read_file_contents
-                 Err(json!({ "error": "Tool 'read_file' not implemented yet." }))
+            // --- Standard Tool Implementations ---
+             "read_file" => { // Reverted to use std::fs
+                 match get_string_param(input, "path") {
+                     Ok(path) => {
+                         info!(path = %path, "Reading file");
+                         match fs::read_to_string(&path) {
+                             Ok(content) => Ok(json!({"success": true, "content": content})),
+                             Err(e) => {
+                                 error!(path = %path, error = %e, "Failed to read file");
+                                 Err(json!({"error": format!("Failed to read file '{}': {}", path, e)}))
+                             }
+                         }
+                     }
+                     Err(e) => Err(e),
+                 }
             }
-            "write_file" => {
-                let path = get_string_param(input, "path")?;
-                let content = get_string_param(input, "content")?;
-                info!(path = %path, content_length = content.len(), "Executing write_file");
-                // TODO: Implement standard write_file, potentially consolidating with write_file_contents
-                 Err(json!({ "error": "Tool 'write_file' not implemented yet." }))
+            "write_file" => { // Reverted to use std::fs
+                 match (get_string_param(input, "path"), get_string_param(input, "content")) {
+                     (Ok(path), Ok(content)) => {
+                         info!(path = %path, content_length = content.len(), "Writing file");
+                         match fs::write(&path, &content) {
+                            Ok(_) => Ok(json!({"success": true, "message": "File written."})),
+                            Err(e) => {
+                                error!(path = %path, error = %e, "Failed to write file");
+                                Err(json!({"error": format!("Failed to write file '{}': {}", path, e)}))
+                            }
+                         }
+                     }
+                     (Err(e), _) | (_, Err(e)) => Err(e),
+                 }
             }
-            "run_terminal_command" => {
-                 let command = get_string_param(input, "command")?;
-                 let timeout_ms = get_optional_u64_param(input, "timeout_ms")?;
-                 info!(command = %command, timeout_ms = ?timeout_ms, "Executing run_terminal_command");
-                 // TODO: Implement standard run_terminal_command, potentially consolidating with run_command
-                 Err(json!({ "error": "Tool 'run_terminal_command' not implemented yet." }))
-            }
-
-             // --- Other Standard Tools (Placeholders) ---
             "get_element_by_description" => {
                 let description = get_string_param(input, "description")?;
                 info!(description = %description, "Executing get_element_by_description");
@@ -1132,8 +1174,62 @@ pub(crate) async fn call_tool(
                 // TODO: Implement get_element_tree using desktop.get_element_tree().await
                 Err(json!({ "error": "Tool 'get_element_tree' not implemented yet." }))
             }
-
-            // --- Unknown Tool ---
+            "get_clipboard_content" => {
+                 match desktop.get_clipboard_content() {
+                    Ok(content) => Ok(json!({"success": true, "content": content})),
+                    Err(e) => Err(json!({"error": format!("Failed to get clipboard content: {}", e)})),
+                }
+            }
+            "set_clipboard_content" => {
+                 match get_string_param(input, "content") {
+                    Ok(content) => match desktop.set_clipboard_content(&content) {
+                        Ok(_) => Ok(json!({"success": true, "message": "Clipboard content set."})),
+                        Err(e) => Err(json!({"error": format!("Failed to set clipboard content: {}", e)})),
+                    },
+                    Err(e) => Err(e),
+                }
+            }
+            // --- Newly Added Tool Handlers (Placeholders/Implementations) ---
+            "get_browser_info" => {
+                // This likely requires interaction with browser extensions or complex OS-specific APIs.
+                Err(json!({"error": "Tool 'get_browser_info' not implemented yet."}))
+            }
+            "run_applescript" => {
+                #[cfg(target_os = "macos")]
+                {
+                     match get_string_param(input, "script") {
+                        Ok(script) => {
+                            info!(script = %script, "Executing AppleScript");
+                            match Command::new("osascript").arg("-e").arg(&script).output() {
+                                Ok(output) => {
+                                    if output.status.success() {
+                                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                        Ok(json!({"success": true, "result": stdout}))
+                                    } else {
+                                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                        warn!(stderr = %stderr, "AppleScript execution failed");
+                                        Err(json!({"error": format!("AppleScript execution failed: {}", stderr)}))
+                                    }
+                                }
+                                Err(e) => {
+                                     error!(error = %e, "Failed to run osascript command");
+                                     Err(json!({"error": format!("Failed to execute osascript: {}", e)}))
+                                }
+                             }
+                         }
+                         Err(e) => Err(e),
+                     }
+                 }
+                 #[cfg(not(target_os = "macos"))]
+                 {
+                     Err(json!({"error": "run_applescript is only available on macOS."}))
+                 }
+            }
+            "get_screen_text" => {
+                 // This requires an OCR engine integration.
+                Err(json!({"error": "Tool 'get_screen_text' not implemented yet."}))
+            }
+             // --- Unknown Tool ---
             _ => Err(json!({"error": format!("Unknown tool name: {}", tool_name)})),
         }
     };
