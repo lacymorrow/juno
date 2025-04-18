@@ -7,9 +7,9 @@ use dotenvy::dotenv;
 use std::env;
 use std::sync::{Arc, Mutex};
 use tauri::{ // Add Manager and missing items here
-    Manager, AppHandle, State, WindowEvent,
+    Manager, WindowEvent,
     menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem},
-    tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState},
+    tray::{TrayIconEvent, MouseButton, MouseButtonState},
     image::Image
 };
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
@@ -28,7 +28,6 @@ pub use commands::*;
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
-use computer_use_ai_sdk::Selector;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
