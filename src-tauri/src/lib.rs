@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::Parser;
-use computer_use_ai_sdk::{Desktop, ToolDefinition};
+use computer_use_ai_sdk::{Desktop, ToolDefinition, ToolInputSchema, ToolParameter};
 use computer_use_ai_sdk::AutomationError;
 use dotenvy::dotenv;
 use reqwest::Client;
@@ -22,6 +22,7 @@ use tauri::{WindowEvent, Wry};
 use tauri::menu::MenuItemBuilder;
 use tauri::image::Image;
 use std::fs;
+use std::collections::HashMap;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -1310,5 +1311,859 @@ mod tests {
     #[test]
     fn test_focused_element_info_placeholder() {
         assert!(true, "Placeholder test for focused element concept");
+    }
+}
+
+fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
+    // Keep existing tools and add new ones
+    let mut tools = vec![
+        // --- Existing Tools (Corrected Construction) ---
+        ToolDefinition {
+            name: "get_focused_element_info".to_string(),
+            description: "Get information about the currently focused UI element.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(), // No properties
+                required: Vec::new(),       // No required fields
+            },
+        },
+        ToolDefinition {
+            name: "click_focused_element".to_string(),
+            description: "Clicks the center of the currently focused UI element.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(),
+                required: Vec::new(),
+            },
+        },
+        ToolDefinition {
+            name: "type_text".to_string(),
+            description: "Types the given text into the currently focused element.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("text".to_string(), ToolParameter { type_: "string".to_string(), description: "The text to type.".to_string() });
+                    props
+                },
+                required: vec!["text".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "press_key".to_string(),
+            description: "Presses a single key, optionally with a modifier.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("key".to_string(), ToolParameter { type_: "string".to_string(), description: "The key to press (e.g., 'a', 'Enter').".to_string() });
+                    props.insert("modifier".to_string(), ToolParameter { type_: "string".to_string(), description: "Optional modifier key (e.g., 'cmd', 'ctrl').".to_string() }); // Add enum validation if needed
+                    props
+                },
+                required: vec!["key".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "open_application".to_string(),
+            description: "Opens an application by its name.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("app_name".to_string(), ToolParameter { type_: "string".to_string(), description: "The name of the application to open.".to_string() });
+                    props
+                },
+                required: vec!["app_name".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "open_url".to_string(),
+            description: "Opens a URL in the default web browser.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("url".to_string(), ToolParameter { type_: "string".to_string(), description: "The URL to open.".to_string() });
+                    props
+                },
+                required: vec!["url".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "scroll_window".to_string(),
+            description: "Scrolls the currently active window or element.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("direction".to_string(), ToolParameter { type_: "string".to_string(), description: "Direction (up, down, left, right).".to_string() });
+                    props.insert("amount".to_string(), ToolParameter { type_: "number".to_string(), description: "Amount to scroll.".to_string() });
+                    props
+                },
+                required: vec!["direction".to_string(), "amount".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "capture_screenshot".to_string(),
+            description: "Captures a screenshot of the entire screen.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(),
+                required: Vec::new(),
+            },
+        },
+        ToolDefinition {
+            name: "capture_element_screenshot".to_string(),
+            description: "Captures a screenshot of the currently focused UI element.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(),
+                required: Vec::new(),
+            },
+        },
+        // --- Added Tools (Corrected Construction) ---
+        ToolDefinition {
+            name: "wait".to_string(),
+            description: "Pauses execution for a specified duration.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("duration_ms".to_string(), ToolParameter { type_: "integer".to_string(), description: "Wait duration in milliseconds.".to_string() });
+                    props
+                },
+                required: vec!["duration_ms".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "cursor_position".to_string(),
+            description: "Gets the current mouse cursor position.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(),
+                required: Vec::new(),
+            },
+        },
+        ToolDefinition {
+            name: "mouse_move".to_string(),
+            description: "Moves the mouse cursor to specified coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "Target X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Target Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "left_mouse_down".to_string(),
+            description: "Presses and holds the left mouse button at coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "left_mouse_up".to_string(),
+            description: "Releases the left mouse button at coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+         ToolDefinition {
+            name: "left_click".to_string(),
+            description: "Performs a left mouse click at coordinates.".to_string(),
+             input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "right_click".to_string(),
+            description: "Performs a right mouse click at coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "middle_click".to_string(),
+            description: "Performs a middle mouse click at coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "double_click".to_string(),
+            description: "Performs a double left mouse click at coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "triple_click".to_string(),
+            description: "Performs a triple left mouse click at coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+         ToolDefinition {
+            name: "left_click_drag".to_string(),
+            description: "Drags the mouse with the left button held down.".to_string(),
+             input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("start_x".to_string(), ToolParameter { type_: "number".to_string(), description: "Starting X coordinate.".to_string() });
+                    props.insert("start_y".to_string(), ToolParameter { type_: "number".to_string(), description: "Starting Y coordinate.".to_string() });
+                    props.insert("end_x".to_string(), ToolParameter { type_: "number".to_string(), description: "Ending X coordinate.".to_string() });
+                    props.insert("end_y".to_string(), ToolParameter { type_: "number".to_string(), description: "Ending Y coordinate.".to_string() });
+                    props
+                },
+                required: vec!["start_x".to_string(), "start_y".to_string(), "end_x".to_string(), "end_y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "scroll_at_position".to_string(),
+            description: "Scrolls the view at a specific coordinate.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate to scroll at.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate to scroll at.".to_string() });
+                    props.insert("direction".to_string(), ToolParameter { type_: "string".to_string(), description: "Direction (up, down, left, right).".to_string() });
+                    props.insert("amount".to_string(), ToolParameter { type_: "number".to_string(), description: "Amount to scroll.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string(), "direction".to_string(), "amount".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "hold_key".to_string(),
+            description: "Presses and holds a modifier key.".to_string(),
+             input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("key".to_string(), ToolParameter { type_: "string".to_string(), description: "Modifier key to hold (cmd, ctrl, alt, shift).".to_string() });
+                    props
+                },
+                required: vec!["key".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "release_key".to_string(),
+            description: "Releases a previously held modifier key.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("key".to_string(), ToolParameter { type_: "string".to_string(), description: "Modifier key to release.".to_string() });
+                    props
+                },
+                required: vec!["key".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "get_clipboard_content".to_string(),
+            description: "Gets the current system clipboard content.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: HashMap::new(),
+                required: Vec::new(),
+            },
+        },
+        ToolDefinition {
+            name: "set_clipboard_content".to_string(),
+            description: "Sets the system clipboard content.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("content".to_string(), ToolParameter { type_: "string".to_string(), description: "Text content to set.".to_string() });
+                    props
+                },
+                required: vec!["content".to_string()],
+            },
+        },
+        // --- Text Editor Tools ---
+        ToolDefinition {
+            name: "text_editor_view".to_string(),
+            description: "Reads and returns the content of a text file.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path to the file.".to_string() });
+                    props
+                },
+                required: vec!["file_path".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "text_editor_create".to_string(),
+            description: "Creates/overwrites a text file with given content.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path for the file.".to_string() });
+                    props.insert("content".to_string(), ToolParameter { type_: "string".to_string(), description: "Initial content.".to_string() });
+                    props
+                },
+                required: vec!["file_path".to_string(), "content".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "text_editor_insert".to_string(),
+            description: "Inserts text into a file at a specific line (1-indexed).".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path to the file.".to_string() });
+                    props.insert("text_to_insert".to_string(), ToolParameter { type_: "string".to_string(), description: "Text to insert.".to_string() });
+                    props.insert("line_number".to_string(), ToolParameter { type_: "integer".to_string(), description: "1-based line number (appends if > lines).".to_string() });
+                    props
+                },
+                required: vec!["file_path".to_string(), "text_to_insert".to_string(), "line_number".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "text_editor_str_replace".to_string(),
+            description: "Replaces all occurrences of a string in a file.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                     let mut props = HashMap::new();
+                    props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path to the file.".to_string() });
+                    props.insert("find_text".to_string(), ToolParameter { type_: "string".to_string(), description: "Text to find.".to_string() });
+                    props.insert("replace_text".to_string(), ToolParameter { type_: "string".to_string(), description: "Replacement text.".to_string() });
+                    props
+                },
+                required: vec!["file_path".to_string(), "find_text".to_string(), "replace_text".to_string()],
+            },
+        },
+        // --- Bash Tool ---
+        ToolDefinition {
+            name: "bash".to_string(),
+            description: "Executes a shell command.".to_string(),
+             input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("command".to_string(), ToolParameter { type_: "string".to_string(), description: "Command line to execute.".to_string() });
+                    props.insert("timeout_seconds".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional timeout (not implemented).".to_string() });
+                    props
+                },
+                required: vec!["command".to_string()],
+            },
+        },
+    ];
+
+    // Add platform-specific tools or modify existing ones if needed
+    #[cfg(target_os = "macos")]
+    {
+        // Example: Add macOS specific tool if any
+    }
+
+    tools
+}
+
+// Helper to extract string param or return error JSON
+fn get_string_param(input: &Value, key: &str) -> Result<String, Value> {
+    input[key]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| json!({"error": format!("Missing or invalid string parameter: {}", key)}))
+}
+
+// Helper to extract optional string param (Corrected)
+fn get_optional_string_param(input: &Value, key: &str) -> Result<Option<String>, Value> {
+    match input.get(key) {
+        Some(value) => {
+            if value.is_null() {
+                Ok(None) // Treat null as None
+            } else {
+                value.as_str()
+                     .map(|s| Ok(Some(s.to_string())))
+                     .unwrap_or_else(|| Err(json!({"error": format!("Invalid optional string parameter type: {}", key)})))
+            }
+        }
+        None => Ok(None), // Key not present is Ok(None)
+    }
+}
+
+
+// Helper to extract f64 param or return error JSON
+fn get_f64_param(input: &Value, key: &str) -> Result<f64, Value> {
+    input[key]
+        .as_f64()
+        .ok_or_else(|| json!({"error": format!("Missing or invalid number parameter: {}", key)}))
+}
+
+// Helper to extract u64 param or return error JSON
+fn get_u64_param(input: &Value, key: &str) -> Result<u64, Value> {
+    input[key]
+        .as_u64()
+        .ok_or_else(|| json!({"error": format!("Missing or invalid integer parameter: {}", key)}))
+}
+
+// Helper to extract i64 param or return error JSON
+fn get_i64_param(input: &Value, key: &str) -> Result<i64, Value> {
+    input[key]
+        .as_i64()
+        .ok_or_else(|| json!({"error": format!("Missing or invalid integer parameter: {}", key)}))
+}
+
+// Tool call dispatcher (Corrected Error Handling and Return Type)
+async fn call_tool(
+    desktop: &Arc<Desktop>,
+    app_handle: &AppHandle,
+    tool_name: &str,
+    input: &Value,
+) -> Result<Value, Value> { // Returns Result<SuccessJson, ErrorJson>
+    info!(tool_name = %tool_name, input = ?input, "Calling tool");
+
+    // Use match to handle errors from param helpers
+    match tool_name {
+        "get_focused_element_info" => {
+             match desktop.focused_element() { // Changed from get_focused_element
+                Ok(element) => {
+                    let attrs = element.attributes();
+                    serde_json::to_value(&attrs).map_err(|e| json!({"error": format!("Failed to serialize element info: {}", e)}))
+                },
+                Err(e) => Err(json!({"error": format!("Failed to get focused element: {}", e)})),
+            }
+        }
+        "click_focused_element" => {
+            match desktop.focused_element() { // Changed from get_focused_element
+                Ok(element) => {
+                    match element.click() {
+                         Ok(_) => Ok(json!({"success": true, "message": "Clicked focused element."})),
+                         Err(e) => Err(json!({"error": format!("Failed to click focused element: {}", e)})),
+                    }
+                },
+                Err(e) => Err(json!({"error": format!("Failed to get focused element for clicking: {}", e)})),
+            }
+        }
+        "type_text" => {
+            match get_string_param(input, "text") {
+                Ok(text) => match desktop.type_text(&text) {
+                    Ok(_) => Ok(json!({"success": true, "message": "Text typed."})),
+                    Err(e) => Err(json!({"error": format!("Failed to type text: {}", e)})),
+                },
+                Err(e) => Err(e), // Propagate param parsing error
+            }
+        }
+        "press_key" => {
+             match (get_string_param(input, "key"), get_optional_string_param(input, "modifier")) {
+                (Ok(key), Ok(modifier)) => {
+                     match desktop.press_key(&key, modifier.as_deref()) {
+                         Ok(_) => Ok(json!({"success": true, "message": format!("Key '{}' pressed.", key)})),
+                         Err(e) => Err(json!({"error": format!("Failed to press key: {}", e)})),
+                     }
+                 }
+                 (Err(e), _) | (_, Err(e)) => Err(e), // Propagate param parsing error
+             }
+        }
+        "open_application" => {
+             match get_string_param(input, "app_name") {
+                 Ok(app_name) => match desktop.open_application(&app_name) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("Application '{}' opened.", app_name)})),
+                     Err(e) => Err(json!({"error": format!("Failed to open application: {}", e)})),
+                 },
+                 Err(e) => Err(e),
+             }
+        }
+        "open_url" => {
+             match get_string_param(input, "url") {
+                 Ok(url) => match desktop.open_url(&url, None) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("URL '{}' opened.", url)})),
+                     Err(e) => Err(json!({"error": format!("Failed to open URL: {}", e)})),
+                 },
+                 Err(e) => Err(e),
+             }
+        }
+        "scroll_window" => { // Maps to scroll_at_current_position
+            match (get_string_param(input, "direction"), get_f64_param(input, "amount")) {
+                 (Ok(direction), Ok(amount)) => match desktop.scroll_at_current_position(&direction, amount) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {}.", direction, amount)})),
+                     Err(e) => Err(json!({"error": format!("Failed to scroll window: {}", e)})),
+                 },
+                 (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+        "capture_screenshot" => {
+            #[cfg(target_os = "macos")]
+            {
+                match macos_utils::capture_and_encode_screenshot() {
+                    Ok(base64_string) => {
+                        app_handle.notification().builder().title("Screenshot").body("Screenshot captured.").show().ok();
+                        Ok(json!({"success": true, "image_base64": base64_string}))
+                    },
+                    Err(e) => Err(json!({"error": format!("Failed to capture screenshot: {}", e)})),
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                 Err(json!({"error": "Screenshot capture is only supported on macOS currently."}))
+            }
+        }
+         "capture_element_screenshot" => {
+            #[cfg(target_os = "macos")]
+            {
+                 match desktop.focused_element() { // Changed from get_focused_element
+                     Ok(focused_element) => {
+                        if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
+                             match macos_utils::capture_element_screenshot(macos_element) {
+                                Ok(base64_string) => {
+                                     app_handle.notification().builder().title("Element Screenshot").body("Focused element screenshot captured.").show().ok();
+                                     Ok(json!({"success": true, "image_base64": base64_string}))
+                                },
+                                Err(e) => Err(json!({"error": format!("Failed to capture element screenshot: {}", e)})),
+                             }
+                        } else {
+                            Err(json!({"error": "Focused element is not a MacOSUIElement"}))
+                        }
+                    },
+                    Err(e) => Err(json!({"error": format!("Failed to get focused element for screenshot: {}", e)})),
+                }
+            }
+             #[cfg(not(target_os = "macos"))]
+            {
+                 Err(json!({"error": "Element screenshot capture is only supported on macOS currently."}))
+            }
+        }
+        // --- Added Tool Handlers ---
+        "wait" => {
+             match get_u64_param(input, "duration_ms") {
+                 Ok(duration_ms) => match desktop.wait(duration_ms) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("Waited for {} ms.", duration_ms)})),
+                     Err(e) => Err(json!({"error": format!("Wait failed: {}", e)})),
+                 },
+                 Err(e) => Err(e),
+            }
+        }
+        "cursor_position" => {
+            match desktop.cursor_position() {
+                Ok((x, y)) => Ok(json!({"success": true, "x": x, "y": y})),
+                Err(e) => Err(json!({"error": format!("Failed to get cursor position: {}", e)})),
+            }
+        }
+        "mouse_move" => {
+            match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                (Ok(x), Ok(y)) => match desktop.mouse_move(x, y) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Mouse moved to ({}, {}).", x, y)})),
+                    Err(e) => Err(json!({"error": format!("Failed to move mouse: {}", e)})),
+                },
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+         "left_mouse_down" => {
+             match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                (Ok(x), Ok(y)) => match desktop.left_mouse_down(x, y) {
+                    Ok(_) => Ok(json!({"success": true, "message": "Left mouse button pressed down."})),
+                    Err(e) => Err(json!({"error": format!("Failed to press left mouse button down: {}", e)})),
+                },
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+        "left_mouse_up" => {
+            match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                (Ok(x), Ok(y)) => match desktop.left_mouse_up(x, y) {
+                     Ok(_) => Ok(json!({"success": true, "message": "Left mouse button released."})),
+                     Err(e) => Err(json!({"error": format!("Failed to release left mouse button: {}", e)})),
+                 },
+                 (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+        "left_click" => {
+             match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                (Ok(x), Ok(y)) => match desktop.left_click(x, y) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Left clicked at ({}, {}).", x, y)})),
+                    Err(e) => Err(json!({"error": format!("Failed to perform left click: {}", e)})),
+                },
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+        "right_click" => {
+             match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                 (Ok(x), Ok(y)) => match desktop.right_click(x, y) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("Right clicked at ({}, {}).", x, y)})),
+                     Err(e) => Err(json!({"error": format!("Failed to perform right click: {}", e)})),
+                 },
+                 (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+        "middle_click" => {
+             match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                 (Ok(x), Ok(y)) => match desktop.middle_click(x, y) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("Middle clicked at ({}, {}).", x, y)})),
+                     Err(e) => Err(json!({"error": format!("Failed to perform middle click: {}", e)})),
+                 },
+                 (Err(e), _) | (_, Err(e)) => Err(e),
+             }
+        }
+        "double_click" => {
+            match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                 (Ok(x), Ok(y)) => match desktop.double_click(x, y) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("Double clicked at ({}, {}).", x, y)})),
+                     Err(e) => Err(json!({"error": format!("Failed to perform double click: {}", e)})),
+                 },
+                 (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+        "triple_click" => {
+             match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
+                 (Ok(x), Ok(y)) => match desktop.triple_click(x, y) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("Triple clicked at ({}, {}).", x, y)})),
+                     Err(e) => Err(json!({"error": format!("Failed to perform triple click: {}", e)})),
+                 },
+                 (Err(e), _) | (_, Err(e)) => Err(e),
+            }
+        }
+         "left_click_drag" => {
+            match (
+                get_f64_param(input, "start_x"),
+                get_f64_param(input, "start_y"),
+                get_f64_param(input, "end_x"),
+                get_f64_param(input, "end_y")
+            ) {
+                (Ok(start_x), Ok(start_y), Ok(end_x), Ok(end_y)) => {
+                    match desktop.left_click_drag(start_x, start_y, end_x, end_y) {
+                         Ok(_) => Ok(json!({"success": true, "message": format!("Dragged from ({}, {}) to ({}, {}).", start_x, start_y, end_x, end_y)})),
+                         Err(e) => Err(json!({"error": format!("Failed to perform drag: {}", e)})),
+                     }
+                }
+                (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e),
+            }
+        }
+        "scroll_at_position" => { // Assuming Desktop has this method wrapping the engine call
+              match (
+                get_f64_param(input, "x"),
+                get_f64_param(input, "y"),
+                get_string_param(input, "direction"),
+                get_f64_param(input, "amount")
+              ) {
+                 (Ok(x), Ok(y), Ok(direction), Ok(amount)) => {
+                     match desktop.scroll_at_position(x, y, &direction, amount) { // Verify this method exists on Desktop
+                         Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {} at ({}, {}).", direction, amount, x, y)})),
+                         Err(e) => Err(json!({"error": format!("Failed to scroll at position: {}", e)})),
+                     }
+                 }
+                 (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e),
+             }
+        }
+         "hold_key" => {
+            match get_string_param(input, "key") {
+                 Ok(key) => match desktop.hold_key(&key) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Holding key '{}'.", key)})),
+                    Err(e) => Err(json!({"error": format!("Failed to hold key: {}", e)})),
+                },
+                Err(e) => Err(e),
+            }
+        }
+        "release_key" => {
+             match get_string_param(input, "key") {
+                 Ok(key) => match desktop.release_key(&key) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Released key '{}'.", key)})),
+                    Err(e) => Err(json!({"error": format!("Failed to release key: {}", e)})),
+                },
+                Err(e) => Err(e),
+            }
+        }
+        "get_clipboard_content" => {
+             match desktop.get_clipboard_content() {
+                Ok(content) => Ok(json!({"success": true, "content": content})),
+                Err(e) => Err(json!({"error": format!("Failed to get clipboard content: {}", e)})),
+            }
+        }
+        "set_clipboard_content" => {
+             match get_string_param(input, "content") {
+                Ok(content) => match desktop.set_clipboard_content(&content) {
+                    Ok(_) => Ok(json!({"success": true, "message": "Clipboard content set."})),
+                    Err(e) => Err(json!({"error": format!("Failed to set clipboard content: {}", e)})),
+                },
+                Err(e) => Err(e),
+            }
+        }
+        // --- Text Editor Handlers ---
+        "text_editor_view" => {
+             match get_string_param(input, "file_path") {
+                 Ok(file_path) => match fs::read_to_string(&file_path) {
+                     Ok(content) => Ok(json!({"success": true, "content": content})),
+                     Err(e) => Err(json!({"error": format!("Failed to read file '{}': {}", file_path, e)})),
+                 },
+                 Err(e) => Err(e),
+             }
+        }
+        "text_editor_create" => {
+             match (get_string_param(input, "file_path"), get_string_param(input, "content")) {
+                 (Ok(file_path), Ok(content)) => match fs::write(&file_path, content) {
+                     Ok(_) => Ok(json!({"success": true, "message": format!("File '{}' created/overwritten.", file_path)})),
+                     Err(e) => Err(json!({"error": format!("Failed to write file '{}': {}", file_path, e)})),
+                 },
+                 (Err(e), _) | (_, Err(e)) => Err(e),
+             }
+        }
+        "text_editor_insert" => {
+              match (
+                 get_string_param(input, "file_path"),
+                 get_string_param(input, "text_to_insert"),
+                 get_i64_param(input, "line_number")
+              ) {
+                 (Ok(file_path), Ok(text_to_insert), Ok(line_number)) => {
+                    let line_usize = line_number as usize;
+                    match fs::read_to_string(&file_path) {
+                        Ok(content) => {
+                            let mut lines: Vec<String> = content.lines().map(String::from).collect();
+                             if line_usize == 0 || line_usize > lines.len() {
+                                lines.push(text_to_insert);
+                            } else {
+                                lines.insert(line_usize - 1, text_to_insert);
+                            }
+                            let new_content = lines.join("\n");
+                            match fs::write(&file_path, new_content) {
+                                Ok(_) => Ok(json!({"success": true, "message": format!("Inserted text into '{}' at line {}.", file_path, line_usize)})),
+                                Err(e) => Err(json!({"error": format!("Failed to write updated file '{}': {}", file_path, e)})),
+                            }
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            match fs::write(&file_path, text_to_insert) {
+                                Ok(_) => Ok(json!({"success": true, "message": format!("Created file '{}' with inserted text.", file_path)})),
+                                Err(write_err) => Err(json!({"error": format!("Failed to create file '{}' for insert: {}", file_path, write_err)})),
+                            }
+                        },
+                        Err(e) => Err(json!({"error": format!("Failed to read file '{}' for insert: {}", file_path, e)})),
+                    }
+                 }
+                 (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => Err(e),
+              }
+        }
+         "text_editor_str_replace" => {
+             match (
+                get_string_param(input, "file_path"),
+                get_string_param(input, "find_text"),
+                get_string_param(input, "replace_text")
+             ) {
+                 (Ok(file_path), Ok(find_text), Ok(replace_text)) => {
+                    match str_replace_editor(file_path.clone(), find_text, replace_text) {
+                         Ok(msg) => Ok(json!({"success": true, "message": msg})),
+                         Err(e) => Err(json!({"error": format!("Failed to replace text in file '{}': {}", file_path, e)})),
+                    }
+                 }
+                  (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => Err(e),
+            }
+        }
+        // --- Bash Handler ---
+        "bash" => {
+            match get_string_param(input, "command") {
+                 Ok(command) => {
+                    // let _timeout = get_optional_u64_param(input, "timeout_seconds")?; // Timeout param ignored for now
+                    info!(command = %command, "Executing bash command");
+                    #[cfg(target_os = "macos")] let shell = "/bin/zsh";
+                    #[cfg(target_os = "windows")] let shell = "cmd";
+                    #[cfg(target_os = "linux")] let shell = "/bin/bash";
+                    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))] let shell = "sh";
+
+                    match std::process::Command::new(shell).arg("-c").arg(&command).output() {
+                         Ok(output) => {
+                            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                            let exit_code = output.status.code();
+                            info!(stdout = %stdout, stderr = %stderr, exit_code = ?exit_code, "Bash command finished");
+                            Ok(json!({
+                                "success": output.status.success(),
+                                "stdout": stdout,
+                                "stderr": stderr,
+                                "exit_code": exit_code
+                            }))
+                        }
+                        Err(e) => {
+                            error!(error = %e, command = %command, "Failed to execute bash command");
+                            Err(json!({"error": format!("Failed to execute command '{}': {}", command, e)}))
+                        }
+                    }
+                 }
+                 Err(e) => Err(e),
+            }
+        }
+        // --- Default Case ---
+        _ => Err(json!({"error": format!("Unknown tool name: {}", tool_name)})),
+    }
+}
+
+// Wrapper function to integrate call_tool result into Anthropic flow
+async fn handle_tool_call(
+    desktop: &Arc<Desktop>,
+    app_handle: &AppHandle,
+    tool_name: &str,
+    input: &Value,
+) -> Value { // Returns the JSON expected by Anthropic (either success or error content)
+    match call_tool(desktop, app_handle, tool_name, input).await {
+        Ok(success_json) => {
+            info!(tool_name = %tool_name, output = ?success_json, "Tool call succeeded");
+            success_json
+        }
+        Err(error_json) => {
+            error!(tool_name = %tool_name, error = ?error_json, "Tool call failed");
+            // Ensure the error JSON has an "error" field for consistency
+            if error_json.get("error").is_some() {
+                error_json
+            } else {
+                json!({"error": "An unexpected error occurred", "details": error_json})
+            }
+        }
     }
 }

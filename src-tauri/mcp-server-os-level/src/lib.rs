@@ -248,15 +248,20 @@ impl Desktop {
         self.engine.left_click_drag(start_x, start_y, end_x, end_y)
     }
 
-    // /// Scroll at a specific position on screen
-    // pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
-    //     self.engine.scroll_at_position(x, y, direction, amount)
-    // }
+    /// Scroll at a specific position on screen
+    pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
+        self.engine.scroll_at_position(x, y, direction, amount)
+    }
 
-    // /// Scroll at the current mouse position
-    // pub fn scroll_at_current_position(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
-    //     self.engine.scroll_at_current_position(direction, amount)
-    // }
+    /// Scroll at the current mouse position
+    pub fn scroll_at_current_position(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
+        self.engine.scroll_at_current_position(direction, amount)
+    }
+
+    /// Press a single key with an optional modifier
+    pub fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.press_key(key_name, modifier)
+    }
 
     // --- New Methods for Agent Loop ---
 
@@ -1052,7 +1057,7 @@ impl Desktop {
                     modifier: Option<String>,
                 }
                 let parsed_args: PressKeyArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Failed to parse pressKey args: {}", e)))?;
-                self.engine.press_key(&parsed_args.key, parsed_args.modifier.as_deref())?;
+                self.press_key(&parsed_args.key, parsed_args.modifier.as_deref())?;
                 Ok(json!({
                     "status": "success",
                     "details": format!("Pressed key '{}' with modifier '{}'", parsed_args.key, parsed_args.modifier.as_deref().unwrap_or("none"))
