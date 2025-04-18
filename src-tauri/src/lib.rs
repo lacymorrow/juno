@@ -65,12 +65,11 @@ pub fn run() {
                 match BASE64_STANDARD.decode(base64_audio) {
                     Ok(audio_bytes) => {
                         // 2. Create a temporary file
-                        //    Use .mp3 as a common format, though ElevenLabs might return mpeg or others.
-                        //    Replicate returns wav, System returns m4a.
-                        //    afplay handles multiple formats.
+                        //    Use the correct extension based on the provider. System TTS (macOS) uses m4a.
+                        //    TODO: Handle different extensions for different providers if needed.
                         let temp_file_result = TempFileBuilder::new()
                             .prefix("tts_test_")
-                            .suffix(".mp3") // Using .mp3; adjust if a specific format is needed/guaranteed
+                            .suffix(".m4a") // Use .m4a for system TTS output
                             .tempfile();
 
                         match temp_file_result {
