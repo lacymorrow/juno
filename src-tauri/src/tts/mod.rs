@@ -1,9 +1,9 @@
 pub mod elevenlabs;
 pub mod replicate;
 
-// Placeholder command to satisfy the handler
-#[tauri::command]
+// Placeholder for stopping speech playback if needed
+#[allow(dead_code)] // Allow dead code as this function is not yet implemented/used
 pub fn stop_speech() {
-    println!("[TTS] stop_speech command invoked (placeholder).");
-    // TODO: Implement actual speech stopping logic here
+    // Implementation to stop any ongoing TTS playback
+    println!("[TTS] Stop speech requested (not implemented).");
 }
