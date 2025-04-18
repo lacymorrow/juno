@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Window } from "@tauri-apps/api/window";
 import { Check, Mic, Send } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { cn } from "./lib/utils";
 
 type BarState =
   | "default"
@@ -50,19 +51,9 @@ export function FloatingBar() {
   // Start tooltip timer when window is hovered (if in default state)
   useEffect(() => {
     if (isWindowHovered && barState === "default") {
-      tooltipTimeoutRef.current = setTimeout(() => {
-        setShowTooltip(true);
-        setTimeout(() => setTooltipVisible(true), 50);
-      }, 1000); // Show tooltip after 1 second of hover
+      handleMouseEnter();
     } else {
-      // Clear timer and hide tooltip if not hovered or not in default state
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
-        tooltipTimeoutRef.current = null;
-      }
-      setTooltipVisible(false);
-      // Delay hiding the tooltip element for transition out
-      setTimeout(() => setShowTooltip(false), 200);
+      handleMouseLeave();
     }
 
     // Cleanup timer on unmount or when dependencies change
@@ -313,12 +304,13 @@ export function FloatingBar() {
           {/* Default State Content */}
           {(barState === "default" || barState === "finishing") && (
             <div
-              className={`
-                w-5 h-[4px] bg-emerald-400 rounded-full
-                transition-all duration-300 ease-in-out
-                data-[window-hovered='true']:w-8 data-[window-hovered='true']:bg-emerald-300
-                ${barState === "finishing" ? "opacity-0 animate-fade-in" : ""}
-              `}
+              className={cn(
+                "w-5 h-[4px] bg-emerald-400 rounded-full",
+                "transition-all duration-300 ease-in-out",
+                "data-[window-hovered='true']:w-8 data-[window-hovered='true']:bg-emerald-300",
+                barState === "finishing" ? "opacity-0 animate-fade-in" : "",
+                isWindowHovered ? "w-20" : ""
+              )}
             ></div>
           )}
 
@@ -338,16 +330,16 @@ export function FloatingBar() {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onBlur={handleInputBlur}
-                placeholder="Type and press Enter..."
+                placeholder="Type a command..."
                 className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/50"
                 disabled={barState !== "input"}
               />
               <button
                 type="submit"
-                className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-500 hover:bg-emerald-400 transition-colors duration-200"
+                className="text-muted-foreground hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
                 disabled={barState !== "input"}
               >
-                <Send size={12} className="text-black" />
+                <Send size={12} className="" />
               </button>
             </form>
           )}
