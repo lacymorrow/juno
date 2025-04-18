@@ -1,23 +1,23 @@
-import React, { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Use Alert for messages
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area"; // To handle potentially large JSON
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area"; // To handle potentially large JSON
 import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Use Alert for messages
+import { invoke } from "@tauri-apps/api/core";
 import {
-  Maximize2, // Example icon (replace as needed)
-  MousePointerClick, // Example icon
-  Keyboard, // Example icon
-  ExternalLink, // Example icon
   AppWindow, // Example icon
   ArrowUpDown, // Example icon
   Clipboard, // Added
-  ClipboardPaste, // Added
-  Hand, // Added for Hold/Release
+  ClipboardPaste, // Example icon
+  ExternalLink, // Added
+  Hand, // Example icon
+  Keyboard,
+  Maximize2, // Example icon (replace as needed)
+  MousePointerClick, // Added for Hold/Release
   Timer, // Added for Wait
 } from "lucide-react"; // Import some icons
+import React, { useEffect, useRef, useState } from "react";
 
 // Helper type for tracking loading states
 type LoadingStates = {
@@ -137,13 +137,13 @@ const DevToolsPanel: React.FC = () => {
   };
 
   // Helper function to invoke commands with a delay for focus switching
-  const invokeCommandWithDelay = async (
+  const invokeCommandWithDelay = async <T = any,>(
     command: string,
     args: any,
     loadingKey: keyof LoadingStates,
     delayMs: number = 5000
-  ) => {
-    if (loadingStates[loadingKey]) return; // Prevent multiple clicks
+  ): Promise<T | null> => {
+    if (loadingStates[loadingKey]) return null; // Prevent multiple clicks
 
     setError(null);
     setDelayMessage(null); // Clear previous delay message
@@ -155,12 +155,15 @@ const DevToolsPanel: React.FC = () => {
       clearTimeout(delayTimeoutRef.current);
     }
 
-    delayTimeoutRef.current = setTimeout(async () => {
-      setDelayMessage(null); // Clear waiting message
-      await invokeCommand(command, args); // Use the original invokeCommand internally
-      setLoadingStates((prev) => ({ ...prev, [loadingKey]: false })); // Clear loading state after execution
-      delayTimeoutRef.current = null;
-    }, delayMs);
+    return new Promise((resolve) => {
+      delayTimeoutRef.current = setTimeout(async () => {
+        setDelayMessage(null); // Clear waiting message
+        const result = await invokeCommand<T>(command, args); // Capture the result with type T
+        setLoadingStates((prev) => ({ ...prev, [loadingKey]: false })); // Clear loading state after execution
+        delayTimeoutRef.current = null;
+        resolve(result); // Resolve the promise with the result
+      }, delayMs);
+    });
   };
 
   const handleCaptureScreenshot = async () => {
@@ -334,12 +337,12 @@ const DevToolsPanel: React.FC = () => {
   // Handler for finding element by selector
   const handleFindElement = async () => {
     setFindElementResult(null); // Clear previous result
-    const result = await invokeCommandWithDelay<string>(
+    const result = await invokeCommandWithDelay<string | null>(
       "dev_find_element_by_selector",
       { selectorStr: selectorString },
       "findElement"
     );
-    if (result !== null) {
+    if (result !== null && typeof result === "string") {
       try {
         const parsedInfo = JSON.parse(result);
         setFindElementResult(JSON.stringify(parsedInfo, null, 2));
@@ -348,6 +351,10 @@ const DevToolsPanel: React.FC = () => {
         setFindElementResult(result); // Show raw string if JSON parsing fails
         setError("Received find element result, but failed to parse as JSON.");
       }
+    } else if (result !== null) {
+      // Handle cases where result is not null but also not a string (if possible)
+      setFindElementResult(String(result)); // Convert to string if not null/string
+      setError("Received unexpected non-string result from find element.");
     }
   };
 
