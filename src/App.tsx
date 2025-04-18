@@ -1,24 +1,22 @@
-import { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
-import {
-  Send,
-  Server,
-  BotMessageSquare,
-  Bug,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from "lucide-react"; // Icons
+import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
-import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"; // Import Shadcn Card
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"; // Import Resizable components
+import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
 import { cn } from "@/lib/utils"; // Shadcn utility
-import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
+import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
+import {
+  BotMessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Send,
+  Server,
+} from "lucide-react"; // Icons
+import { useEffect, useRef, useState } from "react";
 
 // Type for conversation messages
 type ChatMessage = {
