@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "identifier": "floating",
+  "description": "Capability for the floating bar",
+  "windows": ["floating-bar"],
   "permissions": [
     "core:default",
     "core:path:default",
