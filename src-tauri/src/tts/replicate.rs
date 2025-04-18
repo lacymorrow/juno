@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::time::Duration;
 use tokio; // Ensure tokio is available for sleep
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use crate::{AppState, Desktop}; // Assuming AppState is made pub(crate) or pub in lib.rs
 use std::sync::Arc; // Required for Desktop Arc
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn}; // Import tracing macros
+use tauri::State;
 
 // --- Replicate API Structures ---
 #[derive(Serialize)]
@@ -32,26 +32,30 @@ pub(crate) struct ReplicateInitialResponse {
 #[derive(Deserialize, Debug)]
 pub(crate) struct ReplicateUrls {
     get: String,
+    #[allow(dead_code)] // Allow dead code, might be useful later
     cancel: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct ReplicatePollingResponse {
+    #[allow(dead_code)] // Allow dead code, might be useful later
     id: String,
     status: String,
     output: Option<String>,
-    error: Option<String>,
+    #[allow(dead_code)] // Allow dead code, might be useful later
     logs: Option<String>,
+    error: Option<String>,
 }
 // --- End Replicate API Structures ---
 
 // Command to invoke Replicate TTS
 #[tauri::command]
-pub async fn invoke_replicate_tts(text: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+pub async fn invoke_replicate_tts(text: String, state: State<'_, AppState>) -> Result<String, String> {
+    info!("Invoking Replicate TTS for text: {}", text);
+    #[allow(unused_variables)] // desktop_arc is intentionally unused now
     let desktop_arc: Arc<Desktop> = state.desktop.clone(); // Explicitly type desktop_arc
-    info!("invoke_replicate_tts called with text: {}", text);
 
-    let replicate_api_key = std::env::var("REPLICATE_API_KEY")
+    let api_key = std::env::var("REPLICATE_API_KEY")
         .map_err(|_| "REPLICATE_API_KEY not configured.".to_string())?;
 
     let client = Client::new();
@@ -72,7 +76,7 @@ pub async fn invoke_replicate_tts(text: String, state: tauri::State<'_, AppState
     // 1. Start the prediction job
     let initial_response = client
         .post(replicate_api_url)
-        .header("Authorization", format!("Bearer {}", replicate_api_key))
+        .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&request_payload)
         .send()
@@ -125,7 +129,7 @@ pub async fn invoke_replicate_tts(text: String, state: tauri::State<'_, AppState
 
         let poll_response = client
             .get(&get_url)
-            .header("Authorization", format!("Bearer {}", replicate_api_key))
+            .header("Authorization", format!("Bearer {}", api_key))
             .send()
             .await;
 
