@@ -1,4 +1,4 @@
- use super::element::MacOSUIElement;
+use super::element::MacOSUIElement;
 use super::permissions::check_accessibility_permissions;
 use super::utils::{
     element_contains_text, get_pid_for_element, get_running_application_pids,
