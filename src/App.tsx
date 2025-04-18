@@ -306,11 +306,11 @@ function App() {
       {/* Header */}
       <header className="flex justify-between items-center mb-4 flex-shrink-0 border-b pb-2">
         <h1 className="text-xl font-semibold flex items-center gap-2">
-          <BotMessageSquare size={24} /> DotDot AI Assistant
+          <BotMessageSquare size={24} /> Juno AI Assistant
         </h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           {/* Status Indicator */}
-          <div className="flex items-center gap-1 text-sm">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Server
               size={16}
               className={cn(
@@ -364,12 +364,12 @@ function App() {
                 >
                   <span
                     className={cn(
-                      "inline-block max-w-[80%] px-3 py-1.5 rounded-lg", // Added max-width
+                      "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
                       msg.role === "user"
                         ? "bg-primary text-primary-foreground"
                         : msg.role === "assistant"
                         ? "bg-muted"
-                        : "bg-secondary text-secondary-foreground text-xs italic"
+                        : "bg-secondary text-secondary-foreground text-xs italic opacity-80"
                     )}
                   >
                     {msg.content}
@@ -430,26 +430,22 @@ function App() {
             </h2>
             {/* DevToolsPanel Component */}
             <div className="border-b pb-3 mb-3">
-              {" "}
-              {/* Spacing and border */}
               <DevToolsPanel />
             </div>
             {/* Logs Area */}
             <div className="flex-grow">
-              {" "}
-              {/* Logs take remaining space */}
               {logs.map((log, index) => (
                 <div
                   key={index}
                   className={cn(
-                    "text-xs mb-1 font-mono whitespace-pre-wrap",
+                    "text-xs mb-1 font-mono whitespace-pre-wrap break-words",
                     getLogColorClass(log.level)
                   )}
                 >
-                  <span className="text-muted-foreground mr-1">
+                  <span className="text-muted-foreground mr-1.5">
                     [{formatTimestamp(log.timestamp)}]
                   </span>
-                  <span className="font-semibold mr-1">
+                  <span className="font-semibold mr-1.5">
                     [{log.level.toUpperCase()}]
                   </span>
                   {log.message}
