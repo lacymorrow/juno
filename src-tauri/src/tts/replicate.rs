@@ -2,11 +2,12 @@ use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::time::Duration;
 use tokio; // Ensure tokio is available for sleep
-use crate::{AppState, Desktop}; // Assuming AppState is made pub(crate) or pub in lib.rs
+use crate::state::AppState; // Use correct path
 use std::sync::Arc; // Required for Desktop Arc
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn}; // Import tracing macros
 use tauri::State;
+use computer_use_ai_sdk::Desktop;
 
 // --- Replicate API Structures ---
 #[derive(Serialize)]
@@ -50,10 +51,13 @@ pub(crate) struct ReplicatePollingResponse {
 
 // Command to invoke Replicate TTS
 #[tauri::command]
-pub async fn invoke_replicate_tts(text: String, state: State<'_, AppState>) -> Result<String, String> {
-    info!("Invoking Replicate TTS for text: {}", text);
-    #[allow(unused_variables)] // desktop_arc is intentionally unused now
-    let desktop_arc: Arc<Desktop> = state.desktop.clone(); // Explicitly type desktop_arc
+pub async fn invoke_replicate_tts(
+    text_to_speak: String,
+    state: State<'_, AppState>, // Rename _state to state
+) -> Result<String, String> {
+    info!("Invoking Replicate TTS for text: {}", text_to_speak);
+    #[allow(unused_variables)]
+    let desktop_arc: Arc<Desktop> = state.desktop.clone(); // Use the renamed state
 
     let api_key = std::env::var("REPLICATE_API_KEY")
         .map_err(|_| "REPLICATE_API_KEY not configured.".to_string())?;
@@ -65,7 +69,7 @@ pub async fn invoke_replicate_tts(text: String, state: State<'_, AppState>) -> R
     let request_payload = ReplicateRequest {
         version: replicate_model_version.to_string(),
         input: ReplicateInput {
-            text,
+            text: text_to_speak,
             speaker: 0,
             max_audio_length_ms: 30000,
         },

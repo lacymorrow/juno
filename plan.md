@@ -87,11 +87,17 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
     *   Added `last_edited_file` and `previous_content` fields (with `Mutex`) to `AppState`.
     *   Updated `create`, `insert`, and `str_replace` handlers in `call_tool` to store the previous state in `AppState`.
     *   Implemented the `text_editor_undo_edit` handler in `call_tool` to restore the previous content or delete the file based on the stored state. Added its definition to `list_tools`.
-2.  **Address `cargo check` Warnings:**
-    *   Review warnings and remove genuinely unused code or add `#[allow(dead_code)]` annotations where appropriate.
-3.  **Refine Error Handling:**
+2.  **[Done] Address `cargo check` Warnings:**
+    *   Added `#[allow(dead_code)]` and `#[allow(unused_variables)]` annotations to silence warnings in `src-tauri/src/lib.rs` and `src/tts/` files for potentially unused but necessary helper functions, state fields, and test functions. Removed genuinely unused variables. Ensured `cargo check` passes.
+3.  **Implement Anthropic API Streaming:**
+    *   Modify backend (`src-tauri/src/lib.rs`) to use `stream: true` with the Anthropic API.
+    *   Parse Server-Sent Events (SSE) from the response stream.
+    *   Emit Tauri events to the frontend with text deltas, tool call information, and stream status.
+    *   Adapt the tool execution loop for streaming.
+    *   Modify frontend UI to listen for Tauri events and display the streaming response incrementally.
+4.  **Refine Error Handling:**
     *   Review potential error scenarios in tool handlers and provide more specific/helpful error messages in the JSON results.
-4.  **Add Tests:**
+5.  **Add Tests:**
     *   Implement unit or integration tests for the tool handlers in `src-tauri/src/lib.rs` to verify correct parameter parsing and execution logic.
 
 ---
