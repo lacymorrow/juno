@@ -179,13 +179,6 @@ pub(crate) async fn capture_element_screenshot_command(
     Err("Element screenshot capture is only supported on macOS currently.".to_string())
 }
 
-
-#[tauri::command]
-pub(crate) async fn get_logs(_state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    Ok(vec!["Log viewing is deprecated. Logs are now output to the terminal using the tracing library.".to_string()])
-}
-
-
 #[tauri::command]
 pub(crate) async fn dev_click_focused_element(
     app: AppHandle,

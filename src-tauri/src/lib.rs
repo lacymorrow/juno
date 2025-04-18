@@ -33,6 +33,8 @@ use {
     std::thread,
     // std::sync::Arc, // No longer needed for monitor handle
     // std::sync::Mutex, // No longer needed for monitor handle
+    objc::runtime::{Class, Object, Sel}, // Added for NSTrackingArea
+    core_graphics::geometry::CGRect, // Added for NSTrackingArea options
 };
 
 // Declare modules
@@ -99,7 +101,6 @@ pub fn run() {
             list_apps,
             check_server_status,
             submit_query,
-            get_logs,
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             capture_screenshot_command,
             dev_get_focused_element_info,
@@ -173,11 +174,22 @@ pub fn run() {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("floating-bar") {
                     match window.is_visible() {
-                        Ok(true) => window.hide().unwrap(),
+                        Ok(true) => {
+                            window.hide().unwrap();
+                            // Make the window ignore mouse events when hidden
+                            if let Err(e) = window.set_ignore_cursor_events(true) {
+                                eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
+                            }
+                            println!("[Tray] Floating bar hidden and ignoring clicks.");
+                        },
                         Ok(false) => {
+                            // Make the window accept mouse events again when shown
+                            if let Err(e) = window.set_ignore_cursor_events(false) {
+                                eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
+                            }
                             window.show().unwrap();
                             window.set_focus().unwrap();
-                            println!("[Tray] Floating bar shown and focused.");
+                            println!("[Tray] Floating bar shown, focused, and accepting clicks.");
                         },
                         Err(e) => eprintln!("[Tray Error] checking floating bar visibility: {}", e),
                     }
@@ -249,7 +261,51 @@ pub fn run() {
                     match window.ns_window() {
                         Ok(ns_window_ptr) => {
                             let ns_window = ns_window_ptr as cocoa_id;
-                            todo!("We should set acceptsMouseMovedEvents to true here. We should also notify the floating bar when it is hovered.We should also notify the floating bar when the window is hovered")
+                            unsafe {
+                                // Allow the window to receive mouse move events even when not key
+                                ns_window.setAcceptsMouseMovedEvents_(YES);
+
+                                // Add tracking area for hover events
+                                let view = ns_window.contentView();
+                                if !view.is_null() {
+                                    let options: i64 = appkit::NSTrackingAreaOptions::MouseEnteredAndExited.bits()
+                                                    | appkit::NSTrackingAreaOptions::ActiveAlways.bits(); // Track even when window isn't key
+
+                                    let bounds: NSRect = msg_send![view, bounds];
+
+                                    let tracking_area: cocoa_id = msg_send![
+                                        class!(NSTrackingArea),
+                                        alloc
+                                    ];
+                                    let tracking_area_init: cocoa_id = msg_send![
+                                        tracking_area,
+                                        initWithRect:bounds
+                                        options:options
+                                        owner:view // Use view as owner for simplicity, might need a delegate later
+                                        userInfo:nil
+                                    ];
+
+                                    // Ensure tracking area covers the view
+                                    let _: () = msg_send![tracking_area_init, release]; // Release initial alloc
+                                    let _: () = msg_send![view, addTrackingArea: tracking_area_init];
+
+                                    // We need a delegate or observe notifications to actually *get* the events.
+                                    // For now, enabling acceptsMouseMovedEvents and adding the area is the setup.
+                                    // Actual event handling requires more setup (delegate or notification center).
+                                    info!("[macOS] Set acceptsMouseMovedEvents=YES and added NSTrackingArea to floating-bar view.");
+
+                                    // --- Emit events (Placeholder - Requires Delegate/Observer) ---
+                                    // This part needs a proper delegate or NotificationCenter observer.
+                                    // For demonstration, we'll just log where the emit *should* happen.
+                                    // In a real implementation, mouseEntered:/mouseExited: methods of a delegate
+                                    // attached to the view (or notifications) would trigger these.
+                                    // let emitter = window.app_handle().emit_to("floating-bar", ...);
+                                    info!("[macOS] Hover event emission logic needs delegate/observer implementation.");
+
+                                } else {
+                                    eprintln!("[macOS Error] Could not get contentView for floating-bar.");
+                                }
+                            }
                         }
                         Err(e) => {
                             eprintln!("Error getting NSWindow for floating-bar: {}", e);
