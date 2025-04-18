@@ -1202,33 +1202,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dotdot"
-version = "0.1.0"
-dependencies = [
- "axum 0.7.9",
- "base64 0.22.1",
- "clap",
- "computer-use-ai-sdk",
- "dotenvy",
- "futures",
- "futures-util",
- "image",
- "log",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tokio",
- "tower-http 0.5.2",
- "tracing",
- "tracing-subscriber",
- "wait-timeout",
-]
-
-[[package]]
 name = "dotenvy"
 version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2567,6 +2540,33 @@ checksum = "5dea2b27dd239b2556ed7a25ba842fe47fd602e7fc7433c2a8d6106d4d9edd70"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "juno"
+version = "0.1.0"
+dependencies = [
+ "axum 0.7.9",
+ "base64 0.22.1",
+ "clap",
+ "computer-use-ai-sdk",
+ "dotenvy",
+ "futures",
+ "futures-util",
+ "image",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tokio",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "wait-timeout",
 ]
 
 [[package]]
