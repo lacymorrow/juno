@@ -104,13 +104,11 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate to scroll at.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate to scroll at.".to_string() });
                     props.insert("direction".to_string(), ToolParameter { type_: "string".to_string(), description: "Direction (up, down, left, right).".to_string() });
-                    props.insert("amount".to_string(), ToolParameter { type_: "number".to_string(), description: "Amount to scroll (number of clicks).".to_string() });
+                    props.insert("amount".to_string(), ToolParameter { type_: "number".to_string(), description: "Amount to scroll.".to_string() });
                     props
                 },
-                required: vec!["x".to_string(), "y".to_string(), "direction".to_string(), "amount".to_string()],
+                required: vec!["direction".to_string(), "amount".to_string()],
             },
         },
         ToolDefinition {
@@ -266,6 +264,22 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                     props
                 },
                 required: vec!["start_x".to_string(), "start_y".to_string(), "end_x".to_string(), "end_y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "scroll_at_position".to_string(),
+            description: "Scrolls the view at a specific coordinate.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate to scroll at.".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate to scroll at.".to_string() });
+                    props.insert("direction".to_string(), ToolParameter { type_: "string".to_string(), description: "Direction (up, down, left, right).".to_string() });
+                    props.insert("amount".to_string(), ToolParameter { type_: "number".to_string(), description: "Amount to scroll.".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string(), "direction".to_string(), "amount".to_string()],
             },
         },
         ToolDefinition {
@@ -563,22 +577,6 @@ fn get_optional_u64_param(input: &Value, key: &str) -> Result<Option<u64>, Value
     }
 }
 
-// Helper function to get optional f64 param
-fn get_optional_f64_param(input: &Value, key: &str) -> Result<Option<f64>, Value> {
-    match input.get(key) {
-        Some(val) => {
-            if val.is_null() {
-                Ok(None) // Treat null as None
-            } else if let Some(num) = val.as_f64() {
-                Ok(Some(num))
-            } else {
-                Err(json!({ "error": format!("Parameter '{}' must be a number or null.", key) }))
-            }
-        }
-        None => Ok(None), // Key not present
-    }
-}
-
 // --- Tool Implementations (Specific) ---
 
 // Tool function for find and replace in a file
@@ -689,18 +687,13 @@ pub(crate) async fn call_tool(
                      Err(e) => Err(e),
                  }
             }
-            "scroll_window" => { // Maps to scroll_at_current_position OR scroll_at_position based on presence of coordinates
-                match (get_optional_f64_param(input, "x"), get_optional_f64_param(input, "y"), get_string_param(input, "direction"), get_f64_param(input, "amount")) {
-                     (Ok(Some(x)), Ok(Some(y)), Ok(direction), Ok(amount)) => match desktop.scroll_at_position(x, y, &direction, amount) {
-                         Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {} at ({}, {}).", direction, amount, x, y)})),
-                         Err(e) => Err(json!({"error": format!("Failed to scroll at position: {}", e)})),
+            "scroll_window" => { // Maps to scroll_at_current_position
+                match (get_string_param(input, "direction"), get_f64_param(input, "amount")) {
+                     (Ok(direction), Ok(amount)) => match desktop.scroll_at_current_position(&direction, amount) {
+                         Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {}.", direction, amount)})),
+                         Err(e) => Err(json!({"error": format!("Failed to scroll window: {}", e)})),
                      },
-                     (Ok(None), Ok(None), Ok(direction), Ok(amount)) => match desktop.scroll_at_current_position(&direction, amount) { // Fallback if no coords
-                         Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {} at current position.", direction, amount)})),
-                         Err(e) => Err(json!({"error": format!("Failed to scroll at current position: {}", e)})),
-                     },
-                     (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e),
-                     _ => Err(json!({ "error": "Invalid parameter combination for scroll_window. Provide x, y, direction, amount OR just direction, amount." })),
+                     (Err(e), _) | (_, Err(e)) => Err(e),
                 }
             }
             "capture_screenshot" => {
@@ -839,7 +832,23 @@ pub(crate) async fn call_tool(
                     (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e),
                 }
             }
-            "hold_key" => {
+            "scroll_at_position" => { // Assuming Desktop has this method wrapping the engine call
+                  match (
+                    get_f64_param(input, "x"),
+                    get_f64_param(input, "y"),
+                    get_string_param(input, "direction"),
+                    get_f64_param(input, "amount")
+                  ) {
+                     (Ok(x), Ok(y), Ok(direction), Ok(amount)) => {
+                         match desktop.scroll_at_position(x, y, &direction, amount) { // Verify this method exists on Desktop
+                             Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {} at ({}, {}).", direction, amount, x, y)})),
+                             Err(e) => Err(json!({"error": format!("Failed to scroll at position: {}", e)})),
+                         }
+                     }
+                     (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e),
+                 }
+            }
+             "hold_key" => {
                 match get_string_param(input, "key") {
                      Ok(key) => match desktop.hold_key(&key) {
                         Ok(_) => Ok(json!({"success": true, "message": format!("Holding key '{}'.", key)})),
