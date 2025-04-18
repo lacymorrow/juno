@@ -237,20 +237,6 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
             },
         },
         ToolDefinition {
-            name: "double_click".to_string(),
-            description: "Performs a double left mouse click at coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
             name: "triple_click".to_string(),
             description: "Performs a triple left mouse click at coordinates.".to_string(),
             input_schema: ToolInputSchema {
@@ -320,28 +306,6 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                     props
                 },
                 required: vec!["key".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "get_clipboard_content".to_string(),
-            description: "Gets the current system clipboard content.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: HashMap::new(),
-                required: Vec::new(),
-            },
-        },
-        ToolDefinition {
-            name: "set_clipboard_content".to_string(),
-            description: "Sets the system clipboard content.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                     let mut props = HashMap::new();
-                    props.insert("content".to_string(), ToolParameter { type_: "string".to_string(), description: "Text content to set.".to_string() });
-                    props
-                },
-                required: vec!["content".to_string()],
             },
         },
         // --- Text Editor Tools ---
@@ -431,50 +395,7 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                 required: vec!["command".to_string()],
             },
         },
-        // --- Added Tools (Corrected Construction) ---
-        ToolDefinition {
-            name: "wait".to_string(),
-            description: "Pauses execution for a specified duration.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("duration_ms".to_string(), ToolParameter { type_: "integer".to_string(), description: "Wait duration in milliseconds.".to_string() });
-                    props
-                },
-                required: vec!["duration_ms".to_string()],
-            },
-        },
         // --- Standard Tools (Potentially Missing or Custom Implemented) ---
-        ToolDefinition {
-            name: "right_click".to_string(),
-            description: "Performs a right mouse click at coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "double_click".to_string(),
-            description: "Performs a double left mouse click at coordinates.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
-                    props
-                },
-                required: vec!["x".to_string(), "y".to_string()],
-            },
-        },
-        // Note: We have custom `read_file_contents` and `write_file_contents`
         ToolDefinition {
             name: "read_file".to_string(),
             description: "Reads the content of a file at the specified path.".to_string(),
@@ -502,7 +423,6 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                 required: vec!["path".to_string(), "content".to_string()],
             },
         },
-        // Note: We have custom `run_command`
         ToolDefinition {
             name: "run_terminal_command".to_string(),
             description: "Runs a command in the terminal.".to_string(),
@@ -887,13 +807,6 @@ pub(crate) async fn call_tool(
                      (Err(e), _) | (_, Err(e)) => Err(e),
                  }
             }
-            "double_click" => {
-                let x = get_f64_param(input, "x")?;
-                let y = get_f64_param(input, "y")?;
-                info!(x = %x, y = %y, "Executing double click");
-                // TODO: Implement double_click using desktop.double_click(x, y).await
-                Err(json!({ "error": "Tool 'double_click' not implemented yet." }))
-            }
             "triple_click" => {
                  match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
                      (Ok(x), Ok(y)) => match desktop.triple_click(x, y) {
@@ -1218,17 +1131,6 @@ pub(crate) async fn call_tool(
                 info!("Executing get_element_tree");
                 // TODO: Implement get_element_tree using desktop.get_element_tree().await
                 Err(json!({ "error": "Tool 'get_element_tree' not implemented yet." }))
-            }
-            "get_clipboard_content" => {
-                info!("Executing get_clipboard_content");
-                // TODO: Implement get_clipboard_content using desktop.get_clipboard_content().await
-                Err(json!({ "error": "Tool 'get_clipboard_content' not implemented yet." }))
-            }
-            "set_clipboard_content" => {
-                let content = get_string_param(input, "content")?;
-                info!(content_length = content.len(), "Executing set_clipboard_content");
-                // TODO: Implement set_clipboard_content using desktop.set_clipboard_content(&content).await
-                Err(json!({ "error": "Tool 'set_clipboard_content' not implemented yet." }))
             }
 
             // --- Unknown Tool ---
