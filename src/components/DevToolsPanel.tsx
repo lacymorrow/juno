@@ -4,18 +4,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area"; // To handle potentially large JSON
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea"; // Added for Set File Content
 import { invoke } from "@tauri-apps/api/core";
 import {
   AppWindow, // Example icon
   ArrowUpDown, // Example icon
   Clipboard, // Added
   ClipboardPaste, // Example icon
-  ExternalLink, // Added
-  Hand, // Example icon
+  ExternalLink,
+  FileEdit,
+  FileText, // Added for Wait
+  Focus, // Added for Close Window
+  Folder, // Added
+  Hand, // Added for Wait
+  Info, // Example icon
   Keyboard,
-  Maximize2, // Example icon (replace as needed)
-  MousePointerClick, // Added for Hold/Release
-  Timer, // Added for Wait
+  Layers, // Added for Window List
+  Maximize2,
+  Mouse, // Example icon (replace as needed)
+  MousePointerClick, // Added for Wait
+  Move, // Added for Hold/Release
+  TextSelect, // Added for Get Selected Text
+  Timer,
+  X,
 } from "lucide-react"; // Import some icons
 import React, { useEffect, useRef, useState } from "react";
 
@@ -40,6 +51,30 @@ type LoadingStates = {
   wait: boolean;
   findElement: boolean;
   clickElement: boolean;
+  getSelectedText: boolean; // Added
+  getWindowList: boolean; // Added
+  getWindowInfo: boolean; // Added
+  focusWindow: boolean; // Added
+  resizeWindow: boolean; // Added
+  moveWindow: boolean; // Added
+  closeWindow: boolean; // Added
+  listFiles: boolean; // Added
+  getFileContent: boolean;
+  setFileContent: boolean; // Added
+  mouseMove: boolean; // Added
+  mouseDown: boolean; // Added
+  mouseUp: boolean; // Added
+  mouseClick: boolean; // Added
+  mouseDoubleClick: boolean; // Added
+  mouseDrag: boolean; // Added
+};
+
+// Helper type for file listing result (assuming backend sends this structure)
+// Adjust based on actual backend implementation
+type FileEntry = {
+  name: string;
+  is_dir: boolean;
+  // Add other relevant fields like size, modified date if needed
 };
 
 const DevToolsPanel: React.FC = () => {
@@ -69,6 +104,22 @@ const DevToolsPanel: React.FC = () => {
     wait: false,
     findElement: false,
     clickElement: false,
+    getSelectedText: false, // Added
+    getWindowList: false, // Added
+    getWindowInfo: false, // Added
+    focusWindow: false, // Added
+    resizeWindow: false, // Added
+    moveWindow: false, // Added
+    closeWindow: false, // Added
+    listFiles: false, // Added
+    getFileContent: false,
+    setFileContent: false, // Added
+    mouseMove: false, // Added
+    mouseDown: false, // Added
+    mouseUp: false, // Added
+    mouseClick: false, // Added
+    mouseDoubleClick: false, // Added
+    mouseDrag: false, // Added
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -90,6 +141,37 @@ const DevToolsPanel: React.FC = () => {
   const [findElementResult, setFindElementResult] = useState<string | null>(
     null
   );
+  const [selectedTextResult, setSelectedTextResult] = useState<string | null>(
+    null
+  ); // Added
+  const [windowListResult, setWindowListResult] = useState<string | null>(null); // Added
+  const [windowIdInput, setWindowIdInput] = useState<string>(""); // Added
+  const [windowInfoResult, setWindowInfoResult] = useState<string | null>(null); // Added
+  const [windowIdFocus, setWindowIdFocus] = useState<string>(""); // Added
+  const [windowIdResize, setWindowIdResize] = useState<string>(""); // Added
+  const [windowWidth, setWindowWidth] = useState<string>("800"); // Added
+  const [windowHeight, setWindowHeight] = useState<string>("600"); // Added
+  const [windowIdMove, setWindowIdMove] = useState<string>(""); // Added
+  const [windowX, setWindowX] = useState<string>("100"); // Added
+  const [windowY, setWindowY] = useState<string>("100"); // Added
+  const [windowIdClose, setWindowIdClose] = useState<string>(""); // Added
+  const [pathToList, setPathToList] = useState<string>("~"); // Added, default to home
+  const [fileListResult, setFileListResult] = useState<string | null>(null); // Added
+  const [pathGetContent, setPathGetContent] = useState<string>(""); // Added
+  const [fileContentResult, setFileContentResult] = useState<string | null>(
+    null
+  ); // Added
+  const [pathSetContent, setPathSetContent] = useState<string>(""); // Added
+  const [fileContentToSet, setFileContentToSet] = useState<string>(""); // Added
+  const [mouseX, setMouseX] = useState<string>("100"); // Added
+  const [mouseY, setMouseY] = useState<string>("100"); // Added
+  const [mouseButton, setMouseButton] = useState<"left" | "right" | "middle">(
+    "left"
+  ); // Added
+  const [mouseStartX, setMouseStartX] = useState<string>("100"); // Added for drag
+  const [mouseStartY, setMouseStartY] = useState<string>("100"); // Added for drag
+  const [mouseEndX, setMouseEndX] = useState<string>("200"); // Added for drag
+  const [mouseEndY, setMouseEndY] = useState<string>("200"); // Added for drag
 
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
   const [delayMessage, setDelayMessage] = useState<string | null>(null); // State for delay message
@@ -365,6 +447,302 @@ const DevToolsPanel: React.FC = () => {
       { selectorStr: selectorString },
       "clickElement"
     );
+
+  // Handler for getting selected text
+  const handleGetSelectedText = async () => {
+    setSelectedTextResult(null); // Clear previous result
+    const result = await invokeCommandWithDelay<string | null>( // Use delay as focus might be needed
+      "dev_get_selected_text",
+      {}, // No arguments needed for this command
+      "getSelectedText"
+    );
+    if (result !== null) {
+      setSelectedTextResult(result);
+    } else {
+      // Handle case where command returns null or error (already logged by invokeCommand)
+      // Optionally set a specific message like "No text selected or failed to retrieve."
+      setSelectedTextResult("(No text selected or failed to retrieve)");
+    }
+  };
+
+  // Handler for getting window list
+  const handleGetWindowList = async () => {
+    setWindowListResult(null); // Clear previous result
+    const result = await invokeCommand<string | null>( // No delay needed usually
+      "dev_get_window_list",
+      {}, // No arguments
+      "getWindowList"
+    );
+    if (result !== null && typeof result === "string") {
+      try {
+        // Attempt to parse and re-stringify for pretty printing
+        const parsedList = JSON.parse(result);
+        setWindowListResult(JSON.stringify(parsedList, null, 2));
+      } catch (parseError) {
+        console.error("Failed to parse window list JSON:", parseError);
+        setWindowListResult(result); // Show raw string if JSON parsing fails
+        setError("Received window list, but failed to parse as JSON.");
+      }
+    } else if (result !== null) {
+      setWindowListResult(String(result)); // Handle non-string, non-null results
+      setError("Received unexpected non-string result for window list.");
+    } else {
+      // Handle null result (error handled by invokeCommand)
+      setWindowListResult("(Failed to retrieve window list)");
+    }
+  };
+
+  // Handler for getting specific window info
+  const handleGetWindowInfo = async () => {
+    if (!windowIdInput.trim()) {
+      setError("Please enter a Window ID.");
+      return;
+    }
+    setWindowInfoResult(null); // Clear previous result
+    const result = await invokeCommand<string | null>( // No delay usually needed
+      "dev_get_window_info",
+      { windowId: windowIdInput.trim() }, // Pass window ID
+      "getWindowInfo"
+    );
+    if (result !== null && typeof result === "string") {
+      try {
+        const parsedInfo = JSON.parse(result);
+        setWindowInfoResult(JSON.stringify(parsedInfo, null, 2));
+      } catch (parseError) {
+        console.error("Failed to parse window info JSON:", parseError);
+        setWindowInfoResult(result);
+        setError("Received window info, but failed to parse as JSON.");
+      }
+    } else if (result !== null) {
+      setWindowInfoResult(String(result));
+      setError("Received unexpected non-string result for window info.");
+    } else {
+      setWindowInfoResult("(Failed to retrieve window info)");
+    }
+  };
+
+  // Handler for focusing a specific window
+  const handleFocusWindow = async () => {
+    if (!windowIdFocus.trim()) {
+      setError("Please enter a Window ID to focus.");
+      return;
+    }
+    await invokeCommand(
+      "dev_focus_window",
+      { windowId: windowIdFocus.trim() }, // Pass window ID
+      "focusWindow"
+    );
+    // No result to display, success/error handled by invokeCommand
+  };
+
+  // Handler for resizing a specific window
+  const handleResizeWindow = async () => {
+    const width = parseInt(windowWidth, 10);
+    const height = parseInt(windowHeight, 10);
+
+    if (!windowIdResize.trim()) {
+      setError("Please enter a Window ID to resize.");
+      return;
+    }
+    if (isNaN(width) || width <= 0) {
+      setError("Invalid width. Please enter a positive number.");
+      return;
+    }
+    if (isNaN(height) || height <= 0) {
+      setError("Invalid height. Please enter a positive number.");
+      return;
+    }
+
+    await invokeCommand(
+      "dev_resize_window",
+      { windowId: windowIdResize.trim(), width, height }, // Pass ID and dimensions
+      "resizeWindow"
+    );
+  };
+
+  // Handler for moving a specific window
+  const handleMoveWindow = async () => {
+    const x = parseInt(windowX, 10);
+    const y = parseInt(windowY, 10);
+
+    if (!windowIdMove.trim()) {
+      setError("Please enter a Window ID to move.");
+      return;
+    }
+    if (isNaN(x)) {
+      setError("Invalid X coordinate. Please enter a number.");
+      return;
+    }
+    if (isNaN(y)) {
+      setError("Invalid Y coordinate. Please enter a number.");
+      return;
+    }
+
+    await invokeCommand(
+      "dev_move_window",
+      { windowId: windowIdMove.trim(), x, y }, // Pass ID and coordinates
+      "moveWindow"
+    );
+  };
+
+  // Handler for closing a specific window
+  const handleCloseWindow = async () => {
+    if (!windowIdClose.trim()) {
+      setError("Please enter a Window ID to close.");
+      return;
+    }
+    await invokeCommand(
+      "dev_close_window",
+      { windowId: windowIdClose.trim() }, // Pass window ID
+      "closeWindow"
+    );
+  };
+
+  // Handler for listing files in a directory
+  const handleListFiles = async () => {
+    if (!pathToList.trim()) {
+      setError("Please enter a path to list.");
+      return;
+    }
+    setFileListResult(null); // Clear previous result
+    const result = await invokeCommand<string | null>( // Using string for now, might refine
+      "dev_list_files",
+      { path: pathToList.trim() },
+      "listFiles"
+    );
+
+    if (result !== null && typeof result === "string") {
+      try {
+        // Attempt to parse and re-stringify for pretty printing
+        const parsedList: FileEntry[] = JSON.parse(result);
+        // Format for display (example: simple list)
+        const formattedList = parsedList
+          .map((entry) => `${entry.is_dir ? "[D]" : "[F]"} ${entry.name}`)
+          .join("\n");
+        setFileListResult(formattedList);
+        // Alternatively, keep JSON string: setFileListResult(JSON.stringify(parsedList, null, 2));
+      } catch (parseError) {
+        console.error("Failed to parse file list JSON:", parseError);
+        setFileListResult(result); // Show raw string if parsing fails
+        setError("Received file list, but failed to parse or format.");
+      }
+    } else if (result !== null) {
+      setFileListResult(String(result));
+      setError("Received unexpected non-string result for file list.");
+    } else {
+      setFileListResult("(Failed to list files)");
+    }
+  };
+
+  // Handler for getting file content
+  const handleGetFileContent = async () => {
+    if (!pathGetContent.trim()) {
+      setError("Please enter a file path to read.");
+      return;
+    }
+    setFileContentResult(null); // Clear previous result
+    const result = await invokeCommand<string | null>(
+      "dev_get_file_content",
+      { path: pathGetContent.trim() },
+      "getFileContent"
+    );
+    if (result !== null) {
+      setFileContentResult(result); // Display raw content
+    } else {
+      setFileContentResult("(Failed to get file content)");
+    }
+  };
+
+  // Handler for setting file content
+  const handleSetFileContent = async () => {
+    if (!pathSetContent.trim()) {
+      setError("Please enter a file path to write to.");
+      return;
+    }
+    // Note: No check for empty content, allow writing empty files
+    await invokeCommand(
+      "dev_set_file_content",
+      { path: pathSetContent.trim(), content: fileContentToSet },
+      "setFileContent"
+    );
+    // No result to display, success/error handled by invokeCommand
+  };
+
+  // Handler for moving the mouse
+  const handleMouseMove = async () => {
+    const x = parseInt(mouseX, 10);
+    const y = parseInt(mouseY, 10);
+
+    if (isNaN(x)) {
+      setError("Invalid X coordinate for mouse move.");
+      return;
+    }
+    if (isNaN(y)) {
+      setError("Invalid Y coordinate for mouse move.");
+      return;
+    }
+
+    await invokeCommand(
+      "dev_mouse_move",
+      { x, y }, // Pass coordinates
+      "mouseMove"
+    );
+  };
+
+  // Handler for mouse down
+  const handleMouseDown = async () => {
+    await invokeCommandWithDelay(
+      "dev_mouse_down",
+      { button: mouseButton }, // Pass the selected button
+      "mouseDown"
+    );
+  };
+
+  // Handler for mouse up
+  const handleMouseUp = async () => {
+    await invokeCommandWithDelay(
+      "dev_mouse_up",
+      { button: mouseButton }, // Pass the selected button
+      "mouseUp"
+    );
+  };
+
+  // Handler for mouse click
+  const handleMouseClick = async () => {
+    await invokeCommandWithDelay(
+      "dev_mouse_click",
+      { button: mouseButton }, // Pass the selected button
+      "mouseClick"
+    );
+  };
+
+  // Handler for mouse double click
+  const handleMouseDoubleClick = async () => {
+    await invokeCommandWithDelay(
+      "dev_mouse_double_click",
+      { button: mouseButton }, // Pass the selected button
+      "mouseDoubleClick"
+    );
+  };
+
+  // Handler for mouse drag
+  const handleMouseDrag = async () => {
+    const startX = parseInt(mouseStartX, 10);
+    const startY = parseInt(mouseStartY, 10);
+    const endX = parseInt(mouseEndX, 10);
+    const endY = parseInt(mouseEndY, 10);
+
+    if (isNaN(startX) || isNaN(startY) || isNaN(endX) || isNaN(endY)) {
+      setError("Invalid coordinates for mouse drag. Please enter numbers.");
+      return;
+    }
+
+    await invokeCommand(
+      "dev_mouse_drag",
+      { startX, startY, endX, endY, button: mouseButton }, // Pass coordinates and button
+      "mouseDrag"
+    );
+  };
 
   return (
     <div className="w-full space-y-3 text-sm">
@@ -755,6 +1133,492 @@ const DevToolsPanel: React.FC = () => {
             </ScrollArea>
           </div>
         )}
+      </div>
+      <Separator className="my-3" />
+      {/* Selected Text Section */}
+      <h3 className="text-base font-semibold border-b pb-1">Selected Text</h3>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleGetSelectedText}
+            disabled={loadingStates.getSelectedText}
+            variant="outline"
+            title="Get Selected Text (after 5s delay)"
+          >
+            <TextSelect size={14} className="mr-1" />
+            {loadingStates.getSelectedText ? "Waiting..." : "Get Selected Text"}
+          </Button>
+          <span className="text-xs text-muted-foreground flex-1">
+            Retrieves selected text from focused app after delay.
+          </span>
+        </div>
+        {selectedTextResult !== null && (
+          <div className="mt-1 border rounded-md p-2 bg-muted text-muted-foreground text-xs">
+            <p className="font-mono break-all">
+              {selectedTextResult || "(Empty)"}
+            </p>
+          </div>
+        )}
+      </div>
+      <Separator className="my-3" />
+      {/* Window Management Section */}
+      <h3 className="text-base font-semibold border-b pb-1">
+        Window Management
+      </h3>
+      <div className="space-y-2">
+        {/* Get Window List */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleGetWindowList}
+            disabled={loadingStates.getWindowList}
+            variant="outline"
+            title="Get List of Open Windows"
+          >
+            <Layers size={14} className="mr-1" />
+            {loadingStates.getWindowList ? "Getting..." : "Get Window List"}
+          </Button>
+        </div>
+        {windowListResult !== null && (
+          <div className="mt-2 border rounded-md p-2">
+            <h4 className="text-xs font-semibold mb-1">Window List:</h4>
+            <ScrollArea className="h-32 w-full rounded-md border p-2">
+              {" "}
+              {/* Increased height */}
+              <pre className="text-xs whitespace-pre-wrap break-words">
+                <code>{windowListResult}</code>
+              </pre>
+            </ScrollArea>
+          </div>
+        )}
+        {/* Get Window Info */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleGetWindowInfo}
+            disabled={loadingStates.getWindowInfo}
+            variant="outline"
+            title="Get Info for Specific Window"
+          >
+            <Info size={14} className="mr-1" />
+            {loadingStates.getWindowInfo ? "Getting..." : "Get Window Info"}
+          </Button>
+          <Input
+            id="window-id-info"
+            value={windowIdInput}
+            onChange={(e) => setWindowIdInput(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Window ID"
+          />
+        </div>
+        {windowInfoResult !== null && (
+          <div className="mt-2 border rounded-md p-2">
+            <h4 className="text-xs font-semibold mb-1">Window Info:</h4>
+            <ScrollArea className="h-32 w-full rounded-md border p-2">
+              <pre className="text-xs whitespace-pre-wrap break-words">
+                <code>{windowInfoResult}</code>
+              </pre>
+            </ScrollArea>
+          </div>
+        )}
+        {/* Focus Window */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleFocusWindow}
+            disabled={loadingStates.focusWindow}
+            variant="outline"
+            title="Focus Specific Window"
+          >
+            <Focus size={14} className="mr-1" />
+            {loadingStates.focusWindow ? "Focusing..." : "Focus Window"}
+          </Button>
+          <Input
+            id="window-id-focus"
+            value={windowIdFocus}
+            onChange={(e) => setWindowIdFocus(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Window ID to focus"
+          />
+        </div>
+        {/* Resize Window */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleResizeWindow}
+            disabled={loadingStates.resizeWindow}
+            variant="outline"
+            title="Resize Specific Window"
+          >
+            <Move size={14} className="mr-1" /> {/* Reusing Move icon */}
+            {loadingStates.resizeWindow ? "Resizing..." : "Resize Window"}
+          </Button>
+          <Input
+            id="window-id-resize"
+            value={windowIdResize}
+            onChange={(e) => setWindowIdResize(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Window ID"
+          />
+          <Input
+            id="window-width"
+            value={windowWidth}
+            onChange={(e) => setWindowWidth(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16" // Fixed width
+            placeholder="Width"
+          />
+          <Input
+            id="window-height"
+            value={windowHeight}
+            onChange={(e) => setWindowHeight(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16" // Fixed width
+            placeholder="Height"
+          />
+        </div>
+        {/* Move Window */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleMoveWindow}
+            disabled={loadingStates.moveWindow}
+            variant="outline"
+            title="Move Specific Window"
+          >
+            <Move size={14} className="mr-1" />
+            {loadingStates.moveWindow ? "Moving..." : "Move Window"}
+          </Button>
+          <Input
+            id="window-id-move"
+            value={windowIdMove}
+            onChange={(e) => setWindowIdMove(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Window ID"
+          />
+          <Input
+            id="window-x"
+            value={windowX}
+            onChange={(e) => setWindowX(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="X"
+          />
+          <Input
+            id="window-y"
+            value={windowY}
+            onChange={(e) => setWindowY(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="Y"
+          />
+        </div>
+        {/* Close Window */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleCloseWindow}
+            disabled={loadingStates.closeWindow}
+            variant="outline"
+            title="Close Specific Window"
+          >
+            <X size={14} className="mr-1" />
+            {loadingStates.closeWindow ? "Closing..." : "Close Window"}
+          </Button>
+          <Input
+            id="window-id-close"
+            value={windowIdClose}
+            onChange={(e) => setWindowIdClose(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Window ID to close"
+          />
+        </div>
+      </div>
+      <Separator className="my-3" />
+      {/* File System Section */}
+      <h3 className="text-base font-semibold border-b pb-1">File System</h3>
+      <div className="space-y-2">
+        {/* List Files */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleListFiles}
+            disabled={loadingStates.listFiles}
+            variant="outline"
+            title="List Directory Contents"
+          >
+            <Folder size={14} className="mr-1" />
+            {loadingStates.listFiles ? "Listing..." : "List Files"}
+          </Button>
+          <Input
+            id="path-to-list"
+            value={pathToList}
+            onChange={(e) => setPathToList(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="Directory path (e.g., ~/, /tmp)"
+          />
+        </div>
+        {fileListResult !== null && (
+          <div className="mt-2 border rounded-md p-2">
+            <h4 className="text-xs font-semibold mb-1">Directory Contents:</h4>
+            <ScrollArea className="h-32 w-full rounded-md border p-2">
+              <pre className="text-xs whitespace-pre-wrap break-words">
+                <code>{fileListResult}</code>
+              </pre>
+            </ScrollArea>
+          </div>
+        )}
+        {/* Get File Content */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleGetFileContent}
+            disabled={loadingStates.getFileContent}
+            variant="outline"
+            title="Get File Content"
+          >
+            <FileText size={14} className="mr-1" />
+            {loadingStates.getFileContent ? "Reading..." : "Get Content"}
+          </Button>
+          <Input
+            id="path-get-content"
+            value={pathGetContent}
+            onChange={(e) => setPathGetContent(e.target.value)}
+            className="h-8 text-xs flex-1"
+            placeholder="File path (e.g., ~/file.txt)"
+          />
+        </div>
+        {fileContentResult !== null && (
+          <div className="mt-2 border rounded-md p-2">
+            <h4 className="text-xs font-semibold mb-1">File Content:</h4>
+            <ScrollArea className="h-32 w-full rounded-md border p-2">
+              <pre className="text-xs whitespace-pre-wrap break-words">
+                <code>{fileContentResult}</code>
+              </pre>
+            </ScrollArea>
+          </div>
+        )}
+        {/* Set File Content */}
+        <div className="flex items-start gap-2">
+          {" "}
+          {/* Use items-start for alignment with textarea */}
+          <div className="flex flex-col gap-2 flex-1">
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={handleSetFileContent}
+                disabled={loadingStates.setFileContent}
+                variant="outline"
+                title="Set File Content"
+              >
+                <FileEdit size={14} className="mr-1" />
+                {loadingStates.setFileContent ? "Writing..." : "Set Content"}
+              </Button>
+              <Input
+                id="path-set-content"
+                value={pathSetContent}
+                onChange={(e) => setPathSetContent(e.target.value)}
+                className="h-8 text-xs flex-1"
+                placeholder="File path (e.g., ~/new_file.txt)"
+              />
+            </div>
+            <Textarea
+              id="file-content-to-set"
+              value={fileContentToSet}
+              onChange={(e) => setFileContentToSet(e.target.value)}
+              placeholder="Content to write to the file..."
+              className="text-xs h-24" // Adjusted height
+            />
+          </div>
+        </div>
+      </div>
+      <Separator className="my-3" />
+      {/* Mouse Control Section */}
+      <h3 className="text-base font-semibold border-b pb-1">Mouse Control</h3>
+      <div className="space-y-2">
+        {/* Mouse Move */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleMouseMove}
+            disabled={loadingStates.mouseMove}
+            variant="outline"
+            title="Move Mouse Cursor"
+          >
+            <Mouse size={14} className="mr-1" />
+            {loadingStates.mouseMove ? "Moving..." : "Move Mouse"}
+          </Button>
+          <Input
+            id="mouse-x"
+            value={mouseX}
+            onChange={(e) => setMouseX(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="X"
+          />
+          <Input
+            id="mouse-y"
+            value={mouseY}
+            onChange={(e) => setMouseY(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="Y"
+          />
+        </div>
+        {/* Mouse Down */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleMouseDown}
+            disabled={loadingStates.mouseDown}
+            variant="outline"
+            title="Press Mouse Button Down (after 5s delay)"
+          >
+            <Mouse size={14} className="mr-1" />
+            {loadingStates.mouseDown ? "Waiting..." : "Mouse Down"}
+          </Button>
+          {/* TODO: Replace with RadioGroup or Select if ui components are available */}
+          <div className="flex items-center gap-1 text-xs">
+            <input
+              type="radio"
+              id="mouse-left"
+              name="mouseButton"
+              value="left"
+              checked={mouseButton === "left"}
+              onChange={() => setMouseButton("left")}
+              className="mr-1"
+            />
+            <label htmlFor="mouse-left">Left</label>
+            <input
+              type="radio"
+              id="mouse-right"
+              name="mouseButton"
+              value="right"
+              checked={mouseButton === "right"}
+              onChange={() => setMouseButton("right")}
+              className="ml-2 mr-1"
+            />
+            <label htmlFor="mouse-right">Right</label>
+            <input
+              type="radio"
+              id="mouse-middle"
+              name="mouseButton"
+              value="middle"
+              checked={mouseButton === "middle"}
+              onChange={() => setMouseButton("middle")}
+              className="ml-2 mr-1"
+            />
+            <label htmlFor="mouse-middle">Middle</label>
+          </div>
+          <span className="text-xs text-muted-foreground flex-1">
+            Presses button down (after 5s delay).
+          </span>
+        </div>
+        {/* Mouse Up */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleMouseUp}
+            disabled={loadingStates.mouseUp}
+            variant="outline"
+            title="Release Mouse Button (after 5s delay)"
+          >
+            <Mouse size={14} className="mr-1" />
+            {loadingStates.mouseUp ? "Waiting..." : "Mouse Up"}
+          </Button>
+          <span className="text-xs text-muted-foreground flex-1">
+            Releases the selected button (after 5s delay). Usually follows Mouse
+            Down.
+          </span>
+        </div>
+        {/* Mouse Click */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleMouseClick}
+            disabled={loadingStates.mouseClick}
+            variant="outline"
+            title="Simulate Mouse Click (after 5s delay)"
+          >
+            <MousePointerClick size={14} className="mr-1" />
+            {loadingStates.mouseClick ? "Waiting..." : "Mouse Click"}
+          </Button>
+          <span className="text-xs text-muted-foreground flex-1">
+            Clicks the selected button (after 5s delay). Uses the button
+            selected above.
+          </span>
+        </div>
+        {/* Mouse Double Click */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleMouseDoubleClick}
+            disabled={loadingStates.mouseDoubleClick}
+            variant="outline"
+            title="Simulate Mouse Double Click (after 5s delay)"
+          >
+            <MousePointerClick size={14} className="mr-1" />
+            {loadingStates.mouseDoubleClick ? "Waiting..." : "Double Click"}
+          </Button>
+          <span className="text-xs text-muted-foreground flex-1">
+            Double-clicks the selected button (after 5s delay). Uses the button
+            selected above.
+          </span>
+        </div>
+        {/* Mouse Drag */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {" "}
+          {/* Allow wrapping */}
+          <Button
+            size="sm"
+            onClick={handleMouseDrag}
+            disabled={loadingStates.mouseDrag}
+            variant="outline"
+            title="Simulate Mouse Drag"
+          >
+            <Move size={14} className="mr-1" /> {/* Use Move icon */}
+            {loadingStates.mouseDrag ? "Dragging..." : "Mouse Drag"}
+          </Button>
+          <Input
+            id="mouse-start-x"
+            value={mouseStartX}
+            onChange={(e) => setMouseStartX(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="Start X"
+          />
+          <Input
+            id="mouse-start-y"
+            value={mouseStartY}
+            onChange={(e) => setMouseStartY(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="Start Y"
+          />
+          <span className="text-xs">&rarr;</span> {/* Right arrow */}
+          <Input
+            id="mouse-end-x"
+            value={mouseEndX}
+            onChange={(e) => setMouseEndX(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="End X"
+          />
+          <Input
+            id="mouse-end-y"
+            value={mouseEndY}
+            onChange={(e) => setMouseEndY(e.target.value)}
+            type="number"
+            className="h-8 text-xs w-16"
+            placeholder="End Y"
+          />
+          <span className="text-xs text-muted-foreground flex-1 min-w-full md:min-w-0 md:flex-none">
+            {/* Ensure description doesn't break layout */}
+            Drags using the selected button (no delay). Uses button selected
+            above.
+          </span>
+        </div>
       </div>
       <Separator className="my-3" />
       {/* Clipboard Section */}

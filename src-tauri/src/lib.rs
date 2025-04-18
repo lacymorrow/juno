@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use {
     cocoa::{
-        appkit::{self, NSEvent, NSWindow, NSView},
+        appkit::{self, NSEvent, NSWindow, NSView, NSWindowCollectionBehavior},
         base::{id as cocoa_id, nil, YES, NO, BOOL},
         foundation::{self, NSAutoreleasePool, NSPoint, NSRect, NSSize},
     },
@@ -33,8 +33,6 @@ use {
     std::thread,
     // std::sync::Arc, // No longer needed for monitor handle
     // std::sync::Mutex, // No longer needed for monitor handle
-    objc::runtime::{Class, Object, Sel}, // Added for NSTrackingArea
-    core_graphics::geometry::CGRect, // Added for NSTrackingArea options
 };
 
 // Declare modules
@@ -262,49 +260,33 @@ pub fn run() {
                         Ok(ns_window_ptr) => {
                             let ns_window = ns_window_ptr as cocoa_id;
                             unsafe {
-                                // Allow the window to receive mouse move events even when not key
-                                ns_window.setAcceptsMouseMovedEvents_(YES);
+                                // Keep window floating above others - Use integer value for Floating level
+                                ns_window.setLevel_(5); // kCGFloatingWindowLevelKey is typically 5
+                                // Allow clicks to pass through transparent areas
+                                ns_window.setOpaque_(NO);
+                                ns_window.setHasShadow_(NO); // Optional: remove shadow if desired
+                                // Prevent the window from becoming the key window (stealing focus)
+                                // ns_window.setCanBecomeKeyWindow_(NO); // This might interfere with interactions if the bar needs input
+                                // Keep it visible across spaces (optional, adjust as needed)
+                                ns_window.setCollectionBehavior_(
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
+                                );
+                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
 
-                                // Add tracking area for hover events
-                                let view = ns_window.contentView();
-                                if !view.is_null() {
-                                    let options: i64 = appkit::NSTrackingAreaOptions::MouseEnteredAndExited.bits()
-                                                    | appkit::NSTrackingAreaOptions::ActiveAlways.bits(); // Track even when window isn't key
-
-                                    let bounds: NSRect = msg_send![view, bounds];
-
-                                    let tracking_area: cocoa_id = msg_send![
-                                        class!(NSTrackingArea),
-                                        alloc
-                                    ];
-                                    let tracking_area_init: cocoa_id = msg_send![
-                                        tracking_area,
-                                        initWithRect:bounds
-                                        options:options
-                                        owner:view // Use view as owner for simplicity, might need a delegate later
-                                        userInfo:nil
-                                    ];
-
-                                    // Ensure tracking area covers the view
-                                    let _: () = msg_send![tracking_area_init, release]; // Release initial alloc
-                                    let _: () = msg_send![view, addTrackingArea: tracking_area_init];
-
-                                    // We need a delegate or observe notifications to actually *get* the events.
-                                    // For now, enabling acceptsMouseMovedEvents and adding the area is the setup.
-                                    // Actual event handling requires more setup (delegate or notification center).
-                                    info!("[macOS] Set acceptsMouseMovedEvents=YES and added NSTrackingArea to floating-bar view.");
-
-                                    // --- Emit events (Placeholder - Requires Delegate/Observer) ---
-                                    // This part needs a proper delegate or NotificationCenter observer.
-                                    // For demonstration, we'll just log where the emit *should* happen.
-                                    // In a real implementation, mouseEntered:/mouseExited: methods of a delegate
-                                    // attached to the view (or notifications) would trigger these.
-                                    // let emitter = window.app_handle().emit_to("floating-bar", ...);
-                                    info!("[macOS] Hover event emission logic needs delegate/observer implementation.");
-
+                                // Set initial ignore state based on visibility (redundant with tray logic, but good practice)
+                                if !window.is_visible().unwrap_or(false) {
+                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
+                                     info!("macOS Setup: Floating bar initially hidden, ignoring mouse events.");
                                 } else {
-                                    eprintln!("[macOS Error] Could not get contentView for floating-bar.");
+                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
+                                     info!("macOS Setup: Floating bar initially visible, accepting mouse events.");
                                 }
+
+                                // Note: setIgnoresMouseEvents is handled dynamically by the tray icon click logic already.
+                                // The acceptsMouseMovedEvents is not needed if we aren't tracking hover within the Rust backend.
+                                info!("macOS specific properties applied to floating-bar.");
                             }
                         }
                         Err(e) => {
