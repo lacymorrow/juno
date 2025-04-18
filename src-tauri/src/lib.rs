@@ -15,14 +15,19 @@ use std::io::Cursor;
 use tracing_subscriber::{fmt, EnvFilter};
 use tracing::{debug, error, info, warn};
 use tauri_plugin_notification::NotificationExt;
-use tauri::{AppHandle, Manager, State};
-use tauri::menu::{Menu, PredefinedMenuItem, MenuBuilder, MenuItemKind};
+use tauri::{AppHandle, Manager, State, Wry};
+use tauri::menu::{Menu, PredefinedMenuItem, MenuItemKind};
 use tauri::tray::{TrayIconEvent, MouseButton, MouseButtonState};
-use tauri::{WindowEvent, Wry};
+use tauri::{WindowEvent};
 use tauri::menu::MenuItemBuilder;
 use tauri::image::Image;
 use std::fs;
+use std::path::PathBuf;
+use std::sync::Mutex;
 use std::collections::HashMap;
+use std::process::Command;
+use std::time::Duration;
+use wait_timeout::ChildExt;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -59,6 +64,9 @@ struct Cli {
 
 pub(crate) struct AppState {
     desktop: Arc<Desktop>,
+    // State for text_editor_undo_edit
+    last_edited_file: Mutex<Option<PathBuf>>,
+    previous_content: Mutex<Option<Option<String>>>, // Option<Option<String>>: None=no undo, Some(None)=last was create, Some(Some(content))=last was edit
 }
 
 #[derive(Serialize, Clone)]
@@ -308,7 +316,7 @@ async fn submit_query(
         content: Value::String(query.clone()),
     });
 
-    let available_tools = desktop_arc.list_tools();
+    let available_tools = list_tools(&desktop_arc); // Call the local list_tools function
 
     for iteration in 0..MAX_ITERATIONS {
         println!("Agent Iteration: {}", iteration + 1);
@@ -944,6 +952,12 @@ fn run_check_accessibility() -> Result<(), String> {
     }
 }
 
+// Helper function to update undo state
+fn update_undo_state(state: &AppState, file_path: PathBuf, previous_content: Option<String>) {
+    *state.last_edited_file.lock().unwrap() = Some(file_path);
+    *state.previous_content.lock().unwrap() = Some(previous_content);
+}
+
 #[tauri::command]
 async fn dev_global_type_text(text: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     info!("Executing dev_global_type_text with text: {}", text);
@@ -1103,6 +1117,8 @@ pub fn run() {
     // Create the AppState
     let app_state = AppState {
         desktop: desktop_arc.clone(),
+        last_edited_file: Mutex::new(None), // Initialize undo state
+        previous_content: Mutex::new(None), // Initialize undo state
     };
 
     // --- Tauri Application Builder ---
@@ -1666,17 +1682,17 @@ fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "text_editor_insert".to_string(),
-            description: "Inserts text into a file at a specific line (1-indexed).".to_string(),
+            description: "Inserts text into a file at a specific line number.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
-                     let mut props = HashMap::new();
+                    let mut props = HashMap::new();
                     props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path to the file.".to_string() });
+                    props.insert("line_number".to_string(), ToolParameter { type_: "integer".to_string(), description: "1-based line number to insert at.".to_string() });
                     props.insert("text_to_insert".to_string(), ToolParameter { type_: "string".to_string(), description: "Text to insert.".to_string() });
-                    props.insert("line_number".to_string(), ToolParameter { type_: "integer".to_string(), description: "1-based line number (appends if > lines).".to_string() });
                     props
                 },
-                required: vec!["file_path".to_string(), "text_to_insert".to_string(), "line_number".to_string()],
+                required: vec!["file_path".to_string(), "line_number".to_string(), "text_to_insert".to_string()],
             },
         },
         ToolDefinition {
@@ -1694,6 +1710,20 @@ fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                 required: vec!["file_path".to_string(), "find_text".to_string(), "replace_text".to_string()],
             },
         },
+        // text_editor_undo_edit (Corrected definition)
+         ToolDefinition {
+             name: "text_editor_undo_edit".to_string(),
+             description: "Undoes the last text editing operation (create, insert, replace).".to_string(),
+             input_schema: ToolInputSchema {
+                 type_: "object".to_string(),
+                 properties: {
+                     let mut props = HashMap::new();
+                     props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path to the file for which the last edit should be undone (used for confirmation).".to_string() });
+                     props
+                 },
+                 required: vec!["file_path".to_string()],
+             },
+         },
         // --- Bash Tool ---
         ToolDefinition {
             name: "bash".to_string(),
@@ -1766,12 +1796,30 @@ fn get_i64_param(input: &Value, key: &str) -> Result<i64, Value> {
         .ok_or_else(|| json!({"error": format!("Missing or invalid integer parameter: {}", key)}))
 }
 
+// Helper function to get an optional u64 parameter from JSON
+fn get_optional_u64_param(input: &Value, key: &str) -> Result<Option<u64>, Value> {
+    match input.get(key) {
+        Some(value) => {
+            if value.is_null() {
+                Ok(None) // Treat null as None
+            } else if let Some(num) = value.as_u64() {
+                Ok(Some(num))
+            } else {
+                // Use value.to_string() or describe the type in the error message
+                Err(json!({ "error": format!("Invalid type for parameter '{}': expected u64 or null, got type {}", key, value.to_string()) }))
+            }
+        }
+        None => Ok(None), // Key not present
+    }
+}
+
 // Tool call dispatcher (Corrected Error Handling and Return Type)
 async fn call_tool(
     desktop: &Arc<Desktop>,
     app_handle: &AppHandle,
     tool_name: &str,
     input: &Value,
+    state: &State<'_, AppState>, // Correctly include state here in the definition
 ) -> Result<Value, Value> { // Returns Result<SuccessJson, ErrorJson>
     info!(tool_name = %tool_name, input = ?input, "Calling tool");
 
@@ -2050,9 +2098,15 @@ async fn call_tool(
         }
         "text_editor_create" => {
              match (get_string_param(input, "file_path"), get_string_param(input, "content")) {
-                 (Ok(file_path), Ok(content)) => match fs::write(&file_path, content) {
-                     Ok(_) => Ok(json!({"success": true, "message": format!("File '{}' created/overwritten.", file_path)})),
-                     Err(e) => Err(json!({"error": format!("Failed to write file '{}': {}", file_path, e)})),
+                 (Ok(file_path), Ok(content)) => {
+                    // --- Undo State Update ---
+                    let path = PathBuf::from(file_path.clone());
+                    update_undo_state(state, path, None); // Last action was create
+                    // --- End Undo State Update ---
+                    match fs::write(&file_path, content) {
+                        Ok(_) => Ok(json!({"success": true, "message": format!("File '{}' created/overwritten.", file_path)})),
+                        Err(e) => Err(json!({"error": format!("Failed to write file '{}': {}", file_path, e)})),
+                    }
                  },
                  (Err(e), _) | (_, Err(e)) => Err(e),
              }
@@ -2065,6 +2119,19 @@ async fn call_tool(
               ) {
                  (Ok(file_path), Ok(text_to_insert), Ok(line_number)) => {
                     let line_usize = line_number as usize;
+                    // --- Undo State Update ---
+                    let path = PathBuf::from(file_path.clone());
+                    // Read current content *before* modification
+                    let current_content = match fs::read_to_string(&path) {
+                         Ok(content) => Some(content),
+                         Err(e) => {
+                              // If the file doesn't exist, it's an error for insert, but technically the previous state is "doesn't exist"
+                              warn!(error = %e, file_path = %file_path, "File not found for insert, proceeding but undo will delete.");
+                              None
+                         }
+                    };
+                    update_undo_state(state, path.clone(), current_content);
+                     // --- End Undo State Update ---
                     match fs::read_to_string(&file_path) {
                         Ok(content) => {
                             let mut lines: Vec<String> = content.lines().map(String::from).collect();
@@ -2098,6 +2165,16 @@ async fn call_tool(
                 get_string_param(input, "replace_text")
              ) {
                  (Ok(file_path), Ok(find_text), Ok(replace_text)) => {
+                    // --- Undo State Update ---
+                    let path = PathBuf::from(file_path.clone());
+                    let current_content = match fs::read_to_string(&path) {
+                        Ok(content) => Some(content),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None, // File doesn't exist yet, treat as create
+                        Err(e) => return Err(json!({ "status": "error", "message": format!("Failed to read file '{}' before replace: {}", file_path, e) })),
+                    };
+                    update_undo_state(state, path.clone(), current_content);
+                    // --- End Undo State Update ---
+
                     match str_replace_editor(file_path.clone(), find_text, replace_text) {
                          Ok(msg) => Ok(json!({"success": true, "message": msg})),
                          Err(e) => Err(json!({"error": format!("Failed to replace text in file '{}': {}", file_path, e)})),
@@ -2106,37 +2183,134 @@ async fn call_tool(
                   (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => Err(e),
             }
         }
-        // --- Bash Handler ---
-        "bash" => {
-            match get_string_param(input, "command") {
-                 Ok(command) => {
-                    // let _timeout = get_optional_u64_param(input, "timeout_seconds")?; // Timeout param ignored for now
-                    info!(command = %command, "Executing bash command");
-                    #[cfg(target_os = "macos")] let shell = "/bin/zsh";
-                    #[cfg(target_os = "windows")] let shell = "cmd";
-                    #[cfg(target_os = "linux")] let shell = "/bin/bash";
-                    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))] let shell = "sh";
+        "text_editor_undo_edit" => {
+            let file_path_param = get_string_param(input, "file_path")?; // Get param for logging/confirmation if needed
 
-                    match std::process::Command::new(shell).arg("-c").arg(&command).output() {
-                         Ok(output) => {
-                            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                            let exit_code = output.status.code();
-                            info!(stdout = %stdout, stderr = %stderr, exit_code = ?exit_code, "Bash command finished");
-                            Ok(json!({
-                                "success": output.status.success(),
-                                "stdout": stdout,
-                                "stderr": stderr,
-                                "exit_code": exit_code
-                            }))
+            let mut last_edited_path_guard = state.last_edited_file.lock().unwrap();
+            let mut previous_content_guard = state.previous_content.lock().unwrap();
+
+            if let Some(path_to_undo) = last_edited_path_guard.take() {
+                 // Verify param matches state if desired, though state is source of truth
+                if PathBuf::from(&file_path_param) != path_to_undo {
+                    warn!(param_path=%file_path_param, state_path=?path_to_undo, "Undo called with path mismatch, using state path.");
+                 }
+
+                if let Some(maybe_content) = previous_content_guard.take() {
+                    match maybe_content {
+                        Some(content) => {
+                            // Last action was an edit, restore content
+                            match fs::write(&path_to_undo, content) {
+                                Ok(_) => Ok(json!({ "status": "success", "message": format!("Undo successful for '{}'.", path_to_undo.display()) })),
+                                Err(e) => Err(json!({ "status": "error", "message": format!("Failed to write previous content during undo for '{}': {}", path_to_undo.display(), e) })),
+                            }
                         }
-                        Err(e) => {
-                            error!(error = %e, command = %command, "Failed to execute bash command");
-                            Err(json!({"error": format!("Failed to execute command '{}': {}", command, e)}))
+                        None => {
+                            // Last action was create, delete the file
+                            match fs::remove_file(&path_to_undo) {
+                                Ok(_) => Ok(json!({ "status": "success", "message": format!("Undo successful for '{}' (file deleted).", path_to_undo.display()) })),
+                                // If it already doesn't exist, that's okay for undoing a create
+                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                                     Ok(json!({ "status": "success", "message": format!("Undo successful for '{}' (file was already deleted).", path_to_undo.display()) }))
+                                }
+                                Err(e) => Err(json!({ "status": "error", "message": format!("Failed to delete file during undo for '{}': {}", path_to_undo.display(), e) })),
+                            }
                         }
                     }
+                } else {
+                     // Should not happen if last_edited_path was Some, indicates state inconsistency
+                     error!("Undo state inconsistency: last_edited_file was Some, but previous_content was None.");
+                     Err(json!({ "status": "error", "message": "Internal error: Undo state inconsistent." }))
                  }
-                 Err(e) => Err(e),
+
+            } else {
+                Err(json!({ "status": "error", "message": "Nothing to undo." }))
+            }
+        }
+        // Comment out the problematic computer_screenshot arm
+        /*
+        "computer_screenshot" => {
+            // ... existing code ...
+            // This arm currently returns () instead of Result<Value, Value>,
+            // causing E0308. Commenting out until fixed or removed.
+            // placeholder to satisfy type checker if uncommented
+            // Err(json!({ "status": "error", "message": "Screenshot within call_tool not implemented" }))
+        }
+        */
+        // --- Bash Handler ---
+        "bash" => {
+            let command_str = get_string_param(input, "command")?;
+            let timeout_seconds_opt = get_optional_u64_param(input, "timeout_seconds");
+            let timeout = match timeout_seconds_opt {
+                Ok(Some(secs)) => Some(Duration::from_secs(secs)),
+                Ok(None) => None, // No timeout specified
+                Err(e) => return Err(e), // Error parsing timeout
+            };
+
+            info!(command = %command_str, ?timeout, "Executing bash command");
+            #[cfg(target_os = "macos")] let shell = "/bin/zsh";
+            #[cfg(target_os = "windows")] let shell = "cmd";
+            #[cfg(target_os = "linux")] let shell = "/bin/bash";
+            #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))] let shell = "sh";
+
+            let mut cmd = Command::new(shell);
+            cmd.arg("-c").arg(&command_str);
+
+            match cmd.spawn() { // Spawn the process
+                Ok(mut child) => {
+                    let status_result = match timeout {
+                        Some(duration) => child.wait_timeout(duration),
+                        None => child.wait().map(Some), // Wait indefinitely if no timeout
+                    };
+
+                    match status_result {
+                        Ok(Some(status)) => { // Process finished or killed by timeout
+                            // Attempt to get output even if killed (might be partial)
+                            let output_result = child.wait_with_output();
+                            match output_result {
+                                Ok(output) => {
+                                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                     let exit_code = output.status.code();
+                                     let timed_out = !status.success() && exit_code.is_none(); // Infer timeout if killed
+                                     info!(stdout = %stdout, stderr = %stderr, exit_code = ?exit_code, timed_out = timed_out, "Bash command finished (or timed out)");
+                                     Ok(json!({
+                                        "success": output.status.success(),
+                                        "stdout": stdout,
+                                        "stderr": stderr,
+                                        "exit_code": exit_code,
+                                        "timed_out": timed_out
+                                     }))
+                                }
+                                Err(e) => {
+                                    // This might happen if the process was forcefully killed and output couldn't be retrieved
+                                    error!(error = %e, command = %command_str, "Failed to get output after command finished/timed out");
+                                    Err(json!({"error": format!("Failed to get output for command '{}' after execution: {}", command_str, e), "timed_out": true})) // Assume timeout if we can't get output
+                                }
+                            }
+                        }
+                        Ok(None) => { // Timeout occurred
+                            info!(command = %command_str, "Bash command timed out");
+                            // Attempt to kill the process if it timed out
+                            let _ = child.kill(); // Ignore kill errors, best effort
+                            let _ = child.wait(); // Ensure it's reaped
+                            Err(json!({
+                                "error": "Command execution timed out".to_string(),
+                                "stdout": "",
+                                "stderr": "",
+                                "exit_code": null, // No exit code if timed out
+                                "timed_out": true
+                            }))
+                        }
+                        Err(e) => { // Error waiting for the process
+                            error!(error = %e, command = %command_str, "Error waiting for bash command");
+                            Err(json!({"error": format!("Error waiting for command '{}': {}", command_str, e)}))
+                        }
+                    }
+                }
+                Err(e) => { // Error spawning the process
+                    error!(error = %e, command = %command_str, "Failed to spawn bash command");
+                    Err(json!({"error": format!("Failed to spawn command '{}': {}", command_str, e)}))
+                }
             }
         }
         // --- Default Case ---
@@ -2150,8 +2324,9 @@ async fn handle_tool_call(
     app_handle: &AppHandle,
     tool_name: &str,
     input: &Value,
+    state: &State<'_, AppState>, // Added state parameter
 ) -> Value { // Returns the JSON expected by Anthropic (either success or error content)
-    match call_tool(desktop, app_handle, tool_name, input).await {
+    match call_tool(desktop, app_handle, tool_name, input, state).await { // Pass state
         Ok(success_json) => {
             info!(tool_name = %tool_name, output = ?success_json, "Tool call succeeded");
             success_json
