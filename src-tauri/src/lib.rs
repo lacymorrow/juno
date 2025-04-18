@@ -25,14 +25,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use {
     cocoa::{
-        appkit::{self, NSEvent, NSWindow, NSView, NSWindowCollectionBehavior},
+        appkit::{NSWindow, NSView, NSWindowCollectionBehavior},
         base::{id as cocoa_id, nil, YES, NO, BOOL},
-        foundation::{self, NSAutoreleasePool, NSPoint, NSRect, NSSize},
+        foundation::{self, NSRect},
     },
-    objc::{class, msg_send, runtime::Object, sel, sel_impl},
-    std::thread,
-    // std::sync::Arc, // No longer needed for monitor handle
-    // std::sync::Mutex, // No longer needed for monitor handle
+    objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
 };
 
 // Declare modules
@@ -256,6 +253,7 @@ pub fn run() {
                 info!("Applying macOS specific setup...");
                 if let Some(window) = app_handle.get_webview_window("floating-bar") {
                     info!("Found floating-bar for macOS setup.");
+                    // --- Apply Standard Window Styling ---
                     match window.ns_window() {
                         Ok(ns_window_ptr) => {
                             let ns_window = ns_window_ptr as cocoa_id;
@@ -265,17 +263,14 @@ pub fn run() {
                                 // Allow clicks to pass through transparent areas
                                 ns_window.setOpaque_(NO);
                                 ns_window.setHasShadow_(NO); // Optional: remove shadow if desired
-                                // Prevent the window from becoming the key window (stealing focus)
-                                // ns_window.setCanBecomeKeyWindow_(NO); // This might interfere with interactions if the bar needs input
-                                // Keep it visible across spaces (optional, adjust as needed)
+                                // Keep it visible across spaces
                                 ns_window.setCollectionBehavior_(
                                     NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
                                     NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
                                     NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
                                 );
-                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
 
-                                // Set initial ignore state based on visibility (redundant with tray logic, but good practice)
+                                // Set initial ignore state based on visibility (handled by tray logic, but good initial state)
                                 if !window.is_visible().unwrap_or(false) {
                                      let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
                                      info!("macOS Setup: Floating bar initially hidden, ignoring mouse events.");
@@ -283,16 +278,16 @@ pub fn run() {
                                      let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
                                      info!("macOS Setup: Floating bar initially visible, accepting mouse events.");
                                 }
-
-                                // Note: setIgnoresMouseEvents is handled dynamically by the tray icon click logic already.
-                                // The acceptsMouseMovedEvents is not needed if we aren't tracking hover within the Rust backend.
-                                info!("macOS specific properties applied to floating-bar.");
+                                info!("macOS standard styling applied to floating-bar.");
                             }
                         }
                         Err(e) => {
-                            eprintln!("Error getting NSWindow for floating-bar: {}", e);
+                            eprintln!("Error getting NSWindow for styling floating-bar: {}", e);
                         }
                     }
+                     // --- Setup Mouse Tracking ---
+                    macos_tracking::setup_tracking_area(&window, app_handle.clone());
+
                 } else {
                     eprintln!("Warning: floating-bar window not found during macOS specific setup.");
                 }
@@ -326,5 +321,117 @@ mod tests {
     fn test_focused_element_info_placeholder() {
         // This test might need refactoring if it relied on functions moved to utils or commands
         assert!(true, "Placeholder test for focused element concept");
+    }
+}
+
+// --- Define macOS specific constants and delegate ---
+#[cfg(target_os = "macos")]
+mod macos_tracking {
+    use super::*; // Import items from parent module (like AppHandle, cocoa types etc.)
+    use std::sync::Mutex; // Use std::sync::Mutex for interior mutability safely
+
+    // Constants for NSTrackingAreaOptions
+    const NS_TRACKING_MOUSE_ENTERED_AND_EXITED: u64 = 0x01;
+    const NS_TRACKING_ACTIVE_ALWAYS: u64 = 0x80;
+    const TRACKING_OPTIONS: u64 = NS_TRACKING_MOUSE_ENTERED_AND_EXITED | NS_TRACKING_ACTIVE_ALWAYS;
+
+    // Static storage for the AppHandle, wrapped for thread safety
+    static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
+
+    // Delegate implementation
+    extern "C" fn mouse_entered(_this: &Object, _cmd: Sel, _event: cocoa_id) {
+        info!("[Tracking Delegate] Mouse Entered");
+        if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
+             if let Some(window) = handle.get_webview_window("floating-bar") {
+                let _ = window.emit("mouse-entered-window", ()); // Emit specific event
+                 info!("[Tracking Delegate] Emitted mouse-entered-window");
+             } else {
+                  eprintln!("[Tracking Delegate Error] Floating bar window not found for mouse_entered emit.");
+             }
+        }
+    }
+
+    extern "C" fn mouse_exited(_this: &Object, _cmd: Sel, _event: cocoa_id) {
+         info!("[Tracking Delegate] Mouse Exited");
+         if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
+             if let Some(window) = handle.get_webview_window("floating-bar") {
+                let _ = window.emit("mouse-left-window", ()); // Emit specific event
+                 info!("[Tracking Delegate] Emitted mouse-left-window");
+             } else {
+                 eprintln!("[Tracking Delegate Error] Floating bar window not found for mouse_exited emit.");
+             }
+         }
+    }
+
+    pub fn setup_tracking_area(window: &WebviewWindow<Wry>, app_handle: AppHandle) {
+        info!("Setting up macOS tracking area for floating-bar...");
+        // Store the AppHandle statically
+        *APP_HANDLE.lock().unwrap() = Some(app_handle.clone());
+
+        let ns_window = match window.ns_window() {
+            Ok(ptr) => ptr as cocoa_id,
+            Err(e) => {
+                eprintln!("Failed to get NSWindow for tracking area setup: {}", e);
+                return;
+            }
+        };
+
+        unsafe {
+            let view = ns_window.contentView();
+            if view == nil {
+                eprintln!("Failed to get contentView for tracking area setup.");
+                return;
+            }
+
+            let delegate_class_name = "MouseTrackingDelegate";
+            let mut delegate_class = Class::get(delegate_class_name);
+
+            // Declare class only if it doesn't exist yet
+            if delegate_class.is_none() {
+                 info!("Declaring MouseTrackingDelegate class...");
+                let superclass = class!(NSObject);
+                let mut decl = ClassDecl::new(delegate_class_name, superclass).unwrap();
+
+                // Add mouseEntered: method
+                decl.add_method(
+                    sel!(mouseEntered:),
+                    mouse_entered as extern "C" fn(&Object, Sel, cocoa_id),
+                );
+
+                // Add mouseExited: method
+                decl.add_method(
+                    sel!(mouseExited:),
+                    mouse_exited as extern "C" fn(&Object, Sel, cocoa_id),
+                );
+
+                delegate_class = Some(decl.register());
+                 info!("MouseTrackingDelegate class registered.");
+            }
+
+            let delegate: cocoa_id = msg_send![delegate_class.unwrap(), new];
+             info!("MouseTrackingDelegate instance created: {:?}", delegate);
+
+            // Keep the delegate alive. Leaking it here is simpler than complex lifetime management.
+            let _ = Box::leak(Box::new(delegate)); // Box the delegate and leak it
+
+            let bounds: NSRect = msg_send![view, bounds];
+             info!("Got view bounds for tracking area.");
+
+            let tracking_area: cocoa_id = msg_send![class!(NSTrackingArea), alloc];
+            let tracking_area_ptr: cocoa_id = msg_send![
+                tracking_area,
+                initWithRect: bounds
+                options: TRACKING_OPTIONS
+                owner: delegate // Use the delegate instance as the owner
+                userInfo: nil
+            ];
+             info!("NSTrackingArea created: {:?}", tracking_area_ptr);
+
+            let _: () = msg_send![view, addTrackingArea: tracking_area_ptr];
+            let _: () = msg_send![tracking_area_ptr, release]; // Release after adding (view retains it)
+            // Note: Do not release the delegate here, it's leaked via Box::leak
+
+             info!("NSTrackingArea added to view.");
+        }
     }
 }
