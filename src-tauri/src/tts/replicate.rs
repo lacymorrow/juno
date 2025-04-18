@@ -12,6 +12,7 @@ use base64::Engine;
 #[derive(Serialize)]
 pub(crate) struct ReplicateInput { // Make pub(crate) if only used within the crate
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")] // Omit if None
     speaker_wav: Option<String>, // Optional: URL to a speaker reference audio
 }
 
@@ -51,9 +52,16 @@ pub async fn invoke_replicate_tts(
     info!("Invoking Replicate TTS for text: {}", text);
     let api_key = env::var("REPLICATE_API_KEY")
         .map_err(|_| "REPLICATE_API_KEY environment variable not set".to_string())?;
+
+    // Restore default model version logic
     let model_version = env::var("REPLICATE_MODEL_VERSION")
-        .map_err(|_| "REPLICATE_MODEL_VERSION environment variable not set".to_string())?;
+        .unwrap_or_else(|_| "3e59b10a9894c54ae5f2fc0347e3a2f5c82f0574407e53a7d9f76ec7c502ad03".to_string());
+    info!("Using Replicate Model Version: {}", model_version);
+
     let speaker_wav_url = env::var("REPLICATE_SPEAKER_WAV_URL").ok(); // Optional
+    if speaker_wav_url.is_some() {
+        info!("Using speaker WAV URL: {:?}", speaker_wav_url);
+    }
 
     let client = Client::new();
     let start_url = "https://api.replicate.com/v1/predictions";
@@ -66,8 +74,11 @@ pub async fn invoke_replicate_tts(
         },
     };
 
-    info!("Starting Replicate prediction with payload: {{ version: {}, input: {{ text: '{}...', speaker_wav: {:?} }} }}",
-           request_payload.version, text.chars().take(20).collect::<String>(), request_payload.input.speaker_wav);
+    // Debug log the actual JSON being sent
+    match serde_json::to_string(&request_payload) {
+        Ok(json_string) => info!("Sending Replicate payload: {}", json_string),
+        Err(e) => warn!("Failed to serialize Replicate payload for logging: {}", e),
+    }
 
     // 1. Start the prediction
     let initial_response = client
