@@ -1387,4 +1387,48 @@ impl AccessibilityEngine for MacOSEngine {
     ) -> Result<(), AutomationError> {
         interaction::left_click_drag(start_x, start_y, end_x, end_y)
     }
+
+    fn get_window_title(&self) -> Result<String, AutomationError> {
+        // Implementation Note: Get focused element, check if it's a window, get AXTitle.
+        // Need robust error handling if no focus or not a window.
+        todo!("Implement get_window_title for macOS")
+    }
+
+    fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
+        // Implementation Note: Iterate through applications from get_applications(),
+        // then get AXWindows for each. Or use a system-level API if available.
+        todo!("Implement list_windows for macOS")
+    }
+
+    fn close_window(&self) -> Result<(), AutomationError> {
+        // Implementation Note: Get focused element, check if it's a window,
+        // find the close button (AXCloseButton) and click it.
+        // Alternatively, use AXPerformAction kAXPressAction on the close button.
+        todo!("Implement close_window for macOS")
+    }
+
+    fn maximize_window(&self) -> Result<(), AutomationError> {
+        // Implementation Note: Get focused element, check if window,
+        // find maximize button (AXZoomButton) and click it.
+        todo!("Implement maximize_window for macOS")
+    }
+
+    fn minimize_window(&self) -> Result<(), AutomationError> {
+        // Implementation Note: Get focused element, check if window,
+        // find minimize button (AXMinimizeButton) and click it.
+        // Or set AXMinimized attribute to true.
+        todo!("Implement minimize_window for macOS")
+    }
+
+    fn resize_window(&self, width: f64, height: f64) -> Result<(), AutomationError> {
+        // Implementation Note: Get focused element, check if window,
+        // set AXSize attribute.
+        todo!("Implement resize_window for macOS")
+    }
+
+    fn move_window(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        // Implementation Note: Get focused element, check if window,
+        // set AXPosition attribute.
+        todo!("Implement move_window for macOS")
+    }
 }

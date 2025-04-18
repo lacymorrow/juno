@@ -10,10 +10,30 @@ use tauri::{ // Add Manager and missing items here
     Manager, WindowEvent,
     menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem},
     tray::{TrayIconEvent, MouseButton, MouseButtonState},
-    image::Image
+    image::Image,
+    Runtime, // Required for window.ns_window()
+    AppHandle, // Keep AppHandle
+    Emitter, // Import Emitter trait for .emit()
+    WebviewWindow, // Keep WebviewWindow
+    Wry, // Keep Wry if needed elsewhere, remove if not
 };
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
+use std::sync::atomic::{AtomicBool, Ordering};
+
+// macOS specific imports
+#[cfg(target_os = "macos")]
+use {
+    cocoa::{
+        appkit::{self, NSEvent, NSWindow, NSView},
+        base::{id as cocoa_id, nil, YES, NO, BOOL},
+        foundation::{self, NSAutoreleasePool, NSPoint, NSRect, NSSize},
+    },
+    objc::{class, msg_send, runtime::Object, sel, sel_impl},
+    std::thread,
+    // std::sync::Arc, // No longer needed for monitor handle
+    // std::sync::Mutex, // No longer needed for monitor handle
+};
 
 // Declare modules
 pub mod tts;
@@ -183,7 +203,11 @@ pub fn run() {
 
             let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/tray-Template.png");
             let icon_bytes = std::fs::read(&icon_path).expect("Failed to read icon file");
-            let icon = Image::from_bytes(&icon_bytes).expect("Failed to create image from bytes");
+            let icon = Image::new_owned(
+                icon_bytes, // Pass owned Vec<u8>
+                32, // Provide explicit width (adjust if needed)
+                32  // Provide explicit height (adjust if needed)
+            );
 
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .menu(&menu)
@@ -215,6 +239,27 @@ pub fn run() {
             } else {
                 eprintln!("Warning: Floating bar window not found during setup.");
             }
+
+            // --- macOS Specific Setup for Floating Bar --- ///
+            #[cfg(target_os = "macos")]
+            {
+                info!("Applying macOS specific setup...");
+                if let Some(window) = app_handle.get_webview_window("floating-bar") {
+                    info!("Found floating-bar for macOS setup.");
+                    match window.ns_window() {
+                        Ok(ns_window_ptr) => {
+                            let ns_window = ns_window_ptr as cocoa_id;
+                            todo!("We should set acceptsMouseMovedEvents to true here. We should also notify the floating bar when it is hovered.We should also notify the floating bar when the window is hovered")
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting NSWindow for floating-bar: {}", e);
+                        }
+                    }
+                } else {
+                    eprintln!("Warning: floating-bar window not found during macOS specific setup.");
+                }
+            }
+            // --- End macOS Specific Setup ---
 
             Ok(())
         });
