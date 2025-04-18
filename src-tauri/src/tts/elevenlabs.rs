@@ -28,7 +28,7 @@ pub(crate) struct ElevenLabsRequest {
 #[tauri::command]
 pub async fn invoke_elevenlabs_tts(
     text: String,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<String, String> {
     info!("Invoking ElevenLabs TTS for text: \"{}\"", text);
 
