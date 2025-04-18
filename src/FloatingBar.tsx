@@ -1,34 +1,94 @@
+import { invoke } from "@tauri-apps/api/core"; // Import invoke
+import { appWindow } from "@tauri-apps/api/window"; // Import appWindow
 import React, { useEffect, useRef, useState } from "react";
 import GooeyLoader from "./GooeyLoader"; // Import the loader
-// import { invoke } from '@tauri-apps/api/core'; // Keep for later
+
+// Type for the result from submit_query (copied from App.tsx)
+type SubmitQueryResult = {
+  text: string;
+  audio_base64?: string; // Optional base64 audio data
+};
+
+// Type for conversation messages (optional, if storing conversation here)
+// type ChatMessage = {
+//   role: "user" | "assistant" | "system";
+//   content: string;
+// };
 
 const FloatingBar: React.FC = () => {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false); // State to control expansion
   const inputRef = useRef<HTMLInputElement>(null); // Ref for the input element
+  // Optional: State to hold the last response text
+  // const [lastResponse, setLastResponse] = useState<string | null>(null);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || isLoading) return;
 
+    const query = inputValue;
     setIsLoading(true);
-    console.log("Submitting:", inputValue);
-    // TODO: Replace with invoke call to backend
-    // try {
-    //   const result = await invoke('submit_query', { query: inputValue });
-    //   console.log('Backend response:', result);
-    //   // Handle result - maybe display in main panel or notification
-    // } catch (error) {
-    //   console.error('Error submitting query:', error);
-    // }
-    setTimeout(() => {
+    setInputValue(""); // Clear input immediately
+    inputRef.current?.blur(); // Blur input
+    // Keep it expanded while loading
+    // setIsExpanded(false); // Don't collapse immediately
+
+    console.log("Submitting query:", query);
+
+    try {
+      // Call the backend invoke function
+      const result: SubmitQueryResult = await invoke("submit_query", {
+        query: query,
+      });
+      console.log("Backend response:", result);
+      // TODO: Handle the result (e.g., show notification, play audio, update main window?)
+      // Example: setLastResponse(result.text);
+      // If audio, could potentially play it here too
+      // playAudioFromBase64(result.audio_base64);
+    } catch (error) {
+      console.error("Error submitting query:", error);
+      // TODO: Show error state to user?
+      // Example: setLastResponse(`Error: ${error}`);
+    } finally {
       setIsLoading(false);
-      setInputValue("");
-      setIsExpanded(false); // Collapse after submit
-      inputRef.current?.blur(); // Remove focus after submit
-    }, 2000);
+      // Collapse only after loading is finished (success or error)
+      setIsExpanded(false);
+      // Optionally clear last response after a delay?
+      // setTimeout(() => setLastResponse(null), 5000);
+    }
   };
+
+  // Effect to handle window focus changes
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupListener = async () => {
+      unlisten = await appWindow.onFocusChanged(({ payload: isFocused }) => {
+        console.log("Window focus changed:", isFocused);
+        if (isFocused) {
+          // When window gains focus, focus the input
+          inputRef.current?.focus();
+          // Optionally expand the bar when window is focused
+          // setIsExpanded(true);
+        } else {
+          // When window loses focus, blur the input and potentially collapse
+          inputRef.current?.blur();
+          if (!inputValue) {
+            // Only collapse if input is empty
+            setIsExpanded(false);
+          }
+        }
+      });
+    };
+
+    setupListener();
+
+    // Cleanup listener on component unmount
+    return () => {
+      unlisten?.();
+    };
+  }, [inputValue]); // Re-run if inputValue changes to update collapse logic on blur
 
   const handleFocus = () => {
     setIsExpanded(true);
@@ -54,6 +114,12 @@ const FloatingBar: React.FC = () => {
   useEffect(() => {
     if (!isLoading && isExpanded && inputRef.current) {
       // Maybe re-focus input if needed, or handle differently
+      // Check if the window is actually focused before focusing input
+      appWindow.isFocused().then((isFocused) => {
+        if (isFocused) {
+          inputRef.current?.focus();
+        }
+      });
     } else if (isLoading && inputRef.current) {
       inputRef.current.blur(); // Blur input when loading starts
     }
