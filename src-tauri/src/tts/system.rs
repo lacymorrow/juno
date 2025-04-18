@@ -3,14 +3,11 @@ use std::process::Command;
 use tempfile::NamedTempFile;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use tracing::{error, info};
-use tauri::State; // Added State for consistency, even if unused currently
-use crate::state::AppState; // Assuming AppState might be needed later
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn invoke_system_tts(
     text: String,
-    _state: State<'_, AppState>, // Keep state for API consistency
 ) -> Result<String, String> {
     info!("Invoking macOS system TTS for text: {}", text);
 
@@ -85,7 +82,6 @@ pub async fn invoke_system_tts(
 #[tauri::command]
 pub async fn invoke_system_tts(
     text: String,
-    _state: State<'_, AppState>,
 ) -> Result<String, String> {
     tracing::warn!("System TTS invoked on non-macOS platform for text: {}", text);
     Err("System TTS is currently only implemented for macOS.".to_string())

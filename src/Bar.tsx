@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Window } from "@tauri-apps/api/window";
 import { Check, Mic, Send } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -21,6 +22,7 @@ export function FloatingBar() {
   const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isWindowHovered, setIsWindowHovered] = useState(false);
 
   // For debugging - log state changes
   useEffect(() => {
@@ -44,6 +46,32 @@ export function FloatingBar() {
     setTooltipVisible(false);
     setTimeout(() => setShowTooltip(false), 200);
   };
+
+  // Start tooltip timer when window is hovered (if in default state)
+  useEffect(() => {
+    if (isWindowHovered && barState === "default") {
+      tooltipTimeoutRef.current = setTimeout(() => {
+        setShowTooltip(true);
+        setTimeout(() => setTooltipVisible(true), 50);
+      }, 1000); // Show tooltip after 1 second of hover
+    } else {
+      // Clear timer and hide tooltip if not hovered or not in default state
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current);
+        tooltipTimeoutRef.current = null;
+      }
+      setTooltipVisible(false);
+      // Delay hiding the tooltip element for transition out
+      setTimeout(() => setShowTooltip(false), 200);
+    }
+
+    // Cleanup timer on unmount or when dependencies change
+    return () => {
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current);
+      }
+    };
+  }, [isWindowHovered, barState]);
 
   const handleBarClick = () => {
     if (barState !== "default") return;
@@ -136,6 +164,30 @@ export function FloatingBar() {
     };
   }, []);
 
+  // Effect to listen for custom window hover events from backend
+  useEffect(() => {
+    let unlistenEnter: (() => void) | undefined;
+    let unlistenLeave: (() => void) | undefined;
+
+    const setupListeners = async () => {
+      unlistenEnter = await listen<null>("mouse-entered-window", () => {
+        console.log("Mouse entered window bounds (event)");
+        setIsWindowHovered(true);
+      });
+      unlistenLeave = await listen<null>("mouse-left-window", () => {
+        console.log("Mouse left window bounds (event)");
+        setIsWindowHovered(false);
+      });
+    };
+
+    setupListeners();
+
+    return () => {
+      unlistenEnter?.();
+      unlistenLeave?.();
+    };
+  }, []); // Empty dependency array, runs once on mount
+
   // Effect to handle window focus changes
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -201,11 +253,12 @@ export function FloatingBar() {
   return (
     <div
       data-tauri-drag-region
-      className="w-screen h-screen flex items-end justify-center pb-6 group"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      data-window-hovered={isWindowHovered}
+      className="w-screen h-screen flex items-end justify-center pb-6"
       onClick={(e) => {
         if (e.target === e.currentTarget && barState === "default") {
+          // Allow clicking the background area to trigger expansion if needed
+          // handleBarClick(); // Uncomment if clicking bg should expand
         }
       }}
     >
@@ -263,7 +316,7 @@ export function FloatingBar() {
               className={`
                 w-5 h-[4px] bg-emerald-400 rounded-full
                 transition-all duration-300 ease-in-out
-                group-hover:w-8 group-hover:bg-emerald-300
+                data-[window-hovered='true']:w-8 data-[window-hovered='true']:bg-emerald-300
                 ${barState === "finishing" ? "opacity-0 animate-fade-in" : ""}
               `}
             ></div>

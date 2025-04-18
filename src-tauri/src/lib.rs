@@ -5,6 +5,9 @@ use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use dotenvy::dotenv;
 use std::env;
+use std::fs::File;
+use std::io::Write;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{ // Add Manager and missing items here
     Manager, WindowEvent,
@@ -12,7 +15,10 @@ use tauri::{ // Add Manager and missing items here
     tray::{TrayIconEvent, MouseButton, MouseButtonState},
     image::Image
 };
+use tempfile::Builder as TempFileBuilder; // Use tempfile crate
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD}; // For decoding
+use tracing::info; // Import the info macro
 
 // Declare modules
 pub mod tts;
@@ -38,6 +44,94 @@ pub fn run() {
     dotenv().ok();
     let cli = cli::Cli::parse();
 
+    // Check for TTS test first, as it needs an async runtime and should exit
+    if let Some(provider) = cli.tts_provider {
+        let text = cli.tts_text.unwrap_or_else(|| "This is a test of the text to speech system.".to_string());
+        println!("[CLI] Requesting TTS test for provider '{}' with text: '{}'", provider, text);
+
+        // Create a Tokio runtime to execute the async TTS function
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime for TTS test");
+
+        // Run the async TTS function within the runtime
+        // Pass None for the state argument as we don't have Tauri State here
+        match rt.block_on(tts::invoke_tts_for_provider(text, None, &provider)) {
+            Ok(base64_audio) => {
+                println!("[CLI TTS Success] Received base64 audio data ({} bytes). Attempting playback...", base64_audio.len());
+
+                // 1. Decode Base64
+                match BASE64_STANDARD.decode(base64_audio) {
+                    Ok(audio_bytes) => {
+                        // 2. Create a temporary file
+                        //    Use .mp3 as a common format, though ElevenLabs might return mpeg or others.
+                        //    Replicate returns wav, System returns m4a.
+                        //    afplay handles multiple formats.
+                        let temp_file_result = TempFileBuilder::new()
+                            .prefix("tts_test_")
+                            .suffix(".mp3") // Using .mp3; adjust if a specific format is needed/guaranteed
+                            .tempfile();
+
+                        match temp_file_result {
+                            Ok(mut temp_file) => {
+                                let temp_path = temp_file.path().to_path_buf();
+                                info!("Writing decoded audio to temporary file: {:?}", temp_path);
+
+                                // 3. Write decoded bytes to the temp file
+                                if let Err(e) = temp_file.write_all(&audio_bytes) {
+                                    eprintln!("[CLI Playback Error] Failed to write audio bytes to temp file: {}", e);
+                                    std::process::exit(1);
+                                }
+
+                                // Ensure file is written before playing
+                                temp_file.flush().ok();
+
+                                // 4. Play the temporary file (macOS specific using afplay)
+                                #[cfg(target_os = "macos")]
+                                {
+                                    println!("[CLI Playback] Playing audio using afplay...");
+                                    let afplay_status = Command::new("afplay")
+                                        .arg(temp_path)
+                                        .status(); // Wait for playback to finish
+
+                                    match afplay_status {
+                                        Ok(status) if status.success() => {
+                                            println!("[CLI Playback] Playback finished successfully.");
+                                        }
+                                        Ok(status) => {
+                                            eprintln!("[CLI Playback Error] afplay exited with status: {}", status);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[CLI Playback Error] Failed to execute afplay: {}. Is it installed and in PATH?", e);
+                                        }
+                                    }
+                                }
+
+                                #[cfg(not(target_os = "macos"))]
+                                {
+                                    println!("[CLI Playback] Playback command not implemented for this OS.");
+                                    // Add commands for Linux (aplay, paplay) or Windows if needed
+                                }
+
+                                // Temp file is automatically deleted when `temp_file` goes out of scope
+                            }
+                            Err(e) => {
+                                eprintln!("[CLI Playback Error] Failed to create temporary audio file: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[CLI Playback Error] Failed to decode base64 audio: {}", e);
+                    }
+                }
+            }
+            Err(e) => eprintln!("[CLI TTS Error] {}", e),
+        }
+        std::process::exit(0); // Exit after TTS test attempt
+    }
+
+    // --- Proceed with Desktop Initialization and other tests if not doing TTS test ---
     let desktop_instance_result = Desktop::new(false, true);
     let desktop_instance = match desktop_instance_result {
         Ok(instance) => instance,
@@ -48,7 +142,6 @@ pub fn run() {
         }
     };
 
-    // Handle test flags
     let mut ran_test = false;
     let mut test_result: Result<(), String> = Ok(());
     if cli.test_focused_element_ns {
@@ -85,8 +178,7 @@ pub fn run() {
             check_server_status,
             submit_query,
             get_logs,
-            tts::replicate::invoke_replicate_tts,
-            tts::elevenlabs::invoke_elevenlabs_tts,
+            tts::invoke_tts, // Use the main invoke_tts command for Tauri
             capture_screenshot_command,
             dev_get_focused_element_info,
             capture_element_screenshot_command,
