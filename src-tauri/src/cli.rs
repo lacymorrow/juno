@@ -1,5 +1,7 @@
 use clap::Parser;
 
+pub mod runner; // Declare the runner submodule
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub(crate) struct Cli {

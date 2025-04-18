@@ -5,9 +5,6 @@ use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use dotenvy::dotenv;
 use std::env;
-use std::fs::File;
-use std::io::Write;
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{ // Add Manager and missing items here
     Manager, WindowEvent,
@@ -15,9 +12,7 @@ use tauri::{ // Add Manager and missing items here
     tray::{TrayIconEvent, MouseButton, MouseButtonState},
     image::Image
 };
-use tempfile::Builder as TempFileBuilder; // Use tempfile crate
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD}; // For decoding
 use tracing::info; // Import the info macro
 
 // Declare modules
@@ -44,93 +39,7 @@ pub fn run() {
     dotenv().ok();
     let cli = cli::Cli::parse();
 
-    // Check for TTS test first, as it needs an async runtime and should exit
-    if let Some(provider) = cli.tts_provider {
-        let text = cli.tts_text.unwrap_or_else(|| "This is a test of the text to speech system.".to_string());
-        println!("[CLI] Requesting TTS test for provider '{}' with text: '{}'", provider, text);
-
-        // Create a Tokio runtime to execute the async TTS function
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create Tokio runtime for TTS test");
-
-        // Run the async TTS function within the runtime
-        // Pass None for the state argument as we don't have Tauri State here
-        match rt.block_on(tts::invoke_tts_for_provider(text, None, &provider)) {
-            Ok(base64_audio) => {
-                println!("[CLI TTS Success] Received base64 audio data ({} bytes). Attempting playback...", base64_audio.len());
-
-                // 1. Decode Base64
-                match BASE64_STANDARD.decode(base64_audio) {
-                    Ok(audio_bytes) => {
-                        // 2. Create a temporary file
-                        //    Use the correct extension based on the provider. System TTS (macOS) uses m4a.
-                        //    TODO: Handle different extensions for different providers if needed.
-                        let temp_file_result = TempFileBuilder::new()
-                            .prefix("tts_test_")
-                            .suffix(".m4a") // Use .m4a for system TTS output
-                            .tempfile();
-
-                        match temp_file_result {
-                            Ok(mut temp_file) => {
-                                let temp_path = temp_file.path().to_path_buf();
-                                info!("Writing decoded audio to temporary file: {:?}", temp_path);
-
-                                // 3. Write decoded bytes to the temp file
-                                if let Err(e) = temp_file.write_all(&audio_bytes) {
-                                    eprintln!("[CLI Playback Error] Failed to write audio bytes to temp file: {}", e);
-                                    std::process::exit(1);
-                                }
-
-                                // Ensure file is written before playing
-                                temp_file.flush().ok();
-
-                                // 4. Play the temporary file (macOS specific using afplay)
-                                #[cfg(target_os = "macos")]
-                                {
-                                    println!("[CLI Playback] Playing audio using afplay...");
-                                    let afplay_status = Command::new("afplay")
-                                        .arg(temp_path)
-                                        .status(); // Wait for playback to finish
-
-                                    match afplay_status {
-                                        Ok(status) if status.success() => {
-                                            println!("[CLI Playback] Playback finished successfully.");
-                                        }
-                                        Ok(status) => {
-                                            eprintln!("[CLI Playback Error] afplay exited with status: {}", status);
-                                        }
-                                        Err(e) => {
-                                            eprintln!("[CLI Playback Error] Failed to execute afplay: {}. Is it installed and in PATH?", e);
-                                        }
-                                    }
-                                }
-
-                                #[cfg(not(target_os = "macos"))]
-                                {
-                                    println!("[CLI Playback] Playback command not implemented for this OS.");
-                                    // Add commands for Linux (aplay, paplay) or Windows if needed
-                                }
-
-                                // Temp file is automatically deleted when `temp_file` goes out of scope
-                            }
-                            Err(e) => {
-                                eprintln!("[CLI Playback Error] Failed to create temporary audio file: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[CLI Playback Error] Failed to decode base64 audio: {}", e);
-                    }
-                }
-            }
-            Err(e) => eprintln!("[CLI TTS Error] {}", e),
-        }
-        std::process::exit(0); // Exit after TTS test attempt
-    }
-
-    // --- Proceed with Desktop Initialization and other tests if not doing TTS test ---
+    // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
     let desktop_instance_result = Desktop::new(false, true);
     let desktop_instance = match desktop_instance_result {
         Ok(instance) => instance,
@@ -141,21 +50,15 @@ pub fn run() {
         }
     };
 
-    let mut ran_test = false;
-    let mut test_result: Result<(), String> = Ok(());
-    if cli.test_focused_element_ns {
-        #[cfg(target_os = "macos")] { test_result = utils::run_test_focused_element_ns(); ran_test = true; }
-        #[cfg(not(target_os = "macos"))] { eprintln!("Error: --test-focused-element-ns is only supported on macOS."); test_result = Err("Unsupported platform".to_string()); ran_test = true; }
-    }
-    if cli.check_accessibility {
-        #[cfg(target_os = "macos")] { test_result = utils::run_check_accessibility(); ran_test = true; }
-        #[cfg(not(target_os = "macos"))] { println!("Warning: --check-accessibility is macOS-specific. Skipping check."); ran_test = true; }
-    }
-    if ran_test {
-        match test_result { Ok(_) => std::process::exit(0), Err(_) => std::process::exit(1), }
+    // --- Handle CLI Commands ---
+    // If handle_cli_commands returns true, it means a command was executed
+    // and the application should exit.
+    if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
+        return; // Exit early if a CLI command was handled
     }
 
-    println!("No test flags detected, launching Tauri application...");
+    // --- Proceed with Tauri Application Launch if no CLI command was run ---
+    println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
     let desktop_arc = Arc::new(desktop_instance);
 
     // Create the AppState
@@ -301,7 +204,7 @@ pub fn run() {
                         api.prevent_close();
                         let window = window_event_handle.get_webview_window("main").unwrap();
                         window.hide().unwrap();
-                        tracing::info!("[INFO] Main window hidden via close request.");
+                        info!("[INFO] Main window hidden via close request."); // Keep info usage
                     }
                     _ => {}
                 }
