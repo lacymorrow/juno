@@ -201,117 +201,130 @@ export function FloatingBar() {
   return (
     <div
       data-tauri-drag-region
-      className="group w-full h-full flex items-center justify-center"
+      className="w-screen h-screen flex items-end justify-center pb-6 group"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && barState === "default") {
+        }
+      }}
     >
-      {/* Tooltip */}
-      {showTooltip && barState === "default" && (
-        <div
-          className={`
-            absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2
-            bg-black/90 text-white text-xs rounded-md px-3 py-2 shadow-lg
-            whitespace-nowrap transition-all duration-200 ease-in-out
-            ${
-              tooltipVisible
-                ? "opacity-100 translate-y-0"
-                : "opacity-0 translate-y-2"
-            }
-          `}
-        >
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center">
-              <Mic className="h-3.5 w-3.5 text-emerald-400 mr-1.5" />
-              <span>
-                <kbd className="px-1.5 py-0.5 text-[11px] font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-sm">
-                  ⌘ + Space
-                </kbd>
-                <span className="ml-1.5 text-[11px]">Start/Stop Dictation</span>
-              </span>
-            </div>
-          </div>
-          <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-black/90 rotate-45"></div>
-        </div>
-      )}
-
-      {/* Universal Bar Container - Always Present */}
-      <div
-        className={`
-          flex items-center justify-center bg-black/90 backdrop-blur-md text-white
-          rounded-full shadow-lg border border-white/20 overflow-hidden
-          transition-all duration-300 ease-in-out
-          ${getBarStyles()}
-          ${barState === "default" ? "cursor-pointer" : ""}
-        `}
-        onClick={barState === "default" ? handleBarClick : undefined}
-      >
-        {/* Default State Content */}
-        {(barState === "default" || barState === "finishing") && (
+      {/* Container for the bar and tooltip, positioned relative to the flex container */}
+      <div className="relative z-50">
+        {/* Tooltip - positioned relative to this new inner container */}
+        {showTooltip && barState === "default" && (
           <div
             className={`
-              w-5 h-[4px] bg-emerald-400 rounded-full
-              transition-all duration-300 ease-in-out
-              group-hover:w-8 group-hover:bg-emerald-300
-              ${barState === "finishing" ? "opacity-0 animate-fade-in" : ""}
-            `}
-          ></div>
-        )}
-
-        {/* Expanding/Input State Content */}
-        {(barState === "expanding" || barState === "input") && (
-          <form
-            onSubmit={handleSubmit}
-            className={`
-              flex items-center justify-between w-full h-full
-              transition-opacity duration-300 ease-in-out
-              ${barState === "input" ? "opacity-100" : "opacity-0"}
+              absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2
+              bg-black/90 text-white text-xs rounded-md px-3 py-2 shadow-lg
+              whitespace-nowrap transition-all duration-200 ease-in-out
+              ${
+                tooltipVisible
+                  ? "opacity-100 translate-y-0"
+                  : "opacity-0 translate-y-2"
+              }
             `}
           >
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onBlur={handleInputBlur}
-              placeholder="Type and press Enter..."
-              className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/50"
-              disabled={barState !== "input"}
-            />
-            <button
-              type="submit"
-              className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-500 hover:bg-emerald-400 transition-colors duration-200"
-              disabled={barState !== "input"}
-            >
-              <Send size={12} className="text-black" />
-            </button>
-          </form>
-        )}
-
-        {/* Success State Content */}
-        {barState === "success" && (
-          <div className="flex items-center justify-between w-full h-full animate-success-fade">
-            <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap pl-2 text-sm text-emerald-400 font-medium">
-              {lastSubmittedValue}
-            </span>
-            <div className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-500">
-              <Check size={12} className="text-black" />
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center">
+                <Mic className="h-3.5 w-3.5 text-emerald-400 mr-1.5" />
+                <span>
+                  <kbd className="px-1.5 py-0.5 text-[11px] font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-sm">
+                    ⌘ + Space
+                  </kbd>
+                  <span className="ml-1.5 text-[11px]">
+                    Start/Stop Dictation
+                  </span>
+                </span>
+              </div>
             </div>
+            <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-black/90 rotate-45"></div>
           </div>
         )}
 
-        {/* Shrinking State - Empty to create clean transition */}
-        {barState === "shrinking" && (
-          <div className="opacity-0 w-full h-full"></div>
-        )}
+        {/* Universal Bar Container - Now positioned within the flex container */}
+        {/* Clicks specifically on this bar will propagate to handleBarClick */}
+        {/* Stop propagation for mouse enter/leave so they don't trigger the window handlers again */}
+        <div
+          onMouseEnter={(e) => e.stopPropagation()}
+          onMouseLeave={(e) => e.stopPropagation()}
+          className={`
+            flex items-center justify-center bg-black/90 backdrop-blur-md text-white
+            rounded-full shadow-lg border border-white/20 overflow-hidden
+            transition-all duration-300 ease-in-out
+            ${getBarStyles()}
+            ${barState === "default" ? "cursor-pointer" : ""}
+          `}
+          onClick={barState === "default" ? handleBarClick : undefined}
+        >
+          {/* Default State Content */}
+          {(barState === "default" || barState === "finishing") && (
+            <div
+              className={`
+                w-5 h-[4px] bg-emerald-400 rounded-full
+                transition-all duration-300 ease-in-out
+                group-hover:w-8 group-hover:bg-emerald-300
+                ${barState === "finishing" ? "opacity-0 animate-fade-in" : ""}
+              `}
+            ></div>
+          )}
 
-        {/* Loading State Content */}
-        {barState === "loading" && (
-          <div className="gooey-container flex items-center justify-center w-full h-full">
-            <div className="gooey-dot bg-emerald-400"></div>
-            <div className="gooey-dot bg-emerald-400"></div>
-            <div className="gooey-dot bg-emerald-400"></div>
-          </div>
-        )}
+          {/* Expanding/Input State Content */}
+          {(barState === "expanding" || barState === "input") && (
+            <form
+              onSubmit={handleSubmit}
+              className={`
+                flex items-center justify-between w-full h-full
+                transition-opacity duration-300 ease-in-out
+                ${barState === "input" ? "opacity-100" : "opacity-0"}
+              `}
+            >
+              <input
+                ref={inputRef}
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onBlur={handleInputBlur}
+                placeholder="Type and press Enter..."
+                className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/50"
+                disabled={barState !== "input"}
+              />
+              <button
+                type="submit"
+                className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-500 hover:bg-emerald-400 transition-colors duration-200"
+                disabled={barState !== "input"}
+              >
+                <Send size={12} className="text-black" />
+              </button>
+            </form>
+          )}
+
+          {/* Success State Content */}
+          {barState === "success" && (
+            <div className="flex items-center justify-between w-full h-full animate-success-fade">
+              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap pl-2 text-sm text-emerald-400 font-medium">
+                {lastSubmittedValue}
+              </span>
+              <div className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-500">
+                <Check size={12} className="text-black" />
+              </div>
+            </div>
+          )}
+
+          {/* Shrinking State - Empty to create clean transition */}
+          {barState === "shrinking" && (
+            <div className="opacity-0 w-full h-full"></div>
+          )}
+
+          {/* Loading State Content */}
+          {barState === "loading" && (
+            <div className="gooey-container flex items-center justify-center w-full h-full">
+              <div className="gooey-dot bg-emerald-400"></div>
+              <div className="gooey-dot bg-emerald-400"></div>
+              <div className="gooey-dot bg-emerald-400"></div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

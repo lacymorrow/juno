@@ -2562,6 +2562,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
+ "tempfile",
  "tokio",
  "tower-http 0.5.2",
  "tracing",
