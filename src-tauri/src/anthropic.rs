@@ -45,9 +45,9 @@ pub(crate) struct ToolResultBlock {
 }
 
 #[derive(Serialize)]
-pub(crate) struct SubmitQueryResult {
-    pub(crate) text: String,
-    pub(crate) audio_base64: Option<String>,
+pub struct SubmitQueryResult {
+    pub text: String,
+    pub audio_base64: Option<String>,
 }
 
 
@@ -368,8 +368,8 @@ pub async fn submit_query(
     let final_text = final_response_text.trim().to_string();
     info!("Final agent text response: {}", final_text);
 
-    // Call TTS after the loop
-    let audio_result = tts::elevenlabs::invoke_elevenlabs_tts(final_text.clone(), state).await;
+    // Call central TTS function
+    let audio_result = tts::invoke_tts(final_text.clone(), state).await;
 
     let audio_base64 = match audio_result {
         Ok(base64) => {
