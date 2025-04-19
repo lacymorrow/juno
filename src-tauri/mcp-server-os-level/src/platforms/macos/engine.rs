@@ -1,4 +1,4 @@
- use super::element::MacOSUIElement;
+use super::element::MacOSUIElement;
 use super::permissions::check_accessibility_permissions;
 use super::utils::{
     element_contains_text, get_pid_for_element, get_running_application_pids,
@@ -29,6 +29,7 @@ use crate::platforms::macos::constants::{
     MODIFIER_COMMAND, MODIFIER_SHIFT, MODIFIER_OPTION, MODIFIER_CONTROL, // Modifier flags
 };
 use serde_json::{json, Value as JsonValue};
+use crate::element::ElementTreeNode;
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -855,7 +856,45 @@ impl AccessibilityEngine for MacOSEngine {
                     None,
                 ))
             }
+            Selector::Description(desc) => {
+                let desc_lower = desc.to_lowercase();
+                let collector = ElementFinderWithWindows::new(
+                    start_element, // Pass start_element correctly
+                    move |e| {
+                        // Check AXDescription
+                        let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
+                        if let Ok(desc_val) = e.attribute(&desc_attr) {
+                            if let Some(cf_string) = desc_val.downcast_into::<CFString>() {
+                                if cf_string.to_string().to_lowercase() == desc_lower {
+                                    return true;
+                                }
+                            }
+                        }
+                        false
+                    },
+                    None,
+                );
+                let walker: TreeWalkerWithWindows = TreeWalkerWithWindows::new();
 
+                walker.walk(start_element, &collector);
+
+                let ax_ui_element = match collector.find() {
+                    Ok(ax_ui_element) => ax_ui_element,
+                    Err(_) => {
+                        return Err(AutomationError::ElementNotFound(format!(
+                            "Element with description '{}' not found",
+                            desc
+                        )))
+                    }
+                };
+                Ok(self.wrap_element(
+                    ThreadSafeAXUIElement::new(ax_ui_element),
+                    None,
+                    None,
+                    None,
+                    None,
+                ))
+            }
             Selector::Text(text) => {
                 let text_lower = text.to_lowercase(); // Case-insensitive comparison
 
@@ -1071,13 +1110,34 @@ impl AccessibilityEngine for MacOSEngine {
                     .collect();
                 Ok(ui_elements)
             }
+            Selector::Description(desc) => {
+                let desc_lower = desc.to_lowercase();
+                let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
+                    // Check AXDescription
+                    let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
+                    if let Ok(desc_val) = e.attribute(&desc_attr) {
+                        if let Some(cf_string) = desc_val.downcast_into::<CFString>() {
+                            if cf_string.to_string().to_lowercase() == desc_lower {
+                                return true;
+                            }
+                        }
+                    }
+                    false
+                });
+                let ax_ui_elements = collector.find_all();
+                let ui_elements: Vec<UIElement> = ax_ui_elements
+                    .into_iter()
+                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
+                    .collect();
+                Ok(ui_elements)
+            }
             Selector::Text(text) => {
                 let text_lower = text.to_lowercase();
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
                     element_contains_text(e, &text_lower) // Use lower case text
                 });
                  let ax_ui_elements = collector.find_all();
-                let ui_elements = ax_ui_elements
+                let ui_elements: Vec<UIElement> = ax_ui_elements
                     .into_iter()
                     .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
                     .collect();
@@ -1094,7 +1154,7 @@ impl AccessibilityEngine for MacOSEngine {
                  let ax_ui_elements = collector.find_all(); // Get all matching AXUIElements
 
                  // Convert AXUIElements to UIElements
-                let ui_elements = ax_ui_elements
+                let ui_elements: Vec<UIElement> = ax_ui_elements
                     .into_iter()
                     .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
                     .collect();
@@ -1430,5 +1490,9 @@ impl AccessibilityEngine for MacOSEngine {
         // Implementation Note: Get focused element, check if window,
         // set AXPosition attribute.
         todo!("Implement move_window for macOS")
+    }
+
+    fn get_element_tree(&self, element: &UIElement) -> Result<ElementTreeNode, AutomationError> {
+        element.get_tree() // Delegate to the UIElement's get_tree method
     }
 }

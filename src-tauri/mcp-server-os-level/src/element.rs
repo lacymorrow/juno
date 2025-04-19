@@ -3,6 +3,7 @@ use crate::selector::Selector;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use serde::Serialize;
+use std::any::Any;
 
 use super::{ClickResult, Locator};
 
@@ -49,6 +50,7 @@ pub(crate) trait UIElementImpl: Send + Sync + Debug + AsAny {
     fn screenshot(&self) -> Result<String, AutomationError>;
     fn select_text(&self) -> Result<(), AutomationError>;
     fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError>;
+    fn get_tree(&self) -> Result<ElementTreeNode, AutomationError>;
 
     // Add a method to clone the box
     fn clone_box(&self) -> Box<dyn UIElementImpl>;
@@ -200,6 +202,11 @@ impl UIElement {
     pub fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
         self.inner.get_all_attributes()
     }
+
+    /// Get a representation of the accessibility tree starting from this element.
+    pub fn get_tree(&self) -> Result<ElementTreeNode, AutomationError> {
+        self.inner.get_tree()
+    }
 }
 
 impl PartialEq for UIElement {
@@ -240,4 +247,15 @@ impl AsAny for Box<dyn UIElementImpl> {
         // Disambiguate: Call the as_any method from the UIElementImpl trait
         UIElementImpl::as_any(self.as_ref())
     }
+}
+
+// Define a serializable struct for the element tree node
+#[derive(Serialize, Debug, Clone)]
+pub struct ElementTreeNode {
+    pub role: String,
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub bounds: Option<(f64, f64, f64, f64)>,
+    pub children: Vec<ElementTreeNode>,
+    // Add other relevant attributes as needed
 }
