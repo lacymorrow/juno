@@ -9,6 +9,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
 import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
+import { listen } from "@tauri-apps/api/event"; // Import listen
 import {
   BotMessageSquare,
   PanelLeftClose,
@@ -16,7 +17,7 @@ import {
   Send,
   Server,
 } from "lucide-react"; // Icons
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Type for conversation messages
 type ChatMessage = {
@@ -30,6 +31,24 @@ type SubmitQueryResult = {
   audio_base64?: string; // Optional base64 audio data
 };
 
+// Type for the backend response event payload
+type BackendResponsePayload = {
+  query: string;
+  response: SubmitQueryResult;
+};
+
+// Simple debounce function
+function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  return (...args: Parameters<F>): void => {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => func(...args), waitFor);
+  };
+}
+
 function App() {
   const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
@@ -41,6 +60,35 @@ function App() {
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
+  );
+
+  // Debounced handler function
+  const handleBackendResponseDebounced = useCallback(
+    debounce((payload: BackendResponsePayload) => {
+      console.log("Debounced handler executing for:", payload.query);
+      const { query, response } = payload;
+
+      // Add user query message
+      const userMessage: ChatMessage = { role: "user", content: query };
+      // Add assistant response message
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: response.text,
+      };
+
+      setConversation((prev) => [...prev, userMessage, assistantMessage]);
+
+      // Play audio if available
+      if (response.audio_base64) {
+        playAudioFromBase64(response.audio_base64); // This function already handles stopping previous audio
+      }
+
+      // Potentially reset processing state if managed globally here
+      setIsProcessing(false); // Assuming Bar.tsx also sets this true
+    }, 100), // Debounce for 100ms
+    [] // Dependencies for useCallback (playAudioFromBase64 might need to be included if not stable)
+    // Note: If playAudioFromBase64 relies on state/props, add them here or wrap playAudioFromBase64 in useCallback too.
+    // For now, assuming playAudioFromBase64 is stable or relies only on its arguments and `currentAudio` state/setter.
   );
 
   // Check server status on mount
@@ -78,41 +126,62 @@ function App() {
     checkServer();
   }, []);
 
-  // Submit query using Tauri invoke
+  // Listen for responses broadcast from the backend
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupListener = async () => {
+      unlisten = await listen<BackendResponsePayload>(
+        "backend-response",
+        (event) => {
+          console.log("Received backend-response event (raw):", event.payload);
+          // Call the debounced handler
+          handleBackendResponseDebounced(event.payload);
+        }
+      );
+    };
+
+    setupListener();
+
+    // Cleanup listener on component unmount
+    return () => {
+      unlisten?.();
+    };
+  }, [handleBackendResponseDebounced]); // Add debounced handler to dependency array
+
+  // Submit query using Tauri invoke (primarily for the main input)
+  // Note: This function might need adjustment if the backend
+  // `submit_query` command no longer returns the result directly.
+  // For now, we assume it might still be used by the main input,
+  // OR that the main input also triggers the event flow.
+  // If `submit_query` backend now ONLY emits, this function needs adjustment.
   const submitQuery = async (text: string) => {
     if (!text.trim() || isProcessing || serverStatus !== "connected") {
       return;
     }
 
-    const userMessage: ChatMessage = { role: "user", content: text };
-    setConversation((prev) => [...prev, userMessage]);
-    setQuery(""); // Clear input after sending
+    // Optimistically add user message? Or wait for event?
+    // Let's wait for the event to handle both user and assistant messages consistently.
+    // const userMessage: ChatMessage = { role: "user", content: text };
+    // setConversation((prev) => [...prev, userMessage]);
+    setQuery(""); // Clear input immediately
+    setIsProcessing(true); // Set processing state
 
     try {
-      // Expecting an object with text and optional audio_base64
-      const result: SubmitQueryResult = await invoke("submit_query", {
-        query: text,
-      });
-
-      const assistantMessage: ChatMessage = {
-        role: "assistant",
-        content: result.text, // Use the text part of the response
-      };
-      setConversation((prev) => [...prev, assistantMessage]);
-
-      // Play audio if available
-      if (result.audio_base64) {
-        playAudioFromBase64(result.audio_base64);
-      }
+      // Invoke the backend command. We assume it triggers the "backend-response" event.
+      // The direct return value might be empty or just a confirmation now.
+      await invoke("submit_query", { query: text });
+      console.log("submit_query invoked for:", text);
+      // Response handling is now done via the event listener.
     } catch (error) {
       const errorMessage: ChatMessage = {
         role: "system",
-        content: `Error processing query: ${error}`,
+        content: `Error invoking submit_query: ${error}`,
       };
       setConversation((prev) => [...prev, errorMessage]);
-    } finally {
-      setIsProcessing(false);
+      setIsProcessing(false); // Reset processing on error
     }
+    // No finally block to set isProcessing(false) here, as the event listener handles it on success.
   };
 
   const handleSubmit = (e: React.FormEvent) => {
