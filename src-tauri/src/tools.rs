@@ -1166,12 +1166,20 @@ pub(crate) async fn call_tool(
             "get_element_by_description" => {
                 let description = get_string_param(input, "description")?;
                 info!(description = %description, "Executing get_element_by_description");
-                // TODO: Implement get_element_by_description using desktop.get_element_by_description(&description).await
+                // Reverted: Method not found on desktop object
+                // match desktop.find_element_by_description(&description) {
+                //     Ok(element_info) => Ok(json!({"success": true, "element": element_info})),
+                //     Err(e) => Err(json!({"error": format!("Failed to find element by description: {}", e)})),
+                // }
                 Err(json!({ "error": "Tool 'get_element_by_description' not implemented yet." }))
             }
             "get_element_tree" => {
                 info!("Executing get_element_tree");
-                // TODO: Implement get_element_tree using desktop.get_element_tree().await
+                // Reverted: Method not found on desktop object
+                //  match desktop.get_element_tree() {
+                //     Ok(tree_info) => Ok(json!({"success": true, "tree": tree_info})),
+                //     Err(e) => Err(json!({"error": format!("Failed to get element tree: {}", e)})),
+                // }
                 Err(json!({ "error": "Tool 'get_element_tree' not implemented yet." }))
             }
             "get_clipboard_content" => {
@@ -1191,8 +1199,67 @@ pub(crate) async fn call_tool(
             }
             // --- Newly Added Tool Handlers (Placeholders/Implementations) ---
             "get_browser_info" => {
-                // This likely requires interaction with browser extensions or complex OS-specific APIs.
-                Err(json!({"error": "Tool 'get_browser_info' not implemented yet."}))
+                #[cfg(target_os = "macos")]
+                {
+                    info!("Executing get_browser_info for Safari");
+                    // AppleScript to get URL and Title from the front Safari window's current tab
+                    let script = r#"
+                        tell application "Safari"
+                            if it is running then
+                                try
+                                    set currentURL to URL of current tab of front window
+                                    set currentTitle to name of current tab of front window
+                                    return "{\"url\":\"" & currentURL & "\", \"title\":\"" & currentTitle & "\"}"
+                                on error errMsg number errorNumber
+                                    # Return error details as JSON string
+                                    return "{\"error\": \"Failed to get Safari info: " & errMsg & " (" & (errorNumber as string) & ")\"}"
+                                end try
+                            else
+                                return "{\"error\": \"Safari is not running\"}"
+                            end if
+                        end tell
+                    "#;
+
+                    match Command::new("osascript").arg("-e").arg(script).output() {
+                        Ok(output) => {
+                            let result_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                            if output.status.success() {
+                                // Attempt to parse the JSON string returned by AppleScript
+                                match serde_json::from_str::<Value>(&result_str) {
+                                    Ok(json_value) => {
+                                        // Check if the parsed JSON contains an error key (from the script itself)
+                                        if json_value.get("error").is_some() {
+                                            warn!(script_error = %result_str, "get_browser_info AppleScript reported an error");
+                                            Err(json_value) // Return the error JSON from the script
+                                        } else {
+                                            Ok(json!({"success": true, "browser_info": json_value}))
+                                        }
+                                    },
+                                    Err(parse_err) => {
+                                         error!(output = %result_str, error = %parse_err, "Failed to parse AppleScript output as JSON");
+                                         Err(json!({ "error": format!("Failed to parse browser info from script: {}", parse_err), "raw_output": result_str }))
+                                    }
+                                }
+                            } else {
+                                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                warn!(stdout = %result_str, stderr = %stderr, "osascript execution failed for get_browser_info");
+                                // Attempt to parse stdout as potential error JSON from script, otherwise use stderr
+                                 match serde_json::from_str::<Value>(&result_str) {
+                                     Ok(json_value) if json_value.get("error").is_some() => Err(json_value),
+                                     _ => Err(json!({ "error": format!("osascript failed: {}", stderr), "stdout": result_str }))
+                                }
+                            }
+                        }
+                        Err(e) => {
+                             error!(error = %e, "Failed to run osascript command for get_browser_info");
+                             Err(json!({"error": format!("Failed to execute osascript for browser info: {}", e)}))
+                        }
+                    }
+                 }
+                 #[cfg(not(target_os = "macos"))]
+                 {
+                     Err(json!({ "error": "get_browser_info is only implemented for macOS (Safari) currently." }))
+                 }
             }
             "run_applescript" => {
                 #[cfg(target_os = "macos")]

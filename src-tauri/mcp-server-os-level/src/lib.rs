@@ -26,7 +26,7 @@ mod tests;
 
 // Now UIElement is publicly accessible via computer_use_ai_sdk::element::UIElement
 // We still re-export it for convenience
-pub use element::{UIElement, UIElementAttributes};
+pub use element::{ElementTreeNode, UIElement, UIElementAttributes};
 pub use errors::AutomationError;
 pub use locator::Locator;
 pub use selector::Selector;

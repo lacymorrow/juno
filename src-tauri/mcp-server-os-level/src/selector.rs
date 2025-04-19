@@ -11,6 +11,8 @@ pub enum Selector {
     Id(String),
     /// Select by name/label
     Name(String),
+    /// Select by accessibility description
+    Description(String),
     /// Select by text content
     Text(String),
     /// Select using XPath-like query

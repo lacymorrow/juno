@@ -104,11 +104,13 @@ export function FloatingBar() {
 
         try {
           // **** Start backend call ****
+          // Invoke the command. We no longer need the direct result here.
           await invoke("submit_query", { query: query });
-          console.log("Backend call successful");
+          console.log("Backend call invoked successfully");
           // **** Backend call finished ****
 
-          // Transition to finishing after backend call succeeds
+          // Transition to finishing after backend call *invocation* succeeds
+          // The actual result processing happens in App.tsx via event listener
           setBarState("finishing");
           transitionTimeoutRef.current = setTimeout(() => {
             setBarState("input"); // Go back to input state
@@ -292,13 +294,17 @@ export function FloatingBar() {
         <div
           onMouseEnter={(e) => e.stopPropagation()}
           onMouseLeave={(e) => e.stopPropagation()}
-          className={`
+          className={cn(
+            `
             flex items-center justify-center bg-black/90 backdrop-blur-md text-white
             rounded-full shadow-lg border border-white/20 overflow-hidden
             transition-all duration-300 ease-in-out
             ${getBarStyles()}
             ${barState === "default" ? "cursor-pointer" : ""}
-          `}
+            `,
+            // Add slight size increase on hover only when in default state
+            barState === "default" && isWindowHovered && "scale-105"
+          )}
           onClick={barState === "default" ? handleBarClick : undefined}
         >
           {/* Default State Content */}
@@ -307,9 +313,11 @@ export function FloatingBar() {
               className={cn(
                 "w-5 h-[4px] bg-emerald-400 rounded-full",
                 "transition-all duration-300 ease-in-out",
-                "data-[window-hovered='true']:w-8 data-[window-hovered='true']:bg-emerald-300",
-                barState === "finishing" ? "opacity-0 animate-fade-in" : "",
-                isWindowHovered ? "w-20" : ""
+                // Remove hover effect from green bar
+                // "data-[window-hovered='true']:w-8 data-[window-hovered='true']:bg-emerald-300",
+                barState === "finishing" ? "opacity-0 animate-fade-in" : ""
+                // Remove direct hover class from green bar
+                // isWindowHovered ? "w-20" : "" // This seems incorrect based on previous logic, remove
               )}
             ></div>
           )}

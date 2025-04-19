@@ -1,5 +1,5 @@
 use crate::element::UIElement;
-use crate::{AutomationError, Selector};
+use crate::{AutomationError, Selector, ElementTreeNode};
 use anyhow::Result;
 use std::any::Any;
 use serde_json::Value as JsonValue;
@@ -141,6 +141,9 @@ pub trait AccessibilityEngine: Send + Sync + Any {
 
     /// Move the currently focused window.
     fn move_window(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+
+    /// Get the element tree starting from a specific element
+    fn get_element_tree(&self, element: &UIElement) -> Result<ElementTreeNode, AutomationError>;
 }
 
 #[cfg(target_os = "linux")]
