@@ -11,6 +11,7 @@ use std::io::Cursor;
 use tracing::{debug, error, info, warn};
 use tauri::State;
 use futures::future; // Add futures import
+use tauri::{Manager, Emitter}; // Import Manager and Emitter
 
 // --- Anthropic API Structs ---
 
@@ -44,12 +45,19 @@ pub(crate) struct ToolResultBlock {
     pub(crate) is_error: Option<bool>,
 }
 
-#[derive(Serialize)]
+// Keep this for payload structure, ensure Clone is derived
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SubmitQueryResult {
     pub text: String,
     pub audio_base64: Option<String>,
 }
 
+// Define the payload structure for the event
+#[derive(Serialize, Clone)]
+struct BackendResponsePayload {
+    query: String,
+    response: SubmitQueryResult,
+}
 
 #[derive(Serialize)]
 struct AnthropicThinkingBudget {
@@ -93,7 +101,7 @@ pub async fn submit_query(
     query: String,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle, // Pass AppHandle
-) -> Result<SubmitQueryResult, String> {
+) -> Result<(), String> { // Changed return type to Ok(())
     println!("Received query in submit_query: {}", query);
 
     let api_key = std::env::var("ANTHROPIC_API_KEY")
@@ -143,7 +151,10 @@ pub async fn submit_query(
             Err(e) => {
                 let err_msg = format!("HTTP request to Anthropic failed: {}", e);
                 error!("Error: {}", err_msg);
-                return Err(err_msg);
+                // Don't return here, let the function finish and emit error if needed?
+                // Or perhaps emit an error event? For now, let's just record the final text.
+                final_response_text = err_msg; // Capture error message as final text
+                break; // Exit loop on API error
             }
         };
 
@@ -155,7 +166,10 @@ pub async fn submit_query(
                 .unwrap_or_else(|_| "Failed to read error body".to_string());
             let err_msg = format!("Anthropic API error: {} - {}", status, body);
             error!("Error: {}", err_msg);
-            return Err(err_msg);
+            // Don't return here, let the function finish and emit error if needed?
+            // Or perhaps emit an error event? For now, let's just record the final text.
+            final_response_text = err_msg; // Capture error message as final text
+            break; // Exit loop on API error
         }
 
         let anthropic_response: AnthropicResponse = match response.json().await {
@@ -163,7 +177,10 @@ pub async fn submit_query(
             Err(e) => {
                 let err_msg = format!("Failed to parse Anthropic JSON response: {}", e);
                 error!("Error: {}", err_msg);
-                return Err(err_msg);
+                // Don't return here, let the function finish and emit error if needed?
+                // Or perhaps emit an error event? For now, let's just record the final text.
+                final_response_text = err_msg; // Capture error message as final text
+                break; // Exit loop on API error
             }
         };
 
@@ -181,7 +198,10 @@ pub async fn submit_query(
             Err(e) => {
                 let err_msg = format!("Failed to serialize assistant content: {}", e);
                 error!("Error: {}", err_msg);
-                return Err(err_msg);
+                // Don't return here, let the function finish and emit error if needed?
+                // Or perhaps emit an error event? For now, let's just record the final text.
+                final_response_text = err_msg; // Capture error message as final text
+                break; // Exit loop on API error
             }
         };
         conversation_history.push(AnthropicMessage {
@@ -316,14 +336,21 @@ pub async fn submit_query(
         }
         // --- End Tool Call Handling ---
 
-        // Add text responses from the original response
-        for block in &anthropic_response.content {
-            if block.type_ == "text" {
-                if let Some(text) = &block.text {
-                    final_response_text.push_str(text);
-                    final_response_text.push('\n');
+        // Get final text content from the response
+        let current_response_text = anthropic_response.content.iter()
+            .filter_map(|block| {
+                if block.type_ == "text" {
+                    block.text.clone()
+                } else {
+                    None
                 }
-            }
+            })
+            .collect::<Vec<String>>()
+            .join("\n"); // Join multiple text blocks if present
+
+        if !current_response_text.is_empty() {
+             final_response_text = current_response_text; // Update final response if text exists
+             info!("Received text block: {}", final_response_text);
         }
 
         if has_tool_calls {
@@ -332,7 +359,10 @@ pub async fn submit_query(
                 Err(e) => {
                     let err_msg = format!("Failed to serialize tool results: {}", e);
                     error!("Error: {}", err_msg);
-                    return Err(err_msg);
+                    // Don't return here, let the function finish and emit error if needed?
+                    // Or perhaps emit an error event? For now, let's just record the final text.
+                    final_response_text = err_msg; // Capture error message as final text
+                    break; // Exit loop on API error
                 }
             };
 
@@ -341,20 +371,31 @@ pub async fn submit_query(
                 content: tool_results_value,
             });
         } else {
-            if anthropic_response.stop_reason == "end_turn"
-                || anthropic_response.stop_reason == "stop_sequence"
-            {
-                info!(
-                    "Agent loop finished. Stop reason: {}",
-                    anthropic_response.stop_reason
-                );
-                break;
-            } else {
-                let warn_msg = format!(
-                    "Warning: Loop continued without tool calls but stop reason was: {}",
-                    anthropic_response.stop_reason
-                );
-                warn!("{}", warn_msg);
+            if !has_tool_calls || anthropic_response.stop_reason == "stop_sequence" || anthropic_response.stop_reason == "tool_use" {
+                 info!("Stop reason: {}", anthropic_response.stop_reason);
+                 if anthropic_response.stop_reason == "stop_sequence" && !final_response_text.is_empty() {
+                     // We have a final text response without more tools to call
+                     break;
+                 } else if anthropic_response.stop_reason == "tool_use" && has_tool_calls {
+                     // Continue loop to process tool results
+                     continue;
+                 } else if anthropic_response.stop_reason == "stop_sequence" && final_response_text.is_empty() {
+                     // Stopped, but no final text? Maybe only tool calls happened.
+                     warn!("Stop sequence received but no final text content found.");
+                     final_response_text = "Task completed (no text response generated).".to_string();
+                     break;
+                 } else if !has_tool_calls {
+                     // No tool calls in this response, and maybe stop reason indicates completion
+                     info!("No tool calls in this iteration. Considering task complete.");
+                     if final_response_text.is_empty() {
+                         final_response_text = "Task completed (no text response generated).".to_string();
+                     }
+                     break; // Assume completion if no tools called
+                 } else {
+                     // Other stop reasons or conditions might need handling
+                     warn!("Unhandled stop reason '{}' or condition. Breaking loop.", anthropic_response.stop_reason);
+                     break;
+                 }
             }
         }
 
@@ -365,25 +406,42 @@ pub async fn submit_query(
         }
     }
 
-    let final_text = final_response_text.trim().to_string();
-    info!("Final agent text response: {}", final_text);
+    // --- Post-Loop: TTS and Event Emission ---
 
-    // Call central TTS function
-    let audio_result = tts::invoke_tts(final_text.clone(), state).await;
+    // Get the main window handle
+    let window = app_handle.get_window("main").ok_or_else(|| "Main window not found".to_string())?;
 
-    let audio_base64 = match audio_result {
-        Ok(base64) => {
-            info!("TTS successful, including audio in response.");
-            Some(base64)
-        }
+    if final_response_text.is_empty() && conversation_history.len() <= 2 {
+        // Handle cases where the loop exited early or no meaningful response was generated
+        final_response_text = "No response received from AI or task failed internally.".to_string();
+        error!("submit_query finished with empty final_response_text.");
+    }
+
+    // Perform TTS synthesis (consider doing this before emitting if audio is needed immediately)
+    // Use the public invoke_tts function which handles provider selection
+    let audio_base64 = match tts::invoke_tts(final_response_text.clone(), state.clone()).await {
+        Ok(base64) => Some(base64),
         Err(e) => {
-            error!("TTS failed: {}. Returning response without audio.", e);
+            error!("TTS synthesis failed: {}", e);
             None
         }
     };
 
-    Ok(SubmitQueryResult {
-        text: final_text,
+    // Create the result and payload
+    let result = SubmitQueryResult {
+        text: final_response_text,
         audio_base64,
-    })
+    };
+    let payload = BackendResponsePayload {
+        query: query.clone(), // Clone the original query
+        response: result,
+    };
+
+    // Emit the event to the frontend
+    window.emit("backend-response", payload)
+        .map_err(|e| format!("Failed to emit backend-response event: {}", e))?;
+
+    println!("Emitted backend-response event for query: {}", query);
+
+    Ok(()) // Return Ok(()) as the command succeeded in emitting the event
 }

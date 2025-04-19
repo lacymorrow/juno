@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use tracing::{debug, warn};
 use core_graphics::event::{CGEventType, CGMouseButton};
+use crate::element::ElementTreeNode;
 
 #[derive(Debug)]
 pub struct MacOSUIElement {
@@ -733,9 +734,9 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
-        debug!("Fetching all attributes for element (simplified)");
-        // Directly return the result of attributes(), fixing the unused mut warning
-        Ok(self.attributes())
+        let mut all_attrs = self.attributes(); // Start with basic attributes
+		todo!("get_all_attributes only returns the basic attributes for now");
+        Ok(all_attrs)
     }
 
     fn screenshot(&self) -> Result<String, AutomationError> {
@@ -745,5 +746,22 @@ impl UIElementImpl for MacOSUIElement {
 
     fn select_text(&self) -> Result<(), AutomationError> {
         interaction::select_text(self)
+    }
+
+    fn get_tree(&self) -> Result<ElementTreeNode, AutomationError> {
+        let attributes = self.attributes();
+        let children = self.children().unwrap_or_default();
+        let child_nodes = children
+            .into_iter()
+            .filter_map(|child| child.get_tree().ok()) // Recursively get tree for children, ignore errors
+            .collect();
+
+        Ok(ElementTreeNode {
+            role: attributes.role,
+            label: attributes.label,
+            description: attributes.description,
+            bounds: self.bounds().ok(), // Get bounds, ignore errors for the tree
+            children: child_nodes,
+        })
     }
 }
