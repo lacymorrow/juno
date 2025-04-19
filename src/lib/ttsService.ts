@@ -57,7 +57,7 @@ const speakApi = async (text: string, logFn: LogFn, invokeFn: typeof invoke): Pr
                     logFn("API audio playback finished.", "info");
                     resolve();
                 };
-                audio.onerror = (err) => {
+                audio.onerror = () => {
                     // The event itself might not be very informative, log the element's error
                     const errorDetails = audio.error ? `${audio.error.code}: ${audio.error.message}` : 'Unknown audio playback error';
                     logFn(`Error playing API audio: ${errorDetails}`, "error");
