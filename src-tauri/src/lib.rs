@@ -92,7 +92,6 @@ pub fn run() {
         .manage(app_state) // Manage the AppState
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
-            greet,
             list_apps,
             check_server_status,
             submit_query,
@@ -114,6 +113,10 @@ pub fn run() {
             dev_wait,
             dev_find_element_by_selector,
             dev_click_element_by_selector,
+            dev_get_window_list,
+            dev_get_selected_text,
+            dev_get_window_info,
+            dev_focus_window,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
