@@ -1514,3 +1514,33 @@ where
         Err(e) => Err(json!({"error": format!("Action failed: {}. Also failed to release modifiers: {}", e, release_errors.join(", "))})),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_get_string_param_success() {
+        let input = json!({ "key": "value" });
+        assert_eq!(get_string_param(&input, "key").unwrap(), "value");
+    }
+
+    #[test]
+    fn test_get_string_param_missing() {
+        let input = json!({ "other_key": "value" });
+        assert!(get_string_param(&input, "key").is_err());
+    }
+
+    #[test]
+    fn test_get_string_param_wrong_type() {
+        let input = json!({ "key": 123 });
+        assert!(get_string_param(&input, "key").is_err());
+    }
+
+    #[test]
+    fn test_get_string_param_null() {
+        let input = json!({ "key": null });
+        assert!(get_string_param(&input, "key").is_err());
+    }
+}

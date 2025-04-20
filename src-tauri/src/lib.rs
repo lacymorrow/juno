@@ -307,22 +307,13 @@ pub fn run() {
 // Unit tests module
 #[cfg(test)]
 mod tests {
-    // You might need to import items from your modules here
-    // use super::*;
-
-    fn add(a: i32, b: i32) -> i32 {
-        a + b
-    }
-
-    #[test]
-    fn test_simple_addition() {
-        assert_eq!(add(2, 2), 4, "Check basic addition");
-    }
+    use super::*;
 
     #[test]
     fn test_focused_element_info_placeholder() {
-        // This test might need refactoring if it relied on functions moved to utils or commands
-        assert!(true, "Placeholder test for focused element concept");
+        // This test is a placeholder and needs a proper implementation
+        // For now, it just asserts true to ensure the test runner picks it up
+        assert!(true, "Placeholder test for focused_element_info");
     }
 }
 
