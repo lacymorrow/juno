@@ -11,7 +11,6 @@ use tauri::{ // Add Manager and missing items here
     menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem},
     tray::{TrayIconEvent, MouseButton, MouseButtonState},
     image::Image,
-    Runtime, // Required for window.ns_window()
     AppHandle, // Keep AppHandle
     Emitter, // Import Emitter trait for .emit()
     WebviewWindow, // Keep WebviewWindow
@@ -19,15 +18,14 @@ use tauri::{ // Add Manager and missing items here
 };
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
-use std::sync::atomic::{AtomicBool, Ordering};
 
 // macOS specific imports
 #[cfg(target_os = "macos")]
 use {
     cocoa::{
-        appkit::{NSWindow, NSView, NSWindowCollectionBehavior},
+        appkit::{NSWindow, NSWindowCollectionBehavior},
         base::{id as cocoa_id, nil, YES, NO, BOOL},
-        foundation::{self, NSRect},
+        foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
 };
@@ -42,7 +40,7 @@ pub mod cli;
 pub mod utils;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-pub use commands::*;
+use commands::*;
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -117,6 +115,7 @@ pub fn run() {
             dev_get_selected_text,
             dev_get_window_info,
             dev_focus_window,
+            dev_triple_click,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();

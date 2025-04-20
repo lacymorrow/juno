@@ -13,7 +13,6 @@ use tauri::{AppHandle, State};
 use tauri_plugin_notification::NotificationExt;
 use tracing::{error, info, warn};
 use wait_timeout::ChildExt;
-use tokio::time::timeout;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -100,13 +99,17 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "scroll_window".to_string(),
-            description: "Scrolls the currently active window or element.".to_string(),
+            description: "Scrolls the currently active window or element, optionally holding modifier keys.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
                     props.insert("direction".to_string(), ToolParameter { type_: "string".to_string(), description: "Direction (up, down, left, right).".to_string() });
                     props.insert("amount".to_string(), ToolParameter { type_: "number".to_string(), description: "Amount to scroll.".to_string() });
+                    props.insert("modifier_keys".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the scroll.".to_string()
+                    });
                     props
                 },
                 required: vec!["direction".to_string(), "amount".to_string()],
@@ -197,16 +200,22 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
          ToolDefinition {
             name: "left_click".to_string(),
-            description: "Performs a left mouse click at coordinates.".to_string(),
+            description: "Performs a left mouse click at coordinates, optionally holding modifier keys.".to_string(),
              input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                      let mut props = HashMap::new();
                     props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
                     props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    // Add optional modifier keys parameter
+                    props.insert("modifier_keys".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the click.".to_string(),
+                        // items: Some(Box::new(ToolParameter { type_: "string".to_string(), description: "A modifier key (e.g., 'shift', 'cmd', 'ctrl', 'alt')".to_string() })) // Define item type if schema supports it
+                    });
                     props
                 },
-                required: vec!["x".to_string(), "y".to_string()],
+                required: vec!["x".to_string(), "y".to_string()], // Modifiers are optional
             },
         },
         ToolDefinition {
@@ -238,14 +247,28 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
             },
         },
         ToolDefinition {
-            name: "triple_click".to_string(),
-            description: "Performs a triple left mouse click at coordinates.".to_string(),
+            name: "double_click".to_string(),
+            description: "Double-clicks the left mouse button at the specified (x, y) coordinates.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
-                     let mut props = HashMap::new();
-                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
-                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate".to_string() });
+                    props
+                },
+                required: vec!["x".to_string(), "y".to_string()],
+            },
+        },
+        ToolDefinition {
+            name: "triple_click".to_string(),
+            description: "Triple-clicks the left mouse button at the specified (x, y) coordinates.".to_string(),
+            input_schema: ToolInputSchema {
+                type_: "object".to_string(),
+                properties: {
+                    let mut props = HashMap::new();
+                    props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate".to_string() });
+                    props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate".to_string() });
                     props
                 },
                 required: vec!["x".to_string(), "y".to_string()],
@@ -269,7 +292,7 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "scroll_at_position".to_string(),
-            description: "Scrolls the view at a specific coordinate.".to_string(),
+            description: "Scrolls the view at a specific coordinate, optionally holding modifier keys.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
@@ -278,6 +301,10 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
                     props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate to scroll at.".to_string() });
                     props.insert("direction".to_string(), ToolParameter { type_: "string".to_string(), description: "Direction (up, down, left, right).".to_string() });
                     props.insert("amount".to_string(), ToolParameter { type_: "number".to_string(), description: "Amount to scroll.".to_string() });
+                    props.insert("modifier_keys".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the scroll.".to_string()
+                    });
                     props
                 },
                 required: vec!["x".to_string(), "y".to_string(), "direction".to_string(), "amount".to_string()],
@@ -312,12 +339,14 @@ pub(crate) fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         // --- Text Editor Tools ---
         ToolDefinition {
             name: "text_editor_view".to_string(),
-            description: "Reads and returns the content of a text file.".to_string(),
+            description: "Reads and returns the content of a text file, optionally within a specific line range.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                      let mut props = HashMap::new();
                     props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path to the file.".to_string() });
+                    props.insert("start_line".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional 1-based start line number.".to_string() });
+                    props.insert("end_line".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional 1-based end line number.".to_string() });
                     props
                 },
                 required: vec!["file_path".to_string()],
@@ -726,13 +755,33 @@ pub(crate) async fn call_tool(
                  }
             }
             "scroll_window" => { // Maps to scroll_at_current_position
-                match (get_string_param(input, "direction"), get_f64_param(input, "amount")) {
-                     (Ok(direction), Ok(amount)) => match desktop.scroll_at_current_position(&direction, amount) {
+                 let direction = get_string_param(input, "direction")?;
+                 let amount = get_f64_param(input, "amount")?;
+                 let modifier_keys = get_optional_modifier_keys(input)?;
+
+                 if let Some(keys) = modifier_keys {
+                     if !keys.is_empty() {
+                         info!(%direction, %amount, ?keys, "Executing scroll_window with modifiers");
+                         hold_keys_and_run(desktop, &keys, || {
+                             desktop.scroll_at_current_position(&direction, amount)
+                         })
+                         .map(|_| json!({ "success": true, "message": format!("Scrolled {} by {} with modifiers {:?}.", direction, amount, keys) }))
+                     } else {
+                         // Empty modifier list, normal scroll
+                         info!(%direction, %amount, "Executing scroll_window (empty modifiers list)");
+                         match desktop.scroll_at_current_position(&direction, amount) {
+                             Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {}.", direction, amount)})),
+                             Err(e) => Err(json!({"error": format!("Failed to scroll window: {}", e)})),
+                         }
+                     }
+                 } else {
+                     // No modifiers, normal scroll
+                     info!(%direction, %amount, "Executing scroll_window");
+                     match desktop.scroll_at_current_position(&direction, amount) {
                          Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {}.", direction, amount)})),
                          Err(e) => Err(json!({"error": format!("Failed to scroll window: {}", e)})),
-                     },
-                     (Err(e), _) | (_, Err(e)) => Err(e),
-                }
+                     }
+                 }
             }
             "capture_screenshot" => {
                 #[cfg(target_os = "macos")]
@@ -821,13 +870,62 @@ pub(crate) async fn call_tool(
                 }
             }
             "left_click" => {
-                 match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
-                    (Ok(x), Ok(y)) => match desktop.left_click(x, y) {
-                        Ok(_) => Ok(json!({"success": true, "message": format!("Left clicked at ({}, {}).", x, y)})),
-                        Err(e) => Err(json!({"error": format!("Failed to perform left click: {}", e)})),
-                    },
-                    (Err(e), _) | (_, Err(e)) => Err(e),
-                }
+                 let x = get_f64_param(input, "x")?;
+                 let y = get_f64_param(input, "y")?;
+                 // Extract optional modifier keys
+                 let modifier_keys_val = input.get("modifier_keys");
+                 let modifier_keys: Option<Vec<String>> = modifier_keys_val
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+
+                 if let Some(keys) = modifier_keys {
+                     if !keys.is_empty() {
+                         info!(x = %x, y = %y, ?keys, "Executing left click with modifiers");
+                         // Hold keys
+                         for key in &keys {
+                             if let Err(e) = desktop.hold_key(key) {
+                                 // Attempt to release any already held keys before returning error
+                                 for held_key in keys.iter().take_while(|&k| k != key) {
+                                     desktop.release_key(held_key).ok(); // Ignore release error during cleanup
+                                 }
+                                 return Err(json!({"error": format!("Failed to hold modifier key '{}': {}", key, e)}));
+                             }
+                         }
+
+                         // Perform click
+                         let click_result = desktop.left_click(x, y);
+
+                         // Release keys (attempt regardless of click result)
+                         let mut release_errors = Vec::new();
+                         for key in keys.iter().rev() { // Release in reverse order
+                             if let Err(e) = desktop.release_key(key) {
+                                 release_errors.push(format!("Failed to release key '{}': {}", key, e));
+                             }
+                         }
+
+                         // Handle results
+                         match click_result {
+                             Ok(_) if release_errors.is_empty() => Ok(json!({"success": true, "message": format!("Left clicked at ({}, {}) with modifiers {:?}.", x, y, keys)})),
+                             Ok(_) => Err(json!({"error": format!("Click succeeded, but failed to release modifiers: {}", release_errors.join(", "))})),
+                             Err(e) if release_errors.is_empty() => Err(json!({"error": format!("Click failed: {}. Modifiers released.", e)})),
+                             Err(e) => Err(json!({"error": format!("Click failed: {}. Also failed to release modifiers: {}", e, release_errors.join(", "))})),
+                         }
+                     } else {
+                         // Modifiers array provided but empty, treat as normal click
+                         info!(x = %x, y = %y, "Executing left click (empty modifiers list)");
+                         match desktop.left_click(x, y) {
+                             Ok(_) => Ok(json!({"success": true, "message": format!("Left clicked at ({}, {}).", x, y)})),
+                             Err(e) => Err(json!({"error": format!("Failed to perform left click: {}", e)})),
+                         }
+                     }
+                 } else {
+                     // No modifiers provided, perform normal click
+                     info!(x = %x, y = %y, "Executing left click");
+                     match desktop.left_click(x, y) {
+                         Ok(_) => Ok(json!({"success": true, "message": format!("Left clicked at ({}, {}).", x, y)})),
+                         Err(e) => Err(json!({"error": format!("Failed to perform left click: {}", e)})),
+                     }
+                 }
             }
             "right_click" => {
                 let x = get_f64_param(input, "x")?;
@@ -847,52 +945,52 @@ pub(crate) async fn call_tool(
                      (Err(e), _) | (_, Err(e)) => Err(e),
                  }
             }
-            "triple_click" => {
-                let x = get_f64_param(input, "x")?;
-                let y = get_f64_param(input, "y")?;
-                match desktop.triple_click(x, y) {
-                    Ok(_) => Ok(json!({"success": true, "message": format!("Triple clicked at ({}, {}).", x, y)})),
-                    Err(e) => Err(json!({"error": format!("Failed to perform triple click: {}", e)})),
-                }
-            },
             "double_click" => {
                 let x = get_f64_param(input, "x")?;
                 let y = get_f64_param(input, "y")?;
                 match desktop.double_click(x, y) {
-                    Ok(_) => Ok(json!({"success": true, "message": format!("Double clicked at ({}, {}).", x, y)})),
-                    Err(e) => Err(json!({"error": format!("Failed to perform double click: {}", e)})),
-                }
-            },
-             "left_click_drag" => {
-                match (
-                    get_f64_param(input, "start_x"),
-                    get_f64_param(input, "start_y"),
-                    get_f64_param(input, "end_x"),
-                    get_f64_param(input, "end_y")
-                ) {
-                    (Ok(start_x), Ok(start_y), Ok(end_x), Ok(end_y)) => {
-                        match desktop.left_click_drag(start_x, start_y, end_x, end_y) {
-                             Ok(_) => Ok(json!({"success": true, "message": format!("Dragged from ({}, {}) to ({}, {}).", start_x, start_y, end_x, end_y)})),
-                             Err(e) => Err(json!({"error": format!("Failed to perform drag: {}", e)})),
-                         }
-                    }
-                    (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e),
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Double clicked at ({}, {})", x, y)})),
+                    Err(e) => Err(json!({"error": e.to_string()})),
                 }
             }
+            "triple_click" => {
+                let x = get_f64_param(input, "x")?;
+                let y = get_f64_param(input, "y")?;
+                // Use the correct 'triple_click' method
+                match desktop.triple_click(x, y) {
+                    Ok(_) => Ok(json!({"success": true, "message": format!("Triple clicked at ({}, {})", x, y)})),
+                    Err(e) => Err(json!({"error": e.to_string()})),
+                }
+            },
             "scroll_at_position" => { // Assuming Desktop has this method wrapping the engine call
-                  match (
-                    get_f64_param(input, "x"),
-                    get_f64_param(input, "y"),
-                    get_string_param(input, "direction"),
-                    get_f64_param(input, "amount")
-                  ) {
-                     (Ok(x), Ok(y), Ok(direction), Ok(amount)) => {
-                         match desktop.scroll_at_position(x, y, &direction, amount) { // Verify this method exists on Desktop
+                 let x = get_f64_param(input, "x")?;
+                 let y = get_f64_param(input, "y")?;
+                 let direction = get_string_param(input, "direction")?;
+                 let amount = get_f64_param(input, "amount")?;
+                 let modifier_keys = get_optional_modifier_keys(input)?;
+
+                 if let Some(keys) = modifier_keys {
+                     if !keys.is_empty() {
+                         info!(%x, %y, %direction, %amount, ?keys, "Executing scroll_at_position with modifiers");
+                         hold_keys_and_run(desktop, &keys, || {
+                             desktop.scroll_at_position(x, y, &direction, amount)
+                         })
+                         .map(|_| json!({ "success": true, "message": format!("Scrolled {} by {} at ({}, {}) with modifiers {:?}.", direction, amount, x, y, keys) }))
+                     } else {
+                         // Empty modifier list, normal scroll
+                         info!(%x, %y, %direction, %amount, "Executing scroll_at_position (empty modifiers list)");
+                         match desktop.scroll_at_position(x, y, &direction, amount) {
                              Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {} at ({}, {}).", direction, amount, x, y)})),
                              Err(e) => Err(json!({"error": format!("Failed to scroll at position: {}", e)})),
                          }
                      }
-                     (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e),
+                 } else {
+                     // No modifiers, normal scroll
+                     info!(%x, %y, %direction, %amount, "Executing scroll_at_position");
+                     match desktop.scroll_at_position(x, y, &direction, amount) {
+                         Ok(_) => Ok(json!({"success": true, "message": format!("Scrolled {} by {} at ({}, {}).", direction, amount, x, y)})),
+                         Err(e) => Err(json!({"error": format!("Failed to scroll at position: {}", e)})),
+                     }
                  }
             }
              "hold_key" => {
@@ -913,29 +1011,51 @@ pub(crate) async fn call_tool(
                     Err(e) => Err(e),
                 }
             }
-            "get_clipboard_content" => {
-                 match desktop.get_clipboard_content() {
-                    Ok(content) => Ok(json!({"success": true, "content": content})),
-                    Err(e) => Err(json!({"error": format!("Failed to get clipboard content: {}", e)})),
-                }
-            }
-            "set_clipboard_content" => {
-                 match get_string_param(input, "content") {
-                    Ok(content) => match desktop.set_clipboard_content(&content) {
-                        Ok(_) => Ok(json!({"success": true, "message": "Clipboard content set."})),
-                        Err(e) => Err(json!({"error": format!("Failed to set clipboard content: {}", e)})),
-                    },
-                    Err(e) => Err(e),
-                }
-            }
             // --- Text Editor Handlers ---
             "text_editor_view" => {
-                 match get_string_param(input, "file_path") {
-                     Ok(file_path) => match fs::read_to_string(&file_path) {
-                         Ok(content) => Ok(json!({"success": true, "content": content})),
-                         Err(e) => Err(json!({"error": format!("Failed to read file '{}': {}", file_path, e)})),
-                     },
-                     Err(e) => Err(e),
+                 let file_path = get_string_param(input, "file_path")?;
+                 // Get optional line numbers (use our helper for optional u64)
+                 let start_line_opt = get_optional_u64_param(input, "start_line")?;
+                 let end_line_opt = get_optional_u64_param(input, "end_line")?;
+
+                 match (start_line_opt, end_line_opt) {
+                     (Some(start), Some(end)) => {
+                         // Both start and end provided: Read range
+                         info!(path = %file_path, start=start, end=end, "Reading file range");
+                         if start == 0 || end == 0 || start > end {
+                             return Err(json!({"error": format!("Invalid line range: start ({}) must be >= 1 and <= end ({}).", start, end)}));
+                         }
+                         match fs::read_to_string(&file_path) {
+                             Ok(content) => {
+                                 let lines: Vec<&str> = content.lines().collect();
+                                 let total_lines = lines.len();
+                                 // Adjust to 0-based index, clamp to bounds
+                                 let start_idx = (start - 1).clamp(0, total_lines as u64) as usize;
+                                 let end_idx = (end).clamp(0, total_lines as u64) as usize; // end is exclusive for slice
+
+                                 if start_idx >= end_idx {
+                                     // Handle case where start is beyond end after clamping (e.g., start > total_lines)
+                                     Ok(json!({ "success": true, "content": "", "message": "Specified range is empty or invalid for this file." }))
+                                 } else {
+                                     let range_content = lines[start_idx..end_idx].join("\n");
+                                     Ok(json!({"success": true, "content": range_content}))
+                                 }
+                             }
+                             Err(e) => Err(json!({"error": format!("Failed to read file '{}': {}", file_path, e)})),
+                         }
+                     }
+                     (None, None) => {
+                         // Neither provided: Read whole file
+                         info!(path = %file_path, "Reading whole file");
+                         match fs::read_to_string(&file_path) {
+                             Ok(content) => Ok(json!({"success": true, "content": content})),
+                             Err(e) => Err(json!({"error": format!("Failed to read file '{}': {}", file_path, e)})),
+                         }
+                     }
+                     _ => {
+                         // Only one provided: Invalid combination
+                         Err(json!({"error": "Both start_line and end_line must be provided together, or neither."}))
+                     }
                  }
             }
             "text_editor_create" => {
@@ -1329,5 +1449,68 @@ pub(crate) async fn handle_tool_call(
                 json!({"error": "An unexpected error occurred", "details": error_json})
             }
         }
+    }
+}
+
+// --- Helper Function for Hold/Release Simulation ---
+fn get_optional_modifier_keys(input: &Value) -> Result<Option<Vec<String>>, Value> {
+    input.get("modifier_keys")
+       .map_or(Ok(None), |v| {
+           if v.is_null() {
+               Ok(None)
+           } else if let Some(arr) = v.as_array() {
+               let keys = arr.iter()
+                             .filter_map(|val| val.as_str().map(String::from))
+                             .collect::<Vec<String>>();
+                // Check if all elements were strings
+                if keys.len() == arr.len() {
+                     Ok(Some(keys))
+                 } else {
+                     Err(json!({ "error": "Invalid non-string value found in modifier_keys array" }))
+                 }
+           } else {
+               Err(json!({ "error": "Invalid type for modifier_keys: expected an array of strings or null" }))
+           }
+       })
+}
+
+/// Holds specified keys, runs an action, then releases keys.
+/// Returns the result of the action, or an error if holding/releasing fails.
+fn hold_keys_and_run<F, T>(
+    desktop: &Arc<Desktop>,
+    keys: &[String],
+    action: F,
+) -> Result<T, Value>
+where
+    F: FnOnce() -> Result<T, computer_use_ai_sdk::AutomationError>,
+{
+    // Hold keys
+    for key in keys {
+        if let Err(e) = desktop.hold_key(key) {
+            // Attempt to release any already held keys before returning error
+            for held_key in keys.iter().take_while(|&k| k != key) {
+                desktop.release_key(held_key).ok(); // Ignore release error during cleanup
+            }
+            return Err(json!({"error": format!("Failed to hold modifier key '{}': {}", key, e)}));
+        }
+    }
+
+    // Perform action
+    let action_result = action();
+
+    // Release keys (attempt regardless of action result)
+    let mut release_errors = Vec::new();
+    for key in keys.iter().rev() { // Release in reverse order
+        if let Err(e) = desktop.release_key(key) {
+            release_errors.push(format!("Failed to release key '{}': {}", key, e));
+        }
+    }
+
+    // Handle results
+    match action_result {
+        Ok(res) if release_errors.is_empty() => Ok(res),
+        Ok(_) => Err(json!({"error": format!("Action succeeded, but failed to release modifiers: {}", release_errors.join(", "))})),
+        Err(e) if release_errors.is_empty() => Err(json!({"error": format!("Action failed: {}. Modifiers released.", e)})),
+        Err(e) => Err(json!({"error": format!("Action failed: {}. Also failed to release modifiers: {}", e, release_errors.join(", "))})),
     }
 }

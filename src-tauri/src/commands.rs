@@ -5,7 +5,7 @@ use computer_use_ai_sdk::AutomationError;
 use tauri::{AppHandle, State}; // Remove unused Manager
 use tauri_plugin_notification::NotificationExt;
 use tracing::{info}; // Remove unused error
-use computer_use_ai_sdk::UIElementAttributes; // Need this for return type
+// use computer_use_ai_sdk::UIElementAttributes; // Removed unused import
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -687,6 +687,35 @@ pub(crate) async fn dev_focus_window(
             // Error message already includes context from find_window_by_id
             println!("[DEV_TOOL] Error finding window for focus: {}", e);
             Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_triple_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to triple click at ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.triple_click(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] triple_click succeeded.");
+             send_dev_tool_notification(&app, "Triple Click", &format!("Clicked at ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call triple_click: {}", e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
         }
     }
 }
