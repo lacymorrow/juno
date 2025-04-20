@@ -54,6 +54,9 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
 *   **[Done] Implement Keyboard Actions:**
     *   Implemented `press_key`, `type_text`, `hold_key`, `release_key` in SDK.
     *   Exposed methods via `Desktop` struct.
+*   **[Done] Implement Screenshot Actions:**
+    *   Implemented `capture_screenshot` and `capture_element_screenshot` in SDK and Tauri backend (`tools.rs`, `commands.rs`).
+    *   Exposed via Tauri commands and integrated into tool handling logic in `tools.rs`.
 *   **[Done] Implement Clipboard Actions:**
     *   Implemented `get_clipboard_content`, `set_clipboard_content` in SDK.
     *   Exposed methods via `Desktop` struct.
@@ -76,6 +79,7 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
 
 *   **Core Functionality:** Most core `computer`, `text_editor`, and `bash` actions specified by Anthropic are implemented and integrated into the Tauri backend (`src-tauri/src/lib.rs`), including `bash` timeout.
 *   **Remaining Gaps:**
+    *   `bash.restart`: The ability to restart the bash process is not implemented.
     *   `text_editor_undo_edit`: Not implemented due to state complexity. Requires tracking file changes or using a temporary file strategy.
     *   `cargo check` warnings: Several warnings related to unused code (helper functions, test functions, SDK internal functions) exist. These can be addressed later or ignored if the code is intended for future use.
     *   Error Handling: While basic error handling is present, further refinement might be needed for specific edge cases or providing more user-friendly error messages.
@@ -83,12 +87,12 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
 
 ## Next Steps
 
-1.  **[Done] Implement `text_editor_undo_edit`:**
-    *   Added `last_edited_file` and `previous_content` fields (with `Mutex`) to `AppState`.
-    *   Updated `create`, `insert`, and `str_replace` handlers in `call_tool` to store the previous state in `AppState`.
-    *   Implemented the `text_editor_undo_edit` handler in `call_tool` to restore the previous content or delete the file based on the stored state. Added its definition to `list_tools`.
-2.  **[Done] Address `cargo check` Warnings:**
-    *   Added `#[allow(dead_code)]` and `#[allow(unused_variables)]` annotations to silence warnings in `src-tauri/src/lib.rs` and `src/tts/` files for potentially unused but necessary helper functions, state fields, and test functions. Removed genuinely unused variables. Ensured `cargo check` passes.
+1.  **Implement `text_editor_undo_edit`:**
+    *   Add `last_edited_file` and `previous_content` fields (with `Mutex`) to `AppState`.
+    *   Update `create`, `insert`, and `str_replace` handlers in `call_tool` to store the previous state in `AppState`.
+    *   Implement the `text_editor_undo_edit` handler in `call_tool` to restore the previous content or delete the file based on the stored state. Add its definition to `list_tools`.
+2.  **Address `cargo check` Warnings:**
+    *   Add `#[allow(dead_code)]` and `#[allow(unused_variables)]` annotations to silence warnings in `src-tauri/src/lib.rs` and `src/tts/` files for potentially unused but necessary helper functions, state fields, and test functions. Remove genuinely unused variables. Ensure `cargo check` passes.
 3.  **Implement Anthropic API Streaming:**
     *   Modify backend (`src-tauri/src/lib.rs`) to use `stream: true` with the Anthropic API.
     *   Parse Server-Sent Events (SSE) from the response stream.
