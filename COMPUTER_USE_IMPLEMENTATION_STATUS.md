@@ -38,10 +38,10 @@ This tool handles direct GUI interaction (mouse, keyboard, screen).
 *   `[x]` **middle_click**: Click middle button (at coords) (`middle_click` tool defined in `tools.rs`)
 *   `[x]` **double_click**: Double-click left button (at coords) (`double_click` tool defined in `tools.rs`)
 *   `[x]` **triple_click**: Triple-click left button (Anthropic `_20250124` tool)
-*   `[p]` **scroll**: Scroll wheel
+*   `[x]` **scroll**: Scroll wheel
     *   `[x]` Scroll up/down/left/right by amount (`scroll_window` in `commands.rs`, `scroll` tool defined in `tools.rs`)
     *   `[x]` Scroll at specific (x, y) coordinates (Anthropic spec mention - Implemented via `scroll_at_position` tool in `tools.rs`)
-    *   `[ ]` Scroll with modifier keys held (Anthropic spec mention, not explicitly defined in `tools.rs`)
+    *   `[x]` Scroll with modifier keys held (Anthropic spec mention - Implemented via simulation in `call_tool` for `scroll_window` and `scroll_at_position`)
 
 ### Other Actions
 
@@ -103,7 +103,7 @@ These functions are implemented but do not directly map to the standard Anthropi
 *   **Computer Tool:**
     *   `[x]` `triple_click` action is missing.
     *   `[x]` `left_click` action is missing support for holding modifier keys. -> Implemented via simulation.
-    *   `[p]` `scroll` action is missing support for specific (x, y) coordinates and holding modifier keys. -> Coordinates implemented (`scroll_at_position`), modifiers missing.
+    *   `[x]` `scroll` action is missing support for specific (x, y) coordinates and holding modifier keys. -> Coordinates implemented (`scroll_at_position`), modifiers implemented via simulation.
 *   **Bash Tool:**
     *   `[p]` `restart` action is not explicitly defined as a separate tool, though the parameter exists in the `bash_command` tool schema. -> Parameter acknowledged, no state reset needed.
 
@@ -111,7 +111,7 @@ These functions are implemented but do not directly map to the standard Anthropi
 
 ## VI. Potential Additions / Stretch Goals
 
-*   **Implement Missing Anthropic Actions:** Fill the gaps listed above (~~triple_click~~, ~~click/scroll modifiers~~ -> click modifiers added, scroll modifiers needed, ~~scroll coordinates~~ -> implemented via `scroll_at_position`, ~~bash restart tool~~ -> parameter handled).
+*   **Implement Missing Anthropic Actions:** Fill the gaps listed above (~~triple_click~~, ~~click/scroll modifiers~~ -> implemented, ~~scroll coordinates~~ -> implemented, ~~bash restart tool~~ -> parameter handled).
 *   **OS-Specific Features:** Explore deeper integration with macOS accessibility APIs or platform features beyond the current scope (e.g., interacting with specific controls not covered by generic elements, reading screen content via VoiceOver API, window manipulation beyond focus/info).
 *   **Multi-Monitor Support:** Explicitly handle coordinates and screenshots across multiple displays if not already covered by the underlying SDK.
 *   **More Robust Element Selection:** Enhance selector capabilities (e.g., XPath-like queries, image-based searching if feasible).
