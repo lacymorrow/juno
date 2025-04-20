@@ -2,9 +2,7 @@ use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::time::Duration;
 use tokio; // Ensure tokio is available for sleep
-use std::sync::Arc; // Required for Desktop Arc
-use tokio::time::sleep;
-use tracing::{debug, error, info, warn}; // Import tracing macros
+use tracing::{error, info, warn}; // Import tracing macros
 use std::env;
 use base64::Engine;
 
@@ -25,7 +23,7 @@ pub(crate) struct ReplicateRequest {
 #[derive(Deserialize, Debug)]
 pub(crate) struct ReplicateInitialResponse {
     id: String,
-    status: String,
+    _status: String,
     urls: ReplicateUrls,
 }
 
@@ -43,6 +41,8 @@ pub(crate) struct ReplicateStatusResponse {
     error: Option<String>, // Capture error messages
 }
 // --- End Replicate API Structures ---
+
+const _REPLICATE_API_BASE: &str = "https://api.replicate.com/v1";
 
 // Command to invoke Replicate TTS
 #[tauri::command]
