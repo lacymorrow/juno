@@ -735,7 +735,44 @@ impl UIElementImpl for MacOSUIElement {
 
     fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
         let mut all_attrs = self.attributes(); // Start with basic attributes
-		todo!("get_all_attributes only returns the basic attributes for now");
+
+        match self.element.0.attribute_names() {
+            Ok(attr_names_cf) => {
+                let attr_names: Vec<String> = attr_names_cf.iter().map(|s| s.to_string()).collect();
+                debug!(element_role = %all_attrs.role, label = ?all_attrs.label, "Fetching all {} attributes", attr_names.len());
+
+                for name_str in attr_names {
+                    // Skip attributes already handled by self.attributes()
+                    if !["AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue", "AXPosition", "AXSize"].contains(&name_str.as_str()) {
+                        let attr = AXAttribute::new(&CFString::new(&name_str));
+                        match self.element.0.attribute(&attr) {
+                            Ok(value) => {
+                                let parsed_value = parse_ax_attribute_value(&name_str, value);
+                                all_attrs.properties.insert(name_str.clone(), parsed_value);
+                                // Avoid overly verbose logging for every single attribute
+                                // debug!("Fetched property '{}': {:?}", name_str, parsed_value);
+                            }
+                            Err(e) => {
+                                // Log errors only if they are unexpected (not 'unsupported' or 'no value')
+                                if !matches!(
+                                    e,
+                                    accessibility::Error::Ax(-25212) // attribute unsupported
+                                        | accessibility::Error::Ax(-25205) // no value
+                                        | accessibility::Error::Ax(-25204) // getting attribute failed (internal error)
+                                ) {
+                                    debug!("Error getting property attribute '{}': {:?}", name_str, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to retrieve attribute names for element: {:?}", e);
+                // Continue with just the basic attributes if names can't be fetched
+            }
+        }
+
         Ok(all_attrs)
     }
 

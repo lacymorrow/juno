@@ -302,7 +302,25 @@ pub(crate) async fn call_tool(
                     Ok(_) => Ok(json!({ "success": true, "message": format!("Triple clicked at ({}, {})", x, y) })),
                     Err(e) => Err(json!({ "error": e.to_string() })),
                 }
-            },
+            }
+            "left_click_drag" => {
+                match (
+                    get_f64_param(input, "start_x"),
+                    get_f64_param(input, "start_y"),
+                    get_f64_param(input, "end_x"),
+                    get_f64_param(input, "end_y"),
+                ) {
+                    (Ok(start_x), Ok(start_y), Ok(end_x), Ok(end_y)) => {
+                        info!(start_x=%start_x, start_y=%start_y, end_x=%end_x, end_y=%end_y, "Executing left click drag");
+                        // Assuming desktop.left_click_drag exists or will be added
+                        match desktop.left_click_drag(start_x, start_y, end_x, end_y) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Left click drag from ({}, {}) to ({}, {}).", start_x, start_y, end_x, end_y) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to perform left click drag: {}", e) })),
+                        }
+                    }
+                    (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => Err(e), // Propagate the first parsing error
+                }
+            }
             "scroll_at_position" => { // Assuming Desktop has this method wrapping the engine call
                 let x = get_f64_param(input, "x")?;
                 let y = get_f64_param(input, "y")?;
@@ -647,13 +665,23 @@ pub(crate) async fn call_tool(
                 }
             }
             "get_element_tree" => {
-                info!("Executing get_element_tree");
-                // Reverted: Method not found on desktop object
-                //  match desktop.get_element_tree() {
-                //     Ok(tree_info) => Ok(json!({ "success": true, "tree": tree_info })),
-                //     Err(e) => Err(json!({ "error": format!("Failed to get element tree: {}", e) })),
-                // }
-                Err(json!({ "error": "Tool 'get_element_tree' not implemented yet." }))
+                info!("Executing get_element_tree on focused element");
+                // Get the focused element first
+                match desktop.focused_element() {
+                    Ok(focused_element) => {
+                        // Call get_tree on the focused element
+                        match focused_element.get_tree() { // get_tree is on UIElement
+                            Ok(tree_info) => {
+                                match serde_json::to_value(&tree_info) { // Serialize the result
+                                    Ok(json_tree) => Ok(json!({ "success": true, "tree": json_tree })),
+                                    Err(e) => Err(json!({ "error": format!("Failed to serialize element tree: {}", e) }))
+                                }
+                            },
+                            Err(e) => Err(json!({ "error": format!("Failed to get element tree from focused element: {}", e) }))
+                        }
+                    },
+                    Err(e) => Err(json!({ "error": format!("Failed to get focused element to retrieve tree: {}", e) }))
+                }
             }
             "get_clipboard_content" => {
                 match desktop.get_clipboard_content() {
