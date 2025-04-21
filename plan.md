@@ -62,7 +62,7 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
     *   Exposed methods via `Desktop` struct.
 *   **[Done] Implement Text Editor Actions:**
     *   Added `text_editor_view`, `text_editor_create`, `text_editor_str_replace`, `text_editor_insert` tool definitions and handlers using `std::fs` in `src-tauri/src/lib.rs`.
-    *   Skipped `text_editor_undo_edit` due to state management complexity.
+    *   Implemented `text_editor_undo_edit` using internal state tracking (`AppState`) to revert file changes.
 *   **[Done] Implement Bash Action:**
     *   Added `bash` tool definition and handler using `std::process::Command` in `src-tauri/src/lib.rs`.
     *   Timeout parameter defined in schema but not yet implemented in handler.
@@ -90,7 +90,7 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
 
 ## Current Status & Remaining Gaps
 
-*   **Core Functionality:** Most core `computer`, `text_editor`, and `bash` actions specified by Anthropic are implemented and integrated into the Tauri backend (`src-tauri/src/lib.rs`), including `bash` timeout.
+*   **Core Functionality:** Most core `computer`, `text_editor`, and `bash` actions specified by Anthropic are implemented and integrated into the Tauri backend (`src-tauri/src/lib.rs`), including `bash` timeout and stateful text editor undo.
 *   **Remaining Gaps:**
     *   `bash.restart`: The ability to restart the bash process is not implemented.
     *   `text_editor_undo_edit`: Not implemented due to state complexity. Requires tracking file changes or using a temporary file strategy.
@@ -100,10 +100,11 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
 
 ## Next Steps
 
-1.  **Implement `text_editor_undo_edit`:**
-    *   Add `last_edited_file` and `previous_content` fields (with `Mutex`) to `AppState`.
-    *   Update `create`, `insert`, and `str_replace` handlers in `call_tool` to store the previous state in `AppState`.
-    *   Implement the `text_editor_undo_edit` handler in `call_tool` to restore the previous content or delete the file based on the stored state. Add its definition to `list_tools`.
+1.  **[Done] Implement `text_editor_undo_edit`:**
+    *   Added `last_edited_file` and `previous_content` fields (with `Mutex`) to `AppState`.
+    *   Updated `create`, `insert`, and `str_replace` handlers in `call_tool` to store the previous state in `AppState`.
+    *   Implemented the `text_editor_undo_edit` handler in `call_tool` to restore the previous content or delete the file based on the stored state. Added its definition to `list_tools`.
+    *   **Summary:** Verified the existing implementation in `dispatch.rs` which uses `AppState` to track the last edited file and its content (or lack thereof for creation) to perform undo by restoring content or deleting the file. Updated `plan.md` to reflect completion.
 2.  **Address `cargo check` Warnings:**
     *   Add `#[allow(dead_code)]` and `#[allow(unused_variables)]` annotations to silence warnings in `src-tauri/src/lib.rs` and `src/tts/` files for potentially unused but necessary helper functions, state fields, and test functions. Remove genuinely unused variables. Ensure `cargo check` passes.
 3.  **Implement Anthropic API Streaming:**
