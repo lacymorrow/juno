@@ -74,6 +74,19 @@ Based on the [Anthropic Computer Use documentation](https://docs.anthropic.com/e
 *   **[Done] Implement `bash` Timeout:**
     *   Added `wait-timeout` crate dependency.
     *   Modified `call_tool` function's `bash` handler to spawn the command, wait with timeout using `child.wait_timeout`, and handle timeout/completion results.
+*   **[Done] Implement Window Management Functions:**
+    *   Implemented `get_window_title`, `list_windows`, `close_window`, `maximize_window`, `minimize_window`, `resize_window`, `move_window` in `MacOSEngine`.
+*   **[Done] Enhance Element Attributes:**
+    *   Implemented `is_enabled`, `is_focused` in `MacOSUIElement`.
+    *   Enhanced `get_all_attributes` in `MacOSUIElement` to fetch more standard attributes explicitly.
+*   **[Done] Implement Advanced Selectors (Partial):**
+    *   Implemented `Selector::Chain` for `find_element` in `MacOSEngine`.
+    *   Implemented basic `Selector::Path` (simple chains) for `find_element` in `MacOSEngine`.
+    *   Marked `Path`, `Filter`, `Chain` as unsupported for `find_elements`.
+*   **[Done] Verify `get_element_tree` Implementation:**
+    *   Confirmed `get_tree` implementation exists in `MacOSUIElement`.
+    *   Confirmed `get_ui_tree` implementation exists in `MacOSEngine`.
+    *   Confirmed `getUiTree` tool handler exists in `lib.rs` and correctly calls the engine function.
 
 ## Current Status & Remaining Gaps
 
