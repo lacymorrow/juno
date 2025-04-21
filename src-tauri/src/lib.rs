@@ -116,6 +116,15 @@ pub fn run() {
             dev_get_window_info,
             dev_focus_window,
             dev_triple_click,
+            dev_mouse_move,
+            dev_left_mouse_down,
+            dev_left_mouse_up,
+            dev_left_click,
+            dev_left_click_drag,
+            dev_right_click,
+            dev_middle_click,
+            dev_double_click,
+            dev_get_cursor_position,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
