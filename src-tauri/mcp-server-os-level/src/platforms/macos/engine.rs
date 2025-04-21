@@ -956,53 +956,69 @@ impl AccessibilityEngine for MacOSEngine {
                     None, None, None, None
                 ))
             }
-            Selector::Path(_) => Err(AutomationError::UnsupportedOperation(
-                "Path selector not implemented".to_string(),
-            )),
-            Selector::Chain(selectors) => {
-                // For now, only support role -> id pattern
-                if selectors.len() != 2 {
-                    return Err(AutomationError::UnsupportedOperation(
-                        "Only role -> id chains are supported".to_string(),
-                    ));
-                }
+            Selector::Path(path) => {
+                // Basic Path Implementation: Treat as a chain of Role/Name selectors separated by '/'
+                // Example: "/AXApplication[@AXTitle='Finder']/AXWindow/AXButton[@AXIdentifier='save']"
+                // This simple implementation only handles simple segments like "Role" or "Name"
+                // and assumes '/' separation.
+                // A full XPath-like implementation is complex.
 
-                // Check if it's a role -> id pattern
-                if let (Selector::Role { role, name: _ }, Selector::Id(id)) =
-                    (&selectors[0], &selectors[1])
-                {
-                    debug!("processing chain: role '{}' -> id '{}'", role, id);
+                debug!("Processing Path selector: {}", path);
+                let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+                let mut current_element_opt = root.cloned(); // Start with the provided root or None
+                let mut current_root_ref = root; // Keep track of the current root for find_element
 
-                    // First find elements matching the role
-                    let role_elements = self.find_elements(&selectors[0], root)?;
-                    debug!(
-                        "found {} elements matching role '{}'",
-                        role_elements.len(),
-                        role
-                    );
-
-                    // Then find the one with matching id
-                    for element in role_elements {
-                        if let Some(element_id) = element.id() {
-                            if element_id == *id {
-                                debug!("found matching element with id '{}'", id);
-                                return Ok(element);
-                            }
-                        }
+                for segment in segments {
+                    if segment.is_empty() { continue; }
+                    // Very basic parsing: If it contains '[', assume attribute for now (unsupported)
+                    // Otherwise, treat as Role or Name
+                    if segment.contains('[') || segment.contains('@') {
+                        return Err(AutomationError::UnsupportedOperation(
+                            format!("Complex path segments with attribute filters ('{}') are not yet supported.", segment)
+                        ));
                     }
 
-                    return Err(AutomationError::ElementNotFound(format!(
-                        "no element found with role '{}' and id '{}'",
-                        role, id
-                    )));
-                } else {
-                    return Err(AutomationError::UnsupportedOperation(
-                        "only role -> id chains are supported".to_string(),
-                    ));
+                    // Convert segment string to a simple Selector (Role or Name)
+                    let segment_selector = Selector::from(segment); // Use From<&str> logic
+
+                    // Find the next element within the current one
+                    let next_element = self.find_element(&segment_selector, current_root_ref)?;
+
+                    // Update current element and root reference for the next iteration
+                    current_element_opt = Some(next_element.clone());
+                    current_root_ref = current_element_opt.as_ref(); // Need to store the owned element to reference it
                 }
+
+                // Return the final element found, or error if the chain broke
+                current_element_opt.ok_or_else(|| AutomationError::ElementNotFound(format!(
+                    "Path selector '{}' did not resolve to an element.", path
+                )))
+            }
+            Selector::Chain(selectors) => {
+                debug!("Processing Chain selector with {} parts", selectors.len());
+                if selectors.is_empty() {
+                    return Err(AutomationError::InvalidArgument("Chain selector cannot be empty".to_string()));
+                }
+
+                let mut current_element_opt = root.cloned();
+                let mut current_root_ref = root; // Reference to the current element for find_element
+
+                for (index, selector) in selectors.iter().enumerate() {
+                    debug!("Chain part {}: {:?}", index + 1, selector);
+                    let next_element = self.find_element(selector, current_root_ref)?;
+
+                    // Update current element and root reference
+                    current_element_opt = Some(next_element.clone());
+                    current_root_ref = current_element_opt.as_ref();
+                }
+
+                // Return the final element found
+                current_element_opt.ok_or_else(|| AutomationError::ElementNotFound(
+                    "Chain selector did not resolve to an element (intermediate step failed)".to_string()
+                ))
             }
             Selector::Filter(_) => Err(AutomationError::UnsupportedOperation(
-                "Filter selector not implemented for find_elements".to_string(),
+                "Filter selector not implemented for find_element".to_string(),
             )),
         }
     }
@@ -1162,13 +1178,13 @@ impl AccessibilityEngine for MacOSEngine {
                  Ok(ui_elements)
             }
             Selector::Path(_) => Err(AutomationError::UnsupportedOperation(
-                "Path selector not implemented".to_string(),
+                "Path selector is not supported for find_elements due to complexity.".to_string(),
             )),
             Selector::Filter(_) => Err(AutomationError::UnsupportedOperation(
                 "Filter selector not implemented for find_elements".to_string(),
             )),
             Selector::Chain(_) => Err(AutomationError::UnsupportedOperation(
-                "Chain selector not implemented for find_elements".to_string(),
+                "Chain selector is not supported for find_elements due to complexity.".to_string(),
             )),
         }
     }
@@ -1451,7 +1467,48 @@ impl AccessibilityEngine for MacOSEngine {
     fn get_window_title(&self) -> Result<String, AutomationError> {
         // Implementation Note: Get focused element, check if it's a window, get AXTitle.
         // Need robust error handling if no focus or not a window.
-        todo!("Implement get_window_title for macOS")
+        // todo!("Implement get_window_title for macOS")
+        debug!("Getting window title");
+
+        let focused_element = self.get_focused_element()?;
+
+        if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
+            let ax_element = &macos_element.element.0;
+
+            // Check if the focused element is a window
+            let role = ax_element.role().map_or(String::new(), |r| r.to_string());
+            if role == "AXWindow" {
+                // Get the AXTitle attribute
+                match ax_element.title() {
+                    Ok(title_cf) => {
+                        let title = title_cf.to_string();
+                        debug!("Found window title: {}", title);
+                        Ok(title)
+                    }
+                    Err(e) => {
+                        warn!("Focused window element does not have a title: {:?}", e);
+                        Err(AutomationError::PlatformError(format!(
+                            "Failed to get title for focused window: {:?}",
+                            e
+                        )))
+                    }
+                }
+            } else {
+                warn!(
+                    "Focused element is not a window (role: {}), cannot get title.",
+                    role
+                );
+                Err(AutomationError::UnsupportedOperation(
+                    "Cannot get window title from a non-window element".to_string(),
+                ))
+            }
+        } else {
+            // This should ideally not happen if get_focused_element works correctly
+            warn!("Could not downcast focused element to MacOSUIElement");
+            Err(AutomationError::PlatformError(
+                "Failed to interpret focused element as a macOS element".to_string(),
+            ))
+        }
     }
 
     fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
@@ -1507,32 +1564,309 @@ impl AccessibilityEngine for MacOSEngine {
         // Implementation Note: Get focused element, check if it's a window,
         // find the close button (AXCloseButton) and click it.
         // Alternatively, use AXPerformAction kAXPressAction on the close button.
-        todo!("Implement close_window for macOS")
+        // todo!("Implement close_window for macOS")
+        debug!("Attempting to close the focused window");
+
+        let focused_element = self.get_focused_element()?;
+
+        if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
+            let ax_window = &macos_element.element.0;
+
+            // 1. Verify it's a window
+            let role = ax_window.role().map_or(String::new(), |r| r.to_string());
+            if role != "AXWindow" {
+                warn!("Focused element is not a window (role: {}), cannot close.", role);
+                return Err(AutomationError::UnsupportedOperation(
+                    "Cannot close a non-window element".to_string(),
+                ));
+            }
+
+            // 2. Find the close button (AXCloseButton)
+            // We can use the AXAttribute directly to search for the button
+            let close_button_attr = AXAttribute::new(&CFString::new("AXCloseButton"));
+            match ax_window.attribute(&close_button_attr) {
+                Ok(button_val) => {
+                    if let Some(close_button) = button_val.downcast::<accessibility::AXUIElement>() {
+                        // 3. Perform the press action
+                        let press_action = CFString::new("AXPress"); // kAXPressAction
+                        match close_button.perform_action(&press_action) {
+                            Ok(_) => {
+                                debug!("Successfully performed AXPress on the close button");
+                                Ok(())
+                            }
+                            Err(e) => {
+                                warn!("Failed to perform AXPress on close button: {:?}", e);
+                                Err(AutomationError::PlatformError(format!(
+                                    "Failed to press the close button: {:?}",
+                                    e
+                                )))
+                            }
+                        }
+                    } else {
+                        warn!("AXCloseButton attribute did not return a valid UI element.");
+                        Err(AutomationError::ElementNotFound(
+                            "Could not find the close button element within the window".to_string(),
+                        ))
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get AXCloseButton attribute: {:?}", e);
+                    Err(AutomationError::ElementNotFound(format!(
+                        "Could not find the close button attribute: {:?}",
+                        e
+                    )))
+                }
+            }
+        } else {
+            warn!("Could not downcast focused element to MacOSUIElement");
+            Err(AutomationError::PlatformError(
+                "Failed to interpret focused element as a macOS element for closing".to_string(),
+            ))
+        }
     }
 
     fn maximize_window(&self) -> Result<(), AutomationError> {
         // Implementation Note: Get focused element, check if window,
         // find maximize button (AXZoomButton) and click it.
-        todo!("Implement maximize_window for macOS")
+        debug!("Attempting to maximize the focused window");
+
+        let focused_element = self.get_focused_element()?;
+
+        if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
+            let ax_window = &macos_element.element.0;
+
+            // 1. Verify it's a window
+            let role = ax_window.role().map_or(String::new(), |r| r.to_string());
+            if role != "AXWindow" {
+                warn!(
+                    "Focused element is not a window (role: {}), cannot maximize.",
+                    role
+                );
+                return Err(AutomationError::UnsupportedOperation(
+                    "Cannot maximize a non-window element".to_string(),
+                ));
+            }
+
+            // 2. Find the maximize/zoom button (AXZoomButton)
+            let zoom_button_attr = AXAttribute::new(&CFString::new("AXZoomButton"));
+            match ax_window.attribute(&zoom_button_attr) {
+                Ok(button_val) => {
+                    if let Some(zoom_button) = button_val.downcast::<accessibility::AXUIElement>() {
+                        // 3. Perform the press action
+                        let press_action = CFString::new("AXPress");
+                        match zoom_button.perform_action(&press_action) {
+                            Ok(_) => {
+                                debug!("Successfully performed AXPress on the zoom button");
+                                Ok(())
+                            }
+                            Err(e) => {
+                                warn!("Failed to perform AXPress on zoom button: {:?}", e);
+                                Err(AutomationError::PlatformError(format!(
+                                    "Failed to press the zoom button: {:?}",
+                                    e
+                                )))
+                            }
+                        }
+                    } else {
+                        warn!("AXZoomButton attribute did not return a valid UI element.");
+                        Err(AutomationError::ElementNotFound(
+                            "Could not find the zoom button element within the window".to_string(),
+                        ))
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to get AXZoomButton attribute: {:?}", e);
+                    Err(AutomationError::ElementNotFound(format!(
+                        "Could not find the zoom button attribute: {:?}",
+                        e
+                    )))
+                }
+            }
+        } else {
+            warn!("Could not downcast focused element to MacOSUIElement");
+            Err(AutomationError::PlatformError(
+                "Failed to interpret focused element as a macOS element for maximizing".to_string(),
+            ))
+        }
     }
 
     fn minimize_window(&self) -> Result<(), AutomationError> {
         // Implementation Note: Get focused element, check if window,
         // find minimize button (AXMinimizeButton) and click it.
         // Or set AXMinimized attribute to true.
-        todo!("Implement minimize_window for macOS")
+        // todo!("Implement minimize_window for macOS")
+        debug!("Attempting to minimize the focused window");
+
+        let focused_element = self.get_focused_element()?;
+
+        if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
+            let ax_window = &macos_element.element.0;
+
+            // 1. Verify it's a window
+            let role = ax_window.role().map_or(String::new(), |r| r.to_string());
+            if role != "AXWindow" {
+                warn!(
+                    "Focused element is not a window (role: {}), cannot minimize.",
+                    role
+                );
+                return Err(AutomationError::UnsupportedOperation(
+                    "Cannot minimize a non-window element".to_string(),
+                ));
+            }
+
+            // 2. Set the AXMinimized attribute to true
+            let minimized_attr = AXAttribute::new(&CFString::new("AXMinimized"));
+            let value_to_set = CFBoolean::true_value();
+
+            match ax_window.set_attribute(&minimized_attr, value_to_set.as_CFType()) {
+                Ok(_) => {
+                    debug!("Successfully set AXMinimized attribute to true");
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("Failed to set AXMinimized attribute: {:?}", e);
+                    // Consider if pressing the button is a fallback?
+                    // For now, report the error directly.
+                    Err(AutomationError::PlatformError(format!(
+                        "Failed to set the minimized attribute: {:?}",
+                        e
+                    )))
+                }
+            }
+        } else {
+            warn!("Could not downcast focused element to MacOSUIElement");
+            Err(AutomationError::PlatformError(
+                "Failed to interpret focused element as a macOS element for minimizing".to_string(),
+            ))
+        }
     }
 
     fn resize_window(&self, width: f64, height: f64) -> Result<(), AutomationError> {
         // Implementation Note: Get focused element, check if window,
         // set AXSize attribute.
-        todo!("Implement resize_window for macOS")
+        // todo!("Implement resize_window for macOS")
+        debug!("Attempting to resize the focused window to width={}, height={}", width, height);
+
+        let focused_element = self.get_focused_element()?;
+
+        if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
+            let ax_window = &macos_element.element.0;
+
+            // 1. Verify it's a window
+            let role = ax_window.role().map_or(String::new(), |r| r.to_string());
+            if role != "AXWindow" {
+                warn!(
+                    "Focused element is not a window (role: {}), cannot resize.",
+                    role
+                );
+                return Err(AutomationError::UnsupportedOperation(
+                    "Cannot resize a non-window element".to_string(),
+                ));
+            }
+
+            // 2. Create CGSize and AXValue
+            let size_attr = AXAttribute::new(&CFString::new("AXSize"));
+            let mut cg_size = core_graphics::geometry::CGSize::new(width, height);
+            let size_ptr = &mut cg_size as *mut _ as *const std::ffi::c_void;
+
+            unsafe {
+                // Use AXValueCreate from ffi or accessibility_sys if available
+                // Assuming K_AXVALUE_CGSIZE_TYPE is defined similarly to K_AXVALUE_CGPOINT_TYPE
+                let value_ref = super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGSIZE_TYPE, size_ptr);
+                if value_ref.is_null() {
+                    warn!("Failed to create AXValueRef for CGSize");
+                    return Err(AutomationError::PlatformError(
+                        "Could not create AXValue for size".to_string(),
+                    ));
+                }
+
+                // 3. Set the AXSize attribute
+                // Need to wrap value_ref appropriately for set_attribute
+                // TCFType::wrap_under_create_rule might work if AXValueRef is a CFTypeRef
+                let value_to_set = CFType::wrap_under_create_rule(value_ref);
+
+                match ax_window.set_attribute(&size_attr, value_to_set) {
+                    Ok(_) => {
+                        debug!("Successfully set AXSize attribute");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("Failed to set AXSize attribute: {:?}", e);
+                        Err(AutomationError::PlatformError(format!(
+                            "Failed to set the size attribute: {:?}",
+                            e
+                        )))
+                    }
+                    // Ensure the created CFTypeRef (AXValueRef) is released if wrap_under_create_rule doesn't handle it
+                    // However, CFType wrapper should manage the retain count.
+                }
+            }
+        } else {
+            warn!("Could not downcast focused element to MacOSUIElement");
+            Err(AutomationError::PlatformError(
+                "Failed to interpret focused element as a macOS element for resizing".to_string(),
+            ))
+        }
     }
 
     fn move_window(&self, x: f64, y: f64) -> Result<(), AutomationError> {
         // Implementation Note: Get focused element, check if window,
         // set AXPosition attribute.
-        todo!("Implement move_window for macOS")
+        // todo!("Implement move_window for macOS")
+        debug!("Attempting to move the focused window to x={}, y={}", x, y);
+
+        let focused_element = self.get_focused_element()?;
+
+        if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
+            let ax_window = &macos_element.element.0;
+
+            // 1. Verify it's a window
+            let role = ax_window.role().map_or(String::new(), |r| r.to_string());
+            if role != "AXWindow" {
+                warn!("Focused element is not a window (role: {}), cannot move.", role);
+                return Err(AutomationError::UnsupportedOperation(
+                    "Cannot move a non-window element".to_string(),
+                ));
+            }
+
+            // 2. Create CGPoint and AXValue
+            let position_attr = AXAttribute::new(&CFString::new("AXPosition"));
+            let mut cg_point = core_graphics::geometry::CGPoint::new(x, y);
+            let point_ptr = &mut cg_point as *mut _ as *const std::ffi::c_void;
+
+            unsafe {
+                let value_ref =
+                    super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGPOINT_TYPE, point_ptr);
+                if value_ref.is_null() {
+                    warn!("Failed to create AXValueRef for CGPoint");
+                    return Err(AutomationError::PlatformError(
+                        "Could not create AXValue for position".to_string(),
+                    ));
+                }
+
+                // 3. Set the AXPosition attribute
+                let value_to_set = CFType::wrap_under_create_rule(value_ref);
+
+                match ax_window.set_attribute(&position_attr, value_to_set) {
+                    Ok(_) => {
+                        debug!("Successfully set AXPosition attribute");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("Failed to set AXPosition attribute: {:?}", e);
+                        Err(AutomationError::PlatformError(format!(
+                            "Failed to set the position attribute: {:?}",
+                            e
+                        )))
+                    }
+                }
+            }
+        } else {
+            warn!("Could not downcast focused element to MacOSUIElement");
+            Err(AutomationError::PlatformError(
+                "Failed to interpret focused element as a macOS element for moving".to_string(),
+            ))
+        }
     }
 
     fn get_element_tree(&self, element: &UIElement) -> Result<ElementTreeNode, AutomationError> {
