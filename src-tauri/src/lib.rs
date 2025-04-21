@@ -38,6 +38,7 @@ pub mod tools;
 pub mod commands;
 pub mod cli;
 pub mod utils;
+pub mod agent;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::*;
