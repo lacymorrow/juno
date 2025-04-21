@@ -303,6 +303,17 @@ pub(crate) async fn call_tool(
                     Err(e) => Err(json!({ "error": e.to_string() })),
                 }
             },
+            "left_click_drag" => {
+                let start_x = get_f64_param(input, "start_x")?;
+                let start_y = get_f64_param(input, "start_y")?;
+                let end_x = get_f64_param(input, "end_x")?;
+                let end_y = get_f64_param(input, "end_y")?;
+                info!(start_x = %start_x, start_y = %start_y, end_x = %end_x, end_y = %end_y, "Executing left click drag");
+                match desktop.left_click_drag(start_x, start_y, end_x, end_y) { // Assuming this method exists on Desktop
+                    Ok(_) => Ok(json!({ "success": true, "message": format!("Performed left click drag from ({}, {}) to ({}, {}).", start_x, start_y, end_x, end_y) })),
+                    Err(e) => Err(json!({ "error": format!("Failed to perform left click drag: {}", e) })),
+                }
+            },
             "scroll_at_position" => { // Assuming Desktop has this method wrapping the engine call
                 let x = get_f64_param(input, "x")?;
                 let y = get_f64_param(input, "y")?;
@@ -627,21 +638,41 @@ pub(crate) async fn call_tool(
             "get_element_by_description" => {
                 let description = get_string_param(input, "description")?;
                 info!(description = %description, "Executing get_element_by_description");
-                // Reverted: Method not found on desktop object
-                // match desktop.find_element_by_description(&description) {
-                //     Ok(element_info) => Ok(json!({ "success": true, "element": element_info })),
-                //     Err(e) => Err(json!({ "error": format!("Failed to find element by description: {}", e) })),
-                // }
-                Err(json!({ "error": "Tool 'get_element_by_description' not implemented yet." }))
+
+                // Use the locator API provided by the Desktop object
+                let selector = computer_use_ai_sdk::Selector::Description(description.clone()); // Use the Selector from the SDK
+                match desktop.locator(selector).first() {
+                    Ok(Some(element)) => {
+                        let attrs = element.attributes(); // Get attributes
+                        match serde_json::to_value(&attrs) {
+                            Ok(element_info) => Ok(json!({ "success": true, "element": element_info })),
+                            Err(e) => Err(json!({ "error": format!("Failed to serialize found element info: {}", e) }))
+                        }
+                    },
+                    Ok(None) => {
+                         Err(json!({ "error": format!("Element with description '{}' not found.", description) }))
+                    }
+                    Err(e) => {
+                        Err(json!({ "error": format!("Failed to find element by description '{}': {}", description, e) }))
+                    },
+                }
             }
             "get_element_tree" => {
-                info!("Executing get_element_tree");
-                // Reverted: Method not found on desktop object
-                //  match desktop.get_element_tree() {
-                //     Ok(tree_info) => Ok(json!({ "success": true, "tree": tree_info })),
-                //     Err(e) => Err(json!({ "error": format!("Failed to get element tree: {}", e) })),
-                // }
-                Err(json!({ "error": "Tool 'get_element_tree' not implemented yet." }))
+                info!("Executing get_element_tree (on focused element)");
+                match desktop.focused_element() { // Get the focused element first
+                    Ok(element) => {
+                        match element.get_tree() { // Call get_tree() on the UIElement
+                            Ok(tree_node) => {
+                                match serde_json::to_value(&tree_node) { // Serialize the ElementTreeNode
+                                    Ok(tree_json) => Ok(json!({ "success": true, "tree": tree_json })),
+                                    Err(e) => Err(json!({ "error": format!("Failed to serialize element tree node: {}", e) }))
+                                }
+                            },
+                            Err(e) => Err(json!({ "error": format!("Failed to get element tree from focused element: {}", e) }))
+                        }
+                    },
+                    Err(e) => Err(json!({ "error": format!("Failed to get focused element to retrieve tree: {}", e) }))
+                }
             }
             "get_clipboard_content" => {
                 match desktop.get_clipboard_content() {
