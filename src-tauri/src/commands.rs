@@ -4,8 +4,14 @@ use computer_use_ai_sdk::{Selector};
 use computer_use_ai_sdk::AutomationError;
 use tauri::{AppHandle, State}; // Remove unused Manager
 use tauri_plugin_notification::NotificationExt;
-use tracing::{info}; // Remove unused error
+use tracing::{info, warn, error}; // Add error
 // use computer_use_ai_sdk::UIElementAttributes; // Removed unused import
+use std::process::Command;
+use std::fs::{self}; // Removed File
+use std::io::{self}; // Removed BufReader, BufRead, Write
+use std::time::Duration;
+use wait_timeout::ChildExt;
+use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -263,15 +269,28 @@ pub(crate) async fn dev_press_key(
             }
         };
 
-        // Press key on the element
-        match focused_element.press_key(&key) {
+        // Coerce single lowercase letters to uppercase for the SDK
+        let key_to_press = if key.len() == 1 {
+            let char = key.chars().next().unwrap();
+            if char.is_ascii_lowercase() {
+                println!("[DEV_TOOL] Coercing lowercase key '{}' to uppercase '{}'", char, char.to_ascii_uppercase());
+                char.to_ascii_uppercase().to_string()
+            } else {
+                key // Use original if not lowercase
+            }
+        } else {
+            key // Use original if not single char
+        };
+
+        // Press key on the element using the potentially coerced key
+        match focused_element.press_key(&key_to_press) {
              Ok(_) => {
-                println!("[DEV_TOOL] press_key succeeded for: {}", key);
-                send_dev_tool_notification(&app, "Press Key", &format!("Pressed key(s): {}", key))?; // Send notification
+                println!("[DEV_TOOL] press_key succeeded for: {}", key_to_press); // Log the key actually pressed
+                send_dev_tool_notification(&app, "Press Key", &format!("Pressed key(s): {}", key_to_press))?; // Send notification
                 Ok(())
             }
             Err(e) => {
-                let err_msg = format!("Failed to call press_key for '{}': {}", key, e);
+                let err_msg = format!("Failed to call press_key for '{}': {}", key_to_press, e); // Log the key actually pressed
                 println!("[DEV_TOOL] Error: {}", err_msg);
                 Err(err_msg)
             }
@@ -324,39 +343,65 @@ pub(crate) async fn dev_scroll_window(
     state: State<'_, AppState>,
     direction: String,      // "up", "down", "left", "right"
     scroll_amount: f64, // Number of units/clicks (changed back to f64 for SDK)
+    x: Option<f64>,     // Optional x coordinate
+    y: Option<f64>,     // Optional y coordinate
 ) -> Result<(), String> {
-    println!(
-        "[DEV_TOOL] Attempting to scroll {} by {} units at current position...",
-        direction,
-        scroll_amount
-    );
-
     // Validate direction
     let valid_directions = ["up", "down", "left", "right"];
     if !valid_directions.contains(&direction.as_str()) {
-        let err_msg = format!("Invalid scroll direction: '{}'. Must be one of: {:?}", direction, valid_directions);
+        let err_msg = format!(
+            "Invalid scroll direction: \'{}\'. Must be one of: {:?}",
+            direction, valid_directions
+        );
         println!("[DEV_TOOL] Error: {}", err_msg);
         return Err(err_msg);
     }
 
+    let result: Result<(), AutomationError>;
+    let action_desc: String; // Declare without initializing
+
     #[cfg(target_os = "macos")]
-    let result = state.desktop.scroll_at_current_position(&direction, scroll_amount);
+    {
+        match (x, y) {
+            (Some(px), Some(py)) => {
+                println!(
+                    "[DEV_TOOL] Attempting to scroll {} by {} units at position ({}, {})...",
+                    direction, scroll_amount, px, py
+                );
+                result = state.desktop.scroll_at_position(px, py, &direction, scroll_amount);
+                action_desc = format!( // Assign here
+                    "Scrolled {} by {} at ({}, {})",
+                    direction, scroll_amount, px, py
+                );
+            }
+            _ => {
+                println!(
+                    "[DEV_TOOL] Attempting to scroll {} by {} units at current position...",
+                    direction, scroll_amount
+                );
+                result = state.desktop.scroll_at_current_position(&direction, scroll_amount);
+                action_desc = format!( // Assign here
+                    "Scrolled {} by {} at current position",
+                    direction, scroll_amount
+                );
+            }
+        }
+    }
 
     #[cfg(not(target_os = "macos"))]
-    let result = Err(AutomationError::UnsupportedPlatform);
+    {
+        result = Err(AutomationError::UnsupportedPlatform);
+        action_desc = "Scroll (Unsupported Platform)".to_string(); // Assign here
+    }
 
     match result {
         Ok(_) => {
-            println!("[DEV_TOOL] scroll_at_current_position {} by {} succeeded.", direction, scroll_amount);
-            send_dev_tool_notification(
-                &app,
-                "Scroll",
-                &format!("Scrolled {} by {} at current position", direction, scroll_amount),
-            )?;
+            println!("[DEV_TOOL] {} succeeded.", action_desc); // Now action_desc is definitely assigned
+            send_dev_tool_notification(&app, "Scroll", &action_desc)?;
             Ok(())
         }
         Err(e) => {
-            let err_msg = format!("Failed to call scroll_at_current_position: {}", e);
+            let err_msg = format!("Failed to perform scroll action ({}): {}", action_desc, e); // Now action_desc is definitely assigned
             println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
@@ -400,8 +445,9 @@ pub(crate) async fn dev_release_key(key: String, state: tauri::State<'_, AppStat
 }
 
 #[tauri::command]
-pub(crate) async fn dev_wait(duration_ms: u64, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    info!("Executing dev_wait for {} ms", duration_ms);
+pub(crate) async fn dev_wait(duration_sec: f64, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let duration_ms = (duration_sec * 1000.0).max(0.0) as u64; // Convert seconds to ms, ensure non-negative
+    info!("Executing dev_wait for {} seconds ({} ms)", duration_sec, duration_ms);
     state.desktop.wait(duration_ms)
         .map_err(|e| format!("Error during wait: {}", e))
 }
@@ -965,6 +1011,339 @@ pub(crate) async fn dev_get_cursor_position(
         }
         Err(e) => {
             let err_msg = format!("Failed to call get_cursor_position: {}", e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+// =========================================
+// Text Editor Commands
+// =========================================
+
+// Helper to update undo state
+fn update_undo_state(state: &State<AppState>, path: String, previous_content: Option<String>) {
+    let mut last_edited = state.last_edited_file.lock().unwrap();
+    *last_edited = Some(path.into()); // Convert String to PathBuf
+    let mut prev_content = state.previous_content.lock().unwrap();
+    *prev_content = Some(previous_content); // Wrap Option<String> in Option
+}
+
+#[tauri::command]
+pub(crate) async fn dev_text_editor_view(path: String) -> Result<String, String> {
+    info!(path = %Path::new(&path).display(), "[DEV_TOOL] Reading file content");
+    match fs::read_to_string(&path) {
+        Ok(content) => Ok(content),
+        Err(e) => {
+            let err_msg = format!("Failed to read file '{}': {}", path, e);
+            error!("{}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_text_editor_create(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    let path_buf: PathBuf = path.into();
+    info!(path = %path_buf.display(), "[DEV_TOOL] Creating/overwriting file");
+
+    // Store previous state for undo
+    let previous_content = fs::read_to_string(&path_buf).ok();
+    // Use original String for state update, convert PathBuf back for notification
+    update_undo_state(&state, path_buf.to_string_lossy().to_string(), previous_content);
+
+    match fs::write(&path_buf, content) {
+        Ok(_) => {
+            send_dev_tool_notification(&app, "File Operation", &format!("File '{}' created/updated.", path_buf.display()))?;
+            Ok(())
+        },
+        Err(e) => {
+            let err_msg = format!("Failed to write file '{}': {}", path_buf.display(), e);
+            error!("{}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+
+#[tauri::command]
+pub(crate) async fn dev_text_editor_str_replace(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    path: String,
+    find: String,
+    replace: String,
+) -> Result<(), String> {
+    let path_buf: PathBuf = path.into();
+    info!(path = %path_buf.display(), find, replace, "[DEV_TOOL] Replacing string in file");
+
+    let original_content = match fs::read_to_string(&path_buf) {
+        Ok(content) => content,
+        Err(e) => {
+            let err_msg = format!("Failed to read file for replace '{}': {}", path_buf.display(), e);
+            error!("{}", err_msg);
+            return Err(err_msg);
+        }
+    };
+
+    // Store previous state for undo
+    update_undo_state(&state, path_buf.to_string_lossy().to_string(), Some(original_content.clone()));
+
+    let modified_content = original_content.replace(&find, &replace);
+
+    match fs::write(&path_buf, modified_content) {
+        Ok(_) => {
+            send_dev_tool_notification(&app, "File Operation", &format!("String replaced in '{}'.", path_buf.display()))?;
+            Ok(())
+        },
+        Err(e) => {
+            let err_msg = format!("Failed to write replaced content to '{}': {}", path_buf.display(), e);
+            error!("{}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_text_editor_insert(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    path: String,
+    line_number: usize, // 1-based line number for insertion
+    text: String,
+) -> Result<(), String> {
+    let path_buf: PathBuf = path.into();
+    info!(path = %path_buf.display(), line_number, "[DEV_TOOL] Inserting text into file");
+
+    let original_content = match fs::read_to_string(&path_buf) {
+         Ok(content) => content,
+         // If the file doesn't exist and we're inserting at line 1, treat it as creation
+         Err(e) if e.kind() == io::ErrorKind::NotFound && line_number == 1 => String::new(),
+         Err(e) => {
+             let err_msg = format!("Failed to read file for insert '{}': {}", path_buf.display(), e);
+             error!("{}", err_msg);
+             return Err(err_msg);
+         }
+     };
+
+    // Store previous state for undo
+    update_undo_state(&state, path_buf.to_string_lossy().to_string(), Some(original_content.clone()));
+
+    let mut lines: Vec<String> = original_content.lines().map(String::from).collect();
+
+    // Adjust line number to be 0-based index
+    let index = if line_number == 0 { 0 } else { line_number.saturating_sub(1) };
+
+    if index > lines.len() {
+        let err_msg = format!("Line number {} is out of bounds for file '{}' ({} lines)", line_number, path_buf.display(), lines.len());
+        error!("{}", err_msg);
+        return Err(err_msg);
+    }
+
+    // Insert the new text line by line
+    for (i, line_to_insert) in text.lines().enumerate() {
+       lines.insert(index + i, line_to_insert.to_string());
+    }
+
+
+    let modified_content = lines.join("\n");
+
+    match fs::write(&path_buf, modified_content) {
+        Ok(_) => {
+            send_dev_tool_notification(&app, "File Operation", &format!("Text inserted into '{}' at line {}.", path_buf.display(), line_number))?;
+            Ok(())
+        },
+        Err(e) => {
+            let err_msg = format!("Failed to write inserted content to '{}': {}", path_buf.display(), e);
+            error!("{}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+
+#[tauri::command]
+pub(crate) async fn dev_text_editor_undo_edit(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    info!("[DEV_TOOL] Undoing last text editor operation");
+
+    let mut last_file_lock = state.last_edited_file.lock().unwrap();
+    let mut prev_content_lock = state.previous_content.lock().unwrap();
+
+    if let Some(path) = last_file_lock.take() {
+        let prev_content_option = prev_content_lock.take();
+
+        if let Some(prev_content) = prev_content_option {
+            // This was Some(Option<String>), so we attempt restore/delete based on inner Option
+            if let Some(content_to_restore) = prev_content {
+                // Had previous content (Some(Some(String))), so restore it
+                info!(path = %path.display(), "[DEV_TOOL] Restoring previous content");
+                match fs::write(&path, &content_to_restore) { // Write the inner String
+                    Ok(_) => {
+                         send_dev_tool_notification(&app, "File Operation", &format!("Undo: Restored '{}'.", path.display()))?;
+                         // Locks are automatically released here as path and prev_content_option go out of scope
+                         Ok(())
+                    },
+                    Err(e) => {
+                        let err_msg = format!("Undo failed: Could not restore file '{}': {}", path.display(), e);
+                        error!("{}", err_msg);
+                        // Put the state back if write failed
+                        *last_file_lock = Some(path);
+                        *prev_content_lock = Some(Some(content_to_restore)); // Put the state back correctly
+                        Err(err_msg)
+                    }
+                }
+            } else {
+                // No previous content (Some(None)), meaning the last operation was create, so delete the file
+                info!(path = %path.display(), "[DEV_TOOL] Deleting file created by last operation");
+                match fs::remove_file(&path) {
+                    Ok(_) => {
+                        send_dev_tool_notification(&app, "File Operation", &format!("Undo: Deleted '{}'.", path.display()))?;
+                        Ok(())
+                    },
+                    // If the file doesn't exist, that's okay for undoing a create
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                         warn!(path = %path.display(), "Undo: File was already deleted.");
+                         Ok(())
+                     },
+                    Err(e) => {
+                        let err_msg = format!("Undo failed: Could not delete file '{}': {}", path.display(), e);
+                        error!("{}", err_msg);
+                        // Put the state back if delete failed
+                        *last_file_lock = Some(path);
+                        *prev_content_lock = Some(None); // Put the state back correctly (Some(None))
+                        Err(err_msg)
+                    }
+                }
+            }
+        } else {
+            // This case implies prev_content_lock was None initially, which shouldn't happen if last_file_lock was Some.
+            let err_msg = format!("Undo failed: Inconsistent state for path '{}', expected previous content state.", path.display());
+            error!("{}", err_msg);
+            // Put the path back
+            *last_file_lock = Some(path);
+            // prev_content_lock remains None, which is consistent with the error state
+             Err(err_msg)
+        }
+    } else {
+        // last_file_lock was None initially
+        let err_msg = "No text editor operation to undo.".to_string();
+        warn!("{}", err_msg);
+        Err(err_msg)
+    }
+}
+
+// =========================================
+// Bash Command
+// =========================================
+#[tauri::command]
+pub(crate) async fn dev_bash_command(
+    app: AppHandle,
+    _state: State<'_, AppState>, // State is unused for now, but kept for consistency
+    command: String,
+    timeout_seconds: Option<u64>,
+    restart: Option<bool>,
+) -> Result<String, String> {
+    let effective_restart = restart.unwrap_or(false);
+    println!(
+        "[DEV_TOOL] Executing bash command: \"{}\" (timeout: {:?}, restart: {})",
+        command,
+        timeout_seconds,
+        effective_restart
+    );
+
+    if effective_restart {
+        warn!("[DEV_TOOL] Bash 'restart' parameter is noted but full shell state reset is not implemented in this command.");
+        // Placeholder for future restart logic if needed
+    }
+
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c");
+    cmd.arg(&command);
+
+    let timeout_duration = timeout_seconds.map(Duration::from_secs);
+
+    match cmd.spawn() {
+        Ok(mut child) => {
+            let status_result = if let Some(duration) = timeout_duration {
+                match child.wait_timeout(duration) {
+                    Ok(Some(status)) => Ok(status),
+                    Ok(None) => {
+                        warn!(
+                            "[DEV_TOOL] Command \"{}\" timed out after {:?}, killing...",
+                            command,
+                            duration
+                        );
+                        child.kill().map_err(|e| {
+                            format!("Failed to kill timed out process for '{}': {}", command, e)
+                        })?;
+                        // Return the status after waiting for the killed process
+                        child.wait().map_err(|e| {
+                            format!("Failed to wait on killed process for '{}': {}", command, e)
+                        })
+                    }
+                    Err(e) => Err(format!(
+                        "Failed to wait with timeout for '{}': {}",
+                        command,
+                        e
+                    )),
+                }
+            } else {
+                // No timeout specified, wait indefinitely
+                child
+                    .wait()
+                    .map_err(|e| format!("Failed to wait for command '{}': {}", command, e))
+            };
+
+            match status_result {
+                Ok(status) => {
+                    let timed_out = timeout_duration.is_some()
+                        && match child.try_wait() {
+                            // Check if process is *still* running after wait_timeout returned None
+                            Ok(None) => true,
+                            _ => false,
+                        };
+
+                    let result_json = serde_json::json!({
+                        "success": status.success(),
+                        "stdout": "(stdout not captured)",
+                        "stderr": "(stderr not captured)",
+                        "exit_code": status.code(),
+                        "timed_out": timed_out
+                    });
+
+                    let result_str = serde_json::to_string(&result_json).map_err(|e| {
+                        format!("Failed to serialize bash command result: {}", e)
+                    })?;
+
+                    println!(
+                        "[DEV_TOOL] Bash command '{}' finished. Result: {}",
+                        command,
+                        result_str
+                    );
+                    send_dev_tool_notification(
+                        &app,
+                        "Bash Command",
+                        &format!("Command finished: {}", command),
+                    )?;
+                    Ok(result_str)
+                }
+                Err(e) => {
+                    // Error already contains context
+                    println!("[DEV_TOOL] Error executing bash command '{}': {}", command, e);
+                    Err(e)
+                }
+            }
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to spawn bash command '{}': {}", command, e);
             println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
