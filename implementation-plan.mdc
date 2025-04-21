@@ -1,0 +1,48 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Your rule content
+
+- You can @ files here
+- You can use markdown but dont have to
+
+# Implementation Plan: Agent Loop
+
+## Phase 1: Core Agent Structure
+
+1.  **Create Agent Module and Basic Structures:**
+    *   Created `src-tauri/src/agent/mod.rs` and `src-tauri/src/agent/agent_core.rs`.
+    *   Defined `AgentState` enum (`Running`, `Finished`, `Failed`).
+    *   Defined basic `Agent` struct skeleton (holding state, max_steps).
+    *   Registered the module in `src-tauri/src/lib.rs`.
+    *   **Status:** Done
+    *   **Summary:** Created the basic agent module structure and defined the `AgentState` enum and `Agent` struct skeleton in `src-tauri/src/agent/agent_core.rs`. Registered the module in `lib.rs`.
+
+2.  **Implement Memory Structure:**
+    *   Defined `Role` enum, `Message` struct, and `ToolCall` struct in `src-tauri/src/agent/memory.rs`.
+    *   Added `memory: Vec<Message>` field to `Agent` struct in `agent_core.rs`.
+    *   Declared `memory` module in `agent/mod.rs`.
+    *   **Status:** Done
+    *   **Summary:** Created necessary structs for message history and tool calls (`Role`, `Message`, `ToolCall`) in a dedicated `memory.rs` file. Updated the `Agent` struct to include a `memory` vector and added appropriate module declarations.
+
+3.  **Implement Basic Agent Loop (`run` method):**
+    *   Add a `run(&mut self, initial_prompt: String)` method skeleton to `Agent`.
+    *   Implement the basic loop structure checking `AgentState` and max steps.
+    *   Add initial prompt to memory.
+    *   **Status:** TODO
+
+4.  **Implement `think` Phase Skeleton:**
+    *   Add `think(&mut self)` method skeleton to `Agent`.
+    *   This method will eventually call the LLM. For now, it can be a placeholder.
+    *   **Status:** TODO
+
+5.  **Implement `act` Phase Skeleton:**
+    *   Add `act(&mut self)` method skeleton to `Agent`.
+    *   This method will eventually execute tools based on LLM response. For now, it can be a placeholder.
+    *   **Status:** TODO
+
+## Phase 2: Tool Integration & LLM Call (Details TBD)
+
+## Phase 3: Command Integration & Refinement (Details TBD)
