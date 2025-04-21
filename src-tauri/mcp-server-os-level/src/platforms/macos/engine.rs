@@ -1457,7 +1457,50 @@ impl AccessibilityEngine for MacOSEngine {
     fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
         // Implementation Note: Iterate through applications from get_applications(),
         // then get AXWindows for each. Or use a system-level API if available.
-        todo!("Implement list_windows for macOS")
+        // todo!("Implement list_windows for macOS")
+        debug!("Listing all windows");
+        let mut all_windows = Vec::new();
+        let apps = self.get_applications()?;
+
+        for app_ui_element in apps {
+            if let Some(macos_app_element) = app_ui_element.as_any().downcast_ref::<MacOSUIElement>() {
+                let ax_app_element = &macos_app_element.element.0;
+
+                match ax_app_element.windows() {
+                    Ok(windows) => {
+                        debug!(
+                            "Found {} windows for app {:?}",
+                            windows.len(),
+                            macos_app_element.cached_label
+                        );
+                        for window_ax_element in &windows {
+                            let role = window_ax_element.role().ok().map(|s| s.to_string());
+                            let title = window_ax_element.title().ok().map(|s| s.to_string());
+                            let desc = window_ax_element.description().ok().map(|s| s.to_string());
+
+                            all_windows.push(self.wrap_element(
+                                ThreadSafeAXUIElement::new(window_ax_element.clone()),
+                                role,
+                                title,
+                                desc,
+                                None, // Value cache - windows typically don't have a simple value
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to get windows for app {:?}: {:?}",
+                            macos_app_element.cached_label, e
+                        );
+                    }
+                }
+            } else {
+                warn!("Could not downcast application UIElement to MacOSUIElement");
+            }
+        }
+
+        debug!("Found a total of {} windows", all_windows.len());
+        Ok(all_windows)
     }
 
     fn close_window(&self) -> Result<(), AutomationError> {
