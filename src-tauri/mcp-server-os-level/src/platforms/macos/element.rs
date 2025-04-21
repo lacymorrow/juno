@@ -24,6 +24,7 @@ use std::hash::{Hash, Hasher};
 use tracing::{debug, warn};
 use core_graphics::event::{CGEventType, CGMouseButton};
 use crate::element::ElementTreeNode;
+use serde_json;
 
 #[derive(Debug)]
 pub struct MacOSUIElement {
@@ -635,9 +636,16 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn is_enabled(&self) -> Result<bool, AutomationError> {
-        Err(AutomationError::UnsupportedOperation(
-            "is_enabled not yet implemented for macOS".to_string(),
-        ))
+        let enabled_attr = AXAttribute::new(&CFString::new("AXEnabled"));
+        match self.element.0.attribute(&enabled_attr) {
+            Ok(value) => value.downcast_into::<core_foundation::boolean::CFBoolean>()
+                              .map(|b| b == core_foundation::boolean::CFBoolean::true_value())
+                              .ok_or_else(|| AutomationError::PlatformError("AXEnabled attribute was not a boolean".to_string())),
+            Err(e) => {
+                debug!("Failed to get AXEnabled attribute: {:?}, assuming disabled", e);
+                Ok(false) // Often safer to assume disabled if attribute is missing/errors
+            }
+        }
     }
 
     fn is_visible(&self) -> Result<bool, AutomationError> {
@@ -648,9 +656,16 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn is_focused(&self) -> Result<bool, AutomationError> {
-        Err(AutomationError::UnsupportedOperation(
-            "is_focused not yet implemented for macOS".to_string(),
-        ))
+        let focused_attr = AXAttribute::new(&CFString::new("AXFocused"));
+         match self.element.0.attribute(&focused_attr) {
+            Ok(value) => value.downcast_into::<core_foundation::boolean::CFBoolean>()
+                              .map(|b| b == core_foundation::boolean::CFBoolean::true_value())
+                              .ok_or_else(|| AutomationError::PlatformError("AXFocused attribute was not a boolean".to_string())),
+            Err(e) => {
+                debug!("Failed to get AXFocused attribute: {:?}, assuming not focused", e);
+                Ok(false)
+            }
+        }
     }
 
     fn perform_action(&self, action: &str) -> Result<(), AutomationError> {
@@ -734,33 +749,78 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
-        let mut all_attrs = self.attributes(); // Start with basic attributes
+        let mut attrs = self.attributes(); // Start with basic attributes (role, label, value, description)
 
+        // Explicitly fetch key attributes and add to properties
+        if let Ok(enabled) = self.is_enabled() {
+            attrs.properties.insert("enabled".to_string(), Some(serde_json::Value::Bool(enabled)));
+        }
+        if let Ok(focused) = self.is_focused() {
+             attrs.properties.insert("focused".to_string(), Some(serde_json::Value::Bool(focused)));
+        }
+        if let Ok((x, y, w, h)) = self.bounds() {
+            attrs.properties.insert("bounds_x".to_string(), Some(serde_json::json!(x)));
+            attrs.properties.insert("bounds_y".to_string(), Some(serde_json::json!(y)));
+            attrs.properties.insert("bounds_width".to_string(), Some(serde_json::json!(w)));
+            attrs.properties.insert("bounds_height".to_string(), Some(serde_json::json!(h)));
+        }
+        if let Some(id) = self.id() { // Use the existing id() method which checks AXIdentifier
+             attrs.properties.insert("identifier".to_string(), Some(serde_json::Value::String(id)));
+        }
+
+        // Helper function to fetch and parse specific attributes
+        let mut fetch_and_insert = |key: &str, ax_attr_name: &str| {
+            let attr = AXAttribute::new(&CFString::new(ax_attr_name));
+            match self.element.0.attribute(&attr) {
+                Ok(value) => {
+                    let parsed = parse_ax_attribute_value(ax_attr_name, value);
+                     if parsed.is_some() { // Only insert if parsing was successful
+                        attrs.properties.insert(key.to_string(), parsed);
+                    }
+                }
+                Err(_) => { /* Ignore errors for optional attributes */ }
+            }
+        };
+
+        fetch_and_insert("placeholder", "AXPlaceholderValue");
+        fetch_and_insert("selected", "AXSelected");
+        // Note: AXChecked is often part of AXValue on checkboxes/radio buttons,
+        // but we can try fetching it directly too.
+        fetch_and_insert("checked", "AXChecked");
+
+
+        // Fetch remaining attributes dynamically (optional, keep if desired)
         match self.element.0.attribute_names() {
             Ok(attr_names_cf) => {
                 let attr_names: Vec<String> = attr_names_cf.iter().map(|s| s.to_string()).collect();
-                debug!(element_role = %all_attrs.role, label = ?all_attrs.label, "Fetching all {} attributes", attr_names.len());
+                debug!(element_role = %attrs.role, label = ?attrs.label, "Dynamically fetching {} other attributes", attr_names.len());
+
+                let explicitly_handled = [
+                    "AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue", // Basic handled by self.attributes()
+                    "AXPosition", "AXSize", // Handled by self.bounds()
+                    "AXEnabled", "AXFocused", "AXIdentifier", // Explicitly handled above
+                    "AXPlaceholderValue", "AXSelected", "AXChecked" // Explicitly handled above
+                ];
 
                 for name_str in attr_names {
-                    // Skip attributes already handled by self.attributes()
-                    if !["AXRole", "AXTitle", "AXLabel", "AXDescription", "AXValue", "AXPosition", "AXSize"].contains(&name_str.as_str()) {
+                    // Skip attributes already handled explicitly or by basic fetch
+                    let key_to_insert = name_str.strip_prefix("AX").unwrap_or(&name_str).to_string(); // Use cleaner key
+                    if !explicitly_handled.contains(&name_str.as_str()) && !attrs.properties.contains_key(&key_to_insert) {
                         let attr = AXAttribute::new(&CFString::new(&name_str));
                         match self.element.0.attribute(&attr) {
                             Ok(value) => {
                                 let parsed_value = parse_ax_attribute_value(&name_str, value);
-                                all_attrs.properties.insert(name_str.clone(), parsed_value);
-                                // Avoid overly verbose logging for every single attribute
-                                // debug!("Fetched property '{}': {:?}", name_str, parsed_value);
+                                attrs.properties.insert(key_to_insert, parsed_value);
                             }
                             Err(e) => {
-                                // Log errors only if they are unexpected (not 'unsupported' or 'no value')
+                                // Log errors only if they are unexpected
                                 if !matches!(
                                     e,
                                     accessibility::Error::Ax(-25212) // attribute unsupported
                                         | accessibility::Error::Ax(-25205) // no value
-                                        | accessibility::Error::Ax(-25204) // getting attribute failed (internal error)
+                                        | accessibility::Error::Ax(-25204) // getting attribute failed
                                 ) {
-                                    debug!("Error getting property attribute '{}': {:?}", name_str, e);
+                                    debug!("Error getting dynamic property attribute '{}': {:?}", name_str, e);
                                 }
                             }
                         }
@@ -768,12 +828,11 @@ impl UIElementImpl for MacOSUIElement {
                 }
             }
             Err(e) => {
-                warn!("Failed to retrieve attribute names for element: {:?}", e);
-                // Continue with just the basic attributes if names can't be fetched
+                warn!("Failed to retrieve attribute names for dynamic fetch: {:?}", e);
             }
         }
 
-        Ok(all_attrs)
+        Ok(attrs)
     }
 
     fn screenshot(&self) -> Result<String, AutomationError> {
