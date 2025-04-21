@@ -125,6 +125,13 @@ pub fn run() {
             dev_middle_click,
             dev_double_click,
             dev_get_cursor_position,
+            dev_bash_command,
+            // Text Editor Commands
+            dev_text_editor_view,
+            dev_text_editor_create,
+            dev_text_editor_str_replace,
+            dev_text_editor_insert,
+            dev_text_editor_undo_edit,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
@@ -283,9 +290,11 @@ pub fn run() {
 
                                 // Set initial ignore state based on visibility (handled by tray logic, but good initial state)
                                 if !window.is_visible().unwrap_or(false) {
+                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
                                      let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
                                      info!("macOS Setup: Floating bar initially hidden, ignoring mouse events.");
                                 } else {
+                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
                                      let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
                                      info!("macOS Setup: Floating bar initially visible, accepting mouse events.");
                                 }
@@ -391,16 +400,19 @@ mod macos_tracking {
             // Declare class only if it doesn't exist yet
             if delegate_class.is_none() {
                  info!("Declaring MouseTrackingDelegate class...");
+                 #[allow(unexpected_cfgs)] // Allow cfg from class! macro
                 let superclass = class!(NSObject);
                 let mut decl = ClassDecl::new(delegate_class_name, superclass).unwrap();
 
                 // Add mouseEntered: method
+                #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
                 decl.add_method(
                     sel!(mouseEntered:),
                     mouse_entered as extern "C" fn(&Object, Sel, cocoa_id),
                 );
 
                 // Add mouseExited: method
+                #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
                 decl.add_method(
                     sel!(mouseExited:),
                     mouse_exited as extern "C" fn(&Object, Sel, cocoa_id),
@@ -410,16 +422,20 @@ mod macos_tracking {
                  info!("MouseTrackingDelegate class registered.");
             }
 
+            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let delegate: cocoa_id = msg_send![delegate_class.unwrap(), new];
              info!("MouseTrackingDelegate instance created: {:?}", delegate);
 
             // Keep the delegate alive. Leaking it here is simpler than complex lifetime management.
             let _ = Box::leak(Box::new(delegate)); // Box the delegate and leak it
 
+            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let bounds: NSRect = msg_send![view, bounds];
              info!("Got view bounds for tracking area.");
 
+            #[allow(unexpected_cfgs)] // Allow cfg from msg_send and class! macros
             let tracking_area: cocoa_id = msg_send![class!(NSTrackingArea), alloc];
+            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let tracking_area_ptr: cocoa_id = msg_send![
                 tracking_area,
                 initWithRect: bounds
@@ -429,7 +445,9 @@ mod macos_tracking {
             ];
              info!("NSTrackingArea created: {:?}", tracking_area_ptr);
 
+            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let _: () = msg_send![view, addTrackingArea: tracking_area_ptr];
+            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let _: () = msg_send![tracking_area_ptr, release]; // Release after adding (view retains it)
             // Note: Do not release the delegate here, it's leaked via Box::leak
 

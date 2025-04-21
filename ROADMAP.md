@@ -8,6 +8,8 @@ This document outlines a roadmap for enhancing the `dotdot` Tauri application. T
 
 ## Phase 1: Implement Core Agent Framework
 
+**Status: Partially Complete.** A core loop exists (`anthropic::submit_query`), but lacks a formal `Agent` structure, dedicated memory roles, and a trait-based `ToolCollection`.
+
 **Improvement over `dotdot`:** `Manus` has a dedicated `ToolCallAgent` class managing the execution loop, state, memory, and tool invocation. `dotdot` currently lacks a central orchestrating agent.
 
 *   **1.1. Define Agent Structure:**
@@ -28,6 +30,8 @@ This document outlines a roadmap for enhancing the `dotdot` Tauri application. T
 
 ## Phase 2: Integrate Key Manus-Inspired Tools
 
+**Status: Partially Complete.** Basic file/process execution exists but lacks the robustness and dedicated interfaces of Manus tools. `TextEditorTool` and `PythonExecute` (corresponding to Anthropic's `bash` tool) are **not exposed** via Tauri commands.
+
 **Improvement over `dotdot`:** `Manus` features specialized, high-level tools like `BrowserUseTool`, `PythonExecute`, and `StrReplaceEditor`.
 
 *   **2.1. Develop `BrowserUseTool`:**
@@ -36,19 +40,20 @@ This document outlines a roadmap for enhancing the `dotdot` Tauri application. T
         *   Research and select a suitable Rust library for browser automation (e.g., `headless_chrome`, `fantoccini`, playwright-rust bindings if mature, or potentially deeper integration with macOS WebKit APIs).
         *   Implement core browser actions as methods within this tool (navigate, find elements by CSS/XPath, click, type, scrape content, manage cookies/state).
         *   Create a `BrowserContextManager` to handle browser instances and state, similar to `Manus.browser_context_helper`.
-*   **2.2. Implement `PythonExecute` Tool:**
-    *   **Goal:** Allow the agent to execute Python code for tasks not easily covered by other tools.
+*   **2.2. Implement `PythonExecute` Tool (Anthropic `bash` equivalent):**
+    *   **Goal:** Allow the agent to execute shell commands (like Python scripts) for tasks not easily covered by other tools.
     *   **Implementation:**
         *   **Security:** This is critical. Execution must be sandboxed or carefully controlled.
-        *   Use `std::process::Command` to invoke the Python interpreter safely.
-        *   Define clear input/output mechanisms (e.g., passing data via stdin/stdout or temporary files).
-        *   Implement strict timeouts and resource limits.
-*   **2.3. Create `TextEditorTool`:**
-    *   **Goal:** Provide capabilities for file manipulation, similar to `Manus.StrReplaceEditor`.
+        *   Use `std::process::Command` to invoke interpreters safely (Python, bash, etc.).
+        *   Define clear input/output mechanisms.
+        *   Implement strict timeouts and resource limits (partially done via `wait-timeout`).
+        *   **Expose via Tauri command.**
+*   **2.3. Create `TextEditorTool` (Anthropic `text_editor` equivalent):**
+    *   **Goal:** Provide capabilities for file manipulation, similar to `Manus.StrReplaceEditor` and Anthropic's `text_editor` tool.
     *   **Implementation:**
         *   Leverage Rust's standard library (`std::fs`) for file reading and writing.
-        *   Implement text manipulation functions (e.g., search-and-replace, insertion, deletion).
-        *   Consider integrating with existing clipboard/typing commands for interacting with text *within* other applications if direct file editing isn't the goal.
+        *   Implement text manipulation functions (e.g., view, create, search-and-replace, insertion, undo).
+        *   **Expose via Tauri commands.**
 *   **2.4. Implement `TerminateTool`:**
     *   **Goal:** Allow the agent (or LLM) to signal the end of a task.
     *   **Implementation:** A simple tool that sets a flag or state within the agent to halt its execution loop gracefully.
