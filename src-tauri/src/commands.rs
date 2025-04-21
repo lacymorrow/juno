@@ -322,51 +322,41 @@ pub(crate) async fn dev_open_url(app: AppHandle, state: State<'_, AppState>, url
 pub(crate) async fn dev_scroll_window(
     app: AppHandle,
     state: State<'_, AppState>,
-    direction: String,
-    amount_str: Option<String>
+    direction: String,      // "up", "down", "left", "right"
+    scroll_amount: f64, // Number of units/clicks (changed back to f64 for SDK)
 ) -> Result<(), String> {
-    println!("[DEV_TOOL] Attempting to scroll window {}...", direction);
+    println!(
+        "[DEV_TOOL] Attempting to scroll {} by {} units at current position...",
+        direction,
+        scroll_amount
+    );
 
-    // Validate direction string and determine the effective direction for the SDK call
-    let lower_direction = direction.to_lowercase();
-    #[cfg(target_os = "macos")]
-    let effective_direction = match lower_direction.as_str() {
-        "up" | "down" | "left" | "right" => lower_direction.as_str(), // Use direction directly
-        _ => return Err(format!("Invalid scroll direction: '{}'. Must be 'up', 'down', 'left', or 'right'.", direction)),
-    };
-
-    #[cfg(not(target_os = "macos"))]
-    let effective_direction = match lower_direction.as_str() {
-         "up" => "up",
-         "down" => "down",
-        _ => return Err(format!("Invalid scroll direction: {}. Must be 'up' or 'down'.", direction)),
-    };
-
-    // Parse amount, default to a reasonable value (e.g., 3.0 units)
-    let amount: f64 = match amount_str {
-        Some(s) => match s.parse::<f64>() {
-            Ok(num) => num,
-            Err(_) => return Err(format!("Invalid scroll amount: '{}'. Must be a number.", s)),
-        },
-        None => 3.0, // Default scroll amount
-    };
+    // Validate direction
+    let valid_directions = ["up", "down", "left", "right"];
+    if !valid_directions.contains(&direction.as_str()) {
+        let err_msg = format!("Invalid scroll direction: '{}'. Must be one of: {:?}", direction, valid_directions);
+        println!("[DEV_TOOL] Error: {}", err_msg);
+        return Err(err_msg);
+    }
 
     #[cfg(target_os = "macos")]
-    // Use the engine's scroll_at_current_position method with the inverted direction
-    let result = state.desktop.engine().scroll_at_current_position(effective_direction, amount);
+    let result = state.desktop.scroll_at_current_position(&direction, scroll_amount);
 
     #[cfg(not(target_os = "macos"))]
-    let result = Err(AutomationError::UnsupportedPlatform); // Keep original behavior for non-macOS
+    let result = Err(AutomationError::UnsupportedPlatform);
 
     match result {
         Ok(_) => {
-            println!("[DEV_TOOL] scroll_window {} (effective: {}) succeeded.", direction, effective_direction);
-            let scroll_msg = format!("Scrolled window {} by {}", direction, amount);
-            send_dev_tool_notification(&app, "Scroll", &scroll_msg)?;
+            println!("[DEV_TOOL] scroll_at_current_position {} by {} succeeded.", direction, scroll_amount);
+            send_dev_tool_notification(
+                &app,
+                "Scroll",
+                &format!("Scrolled {} by {} at current position", direction, scroll_amount),
+            )?;
             Ok(())
         }
         Err(e) => {
-            let err_msg = format!("Failed to scroll window {} (effective: {}): {}", direction, effective_direction, e);
+            let err_msg = format!("Failed to call scroll_at_current_position: {}", e);
             println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
@@ -714,6 +704,267 @@ pub(crate) async fn dev_triple_click(
         }
         Err(e) => {
             let err_msg = format!("Failed to call triple_click: {}", e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_mouse_move(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting to move mouse to ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.mouse_move(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] mouse_move succeeded.");
+            send_dev_tool_notification(&app, "Mouse Move", &format!("Moved mouse to ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call mouse_move: {}", e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_left_mouse_down(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting left mouse down at ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.left_mouse_down(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] left_mouse_down succeeded at ({}, {}).", x, y);
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Left mouse button pressed at ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call left_mouse_down at ({}, {}): {}", x, y, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_left_mouse_up(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting left mouse up at ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.left_mouse_up(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] left_mouse_up succeeded at ({}, {}).", x, y);
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Left mouse button released at ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call left_mouse_up at ({}, {}): {}", x, y, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_left_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting left click at ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.left_click(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] left_click at ({}, {}) succeeded.", x, y);
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Left clicked at ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call left_click at ({}, {}): {}", x, y, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_left_click_drag(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    start_x: f64,
+    start_y: f64,
+    end_x: f64,
+    end_y: f64,
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting left click drag from ({}, {}) to ({}, {})...", start_x, start_y, end_x, end_y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.left_click_drag(start_x, start_y, end_x, end_y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] left_click_drag succeeded.");
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Dragged from ({}, {}) to ({}, {})", start_x, start_y, end_x, end_y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call left_click_drag: {}", e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_right_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting right click at ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.right_click(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] right_click at ({}, {}) succeeded.", x, y);
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Right clicked at ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call right_click at ({}, {}): {}", x, y, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_middle_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting middle click at ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.middle_click(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] middle_click at ({}, {}) succeeded.", x, y);
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Middle clicked at ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call middle_click at ({}, {}): {}", x, y, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_double_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    println!("[DEV_TOOL] Attempting double click at ({}, {})...", x, y);
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.double_click(x, y);
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(_) => {
+            println!("[DEV_TOOL] double_click at ({}, {}) succeeded.", x, y);
+            send_dev_tool_notification(&app, "Mouse Action", &format!("Double clicked at ({}, {})", x, y))?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call double_click at ({}, {}): {}", x, y, e);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_get_cursor_position(
+    app: AppHandle,
+    state: State<'_, AppState>
+) -> Result<(f64, f64), String> {
+    println!("[DEV_TOOL] Attempting to get cursor position...");
+
+    #[cfg(target_os = "macos")]
+    let result = state.desktop.cursor_position();
+
+    #[cfg(not(target_os = "macos"))]
+    let result = Err(AutomationError::UnsupportedPlatform);
+
+    match result {
+        Ok(pos) => {
+            println!("[DEV_TOOL] get_cursor_position succeeded: ({}, {}).", pos.0, pos.1);
+            send_dev_tool_notification(&app, "Cursor Info", &format!("Cursor at ({}, {})", pos.0, pos.1))?;
+            Ok(pos)
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to call get_cursor_position: {}", e);
             println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
