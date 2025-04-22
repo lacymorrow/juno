@@ -108,8 +108,28 @@ pub fn str_replace_editor(file_path: String, find_text: String, replace_text: St
         }
     };
 
+    // --- Add Uniqueness Check ---
+    let occurrences = content.matches(&find_text).count();
+    if occurrences == 0 {
+        let err_msg = format!("No replacement performed: '{}' was not found in file '{}'.", find_text, file_path);
+        error!(error = %err_msg, "str_replace_editor failed");
+        return Err(err_msg);
+    } else if occurrences > 1 {
+        // Try to find line numbers for better error message (best effort)
+        let line_numbers: Vec<usize> = content.lines()
+            .enumerate()
+            .filter(|(_, line)| line.contains(&find_text))
+            .map(|(i, _)| i + 1)
+            .collect();
+        let err_msg = format!("No replacement performed: '{}' found multiple times in file '{}' (e.g., on lines: {:?}). Please provide a unique string.", find_text, file_path, line_numbers);
+        error!(error = %err_msg, "str_replace_editor failed");
+        return Err(err_msg);
+    }
+    // --- End Uniqueness Check ---
+
+
     // Perform the replacement
-    let new_content = content.replace(&find_text, &replace_text);
+    let new_content = content.replace(&find_text, &replace_text); // Now we know it replaces exactly one
 
     // Write the new content back to the file
     match fs::write(&file_path, new_content) {
