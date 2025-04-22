@@ -1,7 +1,7 @@
 use computer_use_ai_sdk::Desktop;
 use serde_json::{json, Value};
 use std::fs;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 // --- Parameter Helper Functions ---
 
