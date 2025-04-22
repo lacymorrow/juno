@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use computer_use_ai_sdk::{Desktop};
+use computer_use_ai_sdk::{Desktop, UIElement};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
@@ -10,6 +10,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_notification::NotificationExt;
 use tracing::{error, info, warn};
 use wait_timeout::ChildExt;
+use shlex;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::{
@@ -376,46 +377,90 @@ pub(crate) async fn call_tool(
                 // Get optional line numbers (use our helper for optional u64)
                 let start_line_opt = get_optional_u64_param(input, "start_line")?;
                 let end_line_opt = get_optional_u64_param(input, "end_line")?;
+                let path = PathBuf::from(&file_path);
 
-                match (start_line_opt, end_line_opt) {
-                    (Some(start), Some(end)) => {
-                        // Both start and end provided: Read range
-                        info!(path = %file_path, start=start, end=end, "Reading file range");
-                        if start == 0 || end == 0 || start > end {
-                            return Err(json!({ "error": format!("Invalid line range: start ({}) must be >= 1 and <= end ({}).", start, end) }));
-                        }
-                        match fs::read_to_string(&file_path) {
-                            Ok(content) => {
-                                let lines: Vec<&str> = content.lines().collect();
-                                let total_lines = lines.len();
-                                // Adjust to 0-based index, clamp to bounds
-                                let start_idx = (start - 1).clamp(0, total_lines as u64) as usize;
-                                let end_idx = (end).clamp(0, total_lines as u64) as usize; // end is exclusive for slice
+                // --- Check if Path is Directory ---
+                match fs::metadata(&path) {
+                    Ok(metadata) => {
+                        if metadata.is_dir() {
+                            // --- Handle Directory Listing ---
+                            if start_line_opt.is_some() || end_line_opt.is_some() {
+                                return Err(json!({ "error": "Line range parameters (start_line, end_line) are not allowed when viewing a directory." }));
+                            }
 
-                                if start_idx >= end_idx {
-                                    // Handle case where start is beyond end after clamping (e.g., start > total_lines)
-                                    Ok(json!({ "success": true, "content": "", "message": "Specified range is empty or invalid for this file." }))
-                                } else {
-                                    let range_content = lines[start_idx..end_idx].join("\n");
-                                    Ok(json!({ "success": true, "content": range_content }))
+                            info!(path = %file_path, "Listing directory contents");
+                            // Construct the find command: find <path> -maxdepth 2 -not -path '*/.*'
+                            // Using sh -c to handle potential special characters in the path
+                            let find_command = format!("find {} -maxdepth 2 -not -path '*/.*'", shlex::quote(&file_path));
+                            match Command::new("sh").arg("-c").arg(&find_command).output() {
+                                Ok(output) => {
+                                    if output.status.success() {
+                                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                        let result_message = format!(
+                                            "Directory listing for '{}' (up to 2 levels deep, excluding hidden):
+{}",
+                                            file_path,
+                                            stdout
+                                        );
+                                        Ok(json!({ "success": true, "content": result_message }))
+                                    } else {
+                                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                        Err(json!({ "error": format!("Failed to list directory '{}': Command failed: {}", file_path, stderr) }))
+                                    }
+                                }
+                                Err(e) => Err(json!({ "error": format!("Failed to execute find command for directory '{}': {}", file_path, e) }))
+                            }
+                            // --- End Handle Directory Listing ---
+                        } else {
+                            // --- Handle File Viewing (Existing Logic) ---
+                            match (start_line_opt, end_line_opt) {
+                                (Some(start), Some(end)) => {
+                                    // Both start and end provided: Read range
+                                    info!(path = %file_path, start=start, end=end, "Reading file range");
+                                    if start == 0 || end == 0 || start > end {
+                                        return Err(json!({ "error": format!("Invalid line range: start ({}) must be >= 1 and <= end ({}).", start, end) }));
+                                    }
+                                    match fs::read_to_string(&file_path) {
+                                        Ok(content) => {
+                                            let lines: Vec<&str> = content.lines().collect();
+                                            let total_lines = lines.len();
+                                            // Adjust to 0-based index, clamp to bounds
+                                            let start_idx = (start - 1).clamp(0, total_lines as u64) as usize;
+                                            let end_idx = (end).clamp(0, total_lines as u64) as usize; // end is exclusive for slice
+
+                                            if start_idx >= end_idx {
+                                                // Handle case where start is beyond end after clamping (e.g., start > total_lines)
+                                                Ok(json!({ "success": true, "content": "", "message": "Specified range is empty or invalid for this file." }))
+                                            } else {
+                                                let range_content = lines[start_idx..end_idx].join("\n");
+                                                Ok(json!({ "success": true, "content": range_content }))
+                                            }
+                                        }
+                                        Err(e) => Err(json!({ "error": format!("Failed to read file '{}': {}", file_path, e) })),
+                                    }
+                                }
+                                (None, None) => {
+                                    // Neither provided: Read whole file
+                                    info!(path = %file_path, "Reading whole file");
+                                    match fs::read_to_string(&file_path) {
+                                        Ok(content) => Ok(json!({ "success": true, "content": content })),
+                                        Err(e) => Err(json!({ "error": format!("Failed to read file '{}': {}", file_path, e) })),
+                                    }
+                                }
+                                _ => {
+                                    // Only one provided: Invalid combination
+                                    Err(json!({ "error": "Both start_line and end_line must be provided together, or neither." }))
                                 }
                             }
-                            Err(e) => Err(json!({ "error": format!("Failed to read file '{}': {}", file_path, e) })),
+                            // --- End Handle File Viewing ---
                         }
                     }
-                    (None, None) => {
-                        // Neither provided: Read whole file
-                        info!(path = %file_path, "Reading whole file");
-                        match fs::read_to_string(&file_path) {
-                            Ok(content) => Ok(json!({ "success": true, "content": content })),
-                            Err(e) => Err(json!({ "error": format!("Failed to read file '{}': {}", file_path, e) })),
-                        }
-                    }
-                    _ => {
-                        // Only one provided: Invalid combination
-                        Err(json!({ "error": "Both start_line and end_line must be provided together, or neither." }))
+                    Err(e) => {
+                        // Handle cases where metadata cannot be retrieved (e.g., path doesn't exist)
+                        Err(json!({ "error": format!("Failed to access path '{}': {}", file_path, e) }))
                     }
                 }
+                // --- End Check if Path is Directory ---
             }
             "text_editor_create" => {
                 match (get_string_param(input, "file_path"), get_string_param(input, "content")) {
