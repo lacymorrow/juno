@@ -5,8 +5,8 @@ use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use dotenvy::dotenv;
 use std::env;
-use std::sync::{Arc, Mutex};
-use tauri::{ // Add Manager and missing items here
+use std::sync::Arc;
+use tauri::{
     Manager, WindowEvent,
     menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem},
     tray::{TrayIconEvent, MouseButton, MouseButtonState},
@@ -41,7 +41,7 @@ pub mod utils;
 pub mod agent;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::*;
+use commands::{app_url::*, core::*, element::*, keyboard::*, mouse::*, shell::*, text_editor::*, window::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -78,11 +78,10 @@ pub fn run() {
     let desktop_arc = Arc::new(desktop_instance);
 
     // Create the AppState
-    let app_state = state::AppState {
-        desktop: desktop_arc.clone(),
-        last_edited_file: Mutex::new(None), // Initialize undo state
-        previous_content: Mutex::new(None), // Initialize undo state
-    };
+    let app_state = state::AppState::new(desktop_arc.clone());
+
+    // Initialize shell state
+    commands::shell::init_shell_state(&app_state);
 
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
