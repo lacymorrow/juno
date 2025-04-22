@@ -1,6 +1,6 @@
 #![allow(dead_code)] // TEMP: Remove later
 
-use super::memory::{Message, Role}; // Import memory structures
+use super::memory::{Message}; // Removed Role
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentState {

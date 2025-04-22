@@ -3,7 +3,6 @@ use crate::tts;
 use crate::utils;
 use computer_use_ai_sdk::Desktop; // Import Desktop
 use std::process::Command;
-use std::fs::File;
 use std::io::Write;
 use tempfile::Builder as TempFileBuilder;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
