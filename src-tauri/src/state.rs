@@ -1,6 +1,8 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+use std::collections::HashMap;
+use std::any::{Any, TypeId};
 
 // Application state structure
 #[allow(dead_code)] // Allow dead code for potentially unused fields
@@ -9,6 +11,8 @@ pub struct AppState {
     // State for text_editor_undo_edit
     pub last_edited_file: Mutex<Option<PathBuf>>,
     pub previous_content: Mutex<Option<Option<String>>>,
+    // Dynamic storage for other state components
+    state_components: Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
 }
 
 impl AppState {
@@ -17,7 +21,28 @@ impl AppState {
             desktop,
             last_edited_file: Mutex::new(None),
             previous_content: Mutex::new(None),
+            state_components: Mutex::new(HashMap::new()),
         }
+    }
+
+    // Insert a component into the state
+    pub fn insert<T: 'static + Send + Sync>(&self, component: T) {
+        let type_id = TypeId::of::<T>();
+        let mut state_components = self.state_components.lock().unwrap();
+        state_components.insert(type_id, Box::new(component));
+    }
+
+    // Get a reference to a component from the state
+    pub fn get<T: 'static + Send + Sync + Clone>(&self) -> Option<Arc<T>> {
+        let type_id = TypeId::of::<T>();
+        let guard = self.state_components.lock().unwrap();
+
+        guard.get(&type_id).and_then(|boxed| {
+            boxed.downcast_ref::<T>().map(|value| {
+                // Clone the Arc to extend the lifetime beyond the lock
+                Arc::new(value.clone())
+            })
+        })
     }
 }
 

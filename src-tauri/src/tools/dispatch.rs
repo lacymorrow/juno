@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use computer_use_ai_sdk::{Desktop, UIElement};
+use computer_use_ai_sdk::{Desktop};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
