@@ -440,13 +440,60 @@ async fn register_additional_computer_use_tools(
     provider.register_tool(hold_key_def, hold_key_exec).await;
     info!("Registered tool: hold_key");
 
-    // left_mouse_down
+    // Define common input structs
     #[derive(serde::Deserialize)]
     struct MousePositionInput {
         x: f64,
         y: f64,
     }
 
+    #[derive(serde::Deserialize)]
+    struct DragInput {
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+    }
+
+    // mouse_move
+    let mouse_move_def = ToolDefinition {
+        name: "mouse_move".to_string(),
+        description: "Move the mouse cursor to the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate to move to." },
+                "y": { "type": "number", "description": "The y coordinate to move to." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let mouse_move_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<MousePositionInput>(input)
+            .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+        // Use a blocking task to handle the async operation
+        let _result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let app_handle_for_async = app_handle.clone();
+                commands::mouse::dev_mouse_move(app_handle_for_async, managed_state, args.x, args.y)
+                    .await
+                    .map_err(|e| format!("Error moving mouse: {}", e))
+            })
+        })?;
+
+        Ok(json!({"success": true}))
+    };
+    provider.register_tool(mouse_move_def, mouse_move_exec).await;
+    info!("Registered tool: mouse_move");
+
+    // left_mouse_down
     let left_mouse_down_def = ToolDefinition {
         name: "left_mouse_down".to_string(),
         description: "Press the left mouse button down at the specified coordinates.".to_string(),
@@ -522,6 +569,44 @@ async fn register_additional_computer_use_tools(
     provider.register_tool(left_mouse_up_def, left_mouse_up_exec).await;
     info!("Registered tool: left_mouse_up");
 
+    // left_click
+    let left_click_def = ToolDefinition {
+        name: "left_click".to_string(),
+        description: "Perform a left click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let left_click_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<MousePositionInput>(input)
+            .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+        // Use a blocking task to handle the async operation
+        let _result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let app_handle_for_async = app_handle.clone();
+                commands::mouse::dev_left_click(app_handle_for_async, managed_state, args.x, args.y)
+                    .await
+                    .map_err(|e| format!("Error left clicking: {}", e))
+            })
+        })?;
+
+        Ok(json!({"success": true}))
+    };
+    provider.register_tool(left_click_def, left_click_exec).await;
+    info!("Registered tool: left_click");
+
     // right_click
     let right_click_def = ToolDefinition {
         name: "right_click".to_string(),
@@ -559,6 +644,129 @@ async fn register_additional_computer_use_tools(
     };
     provider.register_tool(right_click_def, right_click_exec).await;
     info!("Registered tool: right_click");
+
+    // middle_click
+    let middle_click_def = ToolDefinition {
+        name: "middle_click".to_string(),
+        description: "Perform a middle click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let middle_click_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<MousePositionInput>(input)
+            .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+        // Use a blocking task to handle the async operation
+        let _result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let app_handle_for_async = app_handle.clone();
+                commands::mouse::dev_middle_click(app_handle_for_async, managed_state, args.x, args.y)
+                    .await
+                    .map_err(|e| format!("Error middle clicking: {}", e))
+            })
+        })?;
+
+        Ok(json!({"success": true}))
+    };
+    provider.register_tool(middle_click_def, middle_click_exec).await;
+    info!("Registered tool: middle_click");
+
+    // double_click
+    let double_click_def = ToolDefinition {
+        name: "double_click".to_string(),
+        description: "Perform a double click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let double_click_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<MousePositionInput>(input)
+            .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+        // Use a blocking task to handle the async operation
+        let _result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let app_handle_for_async = app_handle.clone();
+                commands::mouse::dev_double_click(app_handle_for_async, managed_state, args.x, args.y)
+                    .await
+                    .map_err(|e| format!("Error double clicking: {}", e))
+            })
+        })?;
+
+        Ok(json!({"success": true}))
+    };
+    provider.register_tool(double_click_def, double_click_exec).await;
+    info!("Registered tool: double_click");
+
+    // left_click_drag
+    let left_click_drag_def = ToolDefinition {
+        name: "left_click_drag".to_string(),
+        description: "Perform a drag operation with the left mouse button from start coordinates to end coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "start_x": { "type": "number", "description": "The starting x coordinate." },
+                "start_y": { "type": "number", "description": "The starting y coordinate." },
+                "end_x": { "type": "number", "description": "The ending x coordinate." },
+                "end_y": { "type": "number", "description": "The ending y coordinate." }
+            },
+            "required": ["start_x", "start_y", "end_x", "end_y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let left_click_drag_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<DragInput>(input)
+            .map_err(|e| format!("Failed to parse drag input: {}", e))?;
+
+        // Use a blocking task to handle the async operation
+        let _result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let app_handle_for_async = app_handle.clone();
+                commands::mouse::dev_left_click_drag(
+                    app_handle_for_async,
+                    managed_state,
+                    args.start_x,
+                    args.start_y,
+                    args.end_x,
+                    args.end_y
+                )
+                .await
+                .map_err(|e| format!("Error performing click and drag: {}", e))
+            })
+        })?;
+
+        Ok(json!({"success": true}))
+    };
+    provider.register_tool(left_click_drag_def, left_click_drag_exec).await;
+    info!("Registered tool: left_click_drag");
 
     // cursor_position
     let cursor_position_def = ToolDefinition {
