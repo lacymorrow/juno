@@ -3,11 +3,12 @@ mod tests {
     // Adjust imports to point to the new locations of helpers and definitions
     use crate::tools::helpers::*; // Assuming helpers are moved to tools::helpers
     use crate::tools::definitions::*; // Assuming list_tools is moved to tools::definitions
-    use computer_use_ai_sdk::Desktop;
+    use computer_use_ai_sdk::{Desktop, AutomationError};
     use serde_json::json;
     use std::sync::Arc;
     use std::{fs, io::Write}; // Added for file operations in tests
     use tempfile::NamedTempFile; // Added for temporary file creation
+    use std::cell::RefCell;
 
     // --- Tests for get_string_param ---
     #[test]
@@ -376,6 +377,217 @@ mod tests {
         assert!(tool_names.contains(&"click_focused_element".to_string()), "Missing tool: click_focused_element");
         assert!(tool_names.contains(&"bash".to_string()), "Missing tool: bash");
         assert!(tool_names.contains(&"text_editor_view".to_string()), "Missing tool: text_editor_view");
-
+    }
+    
+    // --- Tests for hold_keys_and_run ---
+    
+    // Mock Desktop implementation for testing hold_keys_and_run
+    struct MockDesktop {
+        held_keys: RefCell<Vec<String>>,
+        hold_key_should_fail: RefCell<Option<String>>,
+        release_key_should_fail: RefCell<Option<String>>,
+    }
+    
+    impl MockDesktop {
+        fn new() -> Self {
+            MockDesktop {
+                held_keys: RefCell::new(Vec::new()),
+                hold_key_should_fail: RefCell::new(None),
+                release_key_should_fail: RefCell::new(None),
+            }
+        }
+        
+        fn hold_key(&self, key: &str) -> Result<(), AutomationError> {
+            if let Some(fail_key) = self.hold_key_should_fail.borrow().as_ref() {
+                if key == fail_key {
+                    return Err(AutomationError::new(&format!("Failed to hold key: {}", key)));
+                }
+            }
+            self.held_keys.borrow_mut().push(key.to_string());
+            Ok(())
+        }
+        
+        fn release_key(&self, key: &str) -> Result<(), AutomationError> {
+            if let Some(fail_key) = self.release_key_should_fail.borrow().as_ref() {
+                if key == fail_key {
+                    return Err(AutomationError::new(&format!("Failed to release key: {}", key)));
+                }
+            }
+            
+            let mut keys = self.held_keys.borrow_mut();
+            if let Some(pos) = keys.iter().position(|k| k == key) {
+                keys.remove(pos);
+                Ok(())
+            } else {
+                Err(AutomationError::new(&format!("Key not held: {}", key)))
+            }
+        }
+        
+        fn get_held_keys(&self) -> Vec<String> {
+            self.held_keys.borrow().clone()
+        }
+        
+        fn set_hold_key_failure(&self, key: Option<String>) {
+            *self.hold_key_should_fail.borrow_mut() = key;
+        }
+        
+        fn set_release_key_failure(&self, key: Option<String>) {
+            *self.release_key_should_fail.borrow_mut() = key;
+        }
+    }
+    
+    #[test]
+    fn test_hold_keys_and_run_success() {
+        let mock_desktop = MockDesktop::new();
+        
+        // Create a simple action that returns a success value
+        let action = || -> Result<i32, AutomationError> {
+            Ok(42)
+        };
+        
+        // Test with a single key
+        let keys = vec!["cmd".to_string()];
+        let result = hold_keys_and_run_with_desktop(&mock_desktop, &keys, action);
+        
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 42);
+        assert!(mock_desktop.get_held_keys().is_empty(), "All keys should be released");
+    }
+    
+    #[test]
+    fn test_hold_keys_and_run_multiple_keys() {
+        let mock_desktop = MockDesktop::new();
+        
+        // Create an action that checks if keys are held during execution
+        let action = || -> Result<Vec<String>, AutomationError> {
+            // Return the currently held keys
+            Ok(mock_desktop.get_held_keys())
+        };
+        
+        // Test with multiple keys
+        let keys = vec!["shift".to_string(), "cmd".to_string(), "alt".to_string()];
+        let result = hold_keys_and_run_with_desktop(&mock_desktop, &keys, action);
+        
+        assert!(result.is_ok());
+        let held_during_action = result.unwrap();
+        assert_eq!(held_during_action.len(), 3, "All keys should be held during action");
+        assert!(held_during_action.contains(&"shift".to_string()));
+        assert!(held_during_action.contains(&"cmd".to_string()));
+        assert!(held_during_action.contains(&"alt".to_string()));
+        
+        // After the function completes, all keys should be released
+        assert!(mock_desktop.get_held_keys().is_empty(), "All keys should be released after function");
+    }
+    
+    #[test]
+    fn test_hold_keys_and_run_hold_failure() {
+        let mock_desktop = MockDesktop::new();
+        
+        // Set up the second key to fail
+        mock_desktop.set_hold_key_failure(Some("cmd".to_string()));
+        
+        // Create a simple action
+        let action = || -> Result<(), AutomationError> {
+            Ok(())
+        };
+        
+        // Test with keys where one will fail to hold
+        let keys = vec!["shift".to_string(), "cmd".to_string(), "alt".to_string()];
+        let result = hold_keys_and_run_with_desktop(&mock_desktop, &keys, action);
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("Failed to hold modifier key 'cmd'"));
+        
+        // Only the first key should have been held and then released during cleanup
+        assert!(mock_desktop.get_held_keys().is_empty(), "All keys should be released after error");
+    }
+    
+    #[test]
+    fn test_hold_keys_and_run_action_failure() {
+        let mock_desktop = MockDesktop::new();
+        
+        // Create an action that fails
+        let action = || -> Result<(), AutomationError> {
+            Err(AutomationError::new("Action failed"))
+        };
+        
+        // Test with keys where the action fails
+        let keys = vec!["shift".to_string(), "cmd".to_string()];
+        let result = hold_keys_and_run_with_desktop(&mock_desktop, &keys, action);
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("Action failed"));
+        
+        // All keys should be released even though the action failed
+        assert!(mock_desktop.get_held_keys().is_empty(), "All keys should be released after action failure");
+    }
+    
+    #[test]
+    fn test_hold_keys_and_run_release_failure() {
+        let mock_desktop = MockDesktop::new();
+        
+        // Set up the first key to fail on release
+        mock_desktop.set_release_key_failure(Some("shift".to_string()));
+        
+        // Create a simple action
+        let action = || -> Result<(), AutomationError> {
+            Ok(())
+        };
+        
+        // Test with keys where one will fail to release
+        let keys = vec!["shift".to_string(), "cmd".to_string()];
+        let result = hold_keys_and_run_with_desktop(&mock_desktop, &keys, action);
+        
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("Action succeeded, but failed to release modifiers"));
+        assert!(error.to_string().contains("Failed to release key 'shift'"));
+        
+        // The key that failed to release should still be held
+        let remaining_keys = mock_desktop.get_held_keys();
+        assert_eq!(remaining_keys.len(), 1);
+        assert_eq!(remaining_keys[0], "shift");
+    }
+    
+    // Helper function to use our mock desktop with hold_keys_and_run
+    fn hold_keys_and_run_with_desktop<F, T>(
+        desktop: &MockDesktop,
+        keys: &[String],
+        action: F,
+    ) -> Result<T, serde_json::Value>
+    where
+        F: FnOnce() -> Result<T, AutomationError>,
+    {
+        // Hold keys
+        for key in keys {
+            if let Err(e) = desktop.hold_key(key) {
+                // Attempt to release any already held keys before returning error
+                for held_key in keys.iter().take_while(|&k| k != key) {
+                    desktop.release_key(held_key).ok(); // Ignore release error during cleanup
+                }
+                return Err(json!({ "error": format!("Failed to hold modifier key '{}': {}", key, e) }));
+            }
+        }
+    
+        // Perform action
+        let action_result = action();
+    
+        // Release keys (attempt regardless of action result)
+        let mut release_errors = Vec::new();
+        for key in keys.iter().rev() { // Release in reverse order
+            if let Err(e) = desktop.release_key(key) {
+                release_errors.push(format!("Failed to release key '{}': {}", key, e));
+            }
+        }
+    
+        // Handle results
+        match action_result {
+            Ok(res) if release_errors.is_empty() => Ok(res),
+            Ok(_) => Err(json!({ "error": format!("Action succeeded, but failed to release modifiers: {}", release_errors.join(", ")) })),
+            Err(e) if release_errors.is_empty() => Err(json!({ "error": format!("Action failed: {}. Modifiers released.", e) })),
+            Err(e) => Err(json!({ "error": format!("Action failed: {}. Also failed to release modifiers: {}", e, release_errors.join(", ")) })),
+        }
     }
 }
