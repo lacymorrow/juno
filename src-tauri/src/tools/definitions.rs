@@ -465,7 +465,7 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: HashMap::new(),
-                required: vec!["content".to_string()], // Note: This required field might be incorrect for 'get'
+                required: vec![], // Corrected: Removed 'content' as it's an output, not input.
             },
         },
         ToolDefinition {
