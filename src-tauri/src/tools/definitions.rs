@@ -321,35 +321,6 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         // --- Text Editor Tools ---
         ToolDefinition {
-            name: "text_editor_view".to_string(),
-            description: "Reads and returns the content of a text file, optionally within a specific line range.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path to the file.".to_string() });
-                    props.insert("start_line".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional 1-based start line number.".to_string() });
-                    props.insert("end_line".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional 1-based end line number.".to_string() });
-                    props
-                },
-                required: vec!["file_path".to_string()],
-            },
-        },
-        ToolDefinition {
-            name: "text_editor_create".to_string(),
-            description: "Creates/overwrites a text file with given content.".to_string(),
-            input_schema: ToolInputSchema {
-                type_: "object".to_string(),
-                properties: {
-                    let mut props = HashMap::new();
-                    props.insert("file_path".to_string(), ToolParameter { type_: "string".to_string(), description: "Absolute path for the file.".to_string() });
-                    props.insert("content".to_string(), ToolParameter { type_: "string".to_string(), description: "Initial content.".to_string() });
-                    props
-                },
-                required: vec!["file_path".to_string(), "content".to_string()],
-            },
-        },
-        ToolDefinition {
             name: "text_editor_insert".to_string(),
             description: "Inserts text into a file at a specific line number.".to_string(),
             input_schema: ToolInputSchema {
@@ -465,7 +436,7 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: HashMap::new(),
-                required: vec!["content".to_string()], // Note: This required field might be incorrect for 'get'
+                required: Vec::new(), // Corrected: No required fields for 'get'
             },
         },
         ToolDefinition {
@@ -514,17 +485,32 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
             },
         },
         // --- Custom Tools ---
+        // ToolDefinition {
+        //     name: "read_file_contents".to_string(), // Keep custom for now
+        //     description: "Reads the content of a file at the specified path.".to_string(),
+        //     input_schema: ToolInputSchema {
+        //         type_: "object".to_string(),
+        //         properties: {
+        //             let mut props = HashMap::new();
+        //             props.insert("path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path to the file.".to_string() });
+        //             props
+        //         },
+        //         required: vec!["path".to_string()],
+        //     },
+        // },
+        // --- Standard Tools (To Be Implemented) ---
         ToolDefinition {
-            name: "read_file_contents".to_string(), // Keep custom for now
-            description: "Reads the content of a file at the specified path.".to_string(),
+            name: "find_files".to_string(),
+            description: "Finds files based on name patterns and optional search path.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
-                    props.insert("path".to_string(), ToolParameter { type_: "string".to_string(), description: "The path to the file.".to_string() });
+                    props.insert("pattern".to_string(), ToolParameter { type_: "string".to_string(), description: "Filename pattern (e.g., '*.txt', 'document?.doc').".to_string() });
+                    props.insert("path".to_string(), ToolParameter { type_: "string".to_string(), description: "Optional directory path to search within (defaults to home directory).".to_string() });
                     props
                 },
-                required: vec!["path".to_string()],
+                required: vec!["pattern".to_string()],
             },
         },
     ];
