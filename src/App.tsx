@@ -37,17 +37,16 @@ type BackendResponsePayload = {
   response: SubmitQueryResult;
 };
 
-// Simple debounce function
-function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+// --- Payload Types for Backend Events ---
+type AssistantTextDeltaPayload = {
+  delta: string;
+};
 
-  return (...args: Parameters<F>): void => {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-    }
-    timeoutId = setTimeout(() => func(...args), waitFor);
-  };
-}
+// Type for the result part of the final response
+type FinalAssistantResponsePayload = {
+  query: string;
+  response: SubmitQueryResult;
+};
 
 function App() {
   const [query, setQuery] = useState("");
@@ -60,35 +59,6 @@ function App() {
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
-  );
-
-  // Debounced handler function
-  const handleBackendResponseDebounced = useCallback(
-    debounce((payload: BackendResponsePayload) => {
-      console.log("Debounced handler executing for:", payload.query);
-      const { query, response } = payload;
-
-      // Add user query message
-      const userMessage: ChatMessage = { role: "user", content: query };
-      // Add assistant response message
-      const assistantMessage: ChatMessage = {
-        role: "assistant",
-        content: response.text,
-      };
-
-      setConversation((prev) => [...prev, userMessage, assistantMessage]);
-
-      // Play audio if available
-      if (response.audio_base64) {
-        playAudioFromBase64(response.audio_base64); // This function already handles stopping previous audio
-      }
-
-      // Potentially reset processing state if managed globally here
-      setIsProcessing(false); // Assuming Bar.tsx also sets this true
-    }, 100), // Debounce for 100ms
-    [] // Dependencies for useCallback (playAudioFromBase64 might need to be included if not stable)
-    // Note: If playAudioFromBase64 relies on state/props, add them here or wrap playAudioFromBase64 in useCallback too.
-    // For now, assuming playAudioFromBase64 is stable or relies only on its arguments and `currentAudio` state/setter.
   );
 
   // Check server status on mount
@@ -128,15 +98,71 @@ function App() {
 
   // Listen for responses broadcast from the backend
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    let unlistenTextDelta: (() => void) | undefined;
+    let unlistenFinalResponse: (() => void) | undefined;
 
     const setupListener = async () => {
-      unlisten = await listen<BackendResponsePayload>(
-        "backend-response",
+      // Listener for text chunks
+      unlistenTextDelta = await listen<AssistantTextDeltaPayload>(
+        "assistant-text-delta",
         (event) => {
-          console.log("Received backend-response event (raw):", event.payload);
-          // Call the debounced handler
-          handleBackendResponseDebounced(event.payload);
+          console.log("Received text delta:", event.payload.delta);
+          setConversation((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            // If last message is from assistant, append delta
+            if (lastMessage?.role === "assistant") {
+              const updatedMessage = {
+                ...lastMessage,
+                content: lastMessage.content + event.payload.delta,
+              };
+              return [...prev.slice(0, -1), updatedMessage];
+            } else {
+              // Otherwise, create a new assistant message
+              const newAssistantMessage: ChatMessage = {
+                role: "assistant",
+                content: event.payload.delta,
+              };
+              return [...prev, newAssistantMessage];
+            }
+          });
+        }
+      );
+
+      // Listener for the final response (includes full text and audio)
+      unlistenFinalResponse = await listen<FinalAssistantResponsePayload>(
+        "final-assistant-response",
+        (event) => {
+          console.log(
+            "Received final response for query:",
+            event.payload.query
+          );
+          const { response } = event.payload;
+          // Update the last message with the final text (optional, if deltas didn't cover everything)
+          // Or just rely on deltas having built the full message.
+          setConversation((prev) => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage?.role === "assistant") {
+              // Ensure the final text is set correctly, correcting any minor discrepancies
+              const finalMessage = { ...lastMessage, content: response.text };
+              return [...prev.slice(0, -1), finalMessage];
+            } else {
+              // If no assistant message was streamed (e.g., error or immediate empty response),
+              // create one now.
+              const finalAssistantMessage: ChatMessage = {
+                role: "assistant",
+                content: response.text,
+              };
+              return [...prev, finalAssistantMessage];
+            }
+          });
+
+          // Play audio if available
+          if (response.audio_base64) {
+            playAudioFromBase64(response.audio_base64);
+          }
+
+          // Reset processing state
+          setIsProcessing(false);
         }
       );
     };
@@ -145,25 +171,21 @@ function App() {
 
     // Cleanup listener on component unmount
     return () => {
-      unlisten?.();
+      unlistenTextDelta?.();
+      unlistenFinalResponse?.();
     };
-  }, [handleBackendResponseDebounced]); // Add debounced handler to dependency array
+  }, []); // Re-run only on mount/unmount
 
   // Submit query using Tauri invoke (primarily for the main input)
-  // Note: This function might need adjustment if the backend
-  // `submit_query` command no longer returns the result directly.
-  // For now, we assume it might still be used by the main input,
-  // OR that the main input also triggers the event flow.
-  // If `submit_query` backend now ONLY emits, this function needs adjustment.
   const submitQuery = async (text: string) => {
     if (!text.trim() || isProcessing || serverStatus !== "connected") {
       return;
     }
 
-    // Optimistically add user message? Or wait for event?
-    // Let's wait for the event to handle both user and assistant messages consistently.
-    // const userMessage: ChatMessage = { role: "user", content: text };
-    // setConversation((prev) => [...prev, userMessage]);
+    // Add user message immediately for better perceived responsiveness
+    const userMessage: ChatMessage = { role: "user", content: text };
+    setConversation((prev) => [...prev, userMessage]);
+
     setQuery(""); // Clear input immediately
     setIsProcessing(true); // Set processing state
 
@@ -174,6 +196,7 @@ function App() {
       console.log("submit_query invoked for:", text);
       // Response handling is now done via the event listener.
     } catch (error) {
+      console.error("Error invoking submit_query:", error);
       const errorMessage: ChatMessage = {
         role: "system",
         content: `Error invoking submit_query: ${error}`,
@@ -181,7 +204,6 @@ function App() {
       setConversation((prev) => [...prev, errorMessage]);
       setIsProcessing(false); // Reset processing on error
     }
-    // No finally block to set isProcessing(false) here, as the event listener handles it on success.
   };
 
   const handleSubmit = (e: React.FormEvent) => {
