@@ -320,7 +320,7 @@ impl AgentBrain for AnthropicBrain {
 
         // -- DEBUG: Log the request payload --
         match serde_json::to_string_pretty(&request_payload) {
-            Ok(json_string) => log::info!("Anthropic Request Payload:\n{}", json_string),
+            Ok(json_string) => log::debug!("Anthropic Request Payload:\n{}", json_string),
             Err(e) => log::error!("Failed to serialize request payload for logging: {}", e),
         }
         // -- END DEBUG --
