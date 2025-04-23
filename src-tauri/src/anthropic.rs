@@ -128,7 +128,8 @@ pub async fn submit_query(
         let total_max_tokens = max_output_tokens + thinking_budget;
 
         let request_payload = AnthropicRequest {
-            model: "claude-3-5-sonnet-20240620", // Use Claude 3.5 Sonnet
+            model: "claude-3-7-sonnet-20250219", // Use Claude 3.5 Sonnet
+            // model: "claude-3-5-sonnet-20240620", // Use Claude 3.5 Sonnet
             max_tokens: total_max_tokens,
             messages: conversation_history.clone(),
             tools: available_tools.clone(),
