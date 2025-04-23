@@ -1,25 +1,29 @@
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::structs::{ToolDefinition, AgentError};
-use computer_use_ai_sdk::{ToolInputSchema, ToolParameter};
+use crate::agent::structs::ToolDefinition;
 use crate::state::AppState;
-use tauri::{AppHandle, State};
+use crate::commands;
+use tauri::{AppHandle, State, Manager};
 use serde_json::{Value, json};
-use std::collections::HashMap; // Keep HashMap
-use tracing::{error, info}; // Use tracing for logging
+use tracing::info;
 
-// TODO: This function will register the desktop automation tools.
-// It needs access to AppHandle and AppState to call the underlying Tauri commands.
+// Import missing functions that are registered at the crate root
+use crate::{
+    capture_screenshot_command,
+    dev_get_clipboard,
+    dev_set_clipboard,
+};
+
+// Function to register all desktop tools with the tool provider
 pub async fn register_desktop_tools(
     provider: &mut LocalToolProvider,
-    _app_handle: AppHandle, // Marked unused for now
-    _state: State<'_, AppState>, // Marked unused for now
+    app_handle: AppHandle,
+    _state: State<'_, AppState>, // Not using the passed state directly
 ) {
     info!("Registering desktop tools...");
 
-    // Placeholder: Define one or two tools manually for now to test the pattern.
-    // We will later source these from src-tauri/src/tools/definitions.rs
+    // --- Element Tools ---
 
-    // Example: get_focused_element_info
+    // get_focused_element_info
     let get_focused_def = ToolDefinition {
         name: "get_focused_element_info".to_string(),
         description: "Get information about the currently focused UI element.".to_string(),
@@ -29,17 +33,83 @@ pub async fn register_desktop_tools(
             "required": []
         }),
     };
-    let get_focused_exec = |input: Value| -> Result<Value, String> {
-        info!("Executing get_focused_element_info tool with input: {:?}", input);
-        // TODO: Need access to app_handle and state to call the real command
-        // let result = commands::element::dev_get_focused_element_info(app_handle.clone(), state.clone()).await;
-        // For now, return placeholder success
-        Ok(json!({ "status": "success", "message": "Focused element info would be here (placeholder)" }))
+
+    let app_handle_clone = app_handle.clone();
+    let get_focused_exec = move |_input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        let result = rt.block_on(async {
+            let app_handle_for_async = app_handle.clone();
+            commands::element::dev_get_focused_element_info(app_handle_for_async, managed_state)
+                .await
+                .map_err(|e| format!("Error getting focused element: {}", e))
+        })?;
+
+        Ok(json!(result))
     };
     provider.register_tool(get_focused_def, get_focused_exec).await;
-    info!("Registered tool: get_focused_element_info (placeholder executor)");
+    info!("Registered tool: get_focused_element_info");
 
-    // Example: type_text
+    // capture_screenshot
+    let capture_screenshot_def = ToolDefinition {
+        name: "capture_screenshot".to_string(),
+        description: "Captures a screenshot of the entire screen.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let capture_screenshot_exec = move |_input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        let result = rt.block_on(async {
+            let app_handle_for_async = app_handle.clone();
+            capture_screenshot_command(app_handle_for_async)
+                .await
+                .map_err(|e| format!("Error capturing screenshot: {}", e))
+        })?;
+
+        Ok(json!(result))
+    };
+    provider.register_tool(capture_screenshot_def, capture_screenshot_exec).await;
+    info!("Registered tool: capture_screenshot");
+
+    // capture_element_screenshot
+    let capture_element_screenshot_def = ToolDefinition {
+        name: "capture_element_screenshot".to_string(),
+        description: "Captures a screenshot of the currently focused UI element.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let capture_element_screenshot_exec = move |_input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        let result = rt.block_on(async {
+            let app_handle_for_async = app_handle.clone();
+            commands::element::capture_element_screenshot_command(app_handle_for_async, managed_state)
+                .await
+                .map_err(|e| format!("Error capturing element screenshot: {}", e))
+        })?;
+
+        Ok(json!(result))
+    };
+    provider.register_tool(capture_element_screenshot_def, capture_element_screenshot_exec).await;
+    info!("Registered tool: capture_element_screenshot");
+
+    // type_text
     #[derive(serde::Deserialize)]
     struct TypeTextInput { text: String }
 
@@ -54,34 +124,93 @@ pub async fn register_desktop_tools(
             "required": ["text"]
         }),
     };
-    let type_text_exec = |input: Value| -> Result<Value, String> {
-        info!("Executing type_text tool with input: {:?}", input);
-        match serde_json::from_value::<TypeTextInput>(input) {
-            Ok(args) => {
-                // TODO: Need access to app_handle and state to call the real command
-                // let result = commands::keyboard::dev_type_text(args.text, app_handle.clone(), state.clone()).await;
-                // For now, return placeholder success
-                info!("Text to type (placeholder): {}", args.text);
-                Ok(json!({ "status": "success", "message": "Text typed (placeholder)" }))
-            }
-            Err(e) => {
-                let err_msg = format!("Failed to parse input for type_text: {}", e);
-                error!("{}", err_msg);
-                Err(err_msg)
-            }
-        }
+
+    let app_handle_clone = app_handle.clone();
+    let type_text_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<TypeTextInput>(input)
+            .map_err(|e| format!("Failed to parse type_text input: {}", e))?;
+
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        let result = rt.block_on(async {
+            let app_handle_for_async = app_handle.clone();
+            commands::keyboard::dev_type_text(app_handle_for_async, managed_state, args.text)
+                .await
+                .map_err(|e| format!("Error typing text: {}", e))
+        })?;
+
+        Ok(json!(result))
     };
     provider.register_tool(type_text_def, type_text_exec).await;
-    info!("Registered tool: type_text (placeholder executor)");
+    info!("Registered tool: type_text");
 
+    // get_clipboard
+    let get_clipboard_def = ToolDefinition {
+        name: "get_clipboard".to_string(),
+        description: "Gets the current content of the clipboard.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    };
 
-    // TODO:
-    // 1. Read definitions from src-tauri/src/tools/definitions.rs
-    // 2. Implement the executor closures for each definition.
-    // 3. The closures MUST capture clones of AppHandle and Arc<AppState>.
-    // 4. The closures need to parse the input Value, call the corresponding
-    //    `commands::*` function, and format the output/error correctly.
-    // 5. Ensure `register_desktop_tools` receives `app_handle` and `state`.
+    let app_handle_clone = app_handle.clone();
+    let get_clipboard_exec = move |_input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
 
-    info!("Desktop tool registration finished (placeholders only).");
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        let result = rt.block_on(async {
+            dev_get_clipboard(managed_state)
+                .await
+                .map_err(|e| format!("Error getting clipboard: {}", e))
+        })?;
+
+        Ok(json!(result))
+    };
+    provider.register_tool(get_clipboard_def, get_clipboard_exec).await;
+    info!("Registered tool: get_clipboard");
+
+    // set_clipboard
+    #[derive(serde::Deserialize)]
+    struct SetClipboardInput {
+        text: String
+    }
+
+    let set_clipboard_def = ToolDefinition {
+        name: "set_clipboard".to_string(),
+        description: "Sets the content of the clipboard.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "text": { "type": "string", "description": "The text to place on the clipboard." }
+            },
+            "required": ["text"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let set_clipboard_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<SetClipboardInput>(input)
+            .map_err(|e| format!("Failed to parse set_clipboard input: {}", e))?;
+
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        let result = rt.block_on(async {
+            dev_set_clipboard(args.text, managed_state)
+                .await
+                .map_err(|e| format!("Error setting clipboard: {}", e))
+        })?;
+
+        Ok(json!(result))
+    };
+    provider.register_tool(set_clipboard_def, set_clipboard_exec).await;
+    info!("Registered tool: set_clipboard");
+
+    info!("Desktop tool registration completed with core tools. Additional tools to be implemented as needed.");
 }
