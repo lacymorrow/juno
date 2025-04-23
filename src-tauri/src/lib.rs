@@ -125,6 +125,7 @@ pub fn run() {
             dev_middle_click,
             dev_double_click,
             dev_get_cursor_position,
+            dev_test_click_visualization,
             dev_bash_command,
             // Text Editor Commands
             dev_text_editor_view,
