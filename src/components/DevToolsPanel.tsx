@@ -67,6 +67,7 @@ type LoadingStates = {
   mouseClick: boolean; // Added
   mouseDoubleClick: boolean; // Added
   mouseDrag: boolean; // Added
+  testClickVisualization: boolean; // Added for click visualization testing
 };
 
 // Helper type for file listing result (assuming backend sends this structure)
@@ -120,6 +121,7 @@ const DevToolsPanel: React.FC = () => {
     mouseClick: false, // Added
     mouseDoubleClick: false, // Added
     mouseDrag: false, // Added
+    testClickVisualization: false, // Added for click visualization testing
   });
   // Input states
   const [textToType, setTextToType] = useState<string>("Hello from DevTools!");
@@ -737,6 +739,40 @@ const DevToolsPanel: React.FC = () => {
       "dev_mouse_drag",
       { startX, startY, endX, endY, button: mouseButton }, // Pass coordinates and button
       "mouseDrag"
+    );
+  };
+
+  // Handler for testing click visualization
+  const handleTestClickVisualization = async () => {
+    const x = parseInt(mouseX, 10);
+    const y = parseInt(mouseY, 10);
+
+    if (isNaN(x) || isNaN(y)) {
+      toast.error(
+        "Invalid coordinates for visualization. Please enter numbers."
+      );
+      return;
+    }
+
+    let color = "#ff0000"; // Default red
+    switch (mouseButton) {
+      case "left":
+        color = "#ff0000"; // Red for left click
+        break;
+      case "right":
+        color = "#0000ff"; // Blue for right click
+        break;
+      case "middle":
+        color = "#00ff00"; // Green for middle click
+        break;
+      default:
+        color = "#ff0000"; // Default red
+    }
+
+    await invokeCommand(
+      "dev_test_click_visualization",
+      { x, y, color },
+      "testClickVisualization"
     );
   };
 
@@ -1640,6 +1676,21 @@ const DevToolsPanel: React.FC = () => {
             placeholder="Text to set clipboard"
           />
         </div>
+      </div>
+      {/* Test Click Visualization */}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={handleTestClickVisualization}
+          disabled={loadingStates.testClickVisualization}
+          variant="outline"
+          title="Test Click Visualization"
+        >
+          <MousePointerClick size={14} className="mr-1" />
+          {loadingStates.testClickVisualization
+            ? "Testing..."
+            : "Test Click Visualization"}
+        </Button>
       </div>
     </div>
   );

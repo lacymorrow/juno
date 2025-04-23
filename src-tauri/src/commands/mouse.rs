@@ -1,9 +1,33 @@
 // Commands related to mouse actions (clicks, movement, position)
 
 use crate::state::AppState;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, Manager, Emitter};
 use super::send_dev_tool_notification; // Use helper from parent module
 
+// Helper function to create a visual indicator for mouse clicks
+fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> Result<(), String> {
+    // Send an event to the frontend to display a visual indicator
+    app.emit("click-visualization", (x, y, color))
+        .map_err(|e| format!("Failed to emit click visualization event: {}", e))?;
+    Ok(())
+}
+
+// Test command to manually trigger click visualization
+#[tauri::command]
+pub(crate) async fn dev_test_click_visualization(
+    app: AppHandle,
+    x: f64,
+    y: f64,
+    color: Option<String>
+) -> Result<(), String> {
+    let color_to_use = color.unwrap_or_else(|| "#FF0000".to_string()); // Default to red
+    println!("[DEV_TOOL] Testing click visualization at ({}, {}) with color {}", x, y, color_to_use);
+
+    create_click_visualization(&app, x, y, &color_to_use)?;
+    send_dev_tool_notification(&app, "Click Visualization", &format!("Visualized at ({}, {})", x, y))?;
+
+    Ok(())
+}
 
 #[tauri::command]
 pub(crate) async fn dev_triple_click(
@@ -23,7 +47,8 @@ pub(crate) async fn dev_triple_click(
     match result {
         Ok(_) => {
             println!("[DEV_TOOL] triple_click succeeded.");
-             send_dev_tool_notification(&app, "Triple Click", &format!("Clicked at ({}, {})", x, y))?;
+            send_dev_tool_notification(&app, "Triple Click", &format!("Clicked at ({}, {})", x, y))?;
+            create_click_visualization(&app, x, y, "#ff00ff")?; // Magenta for triple-click
             Ok(())
         }
         Err(e) => {
@@ -140,6 +165,7 @@ pub(crate) async fn dev_left_click(
         Ok(_) => {
             println!("[DEV_TOOL] left_click at ({}, {}) succeeded.", x, y);
             send_dev_tool_notification(&app, "Mouse Action", &format!("Left clicked at ({}, {})", x, y))?;
+            create_click_visualization(&app, x, y, "#ff0000")?; // Red for left click
             Ok(())
         }
         Err(e) => {
@@ -200,6 +226,7 @@ pub(crate) async fn dev_right_click(
         Ok(_) => {
             println!("[DEV_TOOL] right_click at ({}, {}) succeeded.", x, y);
             send_dev_tool_notification(&app, "Mouse Action", &format!("Right clicked at ({}, {})", x, y))?;
+            create_click_visualization(&app, x, y, "#0000ff")?; // Blue for right click
             Ok(())
         }
         Err(e) => {
@@ -229,6 +256,7 @@ pub(crate) async fn dev_middle_click(
         Ok(_) => {
             println!("[DEV_TOOL] middle_click at ({}, {}) succeeded.", x, y);
             send_dev_tool_notification(&app, "Mouse Action", &format!("Middle clicked at ({}, {})", x, y))?;
+            create_click_visualization(&app, x, y, "#00ff00")?; // Green for middle click
             Ok(())
         }
         Err(e) => {
@@ -258,6 +286,7 @@ pub(crate) async fn dev_double_click(
         Ok(_) => {
             println!("[DEV_TOOL] double_click at ({}, {}) succeeded.", x, y);
             send_dev_tool_notification(&app, "Mouse Action", &format!("Double clicked at ({}, {})", x, y))?;
+            create_click_visualization(&app, x, y, "#ffa500")?; // Orange for double click
             Ok(())
         }
         Err(e) => {
