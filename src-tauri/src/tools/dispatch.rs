@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use computer_use_ai_sdk::{Desktop, UIElement};
+use computer_use_ai_sdk::{Desktop, AutomationError};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
@@ -20,6 +20,54 @@ use computer_use_ai_sdk::{
 
 // Import helpers from the sibling module
 use super::helpers::*;
+
+// --- Helper Function for Holding Keys ---
+
+/// Holds specified modifier keys, runs a closure, and releases the keys.
+/// Returns the closure's result or an error if key holding/releasing fails.
+fn hold_keys_and_run<F, T>(
+    desktop: &Arc<Desktop>,
+    keys: &[String],
+    func: F,
+) -> Result<T, Value>
+where
+    F: FnOnce() -> Result<T, AutomationError>, // Closure returns SDK result
+{
+    // Hold keys
+    for key in keys {
+        if let Err(e) = desktop.hold_key(key) {
+            // Attempt to release any already held keys before returning error
+            for held_key in keys.iter().take_while(|&k| k != key) {
+                desktop.release_key(held_key).ok(); // Ignore release error during cleanup
+            }
+            return Err(json!({ "error": format!("Failed to hold modifier key '{}': {}", key, e) }));
+        }
+    }
+
+    // Run the function
+    let func_result = func().map_err(|e| json!({ "error": e.to_string() })); // Convert SDK error to JSON error
+
+    // Release keys (attempt regardless of func_result)
+    let mut release_errors = Vec::new();
+    for key in keys.iter().rev() { // Release in reverse order
+        if let Err(e) = desktop.release_key(key) {
+            release_errors.push(format!("Failed to release key '{}': {}", key, e));
+        }
+    }
+
+    // Combine results
+    match (func_result, release_errors.is_empty()) {
+        (Ok(result), true) => Ok(result), // Success
+        (Ok(_), false) => Err(json!({ "error": format!("Action succeeded, but failed to release modifiers: {}", release_errors.join(", ")) })),
+        (Err(func_err), true) => Err(func_err), // Function failed, release succeeded
+        (Err(func_err), false) => Err(json!({ // Both failed
+            "error": format!("Action failed: {}. Also failed to release modifiers: {}",
+                func_err.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown action error"),
+                release_errors.join(", ")
+            )
+        })),
+    }
+}
 
 // --- Tool Call Dispatcher ---
 
@@ -70,32 +118,11 @@ pub(crate) async fn call_tool(
             "press_key" => {
                 match (get_string_param(input, "key"), get_optional_string_param(input, "modifier")) {
                     (Ok(key), Ok(modifier)) => {
-                        // Check if the key is a single, printable character and there's no modifier.
-                        // If so, use type_text instead as press_key might be for special keys.
-                        if key.chars().count() == 1 && modifier.is_none() {
-                            let first_char = key.chars().next().unwrap(); // Safe unwrap due to count check
-                            // Basic check for printable ASCII range, adjust if more complex logic needed
-                            if first_char.is_ascii_graphic() || first_char == ' ' {
-                                info!(key = %key, "Using type_text for single character key press");
-                                match desktop.type_text(&key) {
-                                     Ok(_) => Ok(json!({ "success": true, "message": format!("Typed character '{}'.", key) })),
-                                     Err(e) => Err(json!({ "error": format!("Failed to type character using type_text fallback: {}", e) })),
-                                }
-                            } else {
-                                // Handle single non-graphic chars (like enter, tab if needed) via press_key
-                                info!(key = %key, ?modifier, "Using press_key for single non-graphic character");
-                                match desktop.press_key(&key, modifier.as_deref()) {
-                                    Ok(_) => Ok(json!({ "success": true, "message": format!("Key '{}' pressed.", key) })),
-                                    Err(e) => Err(json!({ "error": format!("Failed to press key: {}", e) })),
-                                }
-                            }
-                        } else {
-                            // Original logic for multi-character keys or keys with modifiers
-                            info!(key = %key, ?modifier, "Using press_key for special key or key with modifier");
-                            match desktop.press_key(&key, modifier.as_deref()) {
-                                Ok(_) => Ok(json!({ "success": true, "message": format!("Key '{}' pressed{}.", key, modifier.map(|m| format!(" with modifier '{}'", m)).unwrap_or_default()) })),
-                                Err(e) => Err(json!({ "error": format!("Failed to press key: {}", e) })),
-                            }
+                        // Always use desktop.press_key for consistency
+                        info!(key = %key, ?modifier, "Using press_key");
+                        match desktop.press_key(&key, modifier.as_deref()) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Key '{}' pressed{}.", key, modifier.map(|m| format!(" with modifier '{}'", m)).unwrap_or_default()) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to press key: {}", e) })),
                         }
                     }
                     (Err(e), _) | (_, Err(e)) => Err(e), // Propagate param parsing error
@@ -295,36 +322,109 @@ pub(crate) async fn call_tool(
             "right_click" => {
                 let x = get_f64_param(input, "x")?;
                 let y = get_f64_param(input, "y")?;
-                info!(x = %x, y = %y, "Executing right click");
-                match desktop.right_click(x, y) {
-                    Ok(_) => Ok(json!({ "success": true, "message": format!("Right clicked at ({}, {}).", x, y) })),
-                    Err(e) => Err(json!({ "error": format!("Failed to perform right click: {}", e) })),
+                let modifier_keys = get_optional_modifier_keys(input)?;
+
+                if let Some(keys) = modifier_keys {
+                    if !keys.is_empty() {
+                        info!(x = %x, y = %y, ?keys, "Executing right click with modifiers");
+                        hold_keys_and_run(desktop, &keys, || desktop.right_click(x, y))
+                            .map(|_| json!({ "success": true, "message": format!("Right clicked at ({}, {}) with modifiers {:?}.", x, y, keys) }))
+                    } else {
+                        // Empty modifier list, normal click
+                        info!(x = %x, y = %y, "Executing right click (empty modifiers list)");
+                        match desktop.right_click(x, y) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Right clicked at ({}, {}).", x, y) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to perform right click: {}", e) })),
+                        }
+                    }
+                } else {
+                    // No modifiers, normal click
+                    info!(x = %x, y = %y, "Executing right click");
+                    match desktop.right_click(x, y) {
+                        Ok(_) => Ok(json!({ "success": true, "message": format!("Right clicked at ({}, {}).", x, y) })),
+                        Err(e) => Err(json!({ "error": format!("Failed to perform right click: {}", e) })),
+                    }
                 }
             }
             "middle_click" => {
-                match (get_f64_param(input, "x"), get_f64_param(input, "y")) {
-                    (Ok(x), Ok(y)) => match desktop.middle_click(x, y) {
+                let x = get_f64_param(input, "x")?;
+                let y = get_f64_param(input, "y")?;
+                let modifier_keys = get_optional_modifier_keys(input)?;
+
+                if let Some(keys) = modifier_keys {
+                    if !keys.is_empty() {
+                        info!(x = %x, y = %y, ?keys, "Executing middle click with modifiers");
+                        hold_keys_and_run(desktop, &keys, || desktop.middle_click(x, y))
+                            .map(|_| json!({ "success": true, "message": format!("Middle clicked at ({}, {}) with modifiers {:?}.", x, y, keys) }))
+                    } else {
+                        // Empty modifier list, normal click
+                        info!(x = %x, y = %y, "Executing middle click (empty modifiers list)");
+                        match desktop.middle_click(x, y) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Middle clicked at ({}, {}).", x, y) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to perform middle click: {}", e) })),
+                        }
+                    }
+                } else {
+                    // No modifiers, normal click
+                    info!(x = %x, y = %y, "Executing middle click");
+                    match desktop.middle_click(x, y) {
                         Ok(_) => Ok(json!({ "success": true, "message": format!("Middle clicked at ({}, {}).", x, y) })),
                         Err(e) => Err(json!({ "error": format!("Failed to perform middle click: {}", e) })),
-                    },
-                    (Err(e), _) | (_, Err(e)) => Err(e),
+                    }
                 }
             }
             "double_click" => {
                 let x = get_f64_param(input, "x")?;
                 let y = get_f64_param(input, "y")?;
-                match desktop.double_click(x, y) {
-                    Ok(_) => Ok(json!({ "success": true, "message": format!("Double clicked at ({}, {})", x, y) })),
-                    Err(e) => Err(json!({ "error": e.to_string() })),
+                let modifier_keys = get_optional_modifier_keys(input)?;
+
+                if let Some(keys) = modifier_keys {
+                    if !keys.is_empty() {
+                        info!(x = %x, y = %y, ?keys, "Executing double click with modifiers");
+                        hold_keys_and_run(desktop, &keys, || desktop.double_click(x, y))
+                            .map(|_| json!({ "success": true, "message": format!("Double clicked at ({}, {}) with modifiers {:?}.", x, y, keys) }))
+                    } else {
+                        // Empty modifier list, normal click
+                        info!(x = %x, y = %y, "Executing double click (empty modifiers list)");
+                        match desktop.double_click(x, y) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Double clicked at ({}, {}).", x, y) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to perform double click: {}", e) })),
+                        }
+                    }
+                } else {
+                    // No modifiers, normal click
+                    info!(x = %x, y = %y, "Executing double click");
+                    match desktop.double_click(x, y) {
+                        Ok(_) => Ok(json!({ "success": true, "message": format!("Double clicked at ({}, {}).", x, y) })),
+                        Err(e) => Err(json!({ "error": format!("Failed to perform double click: {}", e) })),
+                    }
                 }
             }
             "triple_click" => {
                 let x = get_f64_param(input, "x")?;
                 let y = get_f64_param(input, "y")?;
-                // Use the correct 'triple_click' method
-                match desktop.triple_click(x, y) {
-                    Ok(_) => Ok(json!({ "success": true, "message": format!("Triple clicked at ({}, {})", x, y) })),
-                    Err(e) => Err(json!({ "error": e.to_string() })),
+                let modifier_keys = get_optional_modifier_keys(input)?;
+
+                if let Some(keys) = modifier_keys {
+                    if !keys.is_empty() {
+                        info!(x = %x, y = %y, ?keys, "Executing triple click with modifiers");
+                        hold_keys_and_run(desktop, &keys, || desktop.triple_click(x, y))
+                            .map(|_| json!({ "success": true, "message": format!("Triple clicked at ({}, {}) with modifiers {:?}.", x, y, keys) }))
+                    } else {
+                        // Empty modifier list, normal click
+                        info!(x = %x, y = %y, "Executing triple click (empty modifiers list)");
+                        match desktop.triple_click(x, y) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Triple clicked at ({}, {}).", x, y) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to perform triple click: {}", e) })),
+                        }
+                    }
+                } else {
+                    // No modifiers, normal click
+                    info!(x = %x, y = %y, "Executing triple click");
+                    match desktop.triple_click(x, y) {
+                        Ok(_) => Ok(json!({ "success": true, "message": format!("Triple clicked at ({}, {}).", x, y) })),
+                        Err(e) => Err(json!({ "error": format!("Failed to perform triple click: {}", e) })),
+                    }
                 }
             }
             "left_click_drag" => {
@@ -377,12 +477,31 @@ pub(crate) async fn call_tool(
                 }
             }
             "hold_key" => {
-                match get_string_param(input, "key") {
-                    Ok(key) => match desktop.hold_key(&key) {
-                        Ok(_) => Ok(json!({ "success": true, "message": format!("Holding key '{}'.", key) })),
-                        Err(e) => Err(json!({ "error": format!("Failed to hold key: {}", e) })),
-                    },
-                    Err(e) => Err(e),
+                let key = get_string_param(input, "key")?;
+                let duration_ms_opt = get_optional_u64_param(input, "duration_ms")?;
+
+                // Currently, desktop.hold_key doesn't accept duration.
+                // This will need modification in the SDK (mcp-server-os-level).
+                // For now, we parse it but don't use it, logging a warning.
+                // TODO: Update SDK hold_key to accept Option<u64> and implement timed hold.
+                match duration_ms_opt {
+                    Some(duration) => {
+                        warn!(key=%key, duration=%duration, "hold_key with duration is not yet fully implemented in SDK. Holding indefinitely.");
+                        // Placeholder: Call the existing hold_key for now
+                        match desktop.hold_key(&key) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Holding key '{}' (duration ignored, held indefinitely).", key) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to hold key: {}", e) })),
+                        }
+                        // Correct SDK call would be something like:
+                        // match desktop.hold_key(&key, Some(duration)) { ... }
+                    }
+                    None => {
+                        // Call the existing hold_key (which holds indefinitely)
+                        match desktop.hold_key(&key) {
+                            Ok(_) => Ok(json!({ "success": true, "message": format!("Holding key '{}' indefinitely.", key) })),
+                            Err(e) => Err(json!({ "error": format!("Failed to hold key: {}", e) })),
+                        }
+                    }
                 }
             }
             "release_key" => {
@@ -617,16 +736,30 @@ pub(crate) async fn call_tool(
             }
             // --- Bash Handler ---
             "bash" => {
-                match (get_string_param(input, "command"), get_optional_u64_param(input, "timeout_seconds"), get_optional_bool_param(input, "restart")) {
+                match (
+                    get_string_param(input, "command"),
+                    get_optional_u64_param(input, "timeout_seconds"),
+                    get_optional_bool_param(input, "restart"),
+                ) {
                     (Ok(command), Ok(timeout_seconds), Ok(restart_opt)) => {
-                        let restart = restart_opt.unwrap_or(false);
-                        info!(command = %command, timeout = ?timeout_seconds, restart = restart, "Executing bash command");
+                        let restart = restart_opt.unwrap_or(true); // Default to true (fresh shell) if omitted
+                        info!(
+                            command = %command,
+                            timeout = ?timeout_seconds,
+                            restart = restart,
+                            "Executing bash command"
+                        );
 
-                        // TODO: Implement proper shell state management for 'restart' if needed.
-                        if restart {
-                            warn!("Bash 'restart' parameter is noted but full shell state reset is not yet implemented.");
-                            // Potentially clear environment variables or reset CWD if state is managed here
-                        }
+                        // Handle restart parameter logic
+                        if !restart {
+                            // If restart is explicitly false, warn about lack of persistent state
+                            warn!(
+                                "Bash 'restart: false' requested, but persistent shell state is not currently supported. Command will run in a fresh shell instance."
+                            );
+                            // Continue execution as if restart=true, because that's the current behavior
+                        } // If restart is true or omitted, current behavior is correct (fresh shell)
+
+                        // TODO: Implement proper shell state management for 'restart: false' if needed in the future.
 
                         let mut cmd = Command::new("sh"); // Using sh -c for broader compatibility
                         cmd.arg("-c");
@@ -644,39 +777,60 @@ pub(crate) async fn call_tool(
                                         Ok(None) => { // Timeout occurred
                                             warn!(command = %command, "Command timed out, killing process...");
                                             child.kill().map_err(|e| format!("Failed to kill timed out process: {}", e))?;
-                                            child.wait().map_err(|e| format!("Failed to wait on killed process: {}", e))
-                                            // Return a specific status or error indicating timeout
-                                            // For now, just return the wait status after kill
+                                            // Return an error indicating timeout explicitly
+                                            Err("Command timed out".to_string())
                                         }
-                                        Err(e) => Err(format!("Failed to wait for child process with timeout: {}", e)),
+                                        Err(e) => Err(format!(
+                                            "Failed to wait for child process with timeout: {}",
+                                            e
+                                        )),
                                     }
                                 } else {
-                                    child.wait().map_err(|e| format!("Failed to wait for child process: {}", e))
+                                    child.wait().map_err(|e| {
+                                        format!("Failed to wait for child process: {}", e)
+                                    })
                                 };
 
                                 match status_result {
                                     Ok(status) => {
-                                        // Attempt to read stdout/stderr after process exits
-                                        // Note: Reading from pipes of a finished process might be tricky/platform-dependent
-                                        // Consider using libraries like `duct` or managing pipes explicitly if needed.
-                                        // For now, we return exit code and timeout status.
-                                        let timed_out = timeout_duration.is_some() && !status.success() && status.code().is_none(); // Heuristic for timeout
+                                        // Attempt to get stdout/stderr - Note: This requires capturing output
+                                        // Modify cmd.spawn() to cmd.output() if synchronous capture is acceptable
+                                        // Or use async process handling if needed.
+                                        // For now, stick to exit code and timeout status.
+                                        let stdout_content = "(stdout not captured)".to_string(); // Placeholder
+                                        let stderr_content = "(stderr not captured)".to_string(); // Placeholder
 
                                         Ok(json!({
                                             "success": status.success(),
-                                            "stdout": "(stdout not captured in this implementation)", // Placeholder
-                                            "stderr": "(stderr not captured in this implementation)", // Placeholder
+                                            "stdout": stdout_content,
+                                            "stderr": stderr_content,
                                             "exit_code": status.code(),
-                                            "timed_out": timed_out
+                                            "timed_out": false // Explicitly false if finished normally
                                         }))
-                                    },
-                                    Err(e) => Err(json!({ "error": e }))
+                                    }
+                                    Err(e) => {
+                                        // Check if the error is our specific timeout message
+                                        if e == "Command timed out" {
+                                            Err(json!({
+                                                "error": e,
+                                                "timed_out": true,
+                                                "stdout": "(stdout not captured on timeout)",
+                                                "stderr": "(stderr not captured on timeout)"
+                                            }))
+                                        } else {
+                                            Err(json!({ "error": e }))
+                                        }
+                                    }
                                 }
                             }
-                            Err(e) => Err(json!({ "error": format!("Failed to spawn command '{}': {}", command, e) }))
+                            Err(e) => Err(json!({
+                                "error": format!("Failed to spawn command '{}': {}", command, e)
+                            })),
                         }
                     }
-                    (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => Err(json!({ "error": format!("Failed to parse command arguments: {}", e) })), // Corrected structure
+                    (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                        Err(json!({ "error": format!("Failed to parse command arguments: {}", e) }))
+                    } // Corrected structure
                 }
             }
             // --- Standard Tool Implementations ---
