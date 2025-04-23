@@ -557,21 +557,9 @@ pub async fn submit_query(
                              let error_str = serde_json::to_string(&tool_result_value).unwrap_or_else(|e| format!("{{\"error\": \"Failed to serialize error result: {}\"}}", e));
                              json!([{"type": "text", "text": error_str}])
                         } else {
-                            // For non-screenshot success, wrap the result JSON in the text block structure
-                            // Check if the result is already in the desired [{"type": "text", "text": "..."}] format
-                            if let Some(arr) = tool_result_value.as_array() {
-                                if arr.len() == 1 && arr[0].get("type").and_then(|t| t.as_str()) == Some("text") && arr[0].get("text").is_some() {
-                                    tool_result_value // Already formatted correctly
-                                } else {
-                                    // Wrap other JSON results
-                                    let result_str = serde_json::to_string(&tool_result_value).unwrap_or_else(|e| format!("Failed to serialize success result: {}", e));
-                                    json!([{"type": "text", "text": result_str}])
-                                }
-                            } else {
-                                // Wrap non-array JSON results
-                                let result_str = serde_json::to_string(&tool_result_value).unwrap_or_else(|e| format!("Failed to serialize success result: {}", e));
-                                json!([{"type": "text", "text": result_str}])
-                            }
+                            // For non-screenshot success, always wrap the stringified JSON result
+                            let result_str = serde_json::to_string(&tool_result_value).unwrap_or_else(|e| format!("Failed to serialize success result: {}", e));
+                            json!([{"type": "text", "text": result_str}])
                         };
 
                     // Return tuple for aggregation
