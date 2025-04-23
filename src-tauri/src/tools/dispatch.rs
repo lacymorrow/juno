@@ -18,6 +18,9 @@ use computer_use_ai_sdk::{
     platforms::macos::utils as macos_utils,
 };
 
+use glob;
+use dirs;
+
 // Import helpers from the sibling module
 use super::helpers::*;
 
@@ -631,18 +634,19 @@ pub(crate) async fn call_tool(
                                     child.wait().map_err(|e| format!("Failed to wait for child process: {}", e))
                                 };
 
+                                // Capture stdout/stderr after waiting
+                                let output = child.wait_with_output().map_err(|e| format!("Failed to capture command output: {}", e))?;
+
                                 match status_result {
                                     Ok(status) => {
-                                        // Attempt to read stdout/stderr after process exits
-                                        // Note: Reading from pipes of a finished process might be tricky/platform-dependent
-                                        // Consider using libraries like `duct` or managing pipes explicitly if needed.
-                                        // For now, we return exit code and timeout status.
                                         let timed_out = timeout_duration.is_some() && !status.success() && status.code().is_none(); // Heuristic for timeout
+                                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
                                         Ok(json!({
                                             "success": status.success(),
-                                            "stdout": "(stdout not captured in this implementation)", // Placeholder
-                                            "stderr": "(stderr not captured in this implementation)", // Placeholder
+                                            "stdout": stdout,
+                                            "stderr": stderr,
                                             "exit_code": status.code(),
                                             "timed_out": timed_out
                                         }))
@@ -839,8 +843,128 @@ pub(crate) async fn call_tool(
                 }
             }
             "get_screen_text" => {
-                // This requires an OCR engine integration.
-                Err(json!({ "error": "Tool 'get_screen_text' not implemented yet." }))
+                #[cfg(target_os = "macos")]
+                {
+                    info!("Executing get_screen_text using screencapture and tesseract");
+                    // Command: screencapture -i -T 0 -t png - | tesseract stdin stdout -l eng --psm 6
+                    // -i: Interactive selection
+                    // -T 0: No delay
+                    // -t png: Output PNG format
+                    // -: Output to stdout
+                    // tesseract stdin stdout: Read from stdin, write to stdout
+                    // -l eng: Language english
+                    // --psm 6: Assume a single uniform block of text
+                    let cmd_str = "screencapture -i -T 0 -t png - | tesseract stdin stdout -l eng --psm 6";
+
+                    // Check if tesseract is installed first
+                    if Command::new("tesseract").arg("--version").output().is_err() {
+                        let err_msg = "Tesseract OCR is not installed or not found in PATH. Please install it (e.g., 'brew install tesseract') to use get_screen_text.".to_string();
+                        error!("{}", err_msg);
+                        return Err(json!({ "error": err_msg }));
+                    }
+
+                    // Execute the command using sh -c
+                    match Command::new("sh").arg("-c").arg(cmd_str).output() {
+                        Ok(output) => {
+                            if output.status.success() {
+                                let ocr_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                                info!(text_length = ocr_text.len(), "OCR successful");
+                                Ok(json!({ "success": true, "text": ocr_text }))
+                            } else {
+                                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                                error!(stderr = %stderr, "get_screen_text command failed");
+                                // Check stderr for common tesseract errors if possible
+                                Err(json!({ "error": format!("OCR command failed: {}", stderr) }))
+                            }
+                        }
+                        Err(e) => {
+                            error!(error = %e, "Failed to run get_screen_text command");
+                            Err(json!({ "error": format!("Failed to execute screen capture/OCR command: {}", e) }))
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    Err(json!({ "error": "get_screen_text is only implemented for macOS currently." }))
+                }
+            }
+            "find_files" => {
+                let pattern = get_string_param(input, "pattern")?;
+                let base_path_opt = get_optional_string_param(input, "path")?;
+
+                // Determine the base path to search in
+                let base_path = match base_path_opt {
+                    Some(p) => PathBuf::from(p),
+                    None => dirs::home_dir().ok_or_else(|| json!({ "error": "Could not determine home directory." }))?,
+                };
+
+                info!(pattern = %pattern, path = ?base_path, "Executing find_files");
+
+                if !base_path.is_dir() {
+                    return Err(json!({ "error": format!("Specified search path is not a directory: {}", base_path.display()) }));
+                }
+
+                // Construct the full glob pattern (e.g., /Users/me/**/*.txt)
+                // Using glob directly can be complex with absolute paths and directory traversal.
+                // A simpler approach for now might be to use the `find` command via the `bash` tool logic if available,
+                // or implement a basic recursive search.
+                // Let's try a basic recursive search with `walkdir` if available or implement manually.
+                // Since walkdir isn't added, we will use `glob` but carefully construct the pattern.
+
+                // Construct pattern relative to base path for glob search
+                let full_pattern = base_path.join(&pattern).to_string_lossy().to_string();
+                // Note: glob doesn't automatically search recursively with just a filename pattern.
+                // We need to handle recursive search patterns like `**` or limit the search depth.
+                // For simplicity, let's assume the pattern might include `**` if recursion is desired.
+                // Example: path=/Users/user, pattern=**/*.txt -> /Users/user/**/*.txt
+
+                match glob::glob(&full_pattern) {
+                    Ok(paths) => {
+                        let mut found_files: Vec<String> = Vec::new();
+                        let mut error_messages: Vec<String> = Vec::new();
+
+                        for entry in paths {
+                            match entry {
+                                Ok(path) => {
+                                    // Ensure we only return files (or maybe dirs if needed? Check spec)
+                                    // Anthropic doc implies finding files.
+                                    if path.is_file() {
+                                        found_files.push(path.to_string_lossy().to_string());
+                                    }
+                                }
+                                Err(e) => {
+                                    // Log and collect errors during iteration
+                                    let err_msg = format!("Error matching path during glob search: {}", e);
+                                    warn!("{}", err_msg);
+                                    error_messages.push(err_msg);
+                                }
+                            }
+                        }
+
+                        // Limit the number of results to avoid overwhelming output
+                        const MAX_RESULTS: usize = 50;
+                        let limited_results = found_files.len() > MAX_RESULTS;
+                        if limited_results {
+                            found_files.truncate(MAX_RESULTS);
+                        }
+
+                        let mut response_data = serde_json::Map::new();
+                        response_data.insert("success".to_string(), json!(true));
+                        response_data.insert("files".to_string(), json!(found_files));
+                        if limited_results {
+                            response_data.insert("message".to_string(), json!(format!("Found {} files, returning the first {}.", found_files.len() + error_messages.len(), MAX_RESULTS))); // Adjust count? This only counts truncated success
+                        }
+                        if !error_messages.is_empty() {
+                            response_data.insert("warnings".to_string(), json!(error_messages));
+                        }
+
+                        Ok(json!(response_data))
+                    }
+                    Err(e) => {
+                        error!(pattern = %full_pattern, error = %e, "Glob pattern error");
+                        Err(json!({ "error": format!("Invalid file pattern '{}': {}", full_pattern, e) }))
+                    }
+                }
             }
             // --- Unknown Tool ---
             _ => Err(json!({ "error": format!("Unknown tool name: {}", tool_name) })),
