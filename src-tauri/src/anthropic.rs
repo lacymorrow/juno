@@ -1,17 +1,30 @@
 use crate::state::AppState;
-use crate::tools::{list_tools, handle_tool_call}; // Import from tools module
+// use crate::tools::{list_tools, handle_tool_call}; // Removed unused
 use crate::tts;
-// use computer_use_ai_sdk::{Desktop}; // Remove unused
-use reqwest::Client;
+// use reqwest::Client; // Removed unused
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use image::{GenericImageView, ImageFormat};
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use std::io::Cursor;
-use tracing::{debug, error, info, warn};
+use image::{GenericImageView, ImageFormat}; // Keep if process_screenshot is kept/used
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Keep if process_screenshot is kept/used
+use std::io::Cursor; // Keep if process_screenshot is kept/used
+use tracing::{error, info}; // Removed unused debug, warn
 use tauri::State;
-use futures::future; // Add futures import
 use tauri::{Manager, Emitter}; // Import Manager and Emitter
+// use futures::future; // Removed unused
+
+// --- Agent Integration ---
+use crate::agent::{
+    implementations::{
+        agent_brain::AnthropicBrain, // Use the new brain
+        memory_manager::SimpleMemoryManager,
+        tool_provider::LocalToolProvider,
+        agent_runner::DefaultAgentRunner,
+    },
+    structs::AgentError,
+    traits::AgentRunnable, // Import the trait for the run method
+    tools::basic_tools::register_basic_tools, // Import the tool registration helper
+    tools::desktop_tools::register_desktop_tools, // Import the new desktop tool registration helper
+};
 
 // --- Agent State ---
 
@@ -117,51 +130,6 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
-async fn call_anthropic_api(
-    http_client: &Client,
-    api_key: &str,
-    request_payload: &AnthropicRequest<'_>,
-) -> Result<AnthropicResponse, String> {
-    let response = http_client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("anthropic-beta", "computer-use-2025-01-24") // Ensure correct beta header
-        .header("content-type", "application/json")
-        .json(request_payload)
-        .send()
-        .await;
-
-    let response = match response {
-        Ok(res) => res,
-        Err(e) => {
-            let err_msg = format!("HTTP request to Anthropic failed: {}", e);
-            error!("Error: {}", err_msg);
-            return Err(err_msg);
-        }
-    };
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Failed to read error body".to_string());
-        let err_msg = format!("Anthropic API error: {} - {}", status, body);
-        error!("Error: {}", err_msg);
-        return Err(err_msg);
-    }
-
-    match response.json().await {
-        Ok(res) => Ok(res),
-        Err(e) => {
-            let err_msg = format!("Failed to parse Anthropic JSON response: {}", e);
-            error!("Error: {}", err_msg);
-            Err(err_msg)
-        }
-    }
-}
-
 async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
      match BASE64_STANDARD.decode(base64_data) {
         Ok(image_bytes) => {
@@ -220,7 +188,7 @@ async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
 }
 
 
-// --- Submit Query Function (Refactored with State Machine) ---
+// --- Submit Query Function (Refactored with New Agent) ---
 
 #[tauri::command]
 pub async fn submit_query(
@@ -230,310 +198,97 @@ pub async fn submit_query(
 ) -> Result<(), String> { // Return Ok(()) or Err(string) for command result
     info!("Received query: {}", query);
 
-    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
-         Ok(key) => key,
-         Err(_) => {
-             let err_msg = "ANTHROPIC_API_KEY not configured.".to_string();
+    // --- Instantiate Agent Components ---
+    let memory_manager = SimpleMemoryManager::new();
+    let mut tool_provider = LocalToolProvider::new();
+
+    // Register tools
+    // TODO: This currently registers only basic file/shell tools.
+    // Adapt `register_basic_tools` or create new registration functions
+    // to include the richer set of desktop interaction tools previously defined
+    // in `src-tauri/src/tools/definitions.rs` once they are implemented
+    // according to the `ToolProvider` trait requirements.
+    register_basic_tools(&mut tool_provider).await;
+    info!("Registered basic tools for the agent.");
+
+    // Register desktop tools (currently placeholders)
+    // Pass cloned app_handle and state for the closures to capture
+    register_desktop_tools(&mut tool_provider, app_handle.clone(), state.clone()).await;
+    info!("Registered desktop tools for the agent (placeholders).");
+
+    // Instantiate the brain, handling potential env var errors
+    let agent_brain = match AnthropicBrain::from_env() {
+        Ok(brain) => brain,
+        Err(e) => {
+             let err_msg = format!("Failed to initialize agent brain: {}", e);
              error!("{}", err_msg);
-              // Emit error response immediately if API key is missing
+              // Emit error response immediately
              let result = SubmitQueryResult {
                  text: err_msg.clone(),
                  audio_base64: None,
-                 agent_state: format!("{:?}", AgentState::Failed), // Indicate failure state
+                 agent_state: "Failed".to_string(),
              };
              let payload = BackendResponsePayload { query, response: result };
-             app_handle.get_window("main").ok_or("Main window not found")?.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
+             // Use a blocking send or spawn a task if emit needs to be async within a sync context
+             // For now, assume direct emit works or handle potential blocking issues if they arise.
+             if let Some(window) = app_handle.get_window("main") {
+                 window.emit("backend-response", payload)
+                     .map_err(|e| format!("Emit failed: {}", e))?;
+             } else {
+                 error!("Main window not found, cannot emit initial error.");
+             }
              return Err(err_msg); // Return error from the command itself
          }
      };
+    info!("Agent brain initialized.");
 
-    let desktop_arc = state.desktop.clone();
-    let http_client = Client::new();
-    let mut conversation_history: Vec<AnthropicMessage> = Vec::new();
-    let mut final_response_text = String::new();
-    let mut last_error_message: Option<String> = None; // Store last error for final reporting
-    const MAX_ITERATIONS: u32 = 25;
-    let mut iteration = 0;
-    let mut agent_state = AgentState::Thinking;
-    let mut current_tool_results: Vec<ToolResultBlock> = Vec::new();
+    // Max steps for the agent loop
+    const MAX_ITERATIONS: u32 = 15; // Set a reasonable limit
 
-    // Initial user message
-    conversation_history.push(AnthropicMessage {
-        role: "user".to_string(),
-        content: json!([{ "type": "text", "text": query.clone() }]), // Wrap initial query in content block structure
-    });
+    // Create the agent runner
+    let mut agent_runner = DefaultAgentRunner::new(
+        memory_manager,
+        tool_provider,
+        agent_brain,
+        MAX_ITERATIONS,
+    );
+    info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
 
-    let available_tools = list_tools(&desktop_arc); // Get tools once
+    // --- Run the Agent ---
+    info!("Starting agent run...");
+    let agent_result = agent_runner.run(query.clone()).await;
 
-    // Agent Loop
-    while agent_state != AgentState::Finished && agent_state != AgentState::Failed && iteration < MAX_ITERATIONS {
-        info!("Agent Iteration: {}, State: {:?}", iteration + 1, agent_state);
-        iteration += 1;
-
-        match agent_state {
-            AgentState::Thinking => {
-                let max_output_tokens = 1024;
-                // let thinking_budget = 4000; // Anthropic calculates this based on max_tokens
-                // let total_max_tokens = max_output_tokens + thinking_budget; // Use only max_tokens
-
-                let request_payload = AnthropicRequest {
-                    model: "claude-3-5-sonnet-20240620",
-                    max_tokens: max_output_tokens, // Specify desired output tokens
-                    messages: conversation_history.clone(),
-                    tools: available_tools.clone(),
-                    system: Some("You are an AI assistant that can use tools to interact with the user's computer desktop environment. Use the provided tools to fulfill the user's request. Respond with the final result or status. When using tools, provide necessary thought process or context before the tool call. When finished, provide a final concise answer.".to_string()),
-                };
-
-                match call_anthropic_api(&http_client, &api_key, &request_payload).await {
-                    Ok(anthropic_response) => {
-                        debug!("Anthropic Raw Response: {:?}", anthropic_response);
-
-                        // --- Process Response ---
-                        let mut has_tool_calls = false;
-                        let mut current_text_parts = Vec::new();
-                        let mut tool_use_blocks = Vec::new();
-
-                        for block in anthropic_response.content.iter() {
-                            match block.type_.as_str() {
-                                "text" => {
-                                    if let Some(text) = &block.text {
-                                        current_text_parts.push(text.clone());
-                                    }
-                                }
-                                "tool_use" => {
-                                    if block.id.is_some() && block.name.is_some() && block.input.is_some() {
-                                        has_tool_calls = true;
-                                        tool_use_blocks.push(block.clone()); // Store for Acting state
-                                    } else {
-                                        warn!("Received incomplete tool_use block: {:?}", block);
-                                    }
-                                }
-                                "thinking" => { /* Ignore thinking blocks */ }
-                                _ => { warn!("Unknown content block type: {}", block.type_); }
-                            }
-                        }
-
-                        // Add assistant message to history (including any tool uses it requested)
-                        let assistant_content_value = match serde_json::to_value(anthropic_response.content.clone()) {
-                             Ok(v) => v,
-                             Err(e) => {
-                                 let err_msg = format!("Failed to serialize assistant content: {}", e);
-                                 error!("Error: {}", err_msg);
-                                 last_error_message = Some(err_msg);
-                                 agent_state = AgentState::Failed;
-                                 continue; // Skip to next loop iteration (will fail)
-                             }
-                         };
-                        conversation_history.push(AnthropicMessage {
-                            role: "assistant".to_string(),
-                            content: assistant_content_value,
-                        });
-
-                        // Update final_response_text if new text exists
-                        if !current_text_parts.is_empty() {
-                            final_response_text = current_text_parts.join("
-"); // Join text parts
-                             info!("Assistant text: {}", final_response_text);
-                        }
-
-                        // --- State Transition ---
-                        match anthropic_response.stop_reason.as_str() {
-                            "tool_use" => {
-                                if has_tool_calls {
-                                    agent_state = AgentState::Acting;
-                                } else {
-                                    // Should not happen if stop_reason is tool_use, but handle defensively
-                                    warn!("Stop reason is 'tool_use' but no valid tool calls found. Finishing.");
-                                     agent_state = AgentState::Finished;
-                                     if final_response_text.is_empty() {
-                                         final_response_text = "Task ended unexpectedly after tool signal.".to_string();
-                                     }
-                                }
-                            }
-                            "stop_sequence" | "end_turn" => {
-                                agent_state = AgentState::Finished;
-                                info!("Stop reason '{}' received. Finishing task.", anthropic_response.stop_reason);
-                                if final_response_text.is_empty() {
-                                    final_response_text = "Task completed (no text response generated).".to_string();
-                                }
-                            }
-                            "max_tokens" => {
-                                warn!("Stop reason 'max_tokens'. Task may be incomplete. Finishing.");
-                                final_response_text.push_str("
-[Agent stopped due to maximum token limit]");
-                                agent_state = AgentState::Finished; // Treat as finished for now
-                            }
-                            _ => { // Other reasons like "error" might imply failure
-                                let err_msg = format!("Task stopped due to unexpected reason: {}", anthropic_response.stop_reason);
-                                warn!("{}", err_msg);
-                                last_error_message = Some(err_msg);
-                                agent_state = AgentState::Failed; // Assume failure for unknown/error reasons
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        last_error_message = Some(e);
-                        agent_state = AgentState::Failed;
-                    }
-                }
-            } // End Thinking state
-
-            AgentState::Acting => {
-                // Extract tool calls from the last assistant message
-                let tool_calls_to_execute = conversation_history.last().map_or(Vec::new(), |last_msg| {
-                    if last_msg.role == "assistant" {
-                        serde_json::from_value::<Vec<AnthropicContentBlock>>(last_msg.content.clone())
-                            .unwrap_or_default()
-                            .into_iter()
-                            .filter(|block| block.type_ == "tool_use" && block.id.is_some() && block.name.is_some() && block.input.is_some())
-                            .collect()
-                    } else {
-                        Vec::new()
-                    }
-                });
-
-                if tool_calls_to_execute.is_empty() {
-                     warn!("Entered Acting state but found no tool calls in last assistant message. Finishing.");
-                     agent_state = AgentState::Finished;
-                     if final_response_text.is_empty() { final_response_text = "Task ended unexpectedly after planning to act.".to_string(); }
-                     continue;
-                 }
-
-                let app_handle_clone = app_handle.clone();
-                let state_clone = state.clone(); // Clone State for async block
-
-                let futures = tool_calls_to_execute.iter().map(|block| {
-                    let id_clone = block.id.clone().unwrap(); // Already checked Some in filter
-                    let name_clone = block.name.clone().unwrap();
-                    let input_clone = block.input.clone().unwrap();
-                    let desktop_arc_clone = desktop_arc.clone();
-                    let app_handle_clone_inner = app_handle_clone.clone();
-                     // Create a new clone of State inside the map closure for each future
-                     let state_clone_for_async = state_clone.clone();
-
-
-                    async move {
-                        info!("Executing tool: {} (ID: {})", name_clone, id_clone);
-                        let tool_result_value = handle_tool_call(
-                            &desktop_arc_clone,
-                            &app_handle_clone_inner,
-                            &name_clone,
-                            &input_clone,
-                            &state_clone_for_async, // Pass the cloned State
-                        ).await;
-                        debug!("Raw tool result for {}: {:?}", name_clone, tool_result_value);
-
-                        let is_error = tool_result_value.get("error").is_some() || tool_result_value.get("status").and_then(|s| s.as_str()) == Some("error");
-
-                        // Process result into Anthropic content block format [ { "type": "text", ... } ] or [ { "type": "image", ... } ]
-                        let processed_content_value = if (name_clone == "captureScreenshot" || name_clone == "capture_element_screenshot_command") && !is_error {
-                            // Try fetching base64 data with known keys
-                            if let Some(base64_data) = tool_result_value.get("screenshot_base64").and_then(|v| v.as_str()) {
-                                process_screenshot(base64_data).await.unwrap_or_else(|err_msg| {
-                                    json!([{"type": "text", "text": err_msg}])
-                                })
-                            } else if let Some(base64_data) = tool_result_value.get("image_base64").and_then(|v| v.as_str()) {
-                                process_screenshot(base64_data).await.unwrap_or_else(|err_msg| {
-                                    json!([{"type": "text", "text": err_msg}])
-                                })
-                            } else {
-                                // Handle case where neither key is found
-                                let error_msg = format!("Tool '{}' succeeded but missing expected base64 key ('screenshot_base64' or 'image_base64') in result: {:?}", name_clone, tool_result_value);
-                                error!("{}", error_msg);
-                                json!([{"type": "text", "text": error_msg}])
-                            }
-                        } else { // Handle non-screenshot results or errors
-                             // Use serde_json::to_string for proper JSON serialization
-                             let result_str = serde_json::to_string(&tool_result_value).unwrap_or_else(|e| {
-                                 // Fallback JSON string if serialization fails
-                                 format!("{{\"error\": \"Failed to serialize tool result: {}\"}}", e)
-                             });
-                             json!([{"type": "text", "text": result_str}])
-                        };
-
-                        (id_clone, processed_content_value, is_error)
-                    }
-                }).collect::<Vec<_>>();
-
-                // Execute all tool calls concurrently
-                let results = future::join_all(futures).await;
-
-                // Store results for the next state
-                current_tool_results = results.into_iter().map(|(id, content_value, is_error)| {
-                    ToolResultBlock {
-                        type_: "tool_result".to_string(),
-                        tool_use_id: id,
-                        content: content_value, // Already formatted as content blocks
-                        is_error: Some(is_error),
-                    }
-                }).collect();
-
-                agent_state = AgentState::ProcessingActionResult;
-            } // End Acting state
-
-            AgentState::ProcessingActionResult => {
-                if current_tool_results.is_empty() {
-                    // Should not happen if we came from Acting, but handle defensively
-                    warn!("Entered ProcessingActionResult state but no tool results found. Thinking again.");
-                     agent_state = AgentState::Thinking; // Go back to thinking maybe something went wrong
-                     continue;
-                 }
-
-                // Add tool results as a "user" message to the history
-                 let tool_results_value = match serde_json::to_value(&current_tool_results) {
-                     Ok(v) => v,
-                     Err(e) => {
-                         let err_msg = format!("Failed to serialize tool results: {}", e);
-                         error!("Error: {}", err_msg);
-                         last_error_message = Some(err_msg);
-                         agent_state = AgentState::Failed;
-                         continue; // Skip to next loop iteration (will fail)
-                     }
-                 };
-                 conversation_history.push(AnthropicMessage {
-                    role: "user".to_string(), // Role is 'user' for tool results message
-                    content: tool_results_value, // Content is the array of ToolResultBlock
-                });
-
-                // Clear the temporary results
-                current_tool_results.clear();
-
-                // Go back to thinking with the new tool results in history
-                agent_state = AgentState::Thinking;
-            } // End ProcessingActionResult state
-
-            AgentState::Finished | AgentState::Failed => {
-                // Loop condition will handle this, but break just in case
-                break;
-            }
-        } // End match agent_state
-    } // End while loop
-
-    // --- Post-Loop Processing ---
-
-    // Determine final state and message
-    let final_state = if agent_state == AgentState::Finished {
-        AgentState::Finished
-    } else if iteration >= MAX_ITERATIONS {
-        warn!("Agent reached maximum iterations ({})", MAX_ITERATIONS);
-        final_response_text.push_str(&format!("
-[Agent reached maximum iterations ({})]", MAX_ITERATIONS));
-        AgentState::Failed // Consider max iterations a failure or incomplete state
-    } else {
-        // Must be AgentState::Failed
-        error!("Agent finished in Failed state. Last error: {:?}", last_error_message);
-        if final_response_text.is_empty() {
-            final_response_text = last_error_message.unwrap_or_else(|| "Agent failed due to an unknown error.".to_string());
-        } else if let Some(err) = last_error_message {
-            final_response_text.push_str(&format!("
-[Agent Error: {}]", err));
+    // --- Process Agent Result ---
+    let (final_response_text, final_state_str) = match agent_result {
+        Ok(final_text) => {
+            info!("Agent finished successfully.");
+            (final_text, "Finished".to_string())
         }
-        AgentState::Failed
+        Err(agent_error) => {
+             error!("Agent failed: {:?}", agent_error);
+             // Provide a user-friendly error message based on the AgentError type
+             let user_error_message = match agent_error {
+                 AgentError::MaxStepsReached => format!("Agent stopped after reaching the maximum {} steps. The task might be too complex or require more iterations.", MAX_ITERATIONS),
+                 AgentError::LlmError(s) => format!("An error occurred while communicating with the AI model: {}", s),
+                 AgentError::ToolError(s) => format!("An error occurred while executing a required tool: {}", s),
+                 AgentError::ToolNotFound(s) => format!("A required tool ('{}') could not be found.", s),
+                 AgentError::ConfigurationError(s) => format!("Agent configuration error: {}", s),
+                 AgentError::MemoryError(s) => format!("Agent memory error: {}", s),
+                 AgentError::StateError(s) => format!("Agent encountered an invalid state: {}", s),
+                 AgentError::InputError(s) => format!("Invalid input provided to the agent: {}", s),
+                 AgentError::OutputError(s) => format!("Error processing agent output: {}", s),
+                 AgentError::LoopError(s) => format!("An internal error occurred in the agent loop: {}", s),
+                 AgentError::Terminated => "Agent execution was terminated.".to_string(),
+                 AgentError::Unknown(s) => format!("An unknown error occurred: {}", s),
+                 // Consider adding more specific handling if needed
+             };
+            (user_error_message, "Failed".to_string())
+        }
     };
 
-    info!("Agent finished with state: {:?}", final_state);
+    info!("Agent final response text: {}", final_response_text);
 
-    // Perform TTS synthesis
+    // --- Perform TTS Synthesis ---
     let audio_base64 = match tts::invoke_tts(final_response_text.clone(), state.clone()).await {
         Ok(base64) => Some(base64),
         Err(e) => {
@@ -542,19 +297,17 @@ pub async fn submit_query(
         }
     };
 
-    // Prepare final result payload
+    // --- Prepare and Emit Final Result ---
     let result = SubmitQueryResult {
         text: final_response_text,
         audio_base64,
-        agent_state: format!("{:?}", final_state), // Send final state as string
-        // conversation_history: conversation_history, // Uncomment to send history for debugging
+        agent_state: final_state_str,
     };
     let payload = BackendResponsePayload {
         query: query.clone(), // Use the original query
         response: result,
     };
 
-    // Emit the final response event
     info!("Emitting final backend-response");
      match app_handle.get_window("main") {
          Some(window) => {
