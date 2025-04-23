@@ -252,7 +252,7 @@ pub async fn submit_query(
     let mut conversation_history: Vec<AnthropicMessage> = Vec::new();
     let mut final_response_text = String::new();
     let mut last_error_message: Option<String> = None; // Store last error for final reporting
-    const MAX_ITERATIONS: u32 = 10;
+    const MAX_ITERATIONS: u32 = 25;
     let mut iteration = 0;
     let mut agent_state = AgentState::Thinking;
     let mut current_tool_results: Vec<ToolResultBlock> = Vec::new();
