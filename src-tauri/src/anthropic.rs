@@ -82,6 +82,7 @@ pub struct SubmitQueryResult {
     pub text: String,
     pub audio_base64: Option<String>,
     pub agent_state: String, // Send final state to frontend
+    pub screenshot_base64: Option<String>, // Optional screenshot data from the session
     // pub conversation_history: Vec<AnthropicMessage>, // Optionally send history for debugging
 }
 
@@ -209,7 +210,9 @@ pub async fn submit_query(
 
     // --- Instantiate Agent Components ---
     let memory_manager = SimpleMemoryManager::new();
-    let mut tool_provider = LocalToolProvider::new();
+
+    // Create tool provider with app handle for event emission
+    let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
     // Register tools
     // TODO: This currently registers only basic file/shell tools.
@@ -236,6 +239,7 @@ pub async fn submit_query(
                  text: err_msg.clone(),
                  audio_base64: None,
                  agent_state: "Failed".to_string(),
+                 screenshot_base64: None,
              };
              let payload = BackendResponsePayload { query, response: result };
              // Use a blocking send or spawn a task if emit needs to be async within a sync context
@@ -311,6 +315,7 @@ pub async fn submit_query(
         text: final_response_text,
         audio_base64,
         agent_state: final_state_str,
+        screenshot_base64: None, // Default to None, could be updated in future to include last screenshot
     };
     let payload = BackendResponsePayload {
         query: query.clone(), // Use the original query
