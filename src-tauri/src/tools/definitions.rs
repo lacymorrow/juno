@@ -42,13 +42,13 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "press_key".to_string(),
-            description: "Presses a single key, optionally with a modifier.".to_string(),
+            description: "Simulates pressing a key or a key combination (e.g., 'Enter', 'Cmd+C'). For single, printable characters, this often targets the focused element, while special keys or combinations act globally.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
-                    props.insert("key".to_string(), ToolParameter { type_: "string".to_string(), description: "The key to press (e.g., 'a', 'Enter').".to_string() });
-                    props.insert("modifier".to_string(), ToolParameter { type_: "string".to_string(), description: "Optional modifier key (e.g., 'cmd', 'ctrl').".to_string() }); // Add enum validation if needed
+                    props.insert("key".to_string(), ToolParameter { type_: "string".to_string(), description: "The key to press (e.g., 'a', 'Enter', 'F5', 'Cmd+Shift+P').".to_string() });
+                    props.insert("modifier".to_string(), ToolParameter { type_: "string".to_string(), description: "Optional modifier key (e.g., 'cmd', 'ctrl', 'shift', 'alt'). Use '+' in 'key' for combinations (e.g., 'Cmd+C').".to_string() });
                     props
                 },
                 required: vec!["key".to_string()],
@@ -203,58 +203,78 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "right_click".to_string(),
-            description: "Performs a right mouse click at coordinates.".to_string(),
+            description: "Performs a right mouse click at coordinates, optionally holding modifier keys.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
                     props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
                     props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    // Add optional modifier keys parameter
+                    props.insert("modifier_keys".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the click.".to_string(),
+                    });
                     props
                 },
-                required: vec!["x".to_string(), "y".to_string()],
+                required: vec!["x".to_string(), "y".to_string()], // Modifiers are optional
             },
         },
         ToolDefinition {
             name: "middle_click".to_string(),
-            description: "Performs a middle mouse click at coordinates.".to_string(),
+            description: "Performs a middle mouse click at coordinates, optionally holding modifier keys.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
                     props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate.".to_string() });
                     props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate.".to_string() });
+                    // Add optional modifier keys parameter
+                    props.insert("modifier_keys".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the click.".to_string(),
+                    });
                     props
                 },
-                required: vec!["x".to_string(), "y".to_string()],
+                required: vec!["x".to_string(), "y".to_string()], // Modifiers are optional
             },
         },
         ToolDefinition {
             name: "double_click".to_string(),
-            description: "Double-clicks the left mouse button at the specified (x, y) coordinates.".to_string(),
+            description: "Double-clicks the left mouse button at the specified (x, y) coordinates, optionally holding modifier keys.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
                     props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate".to_string() });
                     props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate".to_string() });
+                    // Add optional modifier keys parameter
+                    props.insert("modifier_keys".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the click.".to_string(),
+                    });
                     props
                 },
-                required: vec!["x".to_string(), "y".to_string()],
+                required: vec!["x".to_string(), "y".to_string()], // Modifiers are optional
             },
         },
         ToolDefinition {
             name: "triple_click".to_string(),
-            description: "Triple-clicks the left mouse button at the specified (x, y) coordinates.".to_string(),
+            description: "Triple-clicks the left mouse button at the specified (x, y) coordinates, optionally holding modifier keys.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
                     props.insert("x".to_string(), ToolParameter { type_: "number".to_string(), description: "X coordinate".to_string() });
                     props.insert("y".to_string(), ToolParameter { type_: "number".to_string(), description: "Y coordinate".to_string() });
+                    // Add optional modifier keys parameter
+                    props.insert("modifier_keys".to_string(), ToolParameter {
+                        type_: "array".to_string(),
+                        description: "Optional array of modifier keys (e.g., ['shift', 'cmd']) to hold during the click.".to_string(),
+                    });
                     props
                 },
-                required: vec!["x".to_string(), "y".to_string()],
+                required: vec!["x".to_string(), "y".to_string()], // Modifiers are optional
             },
         },
         ToolDefinition {
@@ -295,12 +315,13 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "hold_key".to_string(),
-            description: "Presses and holds a modifier key.".to_string(),
+            description: "Presses and holds a modifier key, optionally for a specified duration.".to_string(),
             input_schema: ToolInputSchema {
                 type_: "object".to_string(),
                 properties: {
                     let mut props = HashMap::new();
-                    props.insert("key".to_string(), ToolParameter { type_: "string".to_string(), description: "Modifier key to hold (cmd, ctrl, alt, shift).".to_string() });
+                    props.insert("key".to_string(), ToolParameter { type_: "string".to_string(), description: "Modifier key to hold (cmd, ctrl, alt, shift). Only one key can be held at a time.".to_string() });
+                    props.insert("duration_ms".to_string(), ToolParameter { type_: "integer".to_string(), description: "Optional duration in milliseconds to hold the key. If omitted, key is held until release_key is called.".to_string() });
                     props
                 },
                 required: vec!["key".to_string()],
