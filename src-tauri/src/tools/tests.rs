@@ -6,6 +6,8 @@ mod tests {
     use computer_use_ai_sdk::Desktop;
     use serde_json::json;
     use std::sync::Arc;
+    use std::{fs, io::Write}; // Added for file operations in tests
+    use tempfile::NamedTempFile; // Added for temporary file creation
 
     // --- Tests for get_string_param ---
     #[test]
@@ -232,7 +234,7 @@ mod tests {
         assert!(get_optional_bool_param(&input, "key").is_err());
     }
 
-     // --- Tests for get_optional_modifier_keys ---
+    // --- Tests for get_optional_modifier_keys ---
     #[test]
     fn test_get_optional_modifier_keys_success() {
         let input = json!({ "modifier_keys": ["cmd", "shift"] });
@@ -275,6 +277,65 @@ mod tests {
         assert!(get_optional_modifier_keys(&input).is_err());
     }
 
+    // --- Tests for str_replace_editor ---
+
+    // Helper function to create a temporary file with content
+    fn create_temp_file(content: &str) -> NamedTempFile {
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        write!(temp_file, "{}", content).expect("Failed to write to temp file");
+        temp_file
+    }
+
+    #[test]
+    fn test_str_replace_editor_success() {
+        let temp_file = create_temp_file("Hello world, this is a test.");
+        let file_path = temp_file.path().to_str().unwrap().to_string();
+
+        let result = str_replace_editor(file_path.clone(), "world".to_string(), "universe".to_string());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), format!("Successfully updated file \'{}\'", file_path));
+
+        let updated_content = fs::read_to_string(&file_path).expect("Failed to read back temp file");
+        assert_eq!(updated_content, "Hello universe, this is a test.");
+    }
+
+    #[test]
+    fn test_str_replace_editor_find_text_not_found() {
+        let temp_file = create_temp_file("Hello world, this is a test.");
+        let file_path = temp_file.path().to_str().unwrap().to_string();
+
+        let result = str_replace_editor(file_path.clone(), "galaxy".to_string(), "universe".to_string());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), format!("No replacement performed: \'galaxy\' was not found in file \'{}\'.", file_path));
+
+        // Ensure file content is unchanged
+        let content = fs::read_to_string(&file_path).expect("Failed to read back temp file");
+        assert_eq!(content, "Hello world, this is a test.");
+    }
+
+     #[test]
+    fn test_str_replace_editor_find_text_multiple_occurrences() {
+        let temp_file = create_temp_file("test line one test\\ntest line two test");
+        let file_path = temp_file.path().to_str().unwrap().to_string();
+
+        let result = str_replace_editor(file_path.clone(), "test".to_string(), "verify".to_string());
+        assert!(result.is_err());
+        // The exact line numbers might vary based on how lines are split, adjust assertion if needed
+        assert!(result.unwrap_err().starts_with("No replacement performed: \'test\' found multiple times in file"));
+
+        // Ensure file content is unchanged
+        let content = fs::read_to_string(&file_path).expect("Failed to read back temp file");
+        assert_eq!(content, "test line one test\\ntest line two test");
+    }
+
+    #[test]
+    fn test_str_replace_editor_file_not_exist() {
+        let non_existent_path = "/path/to/non/existent/file/hopefully";
+        let result = str_replace_editor(non_existent_path.to_string(), "find".to_string(), "replace".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().starts_with("Failed to read file"));
+    }
+
     // --- Test for list_tools ---
     #[test]
     fn test_list_tools_basic() {
@@ -282,30 +343,39 @@ mod tests {
         // Create a dummy one (assuming Desktop::new is accessible and works for testing)
         // If Desktop::new is complex or requires unavailable resources, mocking is needed.
         // For now, let's assume a simple creation works for this test.
-        // Note: The false, true args might need adjustment based on Desktop::new's meaning
         let desktop_instance_result = Desktop::new(false, true);
         assert!(desktop_instance_result.is_ok(), "Failed to create dummy Desktop instance for test");
-        let desktop_instance = desktop_instance_result.unwrap();
-        let desktop_arc = Arc::new(desktop_instance);
+        let desktop_arc = Arc::new(desktop_instance_result.unwrap());
 
         let tools = list_tools(&desktop_arc);
 
         assert!(!tools.is_empty(), "list_tools should return some tools");
 
-        // Check for the presence of a few key tools by name
-        let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+        for tool in tools {
+            assert!(!tool.name.is_empty(), "Tool name should not be empty");
+            assert!(!tool.description.is_empty(), "Tool description for '{}' should not be empty", tool.name);
+            assert_eq!(tool.input_schema.type_, "object", "Tool input_schema type for '{}' should be object", tool.name);
+            // Optionally, further checks on properties/required fields could be added here if needed.
+            // Check that properties is a HashMap (implied by type) and required is a Vec<String> (implied by type).
+
+            // Ensure required fields are actually listed in properties
+            let props_map = &tool.input_schema.properties;
+            for required_prop_str in &tool.input_schema.required {
+                assert!(
+                    props_map.contains_key(required_prop_str),
+                    "Required property '{}' for tool '{}' must be defined in properties",
+                    required_prop_str,
+                    tool.name
+                );
+            }
+        }
+
+        // Keep a check for a few key tools by name as a sanity check
+        let tool_names: Vec<String> = list_tools(&desktop_arc).iter().map(|t| t.name.clone()).collect();
         assert!(tool_names.contains(&"type_text".to_string()), "Missing tool: type_text");
         assert!(tool_names.contains(&"click_focused_element".to_string()), "Missing tool: click_focused_element");
         assert!(tool_names.contains(&"bash".to_string()), "Missing tool: bash");
         assert!(tool_names.contains(&"text_editor_view".to_string()), "Missing tool: text_editor_view");
 
-        // Optional: Check properties of a specific tool (e.g., type_text)
-        if let Some(type_text_tool) = tools.iter().find(|t| t.name == "type_text") {
-            assert_eq!(type_text_tool.input_schema.type_, "object");
-            assert!(type_text_tool.input_schema.properties.contains_key("text"));
-            assert_eq!(type_text_tool.input_schema.required, vec!["text".to_string()]);
-        } else {
-            panic!("type_text tool definition not found for detailed check");
-        }
     }
 }
