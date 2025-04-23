@@ -34,7 +34,7 @@ where
     F: FnOnce() -> Result<T, AutomationError>, // Closure returns SDK result
 {
     // Hold keys
-    let mut held_keys = Vec::new(); // Track successfully held keys
+    let mut held_keys = Vec::<String>::new(); // Track successfully held keys
     for key in keys {
         if let Err(e) = desktop.hold_key(key) {
             // Release already held keys in reverse order before returning error
