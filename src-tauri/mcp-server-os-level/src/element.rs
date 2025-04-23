@@ -3,7 +3,6 @@ use crate::selector::Selector;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use serde::Serialize;
-use std::any::Any;
 
 use super::{ClickResult, Locator};
 
