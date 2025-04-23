@@ -128,6 +128,9 @@ struct AnthropicResponse {
     usage: AnthropicUsage,
 }
 
+// Import the coordinates utility
+use crate::utils::coordinates;
+
 // --- Helper Functions ---
 
 async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
@@ -146,9 +149,15 @@ async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
                     let resized_img = if scale < 1.0 {
                         let new_width = (width as f32 * scale).round() as u32;
                         let new_height = (height as f32 * scale).round() as u32;
+
+                        // Store the scaling information
+                        coordinates::update_scaling_info(width, height, new_width, new_height, scale);
+
                         img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
                     } else {
-                         img // No resize needed if already smaller or equal
+                        // No resizing needed, store 1:1 scaling
+                        coordinates::update_scaling_info(width, height, width, height, 1.0);
+                        img // No resize needed if already smaller or equal
                     };
 
                     let mut png_bytes = Vec::new();

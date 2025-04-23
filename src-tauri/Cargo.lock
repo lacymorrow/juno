@@ -2481,6 +2481,7 @@ dependencies = [
  "image",
  "log",
  "objc",
+ "once_cell",
  "reqwest",
  "serde",
  "serde_json",
