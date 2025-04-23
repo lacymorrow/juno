@@ -70,9 +70,32 @@ pub(crate) async fn call_tool(
             "press_key" => {
                 match (get_string_param(input, "key"), get_optional_string_param(input, "modifier")) {
                     (Ok(key), Ok(modifier)) => {
-                        match desktop.press_key(&key, modifier.as_deref()) {
-                            Ok(_) => Ok(json!({ "success": true, "message": format!("Key '{}' pressed.", key) })),
-                            Err(e) => Err(json!({ "error": format!("Failed to press key: {}", e) })),
+                        // Check if the key is a single, printable character and there's no modifier.
+                        // If so, use type_text instead as press_key might be for special keys.
+                        if key.chars().count() == 1 && modifier.is_none() {
+                            let first_char = key.chars().next().unwrap(); // Safe unwrap due to count check
+                            // Basic check for printable ASCII range, adjust if more complex logic needed
+                            if first_char.is_ascii_graphic() || first_char == ' ' {
+                                info!(key = %key, "Using type_text for single character key press");
+                                match desktop.type_text(&key) {
+                                     Ok(_) => Ok(json!({ "success": true, "message": format!("Typed character '{}'.", key) })),
+                                     Err(e) => Err(json!({ "error": format!("Failed to type character using type_text fallback: {}", e) })),
+                                }
+                            } else {
+                                // Handle single non-graphic chars (like enter, tab if needed) via press_key
+                                info!(key = %key, ?modifier, "Using press_key for single non-graphic character");
+                                match desktop.press_key(&key, modifier.as_deref()) {
+                                    Ok(_) => Ok(json!({ "success": true, "message": format!("Key '{}' pressed.", key) })),
+                                    Err(e) => Err(json!({ "error": format!("Failed to press key: {}", e) })),
+                                }
+                            }
+                        } else {
+                            // Original logic for multi-character keys or keys with modifiers
+                            info!(key = %key, ?modifier, "Using press_key for special key or key with modifier");
+                            match desktop.press_key(&key, modifier.as_deref()) {
+                                Ok(_) => Ok(json!({ "success": true, "message": format!("Key '{}' pressed{}.", key, modifier.map(|m| format!(" with modifier '{}'", m)).unwrap_or_default()) })),
+                                Err(e) => Err(json!({ "error": format!("Failed to press key: {}", e) })),
+                            }
                         }
                     }
                     (Err(e), _) | (_, Err(e)) => Err(e), // Propagate param parsing error
