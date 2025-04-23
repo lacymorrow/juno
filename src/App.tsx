@@ -1,4 +1,5 @@
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
+import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
 import {
@@ -249,145 +250,150 @@ function App() {
   }, [conversation]);
 
   return (
-    <div className="w-screen h-screen bg-background text-foreground">
-      <div className="container mx-auto p-4 h-full flex flex-col">
-        {/* Header */}
-        <header className="flex justify-between items-center mb-4 flex-shrink-0 border-b pb-2">
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <BotMessageSquare size={24} /> Juno{" "}
-            <span className="text-xs text-muted-foreground">Operator</span>
-          </h1>
-          <div className="flex items-center gap-4">
-            {/* Status Indicator */}
-            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <Server
-                size={16}
-                className={cn(
-                  serverStatus === "connected"
-                    ? "text-green-500"
-                    : serverStatus === "error"
-                    ? "text-red-500"
-                    : "text-yellow-500 animate-pulse"
-                )}
-              />
-              {serverStatus === "connected"
-                ? "Connected"
-                : serverStatus === "error"
-                ? "Connection Error"
-                : "Connecting..."}
-            </div>
-            {/* Toggle Dev Panel Button */}
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
-              title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
-            >
-              {isDevPanelOpen ? (
-                <PanelLeftClose size={18} />
-              ) : (
-                <PanelLeftOpen size={18} />
-              )}
-            </Button>
-          </div>
-        </header>
+    <main className="h-screen flex flex-col">
+      {/* Click Visualizer - overlays the entire app to show click indicators */}
+      <ClickVisualizer />
 
-        {/* Main Content Area (Resizable Chat + Dev Panel) */}
-        <ResizablePanelGroup
-          direction="horizontal"
-          className="flex-grow rounded-lg border overflow-hidden"
-        >
-          {/* Chat Panel */}
-          <ResizablePanel defaultSize={75} minSize={30}>
-            <div className="flex flex-col h-full p-4">
-              {/* Conversation Area */}
-              <ScrollArea className="flex-grow mb-4 -mr-4 pr-4">
-                {conversation.map((msg, index) => (
-                  <div
-                    key={index}
-                    className={`mb-3 flex ${
-                      msg.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <span
-                      className={cn(
-                        "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
-                        msg.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : msg.role === "assistant"
-                          ? "bg-muted"
-                          : "bg-secondary text-secondary-foreground text-xs italic opacity-80"
-                      )}
-                    >
-                      {msg.content}
-                    </span>
-                  </div>
-                ))}
-                <div ref={conversationEndRef} />
-              </ScrollArea>
-
-              {/* Input Form */}
-              <form
-                onSubmit={handleSubmit}
-                className="flex gap-2 flex-shrink-0 mt-auto"
-              >
-                <Input
-                  type="text"
-                  placeholder={
-                    isProcessing ? "Processing..." : "Enter your query..."
-                  }
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  disabled={isProcessing || serverStatus !== "connected"}
-                  className="flex-grow"
+      <div className="w-screen h-screen bg-background text-foreground">
+        <div className="container mx-auto p-4 h-full flex flex-col">
+          {/* Header */}
+          <header className="flex justify-between items-center mb-4 flex-shrink-0 border-b pb-2">
+            <h1 className="text-xl font-semibold flex items-center gap-2">
+              <BotMessageSquare size={24} /> Juno{" "}
+              <span className="text-xs text-muted-foreground">Operator</span>
+            </h1>
+            <div className="flex items-center gap-4">
+              {/* Status Indicator */}
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <Server
+                  size={16}
+                  className={cn(
+                    serverStatus === "connected"
+                      ? "text-green-500"
+                      : serverStatus === "error"
+                      ? "text-red-500"
+                      : "text-yellow-500 animate-pulse"
+                  )}
                 />
-                <Button
-                  type="submit"
-                  disabled={
-                    isProcessing ||
-                    serverStatus !== "connected" ||
-                    !query.trim()
-                  }
-                >
-                  <Send size={18} />
-                </Button>
-              </form>
-            </div>
-          </ResizablePanel>
-
-          {/* Resizable Handle */}
-          <ResizableHandle withHandle />
-
-          {/* Dev Tools & Logs Panel (Collapsible) */}
-          <ResizablePanel
-            collapsible
-            collapsedSize={0} // Completely collapses
-            minSize={50} // Minimum size when expanded
-            defaultSize={100} // Default size when expanded
-            className={cn(
-              isDevPanelOpen ? "block" : "hidden",
-              "overflow-hidden" // Ensure panel itself doesn't scroll
-            )}
-          >
-            {/* Apply ScrollArea directly inside the panel */}
-            <ScrollArea className="h-full w-full p-3">
-              {" "}
-              {/* Full size and padding */}
-              {/* Title (replaces CardHeader) */}
-              <h2 className="text-lg font-semibold mb-3 border-b pb-2">
-                Developer Tools & Logs
-              </h2>
-              {/* DevToolsPanel Component */}
-              <div className="border-b pb-3 mb-3">
-                <DevToolsPanel />
+                {serverStatus === "connected"
+                  ? "Connected"
+                  : serverStatus === "error"
+                  ? "Connection Error"
+                  : "Connecting..."}
               </div>
-              {/* Logs Area */}
-              <div className="flex-grow">{/* Logs Area */}</div>
-            </ScrollArea>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+              {/* Toggle Dev Panel Button */}
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
+                title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
+              >
+                {isDevPanelOpen ? (
+                  <PanelLeftClose size={18} />
+                ) : (
+                  <PanelLeftOpen size={18} />
+                )}
+              </Button>
+            </div>
+          </header>
+
+          {/* Main Content Area (Resizable Chat + Dev Panel) */}
+          <ResizablePanelGroup
+            direction="horizontal"
+            className="flex-grow rounded-lg border overflow-hidden"
+          >
+            {/* Chat Panel */}
+            <ResizablePanel defaultSize={75} minSize={30}>
+              <div className="flex flex-col h-full p-4">
+                {/* Conversation Area */}
+                <ScrollArea className="flex-grow mb-4 -mr-4 pr-4">
+                  {conversation.map((msg, index) => (
+                    <div
+                      key={index}
+                      className={`mb-3 flex ${
+                        msg.role === "user" ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      <span
+                        className={cn(
+                          "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
+                          msg.role === "user"
+                            ? "bg-primary text-primary-foreground"
+                            : msg.role === "assistant"
+                            ? "bg-muted"
+                            : "bg-secondary text-secondary-foreground text-xs italic opacity-80"
+                        )}
+                      >
+                        {msg.content}
+                      </span>
+                    </div>
+                  ))}
+                  <div ref={conversationEndRef} />
+                </ScrollArea>
+
+                {/* Input Form */}
+                <form
+                  onSubmit={handleSubmit}
+                  className="flex gap-2 flex-shrink-0 mt-auto"
+                >
+                  <Input
+                    type="text"
+                    placeholder={
+                      isProcessing ? "Processing..." : "Enter your query..."
+                    }
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    disabled={isProcessing || serverStatus !== "connected"}
+                    className="flex-grow"
+                  />
+                  <Button
+                    type="submit"
+                    disabled={
+                      isProcessing ||
+                      serverStatus !== "connected" ||
+                      !query.trim()
+                    }
+                  >
+                    <Send size={18} />
+                  </Button>
+                </form>
+              </div>
+            </ResizablePanel>
+
+            {/* Resizable Handle */}
+            <ResizableHandle withHandle />
+
+            {/* Dev Tools & Logs Panel (Collapsible) */}
+            <ResizablePanel
+              collapsible
+              collapsedSize={0} // Completely collapses
+              minSize={50} // Minimum size when expanded
+              defaultSize={100} // Default size when expanded
+              className={cn(
+                isDevPanelOpen ? "block" : "hidden",
+                "overflow-hidden" // Ensure panel itself doesn't scroll
+              )}
+            >
+              {/* Apply ScrollArea directly inside the panel */}
+              <ScrollArea className="h-full w-full p-3">
+                {" "}
+                {/* Full size and padding */}
+                {/* Title (replaces CardHeader) */}
+                <h2 className="text-lg font-semibold mb-3 border-b pb-2">
+                  Developer Tools & Logs
+                </h2>
+                {/* DevToolsPanel Component */}
+                <div className="border-b pb-3 mb-3">
+                  <DevToolsPanel />
+                </div>
+                {/* Logs Area */}
+                <div className="flex-grow">{/* Logs Area */}</div>
+              </ScrollArea>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
 
