@@ -521,4 +521,77 @@ async fn register_additional_computer_use_tools(
     };
     provider.register_tool(left_mouse_up_def, left_mouse_up_exec).await;
     info!("Registered tool: left_mouse_up");
+
+    // right_click
+    let right_click_def = ToolDefinition {
+        name: "right_click".to_string(),
+        description: "Perform a right click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let right_click_exec = move |input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        let args = serde_json::from_value::<MousePositionInput>(input)
+            .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+        // Use a blocking task to handle the async operation
+        let _result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let app_handle_for_async = app_handle.clone();
+                commands::mouse::dev_right_click(app_handle_for_async, managed_state, args.x, args.y)
+                    .await
+                    .map_err(|e| format!("Error right clicking: {}", e))
+            })
+        })?;
+
+        Ok(json!({"success": true}))
+    };
+    provider.register_tool(right_click_def, right_click_exec).await;
+    info!("Registered tool: right_click");
+
+    // cursor_position
+    let cursor_position_def = ToolDefinition {
+        name: "cursor_position".to_string(),
+        description: "Get the current cursor position.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let cursor_position_exec = move |_input: Value| -> Result<Value, String> {
+        let app_handle = app_handle_clone.clone();
+        let managed_state = app_handle.state::<AppState>();
+
+        // Use a blocking task to handle the async operation
+        let result = tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let app_handle_for_async = app_handle.clone();
+                commands::mouse::dev_get_cursor_position(app_handle_for_async, managed_state)
+                    .await
+                    .map_err(|e| format!("Error getting cursor position: {}", e))
+            })
+        })?;
+
+        Ok(json!({
+            "x": result.0,
+            "y": result.1
+        }))
+    };
+    provider.register_tool(cursor_position_def, cursor_position_exec).await;
+    info!("Registered tool: cursor_position");
 }
