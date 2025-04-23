@@ -34,14 +34,16 @@ where
     F: FnOnce() -> Result<T, AutomationError>, // Closure returns SDK result
 {
     // Hold keys
+    let mut held_keys = Vec::new(); // Track successfully held keys
     for key in keys {
         if let Err(e) = desktop.hold_key(key) {
-            // Attempt to release any already held keys before returning error
-            for held_key in keys.iter().take_while(|&k| k != key) {
+            // Release already held keys in reverse order before returning error
+            for held_key in held_keys.iter().rev() {
                 desktop.release_key(held_key).ok(); // Ignore release error during cleanup
             }
             return Err(json!({ "error": format!("Failed to hold modifier key '{}': {}", key, e) }));
         }
+        held_keys.push(key.clone()); // Add to held keys list
     }
 
     // Run the function
