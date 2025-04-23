@@ -78,6 +78,79 @@ type FileEntry = {
   // Add other relevant fields like size, modified date if needed
 };
 
+// Default loading states
+const initialLoadingStates: LoadingStates = {
+  screenshot: false,
+  focusInfo: false,
+  focusDelay: false,
+  elementScreenshot: false,
+  clickFocus: false,
+  typeText: false,
+  pressKey: false,
+  openApp: false,
+  openUrl: false,
+  scroll: false,
+  globalTypeText: false,
+  getClipboard: false,
+  setClipboard: false,
+  holdKey: false,
+  releaseKey: false,
+  wait: false,
+  findElement: false,
+  clickElement: false,
+  getSelectedText: false,
+  getWindowList: false,
+  getWindowInfo: false,
+  focusWindow: false,
+  resizeWindow: false,
+  moveWindow: false,
+  closeWindow: false,
+  listFiles: false,
+  getFileContent: false,
+  setFileContent: false,
+  mouseMove: false,
+  mouseDown: false,
+  mouseUp: false,
+  mouseClick: false,
+  mouseDoubleClick: false,
+  mouseDrag: false,
+  testClickVisualization: false,
+};
+
+// Type for result data from QA tests
+type ClickQAResult = {
+  success: boolean;
+  operation: string;
+  coordinates: [number, number];
+  original_coordinates?: [number, number];
+  error?: string;
+  visualization_success: boolean;
+  cursor_position_after?: [number, number];
+  latency_ms: number;
+};
+
+// Type for coordinate transformation test results
+type CoordinateTestResult = {
+  original: { x: number; y: number };
+  transformed_to_screen: { x: number; y: number };
+  transformed_back: { x: number; y: number };
+  error: { x: number; y: number };
+  scaling_info?: any;
+  is_accurate: boolean;
+};
+
+// Type for visualization test results
+type VisualizationTestResult = {
+  test: string;
+  results: Array<{
+    position: { x: number; y: number };
+    color: string;
+    success: boolean;
+    error?: string;
+  }>;
+  success_rate: number;
+};
+
 const DevToolsPanel: React.FC = () => {
   const [screenshotSrc, setScreenshotSrc] = useState<string | null>(null);
   const [focusedElementInfo, setFocusedElementInfo] = useState<string | null>(
@@ -86,43 +159,8 @@ const DevToolsPanel: React.FC = () => {
   const [elementScreenshotSrc, setElementScreenshotSrc] = useState<
     string | null
   >(null);
-  const [loadingStates, setLoadingStates] = useState<LoadingStates>({
-    screenshot: false,
-    focusInfo: false,
-    focusDelay: false,
-    elementScreenshot: false,
-    clickFocus: false,
-    typeText: false,
-    pressKey: false,
-    openApp: false,
-    openUrl: false,
-    scroll: false,
-    globalTypeText: false,
-    getClipboard: false,
-    setClipboard: false,
-    holdKey: false,
-    releaseKey: false,
-    wait: false,
-    findElement: false,
-    clickElement: false,
-    getSelectedText: false, // Added
-    getWindowList: false, // Added
-    getWindowInfo: false, // Added
-    focusWindow: false, // Added
-    resizeWindow: false, // Added
-    moveWindow: false, // Added
-    closeWindow: false, // Added
-    listFiles: false, // Added
-    getFileContent: false,
-    setFileContent: false, // Added
-    mouseMove: false, // Added
-    mouseDown: false, // Added
-    mouseUp: false, // Added
-    mouseClick: false, // Added
-    mouseDoubleClick: false, // Added
-    mouseDrag: false, // Added
-    testClickVisualization: false, // Added for click visualization testing
-  });
+  const [loadingStates, setLoadingStates] =
+    useState<LoadingStates>(initialLoadingStates);
   // Input states
   const [textToType, setTextToType] = useState<string>("Hello from DevTools!");
   const [keyToPress, setKeyToPress] = useState<string>("Return"); // e.g., Return, Tab, cmd+s
@@ -172,6 +210,28 @@ const DevToolsPanel: React.FC = () => {
   const [mouseStartY, setMouseStartY] = useState<string>("100"); // Added for drag
   const [mouseEndX, setMouseEndX] = useState<string>("200"); // Added for drag
   const [mouseEndY, setMouseEndY] = useState<string>("200"); // Added for drag
+
+  // Results states for QA tests
+  const [qaClickResult, setQaClickResult] = useState<ClickQAResult | null>(
+    null
+  );
+  const [qaClickSeriesResults, setQaClickSeriesResults] = useState<
+    ClickQAResult[] | null
+  >(null);
+  const [coordinateTestResult, setCoordinateTestResult] =
+    useState<CoordinateTestResult | null>(null);
+  const [visualizationTestResult, setVisualizationTestResult] =
+    useState<VisualizationTestResult | null>(null);
+
+  // Input fields for QA tests
+  const [qaClickType, setQaClickType] = useState<string>("left");
+  const [qaClickX, setQaClickX] = useState<number>(400);
+  const [qaClickY, setQaClickY] = useState<number>(300);
+
+  // State for coordinate testing
+  const [coordTestX, setCoordTestX] = useState("");
+  const [coordTestY, setCoordTestY] = useState("");
+  const [coordTestLoading, setCoordTestLoading] = useState(false);
 
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
 
@@ -776,6 +836,86 @@ const DevToolsPanel: React.FC = () => {
     );
   };
 
+  // QA test handlers
+  const handleQaTestClick = async () => {
+    // Add a delay before invoking the command
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const result = await invokeCommand<ClickQAResult>(
+      "qa_test_click",
+      { x: qaClickX, y: qaClickY, clickType: qaClickType }, // Use clickType here
+      "mouseClick"
+    );
+    if (result) {
+      setQaClickResult(result);
+    }
+  };
+
+  const handleQaTestClickSeries = async () => {
+    // Add a delay before invoking the command
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Create a series of clicks at different positions
+    const positions = [
+      [200, 200, "left"] as [number, number, string],
+      [300, 200, "right"] as [number, number, string],
+      [400, 200, "middle"] as [number, number, string],
+      [500, 200, "double"] as [number, number, string],
+      [600, 200, "triple"] as [number, number, string],
+    ];
+
+    const results = await invokeCommand<ClickQAResult[]>(
+      "qa_test_click_series",
+      { positions },
+      "mouseClick"
+    );
+    if (results) {
+      setQaClickSeriesResults(results);
+    }
+  };
+
+  const handleQaTestCoordinateTransformation = async () => {
+    const x = parseFloat(coordTestX);
+    const y = parseFloat(coordTestY);
+
+    if (isNaN(x) || isNaN(y)) {
+      console.error("Invalid coordinates entered");
+      setCoordinateTestResult({ error: "Invalid coordinates entered" });
+      return;
+    }
+
+    setCoordTestLoading(true);
+    setCoordinateTestResult(null);
+
+    try {
+      const result = await invoke<CoordinateTestResult>(
+        "qa_test_coordinate_transformation",
+        { x, y }
+      );
+      console.log("Coordinate Test Result:", result);
+      setCoordinateTestResult(result);
+    } catch (error) {
+      console.error("Coordinate Transformation Test Error:", error);
+      setCoordinateTestResult({ error: String(error) });
+    } finally {
+      setCoordTestLoading(false);
+    }
+  };
+
+  const handleQaTestClickVisualization = async () => {
+    // Add a delay before invoking the command
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    const result = await invokeCommand<VisualizationTestResult>(
+      "qa_test_click_visualization",
+      {},
+      "testClickVisualization"
+    );
+    if (result) {
+      setVisualizationTestResult(result);
+    }
+  };
+
   return (
     <div className="w-full space-y-3 text-sm">
       {" "}
@@ -790,7 +930,7 @@ const DevToolsPanel: React.FC = () => {
         {" "}
         {/* Use gap for spacing */}
         <Button
-          size="sm" // Smaller button
+          size="sm"
           onClick={handleCaptureScreenshot}
           disabled={loadingStates.screenshot || loadingStates.focusDelay}
           title="Capture Screenshot"
@@ -1691,6 +1831,206 @@ const DevToolsPanel: React.FC = () => {
             ? "Testing..."
             : "Test Click Visualization"}
         </Button>
+      </div>
+      {/* QA Testing Tools Section */}
+      <div className="border rounded-md p-3 shadow-sm">
+        <h3 className="text-md font-medium mb-3">QA Testing Tools</h3>
+
+        <div className="space-y-4">
+          {/* Single Click Test */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium">Test Individual Click</h4>
+            <div className="flex flex-wrap gap-2">
+              <select
+                className="px-2 py-1 border rounded-md text-sm"
+                value={qaClickType}
+                onChange={(e) => setQaClickType(e.target.value)}
+              >
+                <option value="left">Left Click</option>
+                <option value="right">Right Click</option>
+                <option value="middle">Middle Click</option>
+                <option value="double">Double Click</option>
+                <option value="triple">Triple Click</option>
+              </select>
+
+              <input
+                type="number"
+                placeholder="X position"
+                className="px-2 py-1 border rounded-md text-sm w-24"
+                value={qaClickX}
+                onChange={(e) => setQaClickX(parseInt(e.target.value))}
+              />
+
+              <input
+                type="number"
+                placeholder="Y position"
+                className="px-2 py-1 border rounded-md text-sm w-24"
+                value={qaClickY}
+                onChange={(e) => setQaClickY(parseInt(e.target.value))}
+              />
+
+              <Button
+                size="sm"
+                onClick={handleQaTestClick}
+                disabled={loadingStates.mouseClick}
+              >
+                {loadingStates.mouseClick ? "Testing..." : "Test Click"}
+              </Button>
+            </div>
+
+            {qaClickResult && (
+              <div className="mt-2 p-2 bg-muted rounded-md text-xs">
+                <div className="font-semibold">
+                  Result:{" "}
+                  {qaClickResult.success ? (
+                    <span className="text-green-500">Success</span>
+                  ) : (
+                    <span className="text-red-500">Failed</span>
+                  )}
+                </div>
+                <div>Operation: {qaClickResult.operation}</div>
+                <div>
+                  Coordinates: ({qaClickResult.coordinates[0]},{" "}
+                  {qaClickResult.coordinates[1]})
+                </div>
+                {qaClickResult.original_coordinates && (
+                  <div>
+                    Original: ({qaClickResult.original_coordinates[0]},{" "}
+                    {qaClickResult.original_coordinates[1]})
+                  </div>
+                )}
+                <div>Latency: {qaClickResult.latency_ms.toFixed(2)}ms</div>
+                {qaClickResult.error && (
+                  <div className="text-red-500">
+                    Error: {qaClickResult.error}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Click Series Test */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium">Test Click Series</h4>
+            <Button
+              size="sm"
+              onClick={handleQaTestClickSeries}
+              disabled={loadingStates.mouseClick}
+            >
+              {loadingStates.mouseClick
+                ? "Running Series..."
+                : "Run Click Series"}
+            </Button>
+
+            {qaClickSeriesResults && (
+              <div className="mt-2 p-2 bg-muted rounded-md text-xs">
+                <div className="font-semibold">
+                  {qaClickSeriesResults.filter((r) => r.success).length} /{" "}
+                  {qaClickSeriesResults.length} successful
+                </div>
+                <div className="mt-1 space-y-1">
+                  {qaClickSeriesResults.map((result, index) => (
+                    <div
+                      key={index}
+                      className={`flex items-center gap-1 ${
+                        result.success ? "text-green-500" : "text-red-500"
+                      }`}
+                    >
+                      <span>
+                        {index + 1}. {result.operation}
+                      </span>
+                      <span>
+                        ({result.coordinates[0]}, {result.coordinates[1]})
+                      </span>
+                      <span>{result.latency_ms.toFixed(1)}ms</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Coordinate Transformation Test */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium">
+              Test Coordinate Transformation
+            </h4>
+            <Button
+              size="sm"
+              onClick={handleQaTestCoordinateTransformation}
+              disabled={loadingStates.mouseMove}
+            >
+              {loadingStates.mouseMove ? "Testing..." : "Test Coordinates"}
+            </Button>
+
+            {coordinateTestResult && (
+              <div className="mt-2 p-2 bg-muted rounded-md text-xs">
+                <div className="font-semibold">
+                  Accuracy:{" "}
+                  {coordinateTestResult.is_accurate ? (
+                    <span className="text-green-500">Good</span>
+                  ) : (
+                    <span className="text-yellow-500">Poor</span>
+                  )}
+                </div>
+                <div>
+                  Original: ({coordinateTestResult.original.x},{" "}
+                  {coordinateTestResult.original.y})
+                </div>
+                <div>
+                  Screen: (
+                  {coordinateTestResult.transformed_to_screen.x.toFixed(1)},{" "}
+                  {coordinateTestResult.transformed_to_screen.y.toFixed(1)})
+                </div>
+                <div>
+                  Back to Scaled: (
+                  {coordinateTestResult.transformed_back.x.toFixed(1)},{" "}
+                  {coordinateTestResult.transformed_back.y.toFixed(1)})
+                </div>
+                <div>
+                  Error: x={coordinateTestResult.error.x.toFixed(2)}, y=
+                  {coordinateTestResult.error.y.toFixed(2)}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Click Visualization Test */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium">Test Click Visualization</h4>
+            <Button
+              size="sm"
+              onClick={handleQaTestClickVisualization}
+              disabled={loadingStates.testClickVisualization}
+            >
+              {loadingStates.testClickVisualization
+                ? "Testing..."
+                : "Test Visualization"}
+            </Button>
+
+            {visualizationTestResult && (
+              <div className="mt-2 p-2 bg-muted rounded-md text-xs">
+                <div className="font-semibold">
+                  Success Rate:{" "}
+                  {(visualizationTestResult.success_rate * 100).toFixed(0)}%
+                </div>
+                <div className="mt-1">
+                  {visualizationTestResult.results.map((point, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <div
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: point.color }}
+                      />
+                      <span>
+                        Point {index + 1}: {point.success ? "✓" : "✗"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
