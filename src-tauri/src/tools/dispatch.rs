@@ -11,6 +11,9 @@ use tauri_plugin_notification::NotificationExt;
 use tracing::{error, info, warn};
 use wait_timeout::ChildExt;
 use shlex;
+use image::{self, ImageFormat};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use std::io::Cursor;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::{
@@ -23,6 +26,32 @@ use dirs;
 
 // Import helpers from the sibling module
 use super::helpers::*;
+
+// --- Helper Function for Image Resizing ---
+fn resize_base64_image(base64_string: String, max_dim: u32) -> Result<String, String> {
+    // 1. Decode Base64
+    let image_bytes = BASE64_STANDARD.decode(&base64_string)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    // 2. Load Image
+    let img = image::load_from_memory(&image_bytes)
+        .map_err(|e| format!("Failed to load image from memory: {}", e))?;
+
+    // 3. Resize Image (preserving aspect ratio using thumbnail)
+    let resized_img = img.thumbnail(max_dim, max_dim);
+    info!("Resized image dimensions: ({}, {})", resized_img.width(), resized_img.height());
+
+
+    // 4. Encode Resized Image to PNG bytes
+    let mut buf = Cursor::new(Vec::new());
+    resized_img.write_to(&mut buf, ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode resized image to PNG: {}", e))?;
+
+    // 5. Encode bytes back to Base64
+    let resized_base64 = BASE64_STANDARD.encode(buf.into_inner());
+
+    Ok(resized_base64)
+}
 
 // --- Tool Call Dispatcher ---
 
@@ -133,9 +162,21 @@ pub(crate) async fn call_tool(
                 {
                     match macos_utils::capture_and_encode_screenshot() {
                         Ok(base64_string) => {
-                            app_handle.notification().builder().title("Screenshot").body("Screenshot captured.").show().ok();
-                            // Return the raw base64 string for processing in submit_query
-                            Ok(json!({ "success": true, "screenshot_base64": base64_string }))
+                            info!("Original screenshot base64 length: {}", base64_string.len());
+                            // Resize the image - Reduced max_dim to 768
+                            match resize_base64_image(base64_string, 768) {
+                                Ok(resized_base64) => {
+                                    info!("Resized screenshot base64 length: {}", resized_base64.len());
+                                    app_handle.notification().builder().title("Screenshot").body("Screenshot captured and resized.").show().ok();
+                                    // Return the resized base64 string
+                                    Ok(json!({ "success": true, "screenshot_base64": resized_base64 }))
+                                }
+                                Err(e) => {
+                                    error!("Failed to resize screenshot: {}", e);
+                                    // Optionally, return the original if resizing fails? Or just error out. Let's error out.
+                                    Err(json!({ "error": format!("Failed to resize screenshot: {}", e) }))
+                                }
+                            }
                         },
                         Err(e) => Err(json!({ "error": format!("Failed to capture screenshot: {}", e) })),
                     }
@@ -153,9 +194,20 @@ pub(crate) async fn call_tool(
                             if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
                                 match macos_utils::capture_element_screenshot(macos_element) {
                                     Ok(base64_string) => {
-                                        app_handle.notification().builder().title("Element Screenshot").body("Focused element screenshot captured.").show().ok();
-                                        // Return the raw base64 string for processing in submit_query
-                                        Ok(json!({ "success": true, "screenshot_base64": base64_string }))
+                                        info!("Original element screenshot base64 length: {}", base64_string.len());
+                                        // Resize the image - Reduced max_dim to 768
+                                        match resize_base64_image(base64_string, 768) {
+                                            Ok(resized_base64) => {
+                                                info!("Resized element screenshot base64 length: {}", resized_base64.len());
+                                                app_handle.notification().builder().title("Element Screenshot").body("Focused element screenshot captured and resized.").show().ok();
+                                                // Return the resized base64 string
+                                                Ok(json!({ "success": true, "screenshot_base64": resized_base64 }))
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to resize element screenshot: {}", e);
+                                                Err(json!({ "error": format!("Failed to resize element screenshot: {}", e) }))
+                                            }
+                                        }
                                     },
                                     Err(e) => Err(json!({ "error": format!("Failed to capture element screenshot: {}", e) })),
                                 }
