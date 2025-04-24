@@ -71,7 +71,8 @@ pub fn run_terminal_command_definition() -> ToolDefinition {
 
 /// Executes the run_terminal_command tool.
 /// Input: Value containing {"command": "shell command string"}
-/// Output: Value containing {"stdout": "...". "stderr": "...", "exit_code": ...} or {"error": "..."}
+/// Output: Value containing {"stdout": "...", "stderr": "...", "exit_code": ...} OR {"error": "..."}
+/// If the command executes but returns a non-zero exit code or significant stderr, it returns an Err.
 pub fn run_terminal_command_exec(input: Value) -> Result<Value, String> {
     let command_str = input["command"]
         .as_str()
@@ -86,19 +87,46 @@ pub fn run_terminal_command_exec(input: Value) -> Result<Value, String> {
         .arg("-c")
         .arg(command_str)
         .output()
-        .map_err(|e| format!("Failed to execute command '{}': {}", command_str, e))?;
+        .map_err(|e| format!("Failed to spawn command process for '{}': {}", command_str, e))?; // Changed error message slightly
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code();
 
-    log::debug!("Command '{}' finished with code {:?}. stdout: {}, stderr: {}", command_str, exit_code, stdout, stderr);
+    log::debug!(
+        "Command '{}' finished with code {:?}. stdout: [{}], stderr: [{}]",
+        command_str,
+        exit_code,
+        stdout.trim(), // Trim whitespace for cleaner logs
+        stderr.trim()
+    );
 
-    Ok(json!({
-        "stdout": stdout,
-        "stderr": stderr,
-        "exit_code": exit_code,
-    }))
+    // Check if the command execution itself failed (non-zero exit code)
+    // Also consider stderr, as some commands might exit 0 but report errors there.
+    // A simple check for non-empty stderr AND non-zero exit code is a start.
+    // More sophisticated checks might be needed depending on expected command behavior.
+    if !output.status.success() {
+        // Return an Err if the command failed
+        log::warn!(
+            "Command '{}' failed with exit code {:?}. stderr: {}",
+            command_str,
+            exit_code,
+            stderr
+        );
+        Err(format!(
+            "Command execution failed with exit code {:?}. Stderr: {}",
+            exit_code.unwrap_or(-1), // Provide a default if no code
+            stderr
+        ))
+    } else {
+        // Return Ok only if the command succeeded (exit code 0)
+        Ok(json!({
+            "status": "success", // Explicitly add success status
+            "stdout": stdout,
+            "stderr": stderr, // Still include stderr even on success, might contain warnings
+            "exit_code": exit_code,
+        }))
+    }
 }
 
 // --- Helper to register all basic tools --- //
