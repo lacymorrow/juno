@@ -1,5 +1,7 @@
+// Add coordinates module
+pub mod coordinates;
+
 use computer_use_ai_sdk::Desktop;
-// use computer_use_ai_sdk::UIElementWrapper; // Remove unresolved import
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::element::get_focused_element_ns_workspace;
