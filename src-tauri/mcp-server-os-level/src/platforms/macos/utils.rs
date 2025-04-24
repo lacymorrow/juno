@@ -12,6 +12,8 @@ use std::io::Cursor; // Added for image encoding
 use tracing::{debug, warn}; // Added warn
 use super::element::MacOSUIElement; // Added for the new function
 use crate::element::UIElementImpl; // Import the trait providing .attributes()
+use core_graphics::event::{CGEvent}; // Removed CGEventTapLocation, CGEventType
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
 // Helper function to get PID from an AXUIElement
 pub(crate) fn get_pid_for_element(element: &ThreadSafeAXUIElement) -> i32 {
@@ -211,9 +213,37 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
 
 /// Captures a screenshot of the main display and encodes it as base64 PNG.
 pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
-    let cg_image = capture_screenshot_cgimage(None)?; // Pass None explicitly
-    // Convert CGImage to buffer first
+    // 1. Get current cursor position
+    let cursor_point = unsafe {
+        // Use kCGEventSourceStateHIDSystemState to get the event source for system events
+        let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .map_err(|_| AutomationError::PlatformError("Failed to create HID event source".to_string()))?;
+        let event = CGEvent::new(event_source).map_err(|_| {
+            AutomationError::PlatformError("Failed to create null CGEvent to get location".to_string())
+        })?;
+        event.location() // This returns CGPoint in global coordinates
+    };
+    debug!("Current cursor position: ({}, {})", cursor_point.x, cursor_point.y);
+
+    // 2. Find the display containing the cursor
+    let target_display_id = match find_display_containing_point(cursor_point) {
+        Ok(id) => {
+            debug!("Cursor found on display ID: {}", id);
+            id
+        },
+        Err(e) => {
+            warn!("Failed to find display for cursor at ({}, {}): {}. Falling back to main display.", cursor_point.x, cursor_point.y, e);
+            unsafe { CGMainDisplayID() } // Fallback to main display
+        }
+    };
+
+    // 3. Capture the specific display containing the cursor
+    let cg_image = capture_screenshot_cgimage(Some(target_display_id))?;
+    debug!("Captured screenshot for display ID: {}", target_display_id);
+
+    // 4. Convert CGImage to buffer first
     let buffer = cgimage_to_imagebuffer(cg_image)?;
+    // 5. Encode
     encode_imagebuffer_to_base64_png(&buffer)
 }
 
@@ -393,7 +423,10 @@ fn encode_imagebuffer_to_base64_png(buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> 
 fn capture_screenshot_cgimage(display_id: Option<CGDirectDisplayID>) -> Result<CGImage, AutomationError> {
     unsafe {
         // Use unwrap_or_else with a closure for unsafe call
-        let target_display_id = display_id.unwrap_or_else(|| unsafe { CGMainDisplayID() });
+        let target_display_id = display_id.unwrap_or_else(|| {
+            warn!("capture_screenshot_cgimage called with None display_id, defaulting to main display.");
+            CGMainDisplayID()
+        });
         // Call the 4-argument version expected by core-graphics 0.24
         let cg_image = CGDisplay::screenshot(CGDisplayBounds(target_display_id), 0, 0, 0)
             .ok_or_else(|| {
