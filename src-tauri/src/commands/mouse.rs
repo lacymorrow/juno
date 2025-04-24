@@ -68,11 +68,11 @@ pub(crate) async fn qa_test_click(
 
     // Perform the requested click type
     let result = match clickType.as_str() {
-        "left" => dev_left_click(app.clone(), state.clone(), original_x, original_y).await,
-        "right" => dev_right_click(app.clone(), state.clone(), original_x, original_y).await,
-        "middle" => dev_middle_click(app.clone(), state.clone(), original_x, original_y).await,
-        "double" => dev_double_click(app.clone(), state.clone(), original_x, original_y).await,
-        "triple" => dev_triple_click(app.clone(), state.clone(), original_x, original_y).await,
+        "left" => dev_left_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "right" => dev_right_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "middle" => dev_middle_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "double" => dev_double_click(app.clone(), state.clone(), original_x, original_y, None).await,
+        "triple" => dev_triple_click(app.clone(), state.clone(), original_x, original_y, None).await,
         _ => Err(format!("Unknown click type: {}", clickType)),
     };
 
@@ -338,34 +338,242 @@ pub(crate) async fn qa_test_click_visualization(
     }))
 }
 
+/// QA Test for text selection functionality
+/// Tests the ability to select all text in the currently focused element
+#[tauri::command]
+pub(crate) async fn qa_test_select_text(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    info!("[QA_TOOL] Testing text selection on currently focused element");
+
+    // Record start time for latency measurement
+    let start_time = std::time::Instant::now();
+
+    // Get the focused element
+    let focused_element = match state.desktop.focused_element() {
+        Ok(element) => element,
+        Err(e) => {
+            let err_msg = format!("Failed to get focused element for text selection: {}", e);
+            error!("[QA_TOOL] {}", err_msg);
+            return Err(err_msg);
+        }
+    };
+
+    // Get element info for reporting
+    let attrs = focused_element.attributes();
+    let element_info = format!(
+        "Role: {}, Label: {:?}, Value: {:?}",
+        attrs.role,
+        attrs.label.unwrap_or_default(),
+        attrs.value.unwrap_or_default()
+    );
+    info!("[QA_TOOL] Attempting to select text in element: {}", element_info);
+
+    // Try to select text
+    let result = focused_element.select_text();
+
+    // Calculate latency
+    let duration = start_time.elapsed();
+    let latency_ms = duration.as_secs_f64() * 1000.0;
+
+    // Prepare result info
+    let success = result.is_ok();
+    let status = if success { "Success" } else { "Failed" };
+    let error_msg = result.err().map(|e| e.to_string());
+
+    // Create result JSON
+    let result_json = serde_json::json!({
+        "success": success,
+        "operation": "select_text",
+        "element_info": element_info,
+        "error": error_msg,
+        "latency_ms": latency_ms
+    });
+
+    // Send notification with result
+    send_dev_tool_notification(
+        &app,
+        "QA Text Selection Test",
+        &format!("{}: Focused element text selection - Latency: {:.2}ms", status, latency_ms)
+    )?;
+
+    Ok(result_json)
+}
+
+/// QA Test for scrolling functionality
+/// Tests the ability to scroll in the specified direction with the given amount
+#[tauri::command]
+pub(crate) async fn qa_test_scroll(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    direction: String,
+    amount: f64,
+) -> Result<serde_json::Value, String> {
+    info!("[QA_TOOL] Testing scroll: direction={}, amount={}", direction, amount);
+
+    // Record start time for latency measurement
+    let start_time = std::time::Instant::now();
+
+    // Get the focused element
+    let focused_element = match state.desktop.focused_element() {
+        Ok(element) => element,
+        Err(e) => {
+            let err_msg = format!("Failed to get focused element for scrolling: {}", e);
+            error!("[QA_TOOL] {}", err_msg);
+            return Err(err_msg);
+        }
+    };
+
+    // Get element info for reporting
+    let attrs = focused_element.attributes();
+    let element_info = format!(
+        "Role: {}, Label: {:?}",
+        attrs.role,
+        attrs.label.unwrap_or_default()
+    );
+    info!("[QA_TOOL] Attempting to scroll in element: {}", element_info);
+
+    // Try to scroll
+    let result = focused_element.scroll(&direction, amount);
+
+    // Calculate latency
+    let duration = start_time.elapsed();
+    let latency_ms = duration.as_secs_f64() * 1000.0;
+
+    // Prepare result info
+    let success = result.is_ok();
+    let status = if success { "Success" } else { "Failed" };
+    let error_msg = result.err().map(|e| e.to_string());
+
+    // Create result JSON
+    let result_json = serde_json::json!({
+        "success": success,
+        "operation": "scroll",
+        "direction": direction,
+        "amount": amount,
+        "element_info": element_info,
+        "error": error_msg,
+        "latency_ms": latency_ms
+    });
+
+    // Send notification with result
+    send_dev_tool_notification(
+        &app,
+        "QA Scroll Test",
+        &format!("{}: {} scroll by {} - Latency: {:.2}ms",
+            status, direction, amount, latency_ms)
+    )?;
+
+    Ok(result_json)
+}
+
+#[tauri::command]
+pub(crate) async fn dev_right_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    info!("Executing dev_right_click at ({}, {}) with modifier: {:?}", x, y, modifier);
+
+    // Create visualization for user feedback
+    if let Err(e) = create_click_visualization(&app, x, y, "#FF6600") {
+        error!("Failed to create click visualization: {}", e);
+        // Continue even if visualization fails
+    }
+
+    // Use a string slice for the modifier parameter if it exists
+    let modifier_str = modifier.as_deref();
+
+    // Execute the click
+    state.desktop.right_click(x, y, modifier_str)
+        .map_err(|e| format!("Failed to perform right click: {}", e))?;
+
+    send_dev_tool_notification(&app, "Right Click", &format!("Clicked at ({}, {})", x, y))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn dev_middle_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    info!("Executing dev_middle_click at ({}, {}) with modifier: {:?}", x, y, modifier);
+
+    // Create visualization for user feedback
+    if let Err(e) = create_click_visualization(&app, x, y, "#33CC33") {
+        error!("Failed to create click visualization: {}", e);
+        // Continue even if visualization fails
+    }
+
+    // Use a string slice for the modifier parameter if it exists
+    let modifier_str = modifier.as_deref();
+
+    // Execute the click
+    state.desktop.middle_click(x, y, modifier_str)
+        .map_err(|e| format!("Failed to perform middle click: {}", e))?;
+
+    send_dev_tool_notification(&app, "Middle Click", &format!("Clicked at ({}, {})", x, y))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn dev_double_click(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    x: f64,
+    y: f64,
+    modifier: Option<String>,
+) -> Result<(), String> {
+    info!("Executing dev_double_click at ({}, {}) with modifier: {:?}", x, y, modifier);
+
+    // Create visualization for user feedback
+    if let Err(e) = create_click_visualization(&app, x, y, "#3366FF") {
+        error!("Failed to create click visualization: {}", e);
+        // Continue even if visualization fails
+    }
+
+    // Use a string slice for the modifier parameter if it exists
+    let modifier_str = modifier.as_deref();
+
+    // Execute the click
+    state.desktop.double_click(x, y, modifier_str)
+        .map_err(|e| format!("Failed to perform double click: {}", e))?;
+
+    send_dev_tool_notification(&app, "Double Click", &format!("Clicked at ({}, {})", x, y))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn dev_triple_click(
     app: AppHandle,
     state: State<'_, AppState>,
     x: f64,
-    y: f64
+    y: f64,
+    modifier: Option<String>,
 ) -> Result<(), String> {
-    println!("[DEV_TOOL] Attempting to triple click at ({}, {})...", x, y);
+    info!("Executing dev_triple_click at ({}, {}) with modifier: {:?}", x, y, modifier);
 
-    #[cfg(target_os = "macos")]
-    let result = state.desktop.triple_click(x, y);
-
-    #[cfg(not(target_os = "macos"))]
-    let result = Err(computer_use_ai_sdk::AutomationError::UnsupportedPlatform);
-
-    match result {
-        Ok(_) => {
-            println!("[DEV_TOOL] triple_click succeeded.");
-            send_dev_tool_notification(&app, "Triple Click", &format!("Clicked at ({}, {})", x, y))?;
-            create_click_visualization(&app, x, y, "#ff00ff")?; // Magenta for triple-click
-            Ok(())
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to call triple_click: {}", e);
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
-        }
+    // Create visualization for user feedback
+    if let Err(e) = create_click_visualization(&app, x, y, "#9933CC") {
+        error!("Failed to create click visualization: {}", e);
+        // Continue even if visualization fails
     }
+
+    // Use a string slice for the modifier parameter if it exists
+    let modifier_str = modifier.as_deref();
+
+    // Execute the click
+    state.desktop.triple_click(x, y, modifier_str)
+        .map_err(|e| format!("Failed to perform triple click: {}", e))?;
+
+    send_dev_tool_notification(&app, "Triple Click", &format!("Clicked at ({}, {})", x, y))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -461,28 +669,25 @@ pub(crate) async fn dev_left_click(
     state: State<'_, AppState>,
     x: f64,
     y: f64,
+    modifier: Option<String>,
 ) -> Result<(), String> {
-    println!("[DEV_TOOL] Attempting left click at ({}, {})...", x, y);
+    info!("Executing dev_left_click at ({}, {}) with modifier: {:?}", x, y, modifier);
 
-    #[cfg(target_os = "macos")]
-    let result = state.desktop.left_click(x, y);
-
-    #[cfg(not(target_os = "macos"))]
-    let result = Err(computer_use_ai_sdk::AutomationError::UnsupportedPlatform);
-
-    match result {
-        Ok(_) => {
-            println!("[DEV_TOOL] left_click at ({}, {}) succeeded.", x, y);
-            send_dev_tool_notification(&app, "Mouse Action", &format!("Left clicked at ({}, {})", x, y))?;
-            create_click_visualization(&app, x, y, "#ff0000")?; // Red for left click
-            Ok(())
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to call left_click at ({}, {}): {}", x, y, e);
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
-        }
+    // Create visualization for user feedback
+    if let Err(e) = create_click_visualization(&app, x, y, "#FF3366") {
+        error!("Failed to create click visualization: {}", e);
+        // Continue even if visualization fails
     }
+
+    // Use a string slice for the modifier parameter if it exists
+    let modifier_str = modifier.as_deref();
+
+    // Execute the click
+    state.desktop.left_click(x, y, modifier_str)
+        .map_err(|e| format!("Failed to perform left click: {}", e))?;
+
+    send_dev_tool_notification(&app, "Left Click", &format!("Clicked at ({}, {})", x, y))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -510,96 +715,6 @@ pub(crate) async fn dev_left_click_drag(
         }
         Err(e) => {
             let err_msg = format!("Failed to call left_click_drag: {}", e);
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
-        }
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn dev_right_click(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
-    println!("[DEV_TOOL] Attempting right click at ({}, {})...", x, y);
-
-    #[cfg(target_os = "macos")]
-    let result = state.desktop.right_click(x, y);
-
-    #[cfg(not(target_os = "macos"))]
-    let result = Err(computer_use_ai_sdk::AutomationError::UnsupportedPlatform);
-
-    match result {
-        Ok(_) => {
-            println!("[DEV_TOOL] right_click at ({}, {}) succeeded.", x, y);
-            send_dev_tool_notification(&app, "Mouse Action", &format!("Right clicked at ({}, {})", x, y))?;
-            create_click_visualization(&app, x, y, "#0000ff")?; // Blue for right click
-            Ok(())
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to call right_click at ({}, {}): {}", x, y, e);
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
-        }
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn dev_middle_click(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
-    println!("[DEV_TOOL] Attempting middle click at ({}, {})...", x, y);
-
-    #[cfg(target_os = "macos")]
-    let result = state.desktop.middle_click(x, y);
-
-    #[cfg(not(target_os = "macos"))]
-    let result = Err(computer_use_ai_sdk::AutomationError::UnsupportedPlatform);
-
-    match result {
-        Ok(_) => {
-            println!("[DEV_TOOL] middle_click at ({}, {}) succeeded.", x, y);
-            send_dev_tool_notification(&app, "Mouse Action", &format!("Middle clicked at ({}, {})", x, y))?;
-            create_click_visualization(&app, x, y, "#00ff00")?; // Green for middle click
-            Ok(())
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to call middle_click at ({}, {}): {}", x, y, e);
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
-        }
-    }
-}
-
-#[tauri::command]
-pub(crate) async fn dev_double_click(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
-    println!("[DEV_TOOL] Attempting double click at ({}, {})...", x, y);
-
-    #[cfg(target_os = "macos")]
-    let result = state.desktop.double_click(x, y);
-
-    #[cfg(not(target_os = "macos"))]
-    let result = Err(computer_use_ai_sdk::AutomationError::UnsupportedPlatform);
-
-    match result {
-        Ok(_) => {
-            println!("[DEV_TOOL] double_click at ({}, {}) succeeded.", x, y);
-            send_dev_tool_notification(&app, "Mouse Action", &format!("Double clicked at ({}, {})", x, y))?;
-            create_click_visualization(&app, x, y, "#ffa500")?; // Orange for double click
-            Ok(())
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to call double_click at ({}, {}): {}", x, y, e);
             println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
