@@ -1,24 +1,48 @@
 use crate::state::AppState;
-use crate::tools::{list_tools, handle_tool_call}; // Import from tools module
+// use crate::tools::{list_tools, handle_tool_call}; // Removed unused
 use crate::tts;
-// use computer_use_ai_sdk::{Desktop}; // Remove unused
-use reqwest::Client;
+// use reqwest::Client; // Removed unused
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use image::{GenericImageView, ImageFormat};
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use std::io::Cursor;
-use tracing::{debug, error, info, warn};
+use image::{GenericImageView, ImageFormat}; // Keep if process_screenshot is kept/used
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Keep if process_screenshot is kept/used
+use std::io::Cursor; // Keep if process_screenshot is kept/used
+use tracing::{error, info}; // Removed unused debug, warn
 use tauri::State;
-use futures::future; // Add futures import
 use tauri::{Manager, Emitter}; // Import Manager and Emitter
+// use futures::future; // Removed unused
+
+// --- Agent Integration ---
+use crate::agent::{
+    implementations::{
+        agent_brain::AnthropicBrain, // Use the new brain
+        memory_manager::SimpleMemoryManager,
+        tool_provider::LocalToolProvider,
+        agent_runner::DefaultAgentRunner,
+    },
+    structs::AgentError,
+    traits::AgentRunnable, // Import the trait for the run method
+    tools::basic_tools::register_basic_tools, // Import the tool registration helper
+    tools::desktop_tools::register_desktop_tools, // Import the new desktop tool registration helper
+};
+
+// --- Agent State ---
+
+#[derive(Debug, Clone, PartialEq, Serialize)] // Added Serialize for potential logging/debugging
+enum AgentState {
+    Thinking,
+    Acting,
+    ProcessingActionResult,
+    Finished,
+    Failed,
+}
 
 // --- Anthropic API Structs ---
 
 #[derive(Serialize, Clone)]
 pub(crate) struct AnthropicMessage {
     pub(crate) role: String,
-    pub(crate) content: Value,
+    pub(crate) content: Value, // Keep as Value to handle complex content
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -27,20 +51,27 @@ pub(crate) struct AnthropicContentBlock {
     pub(crate) type_: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) text: Option<String>,
+    // Fields related to tool_use
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) input: Option<Value>,
+    // Fields related to tool_result (we create these, don't expect from API)
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub(crate) tool_use_id: Option<String>,
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // pub(crate) is_error: Option<bool>,
 }
 
-#[derive(Serialize)]
+
+#[derive(Serialize, Clone)] // Added Clone
 pub(crate) struct ToolResultBlock {
     #[serde(rename = "type")]
     pub(crate) type_: String, // Always "tool_result"
     pub(crate) tool_use_id: String,
-    pub(crate) content: Value,
+    pub(crate) content: Value, // Changed to Value to match Anthropic's structure [ { "type": "text", "text": "..." } ] or [ { "type": "image", ... } ]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) is_error: Option<bool>,
 }
@@ -50,6 +81,9 @@ pub(crate) struct ToolResultBlock {
 pub struct SubmitQueryResult {
     pub text: String,
     pub audio_base64: Option<String>,
+    pub agent_state: String, // Send final state to frontend
+    pub screenshot_base64: Option<String>, // Optional screenshot data from the session
+    // pub conversation_history: Vec<AnthropicMessage>, // Optionally send history for debugging
 }
 
 // Define the payload structure for the event
@@ -59,12 +93,13 @@ struct BackendResponsePayload {
     response: SubmitQueryResult,
 }
 
-#[derive(Serialize)]
-struct AnthropicThinkingBudget {
-    #[serde(rename = "type")]
-    type_: String,
-    budget_tokens: u32,
-}
+// Removed AnthropicThinkingBudget as it was commented out
+// #[derive(Serialize)]
+// struct AnthropicThinkingBudget {
+//     #[serde(rename = "type")]
+//     type_: String,
+//     budget_tokens: u32,
+// }
 
 #[derive(Serialize)]
 struct AnthropicRequest<'a> {
@@ -74,8 +109,8 @@ struct AnthropicRequest<'a> {
     tools: Vec<computer_use_ai_sdk::ToolDefinition>, // Use full path
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<AnthropicThinkingBudget>,
+    // #[serde(skip_serializing_if = "Option::is_none")] // Removed thinking budget
+    // thinking: Option<AnthropicThinkingBudget>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -94,355 +129,211 @@ struct AnthropicResponse {
     usage: AnthropicUsage,
 }
 
-// --- Submit Query Function ---
+// Import the coordinates utility
+use crate::utils::coordinates;
+
+// --- Helper Functions ---
+
+async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
+     match BASE64_STANDARD.decode(base64_data) {
+        Ok(image_bytes) => {
+            match image::load_from_memory(&image_bytes) {
+                Ok(img) => {
+                    let (width, height) = img.dimensions();
+                    let max_dim = 1024.0; // Max dimension for resizing
+                    let scale = if width > height {
+                        max_dim / width as f32
+                    } else {
+                        max_dim / height as f32
+                    };
+
+                    let resized_img = if scale < 1.0 {
+                        let new_width = (width as f32 * scale).round() as u32;
+                        let new_height = (height as f32 * scale).round() as u32;
+
+                        // Store the scaling information
+                        coordinates::update_scaling_info(width, height, new_width, new_height, scale);
+
+                        img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
+                    } else {
+                        // No resizing needed, store 1:1 scaling
+                        coordinates::update_scaling_info(width, height, width, height, 1.0);
+                        img // No resize needed if already smaller or equal
+                    };
+
+                    let mut png_bytes = Vec::new();
+                    match resized_img.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png) {
+                        Ok(_) => {
+                             let resized_base64_data = BASE64_STANDARD.encode(&png_bytes);
+                             Ok(json!([{ // Return as array of content blocks
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": resized_base64_data
+                                }
+                             }]))
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Failed to encode resized image to PNG: {}", e);
+                            error!("{}", err_msg);
+                            // Return error as text block within the array
+                            Ok(json!([{"type": "text", "text": err_msg}]))
+                        }
+                    }
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to load image from screenshot bytes: {}", e);
+                    error!("{}", err_msg);
+                     Ok(json!([{"type": "text", "text": err_msg}]))
+                }
+            }
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to decode base64 screenshot data: {}", e);
+            error!("{}", err_msg);
+             Ok(json!([{"type": "text", "text": err_msg}]))
+        }
+    }
+}
+
+
+// --- Submit Query Function (Refactored with New Agent) ---
 
 #[tauri::command]
 pub async fn submit_query(
     query: String,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle, // Pass AppHandle
-) -> Result<(), String> { // Changed return type to Ok(())
-    println!("Received query in submit_query: {}", query);
+) -> Result<(), String> { // Return Ok(()) or Err(string) for command result
+    info!("Received query: {}", query);
 
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| "ANTHROPIC_API_KEY not configured.".to_string())?;
+    // --- Instantiate Agent Components ---
+    let memory_manager = SimpleMemoryManager::new();
 
-    let desktop_arc = state.desktop.clone();
-    let http_client = Client::new();
-    let mut conversation_history: Vec<AnthropicMessage> = Vec::new();
-    let mut final_response_text = String::new();
-    const MAX_ITERATIONS: u32 = 10;
+    // Create tool provider with app handle for event emission
+    let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-    conversation_history.push(AnthropicMessage {
-        role: "user".to_string(),
-        content: Value::String(query.clone()),
-    });
+    // Register tools
+    // TODO: This currently registers only basic file/shell tools.
+    // Adapt `register_basic_tools` or create new registration functions
+    // to include the richer set of desktop interaction tools previously defined
+    // in `src-tauri/src/tools/definitions.rs` once they are implemented
+    // according to the `ToolProvider` trait requirements.
+    register_basic_tools(&mut tool_provider).await;
+    info!("Registered basic tools for the agent.");
 
-    let available_tools = list_tools(&desktop_arc); // Call the local list_tools function
+    // Register desktop tools (currently placeholders)
+    // Pass cloned app_handle and state for the closures to capture
+    register_desktop_tools(&mut tool_provider, app_handle.clone(), state.clone()).await;
+    info!("Registered desktop tools for the agent (placeholders).");
 
-    for iteration in 0..MAX_ITERATIONS {
-        println!("Agent Iteration: {}", iteration + 1);
+    // Instantiate the brain, handling potential env var errors
+    let agent_brain = match AnthropicBrain::from_env() {
+        Ok(brain) => brain,
+        Err(e) => {
+             let err_msg = format!("Failed to initialize agent brain: {}", e);
+             error!("{}", err_msg);
+              // Emit error response immediately
+             let result = SubmitQueryResult {
+                 text: err_msg.clone(),
+                 audio_base64: None,
+                 agent_state: "Failed".to_string(),
+                 screenshot_base64: None,
+             };
+             let payload = BackendResponsePayload { query, response: result };
+             // Use a blocking send or spawn a task if emit needs to be async within a sync context
+             // For now, assume direct emit works or handle potential blocking issues if they arise.
+             if let Some(window) = app_handle.get_window("main") {
+                 window.emit("backend-response", payload)
+                     .map_err(|e| format!("Emit failed: {}", e))?;
+             } else {
+                 error!("Main window not found, cannot emit initial error.");
+             }
+             return Err(err_msg); // Return error from the command itself
+         }
+     };
+    info!("Agent brain initialized.");
 
-        let max_output_tokens = 1024;
-        let thinking_budget = 4000;
-        let total_max_tokens = max_output_tokens + thinking_budget;
+    // Max steps for the agent loop
+    const MAX_ITERATIONS: u32 = 15; // Set a reasonable limit
 
-        let request_payload = AnthropicRequest {
-            model: "claude-3-7-sonnet-20250219", // Use Claude 3.5 Sonnet
-            // model: "claude-3-5-sonnet-20240620", // Use Claude 3.5 Sonnet
-            max_tokens: total_max_tokens,
-            messages: conversation_history.clone(),
-            tools: available_tools.clone(),
-            system: Some("You are an AI assistant that can use tools to interact with the user's computer desktop environment. Use the provided tools to fulfill the user's request. Respond with the final result or status.".to_string()),
-            thinking: None, // Commented out for now
-        };
+    // Create the agent runner
+    let mut agent_runner = DefaultAgentRunner::new(
+        memory_manager,
+        tool_provider,
+        agent_brain,
+        MAX_ITERATIONS,
+    );
+    info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
 
-        let response = http_client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", &api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("anthropic-beta", "computer-use-2025-01-24")
-            .header("content-type", "application/json")
-            .json(&request_payload)
-            .send()
-            .await;
+    // --- Run the Agent ---
+    info!("Starting agent run...");
+    let agent_result = agent_runner.run(query.clone()).await;
 
-        let response = match response {
-            Ok(res) => res,
-            Err(e) => {
-                let err_msg = format!("HTTP request to Anthropic failed: {}", e);
-                error!("Error: {}", err_msg);
-                // Don't return here, let the function finish and emit error if needed?
-                // Or perhaps emit an error event? For now, let's just record the final text.
-                final_response_text = err_msg; // Capture error message as final text
-                break; // Exit loop on API error
-            }
-        };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            let err_msg = format!("Anthropic API error: {} - {}", status, body);
-            error!("Error: {}", err_msg);
-            // Don't return here, let the function finish and emit error if needed?
-            // Or perhaps emit an error event? For now, let's just record the final text.
-            final_response_text = err_msg; // Capture error message as final text
-            break; // Exit loop on API error
+    // --- Process Agent Result ---
+    let (final_response_text, final_state_str) = match agent_result {
+        Ok(final_text) => {
+            info!("Agent finished successfully.");
+            (final_text, "Finished".to_string())
         }
-
-        let anthropic_response: AnthropicResponse = match response.json().await {
-            Ok(res) => res,
-            Err(e) => {
-                let err_msg = format!("Failed to parse Anthropic JSON response: {}", e);
-                error!("Error: {}", err_msg);
-                // Don't return here, let the function finish and emit error if needed?
-                // Or perhaps emit an error event? For now, let's just record the final text.
-                final_response_text = err_msg; // Capture error message as final text
-                break; // Exit loop on API error
-            }
-        };
-
-        debug!("Anthropic Raw Response: {:?}", anthropic_response);
-
-        let filtered_content: Vec<AnthropicContentBlock> = anthropic_response
-            .content
-            .clone()
-            .into_iter()
-            .filter(|block| block.type_ != "thinking")
-            .collect();
-
-        let assistant_content_value = match serde_json::to_value(filtered_content) {
-            Ok(v) => v,
-            Err(e) => {
-                let err_msg = format!("Failed to serialize assistant content: {}", e);
-                error!("Error: {}", err_msg);
-                // Don't return here, let the function finish and emit error if needed?
-                // Or perhaps emit an error event? For now, let's just record the final text.
-                final_response_text = err_msg; // Capture error message as final text
-                break; // Exit loop on API error
-            }
-        };
-        conversation_history.push(AnthropicMessage {
-            role: "assistant".to_string(),
-            content: assistant_content_value,
-        });
-
-        let mut tool_results: Vec<ToolResultBlock> = Vec::new();
-        let mut has_tool_calls = false;
-
-        // --- Tool Call Handling ---
-        let app_handle_clone = app_handle.clone();
-
-        let futures = anthropic_response.content.iter().filter_map(|block| {
-            if block.type_ == "tool_use" {
-                if let (Some(id), Some(name), Some(input)) = (&block.id, &block.name, &block.input) {
-                    has_tool_calls = true;
-                    info!("Preparing tool execution: {} with input: {:?}", name, input);
-                    let id_clone = id.clone();
-                    let name_clone = name.clone();
-                    let input_clone = input.clone();
-                    let desktop_arc_clone = desktop_arc.clone();
-                    let app_handle_clone_inner = app_handle_clone.clone();
-                    let state_clone_for_async = state.clone();
-
-                    Some(async move {
-                        let tool_result_value = handle_tool_call(
-                            &desktop_arc_clone,
-                            &app_handle_clone_inner,
-                            &name_clone,
-                            &input_clone,
-                            &state_clone_for_async,
-                        ).await;
-
-                        let is_error = tool_result_value.get("error").is_some() || tool_result_value.get("status").and_then(|s| s.as_str()) == Some("error");
-
-                        // Handle screenshot resizing
-                        let processed_content_value = if name_clone == "captureScreenshot" && !is_error {
-                             if let Some(base64_data) = tool_result_value.get("screenshot_base64").or_else(|| tool_result_value.get("image_base64")).and_then(|v| v.as_str()) {
-                                match BASE64_STANDARD.decode(base64_data) {
-                                    Ok(image_bytes) => {
-                                        match image::load_from_memory(&image_bytes) {
-                                            Ok(img) => {
-                                                let (width, height) = img.dimensions();
-                                                let max_dim = 1024.0;
-                                                let scale = if width > height {
-                                                    max_dim / width as f32
-                                                } else {
-                                                    max_dim / height as f32
-                                                };
-
-                                                let new_width = (width as f32 * scale).round() as u32;
-                                                let new_height = (height as f32 * scale).round() as u32;
-
-                                                let resized_img = if scale < 1.0 {
-                                                     img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
-                                                } else {
-                                                     img
-                                                };
-
-                                                let mut png_bytes = Vec::new();
-                                                match resized_img.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png) {
-                                                    Ok(_) => {
-                                                         let resized_base64_data = BASE64_STANDARD.encode(&png_bytes);
-                                                         json!([{
-                                                            "type": "image",
-                                                            "source": {
-                                                                "type": "base64",
-                                                                "media_type": "image/png",
-                                                                "data": resized_base64_data
-                                                            }
-                                                         }])
-                                                    }
-                                                    Err(e) => {
-                                                        let err_msg = format!("Failed to encode resized image to PNG: {}", e);
-                                                        error!("{}", err_msg);
-                                                         json!([{"type": "text", "text": err_msg}]) // Return error text
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let err_msg = format!("Failed to load image from screenshot bytes: {}", e);
-                                                error!("{}", err_msg);
-                                                 json!([{"type": "text", "text": err_msg}]) // Return error text
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let err_msg = format!("Failed to decode base64 screenshot data: {}", e);
-                                        error!("{}", err_msg);
-                                         json!([{"type": "text", "text": err_msg}]) // Return error text
-                                    }
-                                }
-                            } else {
-                                let error_msg = format!("Tool '{}' succeeded but returned unexpected data: {:?}", name_clone, tool_result_value);
-                                error!("{}", error_msg);
-                                 json!([{"type": "text", "text": error_msg}]) // Return error text
-                            }
-                        } else if is_error {
-                            // For errors, just wrap the error JSON in the text block structure
-                             let error_str = serde_json::to_string(&tool_result_value).unwrap_or_else(|e| format!("{{\"error\": \"Failed to serialize error result: {}\"}}", e));
-                             json!([{"type": "text", "text": error_str}])
-                        } else {
-                            // For non-screenshot success, wrap the result JSON in the text block structure
-                            let result_str = serde_json::to_string(&tool_result_value).unwrap_or_else(|e| format!("Failed to serialize success result: {}", e));
-                             json!([{"type": "text", "text": result_str}])
-                        };
-
-                        (id_clone, processed_content_value, is_error)
-                    })
-                } else {
-                    warn!("Warning: Received incomplete tool_use block: {:?}", block);
-                    None
-                }
-            } else {
-                // Filter out non-tool_use blocks
-                None
-            }
-        }).collect::<Vec<_>>();
-
-        // Execute all tool calls concurrently
-        let results = future::join_all(futures).await;
-
-        // Process results and update tool_results
-        for (id, content_value, is_error) in results {
-            tool_results.push(ToolResultBlock {
-                type_: "tool_result".to_string(),
-                tool_use_id: id,
-                content: content_value,
-                is_error: Some(is_error),
-            });
+        Err(agent_error) => {
+             error!("Agent failed: {:?}", agent_error);
+             // Provide a user-friendly error message based on the AgentError type
+             let user_error_message = match agent_error {
+                 AgentError::MaxStepsReached => format!("Agent stopped after reaching the maximum {} steps. The task might be too complex or require more iterations.", MAX_ITERATIONS),
+                 AgentError::LlmError(s) => format!("An error occurred while communicating with the AI model: {}", s),
+                 AgentError::ToolError(s) => format!("An error occurred while executing a required tool: {}", s),
+                 AgentError::ToolNotFound(s) => format!("A required tool ('{}') could not be found.", s),
+                 AgentError::ConfigurationError(s) => format!("Agent configuration error: {}", s),
+                 AgentError::MemoryError(s) => format!("Agent memory error: {}", s),
+                 AgentError::StateError(s) => format!("Agent encountered an invalid state: {}", s),
+                 AgentError::InputError(s) => format!("Invalid input provided to the agent: {}", s),
+                 AgentError::OutputError(s) => format!("Error processing agent output: {}", s),
+                 AgentError::LoopError(s) => format!("An internal error occurred in the agent loop: {}", s),
+                 AgentError::Terminated => "Agent execution was terminated.".to_string(),
+                 AgentError::Unknown(s) => format!("An unknown error occurred: {}", s),
+                 // Consider adding more specific handling if needed
+             };
+            (user_error_message, "Failed".to_string())
         }
-        // --- End Tool Call Handling ---
+    };
 
-        // Get final text content from the response
-        let current_response_text = anthropic_response.content.iter()
-            .filter_map(|block| {
-                if block.type_ == "text" {
-                    block.text.clone()
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<String>>()
-            .join("\n"); // Join multiple text blocks if present
+    info!("Agent final response text: {}", final_response_text);
 
-        if !current_response_text.is_empty() {
-             final_response_text = current_response_text; // Update final response if text exists
-             info!("Received text block: {}", final_response_text);
-        }
-
-        if has_tool_calls {
-            let tool_results_value = match serde_json::to_value(tool_results) {
-                Ok(v) => v,
-                Err(e) => {
-                    let err_msg = format!("Failed to serialize tool results: {}", e);
-                    error!("Error: {}", err_msg);
-                    // Don't return here, let the function finish and emit error if needed?
-                    // Or perhaps emit an error event? For now, let's just record the final text.
-                    final_response_text = err_msg; // Capture error message as final text
-                    break; // Exit loop on API error
-                }
-            };
-
-            conversation_history.push(AnthropicMessage {
-                role: "user".to_string(),
-                content: tool_results_value,
-            });
-        } else {
-            if !has_tool_calls || anthropic_response.stop_reason == "stop_sequence" || anthropic_response.stop_reason == "tool_use" {
-                 info!("Stop reason: {}", anthropic_response.stop_reason);
-                 if anthropic_response.stop_reason == "stop_sequence" && !final_response_text.is_empty() {
-                     // We have a final text response without more tools to call
-                     break;
-                 } else if anthropic_response.stop_reason == "tool_use" && has_tool_calls {
-                     // Continue loop to process tool results
-                     continue;
-                 } else if anthropic_response.stop_reason == "stop_sequence" && final_response_text.is_empty() {
-                     // Stopped, but no final text? Maybe only tool calls happened.
-                     warn!("Stop sequence received but no final text content found.");
-                     final_response_text = "Task completed (no text response generated).".to_string();
-                     break;
-                 } else if !has_tool_calls {
-                     // No tool calls in this response, and maybe stop reason indicates completion
-                     info!("No tool calls in this iteration. Considering task complete.");
-                     if final_response_text.is_empty() {
-                         final_response_text = "Task completed (no text response generated).".to_string();
-                     }
-                     break; // Assume completion if no tools called
-                 } else {
-                     // Other stop reasons or conditions might need handling
-                     warn!("Unhandled stop reason '{}' or condition. Breaking loop.", anthropic_response.stop_reason);
-                     break;
-                 }
-            }
-        }
-
-        if iteration == MAX_ITERATIONS - 1 {
-            let warn_msg = "Warning: Max iterations reached without final answer.".to_string();
-            warn!("{}", warn_msg);
-            final_response_text.push_str("\n[Agent reached maximum iterations]");
-        }
-    }
-
-    // --- Post-Loop: TTS and Event Emission ---
-
-    // Get the main window handle
-    let window = app_handle.get_window("main").ok_or_else(|| "Main window not found".to_string())?;
-
-    if final_response_text.is_empty() && conversation_history.len() <= 2 {
-        // Handle cases where the loop exited early or no meaningful response was generated
-        final_response_text = "No response received from AI or task failed internally.".to_string();
-        error!("submit_query finished with empty final_response_text.");
-    }
-
-    // Perform TTS synthesis (consider doing this before emitting if audio is needed immediately)
-    // Use the public invoke_tts function which handles provider selection
+    // --- Perform TTS Synthesis ---
     let audio_base64 = match tts::invoke_tts(final_response_text.clone(), state.clone()).await {
         Ok(base64) => Some(base64),
         Err(e) => {
             error!("TTS synthesis failed: {}", e);
-            None
+            None // Proceed without audio if TTS fails
         }
     };
 
-    // Create the result and payload
+    // --- Prepare and Emit Final Result ---
     let result = SubmitQueryResult {
         text: final_response_text,
         audio_base64,
+        agent_state: final_state_str,
+        screenshot_base64: None, // Default to None, could be updated in future to include last screenshot
     };
     let payload = BackendResponsePayload {
-        query: query.clone(), // Clone the original query
+        query: query.clone(), // Use the original query
         response: result,
     };
 
-    // Emit the event to the frontend
-    window.emit("backend-response", payload)
-        .map_err(|e| format!("Failed to emit backend-response event: {}", e))?;
-
-    println!("Emitted backend-response event for query: {}", query);
-
-    Ok(()) // Return Ok(()) as the command succeeded in emitting the event
+    info!("Emitting final backend-response");
+     match app_handle.get_window("main") {
+         Some(window) => {
+             window.emit("backend-response", payload)
+                 .map_err(|e| format!("Failed to emit backend-response event: {}", e))?;
+             info!("Successfully emitted backend-response event.");
+             Ok(()) // Command succeeded
+         }
+         None => {
+             let err_msg = "Main window not found, cannot emit event.".to_string();
+             error!("{}", err_msg);
+             Err(err_msg) // Command failed
+         }
+     }
 }
