@@ -199,54 +199,54 @@ impl MacOSEngine {
         amount: f64,
     ) -> Result<(), AutomationError> {
         debug!(
-            "Scrolling at position ({}, {}), direction: {}, amount: {}",
-            x, y, direction, amount
+            "scrolling {} by {} at position ({}, {})",
+            direction, amount, x, y
         );
 
-        // Move the mouse to the specified position first
-        interaction::mouse_move(x, y)?;
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("Failed to create event source".to_string())
+        })?;
 
-        // Wait a moment to ensure the mouse has moved
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let scroll_amount = amount as i32;
 
-        // Get the normalized direction (up, down, left, right)
-        let normalized_direction = direction.to_lowercase();
-
-        // Convert vertical direction to scroll wheel direction
-        // Note: In macOS, negative y-delta scrolls down (moves content up),
-        // positive y-delta scrolls up (moves content down)
-        let (delta_x, delta_y) = match normalized_direction.as_str() {
-            "up" => (0.0, amount),       // Positive for up
-            "down" => (0.0, -amount),    // Negative for down
-            "left" => (-amount, 0.0),    // Negative for left
-            "right" => (amount, 0.0),    // Positive for right
+        let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
+            "up" => (0, -scroll_amount),
+            "down" => (0, scroll_amount),
+            "left" => (-scroll_amount, 0),
+            "right" => (scroll_amount, 0),
             _ => {
                 return Err(AutomationError::InvalidArgument(format!(
-                    "Invalid scroll direction: {}. Expected 'up', 'down', 'left', or 'right'",
+                    "Invalid scroll direction: {}. Must be up, down, left, or right",
                     direction
                 )))
             }
         };
 
-        // Create an event source
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .map_err(|_| AutomationError::PlatformError("Failed to create event source for scrolling".to_string()))?;
-
-        // Create the scroll event
-        let scroll_event = CGEvent::new_scroll_event(
-            source,
-            CGScrollEventUnit::Line,
-            1, // Number of units (lines)
-            delta_x as i32,
-            delta_y as i32,
-            0, // Options - could be used for smooth scrolling
+        let point = CGPoint::new(x, y);
+        let mouse_move = CGEvent::new_mouse_event(
+            source.clone(),
+            CGEventType::MouseMoved,
+            point,
+            CGMouseButton::Left,
         )
-        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+        .map_err(|_| {
+            AutomationError::PlatformError("Failed to create mouse move event".to_string())
+        })?;
+        mouse_move.post(CGEventTapLocation::HID);
 
-        // Post the scroll event to the system
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let scroll_event =
+            CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0).map_err(|_| {
+                AutomationError::PlatformError("Failed to create scroll event".to_string())
+            })?;
+
         scroll_event.post(CGEventTapLocation::HID);
 
-        debug!("Scrolled at ({}, {}) with direction {} and amount {}", x, y, direction, amount);
+        debug!(
+            "scrolled {} by {} at position ({}, {})",
+            direction, amount, x, y
+        );
         Ok(())
     }
 
