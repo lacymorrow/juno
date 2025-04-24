@@ -131,6 +131,8 @@ pub fn run() {
             commands::mouse::qa_test_click_series,
             commands::mouse::qa_test_coordinate_transformation,
             commands::mouse::qa_test_click_visualization,
+            commands::mouse::qa_test_select_text,
+            commands::mouse::qa_test_scroll,
             dev_bash_command,
             // Text Editor Commands
             dev_text_editor_view,

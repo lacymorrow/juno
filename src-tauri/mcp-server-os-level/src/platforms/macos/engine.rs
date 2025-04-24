@@ -1358,7 +1358,7 @@ impl AccessibilityEngine for MacOSEngine {
         interaction::set_clipboard_contents(content)
     }
 
-    fn hold_key(&self, key: &str) -> Result<(), AutomationError> {
+    fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
         let lower_key = key.to_lowercase();
         let (key_code, flags) = match lower_key.as_str() {
             "shift" => (SHIFT_KEYCODE, MODIFIER_SHIFT),
@@ -1370,7 +1370,7 @@ impl AccessibilityEngine for MacOSEngine {
                 key
             ))),
         };
-        interaction::hold_key(key_code, flags)
+        interaction::hold_key(key_code, flags, duration_ms)
     }
 
     fn release_key(&self, key: &str) -> Result<(), AutomationError> {
@@ -1434,23 +1434,49 @@ impl AccessibilityEngine for MacOSEngine {
         interaction::left_mouse_up(x, y)
     }
 
-    fn left_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        interaction::left_click(x, y)
+    fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        let flags = if let Some(mod_name) = modifiers {
+            super::constants::modifier_name_to_flags(mod_name)
+                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?
+        } else {
+            CGEventFlags::empty()
+        };
+        interaction::left_click(x, y, Some(flags))
     }
 
-    fn right_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, right_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for right_click");
+        }
         interaction::right_click(x, y)
     }
 
-    fn middle_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, middle_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for middle_click");
+        }
         interaction::middle_click(x, y)
     }
 
-    fn double_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, double_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for double_click");
+        }
         interaction::double_click(x, y)
     }
 
-    fn triple_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, triple_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for triple_click");
+        }
         interaction::triple_click(x, y)
     }
 
