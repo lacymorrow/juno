@@ -41,7 +41,7 @@ pub mod utils;
 pub mod agent;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, keyboard::*, mouse::*, shell::*, text_editor::*, window::*};
+use commands::{app_url::*, core::*, element::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -65,6 +65,14 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+
+    // --- Initialize Provider Settings ---
+    if let Err(e) = agent::providers::factory::BrainFactory::init() {
+        tracing::warn!("Failed to initialize AI provider settings: {}", e);
+        tracing::info!("Continuing with environment variables or fallback defaults");
+    } else {
+        tracing::info!("Provider settings initialized from configuration");
+    }
 
     // --- Handle CLI Commands ---
     // If handle_cli_commands returns true, it means a command was executed
@@ -140,6 +148,16 @@ pub fn run() {
             dev_text_editor_str_replace,
             dev_text_editor_insert,
             dev_text_editor_undo_edit,
+            // Provider Management Commands
+            get_providers,
+            get_active_provider,
+            set_active_provider,
+            get_provider_settings,
+            update_provider_api_key,
+            update_provider_model,
+            update_provider_max_tokens,
+            update_provider_temperature,
+            update_provider_system_prompt,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
