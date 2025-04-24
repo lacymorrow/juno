@@ -8,6 +8,7 @@ pub mod core;
 pub mod element;
 pub mod keyboard;
 pub mod mouse;
+pub mod providers;
 pub mod shell;
 pub mod text_editor;
 pub mod window;

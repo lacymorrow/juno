@@ -215,12 +215,86 @@ impl AgentBrain for OpenAIBrain {
             Err(e) => log::error!("Failed to serialize OpenAI request: {}", e),
         }
 
-        // PLACEHOLDER: Actual OpenAI API call implementation
-        // TODO: Implement actual API call to OpenAI
+        // Make the API call to OpenAI
+        let response = self.client
+            .post(OPENAI_API_URL)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| AgentError::LlmError(format!("HTTP request failed: {}", e)))?;
 
-        log::warn!("OpenAI Brain implementation is incomplete. Returning placeholder response.");
+        // Check for HTTP errors
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
+            log::error!("OpenAI API Error: Status {}, Body: {}", status, error_body);
+            return Err(AgentError::LlmError(format!(
+                "OpenAI API returned error {}: {}",
+                status,
+                error_body
+            )));
+        }
 
-        // For now, return a placeholder response
-        Ok(AgentAction::Finish("This is a placeholder response from the OpenAI provider. The implementation is not yet complete.".to_string()))
+        // Parse the response
+        let response_body: OpenAIResponse = response
+            .json()
+            .await
+            .map_err(|e| AgentError::LlmError(format!("Failed to parse API response: {}", e)))?;
+
+        log::debug!("Received response from OpenAI: {:?}", response_body);
+
+        if response_body.choices.is_empty() {
+            return Err(AgentError::LlmError("OpenAI returned empty choices array".to_string()));
+        }
+
+        // Process the first choice (typically there's only one)
+        let choice = &response_body.choices[0];
+        let message = &choice.message;
+
+        // Determine which action to take based on the response
+        if let Some(tool_calls) = &message.tool_calls {
+            if !tool_calls.is_empty() {
+                // Convert OpenAI tool calls to our internal format
+                let mut calls = Vec::new();
+                for tool_call in tool_calls {
+                    if tool_call.call_type != "function" {
+                        log::warn!("Unsupported tool call type: {}", tool_call.call_type);
+                        continue;
+                    }
+
+                    // Parse arguments JSON
+                    let input: Value = match serde_json::from_str(&tool_call.function.arguments) {
+                        Ok(json) => json,
+                        Err(e) => {
+                            log::warn!("Failed to parse tool arguments: {}, args: {}", e, tool_call.function.arguments);
+                            continue;
+                        }
+                    };
+
+                    calls.push(ToolCall {
+                        id: tool_call.id.clone(),
+                        name: tool_call.function.name.clone(),
+                        input,
+                    });
+                }
+
+                if !calls.is_empty() {
+                    return Ok(AgentAction::ExecuteTool(calls));
+                }
+            }
+        }
+
+        // If no tool calls, return the message content as a text response
+        match &message.content {
+            Some(content) if !content.is_empty() => {
+                Ok(AgentAction::Finish(content.clone()))
+            }
+            _ => {
+                log::warn!("OpenAI response had no content");
+                Err(AgentError::LlmError("OpenAI response had no content".to_string()))
+            }
+        }
     }
 }
