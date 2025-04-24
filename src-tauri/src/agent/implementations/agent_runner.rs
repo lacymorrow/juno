@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex; // Using Mutex for mutable access to MemoryManager
 
 use crate::agent::structs::{
-    AgentAction, AgentError, AgentState, Message, Role, ToolCall, ToolResult,
+    AgentAction, AgentError, AgentState, Message, Role, // Removed ToolCall, ToolResult
 };
 use crate::agent::traits::{
     AgentBrain, AgentRunnable, MemoryManager, ToolProvider
