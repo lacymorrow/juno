@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Window } from "@tauri-apps/api/window";
+import { Window, PhysicalSize } from "@tauri-apps/api/window";
 import { Check, Mic, Send } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { cn } from "./lib/utils";
@@ -17,10 +17,7 @@ type BarState =
 export function FloatingBar() {
   const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
-  const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipVisible, setTooltipVisible] = useState(false);
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
-  const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
@@ -30,39 +27,35 @@ export function FloatingBar() {
     console.log("Bar state changed to:", barState);
   }, [barState]);
 
-  const handleMouseEnter = () => {
-    if (barState !== "default") return;
-
-    tooltipTimeoutRef.current = setTimeout(() => {
-      setShowTooltip(true);
-      setTimeout(() => setTooltipVisible(true), 50);
-    }, 1000);
-  };
-
-  const handleMouseLeave = () => {
-    if (tooltipTimeoutRef.current) {
-      clearTimeout(tooltipTimeoutRef.current);
-      tooltipTimeoutRef.current = null;
-    }
-    setTooltipVisible(false);
-    setTimeout(() => setShowTooltip(false), 200);
-  };
-
-  // Start tooltip timer when window is hovered (if in default state)
+  // Window resize effect
   useEffect(() => {
-    if (isWindowHovered && barState === "default") {
-      handleMouseEnter();
-    } else {
-      handleMouseLeave();
-    }
+    const resizeWindow = async () => {
+      try {
+        // Get the window by label to ensure we're targeting the correct window
+        const appWindow = await Window.getByLabel("floating-bar");
 
-    // Cleanup timer on unmount or when dependencies change
-    return () => {
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
+        switch (barState) {
+          case "default":
+            // Smaller window size for collapsed bar
+            await appWindow?.setSize(new PhysicalSize(100, 50));
+            break;
+          case "shrinking":
+          case "loading":
+          case "finishing":
+          case "expanding":
+          case "input":
+          case "success":
+            // Larger window size for expanded bar
+            await appWindow?.setSize(new PhysicalSize(280, 70));
+            break;
+        }
+      } catch (err) {
+        console.error("Failed to resize window:", err);
       }
     };
-  }, [isWindowHovered, barState]);
+
+    resizeWindow();
+  }, [barState]);
 
   const handleBarClick = () => {
     if (barState !== "default") return;
@@ -151,7 +144,6 @@ export function FloatingBar() {
 
   useEffect(() => {
     return () => {
-      if (tooltipTimeoutRef.current) clearTimeout(tooltipTimeoutRef.current);
       if (transitionTimeoutRef.current)
         clearTimeout(transitionTimeoutRef.current);
     };
@@ -247,7 +239,10 @@ export function FloatingBar() {
     <div
       data-tauri-drag-region
       data-window-hovered={isWindowHovered}
-      className="w-screen h-screen flex items-end justify-center pb-6"
+      className={cn(
+        "w-screen h-screen flex items-start justify-start pb-6"
+        // barState !== "input" && "cursor-pointer"
+      )}
       onClick={(e) => {
         if (e.target === e.currentTarget && barState === "default") {
           // Allow clicking the background area to trigger expansion if needed
@@ -255,45 +250,10 @@ export function FloatingBar() {
         }
       }}
     >
-      {/* Container for the bar and tooltip, positioned relative to the flex container */}
+      {/* Container for the bar, positioned relative to the flex container */}
       <div className="relative z-50">
-        {/* Tooltip - positioned relative to this new inner container */}
-        {showTooltip && barState === "default" && (
-          <div
-            className={`
-              absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2
-              bg-black/90 text-white text-xs rounded-md px-3 py-2 shadow-lg
-              whitespace-nowrap transition-all duration-200 ease-in-out
-              ${
-                tooltipVisible
-                  ? "opacity-100 translate-y-0"
-                  : "opacity-0 translate-y-2"
-              }
-            `}
-          >
-            <div className="flex items-center space-x-3">
-              <div className="flex items-center">
-                <Mic className="h-3.5 w-3.5 text-emerald-400 mr-1.5" />
-                <span>
-                  <kbd className="px-1.5 py-0.5 text-[11px] font-semibold text-gray-800 bg-gray-100 border border-gray-200 rounded-sm">
-                    ⌘ + Space
-                  </kbd>
-                  <span className="ml-1.5 text-[11px]">
-                    Start/Stop Dictation
-                  </span>
-                </span>
-              </div>
-            </div>
-            <div className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-black/90 rotate-45"></div>
-          </div>
-        )}
-
         {/* Universal Bar Container - Now positioned within the flex container */}
-        {/* Clicks specifically on this bar will propagate to handleBarClick */}
-        {/* Stop propagation for mouse enter/leave so they don't trigger the window handlers again */}
         <div
-          onMouseEnter={(e) => e.stopPropagation()}
-          onMouseLeave={(e) => e.stopPropagation()}
           className={cn(
             `
             flex items-center justify-center bg-black/90 backdrop-blur-md text-white
@@ -313,11 +273,7 @@ export function FloatingBar() {
               className={cn(
                 "w-5 h-[4px] bg-emerald-400 rounded-full",
                 "transition-all duration-300 ease-in-out",
-                // Remove hover effect from green bar
-                // "data-[window-hovered='true']:w-8 data-[window-hovered='true']:bg-emerald-300",
                 barState === "finishing" ? "opacity-0 animate-fade-in" : ""
-                // Remove direct hover class from green bar
-                // isWindowHovered ? "w-20" : "" // This seems incorrect based on previous logic, remove
               )}
             ></div>
           )}
