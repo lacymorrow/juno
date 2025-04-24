@@ -228,8 +228,8 @@ pub async fn submit_query(
     register_desktop_tools(&mut tool_provider, app_handle.clone(), state.clone()).await;
     info!("Registered desktop tools for the agent (placeholders).");
 
-    // Instantiate the brain, handling potential env var errors
-    let agent_brain = match AnthropicBrain::from_env() {
+    // Use the BrainFactory to create the appropriate AI provider brain
+    let agent_brain = match crate::agent::providers::factory::BrainFactory::create_brain() {
         Ok(brain) => brain,
         Err(e) => {
              let err_msg = format!("Failed to initialize agent brain: {}", e);
@@ -259,7 +259,7 @@ pub async fn submit_query(
     const MAX_ITERATIONS: u32 = 15; // Set a reasonable limit
 
     // Create the agent runner
-    let mut agent_runner = DefaultAgentRunner::new(
+    let mut agent_runner = DefaultAgentRunner::with_boxed_brain(
         memory_manager,
         tool_provider,
         agent_brain,

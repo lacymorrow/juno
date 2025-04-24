@@ -4,6 +4,7 @@ use crate::state::AppState;
 // Removed unused: use tauri::{AppHandle, State};
 use tracing::{info};
 use super::send_dev_tool_notification; // Use helper from parent module
+use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -77,4 +78,23 @@ pub(crate) async fn dev_set_clipboard(content: String, state: State<'_, AppState
     info!("Executing dev_set_clipboard {}", content);
     state.desktop.set_clipboard_content(&content)
         .map_err(|e| format!("Error setting clipboard content: {}", e))
+}
+
+/// Get a list of available AI providers
+#[tauri::command]
+pub async fn list_ai_providers() -> Result<Vec<ProviderInfo>, String> {
+    Ok(BrainFactory::list_providers())
+}
+
+/// Set the active AI provider
+#[tauri::command]
+pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
+    // Set environment variable for the current process
+    std::env::set_var("AI_PROVIDER", provider_id.clone());
+
+    // For a real implementation, you would want to persist this setting
+    // to a config file or database so it's remembered across app restarts
+
+    tracing::info!("Set AI provider to: {}", provider_id);
+    Ok(())
 }
