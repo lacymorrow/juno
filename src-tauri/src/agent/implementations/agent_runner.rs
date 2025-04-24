@@ -11,32 +11,52 @@ use crate::agent::traits::{
 
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
-pub struct DefaultAgentRunner<M, T, B>
+pub struct DefaultAgentRunner<M, T>
 where
     M: MemoryManager + Send + Sync,
     T: ToolProvider + Send + Sync,
-    B: AgentBrain + Send + Sync,
 {
     state: AgentState,
     memory: Arc<Mutex<M>>, // Use Mutex for mutable access across async tasks
     tool_provider: Arc<T>,
-    brain: Arc<B>,
+    brain: Arc<dyn AgentBrain + Send + Sync>, // Use trait object directly
     max_steps: u32,
     current_step: u32,
 }
 
-impl<M, T, B> DefaultAgentRunner<M, T, B>
+impl<M, T> DefaultAgentRunner<M, T>
 where
     M: MemoryManager + Send + Sync + 'static, // 'static needed for Arc<Mutex<>>
     T: ToolProvider + Send + Sync + 'static,
-    B: AgentBrain + Send + Sync + 'static,
 {
-    pub fn new(memory: M, tool_provider: T, brain: B, max_steps: u32) -> Self {
+    pub fn new(
+        memory: M,
+        tool_provider: T,
+        brain: impl AgentBrain + Send + Sync + 'static,
+        max_steps: u32
+    ) -> Self {
         DefaultAgentRunner {
             state: AgentState::Idle,
             memory: Arc::new(Mutex::new(memory)),
             tool_provider: Arc::new(tool_provider),
             brain: Arc::new(brain),
+            max_steps,
+            current_step: 0,
+        }
+    }
+
+    /// Creates a new DefaultAgentRunner with a boxed brain implementation
+    pub fn with_boxed_brain(
+        memory: M,
+        tool_provider: T,
+        brain: Box<dyn AgentBrain + Send + Sync>,
+        max_steps: u32,
+    ) -> Self {
+        DefaultAgentRunner {
+            state: AgentState::Idle,
+            memory: Arc::new(Mutex::new(memory)),
+            tool_provider: Arc::new(tool_provider),
+            brain: Arc::from(brain), // Convert Box to Arc
             max_steps,
             current_step: 0,
         }
@@ -50,11 +70,10 @@ where
 }
 
 #[async_trait]
-impl<M, T, B> AgentRunnable for DefaultAgentRunner<M, T, B>
+impl<M, T> AgentRunnable for DefaultAgentRunner<M, T>
 where
     M: MemoryManager + Send + Sync + 'static,
     T: ToolProvider + Send + Sync + 'static,
-    B: AgentBrain + Send + Sync + 'static,
 {
     async fn run(&mut self, initial_prompt: String) -> Result<String, AgentError> {
         if self.state != AgentState::Idle {
@@ -78,71 +97,58 @@ where
             }).await?;
         }
 
-        loop {
+        // --- Begin Agent Loop ---
+        let mut final_response = String::new();
+
+        while self.state != AgentState::Finished && self.state != AgentState::Failed("".to_string()) {
+            log::info!("Agent step {} of {}", self.current_step + 1, self.max_steps);
+
             if self.current_step >= self.max_steps {
-                self.transition_state(AgentState::Failed("Max steps reached".to_string())).await;
+                log::warn!("Reached maximum steps ({}), terminating agent loop", self.max_steps);
                 return Err(AgentError::MaxStepsReached);
             }
-            self.current_step += 1;
-            log::info!("Agent Step {}/{}", self.current_step, self.max_steps);
 
+            // Execute one step of the agent loop
             let action = self.step().await?;
 
+            // Handle agent action
             match action {
-                AgentAction::Finish(final_message) => {
+                AgentAction::Finish(text) => {
+                    log::info!("Agent finished with text response");
                     self.transition_state(AgentState::Finished).await;
-                    // Add final assistant message to memory
+                    final_response = text;
+                    break;
+                }
+                AgentAction::RespondToUser(text) => {
+                    log::info!("Agent responded to user");
+                    // Add the assistant's response to memory
                     {
                         let mut mem = self.memory.lock().await;
                         mem.add_message(Message {
                             role: Role::Assistant,
-                            content: final_message.clone(),
+                            content: text.clone(),
                             tool_calls: None,
                             tool_call_id: None,
                             name: None,
                         }).await?;
                     }
-                    log::info!("Agent finished.");
-                    return Ok(final_message);
+                    // For now, just continue the loop, but we might want to pause
+                    // and wait for user input in an interactive scenario.
                 }
-                AgentAction::Error(e) => {
-                    let error_message = e.to_string();
-                    self.transition_state(AgentState::Failed(error_message)).await;
-                    return Err(e);
+                AgentAction::ExecuteTool(_) | AgentAction::Think => {
+                    // Continue the loop - these actions are handled by step()
+                    continue;
                 }
-                // AgentAction::Think and AgentAction::ExecuteTool are handled within step()
-                // and don't terminate the loop directly.
-                 AgentAction::Think => {
-                    // Continue loop, state remains Thinking or shifts during step
-                    continue;
-                 }
-                 AgentAction::RespondToUser(intermediate_response) => {
-                    // Log or emit intermediate response, then continue thinking
-                    log::info!("Agent intermediate response: {}", intermediate_response);
-                     {
-                        let mut mem = self.memory.lock().await;
-                        mem.add_message(Message {
-                            role: Role::Assistant,
-                            content: intermediate_response,
-                            tool_calls: None,
-                            tool_call_id: None,
-                            name: None,
-                        }).await?;
-                    }
-                    self.transition_state(AgentState::Thinking).await;
-                    continue;
-                 }
-                 // Explicitly handle ExecuteTool case if step doesn't fully process it.
-                 // Currently, step should handle the execution and add results to memory.
-                 AgentAction::ExecuteTool(_) => {
-                    // This case might indicate an issue if step() isn't fully processing tools.
-                    // Assume step() handles execution and adds results, then returns Think or another Action.
-                    log::warn!("AgentRunner received ExecuteTool action directly. Assuming step() handled it.");
-                    self.transition_state(AgentState::Thinking).await;
-                     continue;
-                 }
+                AgentAction::Error(err) => {
+                    self.transition_state(AgentState::Failed(format!("{:?}", err))).await;
+                    return Err(err);
+                }
             }
+
+            self.current_step += 1;
         }
+
+        Ok(final_response)
     }
 
     async fn step(&mut self) -> Result<AgentAction, AgentError> {
@@ -184,60 +190,48 @@ where
                 // Execute tools sequentially for now
                 // TODO: Consider parallel execution if tools are independent
                 for tool_call in tool_calls {
-                    log::info!("Executing tool: {} with ID: {}", tool_call.name, tool_call.id);
-                    let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+                    log::info!("Executing tool: {}", tool_call.name);
 
-                    // Add tool result message to memory immediately after execution
-                    match tool_result {
+                    match self.tool_provider.execute_tool(tool_call.clone()).await {
                         Ok(result) => {
-                            let mut mem = self.memory.lock().await;
-                            log::debug!("Tool {} finished successfully.", tool_call.name);
-                            mem.add_message(Message {
-                                role: Role::Tool,
-                                content: serde_json::to_string(&result.output).unwrap_or_else(|_| "[Serialization Error]".to_string()),
-                                tool_calls: None,
-                                tool_call_id: Some(result.call_id),
-                                name: Some(tool_call.name.clone()), // Often tool name goes here
-                            }).await?;
+                            // Add tool result message to memory
+                            log::info!("Tool execution successful: {}", result.output.to_string());
+                            {
+                                let mut mem = self.memory.lock().await;
+                                mem.add_message(Message {
+                                    role: Role::Tool,
+                                    content: result.output.to_string(),
+                                    tool_calls: None,
+                                    tool_call_id: Some(result.call_id),
+                                    name: Some(tool_call.name.clone()), // Include tool name
+                                }).await?;
+                            }
                         }
                         Err(e) => {
-                            log::error!("Tool execution failed for {}: {}", tool_call.name, e);
-                            let mut mem = self.memory.lock().await;
-                            mem.add_message(Message {
-                                role: Role::Tool,
-                                content: format!("[Tool Execution Error: {}]", e),
-                                tool_calls: None,
-                                tool_call_id: Some(tool_call.id),
-                                name: Some(tool_call.name.clone()),
-                            }).await?;
-                            // Decide whether to stop or let the brain handle the error.
-                            // For now, let's continue and let the brain see the error message.
+                            // Add error result message to memory
+                            log::error!("Tool execution failed: {}", e);
+                            let error_json = serde_json::json!({
+                                "error": format!("Tool execution failed: {}", e)
+                            });
+                            {
+                                let mut mem = self.memory.lock().await;
+                                mem.add_message(Message {
+                                    role: Role::Tool,
+                                    content: error_json.to_string(),
+                                    tool_calls: None,
+                                    tool_call_id: Some(tool_call.id), // Include call ID for linking
+                                    name: Some(tool_call.name), // Include tool name
+                                }).await?;
+                            }
                         }
                     }
                 }
-                // After executing all tools (or encountering an error), go back to thinking
-                Ok(AgentAction::Think)
+
+                // After tool execution, move back to thinking
+                return Ok(AgentAction::Think);
             }
-            AgentAction::RespondToUser(response) => {
-                // This action is usually handled by the run loop after step returns
-                // But if brain decides to respond directly, pass it up.
-                self.transition_state(AgentState::Responding).await;
-                 Ok(AgentAction::RespondToUser(response))
-            }
-            AgentAction::Finish(response) => {
-                // This action will terminate the loop when returned to run()
-                 Ok(AgentAction::Finish(response))
-            }
-            AgentAction::Error(e) => {
-                // This action will terminate the loop when returned to run()
-                Ok(AgentAction::Error(e))
-            }
-            AgentAction::Think => {
-                // Brain decided more thinking is needed without immediate action
-                // (e.g., waiting for external event, or internal state update)
-                // Keep state as Thinking
-                 Ok(AgentAction::Think)
-            }
+            // Pass through other actions
+            other_action => Ok(other_action),
         }
     }
 }

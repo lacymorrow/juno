@@ -3,8 +3,9 @@ pub mod traits;
 pub mod implementations;
 pub mod tools;
 pub mod tool_logger;
+pub mod providers;
 
-// We will add concrete implementations later, e.g.:
+// Uncomment since these modules exist now
 // pub mod implementations;
 // pub mod tools;
 
