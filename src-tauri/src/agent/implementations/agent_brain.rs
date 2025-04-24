@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::env;
 
 use crate::agent::structs::{
-    AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition, ToolResult,
+    AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::AgentBrain;
 
