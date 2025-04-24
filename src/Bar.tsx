@@ -1,9 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Window, PhysicalSize } from "@tauri-apps/api/window";
-import { Check, Mic, Send } from "lucide-react";
+import { Check, Send } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { cn } from "./lib/utils";
+import tauriConfig from "../src-tauri/tauri.conf.json";
+
+// Get default window dimensions from tauri.conf.json
+const floatingBarConfig = tauriConfig.app.windows.find(
+  (window) => window.label === "floating-bar"
+);
+const DEFAULT_WIDTH = floatingBarConfig?.width || 100; // Fallback if not found
+const DEFAULT_HEIGHT = floatingBarConfig?.height || 60; // Fallback if not found
+
+// Constants for expanded size (consider adding to config later if needed)
+const EXPANDED_WIDTH = 280;
+const EXPANDED_HEIGHT = 70;
 
 type BarState =
   | "default"
@@ -36,8 +48,10 @@ export function FloatingBar() {
 
         switch (barState) {
           case "default":
-            // Smaller window size for collapsed bar
-            await appWindow?.setSize(new PhysicalSize(100, 50));
+            // Smaller window size for collapsed bar (from tauri.conf.json)
+            await appWindow?.setSize(
+              new PhysicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
+            );
             break;
           case "shrinking":
           case "loading":
@@ -46,7 +60,9 @@ export function FloatingBar() {
           case "input":
           case "success":
             // Larger window size for expanded bar
-            await appWindow?.setSize(new PhysicalSize(280, 70));
+            await appWindow?.setSize(
+              new PhysicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
+            );
             break;
         }
       } catch (err) {
@@ -240,7 +256,7 @@ export function FloatingBar() {
       data-tauri-drag-region
       data-window-hovered={isWindowHovered}
       className={cn(
-        "w-screen h-screen flex items-start justify-start pb-6"
+        "w-screen h-screen flex items-start justify-start p-1"
         // barState !== "input" && "cursor-pointer"
       )}
       onClick={(e) => {
