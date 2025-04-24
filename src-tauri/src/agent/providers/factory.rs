@@ -5,6 +5,7 @@ use crate::agent::structs::AgentError;
 use crate::agent::traits::AgentBrain;
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::openai::OpenAIBrain;
+use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to_env};
 
 /// Enumeration of available AI providers
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,9 +56,22 @@ pub struct ProviderInfo {
 pub struct BrainFactory;
 
 impl BrainFactory {
-    /// Get the current provider from environment or default
+    /// Initialize configuration and apply settings to environment
+    pub fn init() -> Result<(), AgentError> {
+        apply_provider_settings_to_env()
+    }
+
+    /// Get the current provider from configuration or environment
     pub fn get_current_provider() -> Provider {
-        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| "anthropic".to_string());
+        // First try from environment (set during runtime)
+        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
+            // If not in env, try to load from config
+            match ProviderConfig::load() {
+                Ok(config) => config.active_provider,
+                Err(_) => "anthropic".to_string(), // Default fallback
+            }
+        });
+
         Provider::from_str(&provider_str).unwrap_or(Provider::Anthropic)
     }
 
@@ -66,14 +80,34 @@ impl BrainFactory {
         let current_provider = Self::get_current_provider();
         let providers = vec![Provider::Anthropic, Provider::OpenAI];
 
+        // Try to load config to check for stored API keys
+        let config = ProviderConfig::load().ok();
+
         providers.into_iter().map(|provider| {
+            let provider_id = provider.id();
+
+            // A provider is available if either:
+            // 1. Its API key is already in the environment, or
+            // 2. Its API key is stored in the config
             let is_available = match provider {
-                Provider::Anthropic => env::var("ANTHROPIC_API_KEY").is_ok(),
-                Provider::OpenAI => env::var("OPENAI_API_KEY").is_ok(),
+                Provider::Anthropic => {
+                    env::var("ANTHROPIC_API_KEY").is_ok() ||
+                    config.as_ref()
+                        .and_then(|c| c.get_provider_settings(provider_id))
+                        .and_then(|s| s.api_key.as_ref())
+                        .is_some()
+                },
+                Provider::OpenAI => {
+                    env::var("OPENAI_API_KEY").is_ok() ||
+                    config.as_ref()
+                        .and_then(|c| c.get_provider_settings(provider_id))
+                        .and_then(|s| s.api_key.as_ref())
+                        .is_some()
+                },
             };
 
             ProviderInfo {
-                id: provider.id().to_string(),
+                id: provider_id.to_string(),
                 name: provider.display_name().to_string(),
                 is_available,
                 is_default: provider == current_provider,
@@ -83,6 +117,9 @@ impl BrainFactory {
 
     /// Create an AgentBrain implementation based on provider configuration
     pub fn create_brain() -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+        // Apply settings from config to environment before creating the brain
+        apply_provider_settings_to_env()?;
+
         // Get provider from environment variable or use default
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| "anthropic".to_string());
         info!("Using AI provider from environment: {}", provider_str);
