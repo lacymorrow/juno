@@ -337,7 +337,7 @@ async fn register_additional_computer_use_tools(
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_triple_click(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_triple_click(app_handle_for_async, managed_state, original_x, original_y, None)
                     .await
                     .map_err(|e| format!("Error triple clicking: {}", e))
             })
@@ -416,27 +416,24 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<HoldKeyInput>(input)
             .map_err(|e| format!("Failed to parse hold key input: {}", e))?;
 
-        // Default duration to 1 second if not provided
-        let duration = args.duration.unwrap_or(1.0);
+        // Convert duration from seconds to milliseconds if provided
+        let duration_ms = args.duration.map(|secs| (secs * 1000.0) as u64);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
-                // Hold key
-                commands::keyboard::dev_hold_key(args.key.clone(), managed_state.clone())
-                    .await
-                    .map_err(|e| format!("Error holding key: {}", e))?;
-
-                // Wait for specified duration
-                commands::core::dev_wait(duration, managed_state.clone())
-                    .await
-                    .map_err(|e| format!("Error during wait after hold key: {}", e))?;
-
-                // Release key
-                commands::keyboard::dev_release_key(args.key, managed_state)
-                    .await
-                    .map_err(|e| format!("Error releasing key: {}", e))
+                // If duration is provided, use the built-in duration support in hold_key
+                if duration_ms.is_some() {
+                    commands::keyboard::dev_hold_key(args.key, duration_ms, managed_state)
+                        .await
+                        .map_err(|e| format!("Error holding key with auto-release: {}", e))
+                } else {
+                    // If no duration, just hold the key indefinitely (will need release_key later)
+                    commands::keyboard::dev_hold_key(args.key, None, managed_state)
+                        .await
+                        .map_err(|e| format!("Error holding key: {}", e))
+                }
             })
         })?;
 
@@ -617,7 +614,7 @@ async fn register_additional_computer_use_tools(
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_left_click(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_left_click(app_handle_for_async, managed_state, original_x, original_y, None)
                     .await
                     .map_err(|e| format!("Error left clicking: {}", e))
             })
@@ -659,7 +656,7 @@ async fn register_additional_computer_use_tools(
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_right_click(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_right_click(app_handle_for_async, managed_state, original_x, original_y, None)
                     .await
                     .map_err(|e| format!("Error right clicking: {}", e))
             })
@@ -701,7 +698,7 @@ async fn register_additional_computer_use_tools(
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_middle_click(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_middle_click(app_handle_for_async, managed_state, original_x, original_y, None)
                     .await
                     .map_err(|e| format!("Error middle clicking: {}", e))
             })
@@ -743,7 +740,7 @@ async fn register_additional_computer_use_tools(
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_double_click(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_double_click(app_handle_for_async, managed_state, original_x, original_y, None)
                     .await
                     .map_err(|e| format!("Error double clicking: {}", e))
             })

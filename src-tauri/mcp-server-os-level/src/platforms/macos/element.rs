@@ -716,36 +716,8 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn scroll(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
-        let _ = self.focus();
-        let (x, y, width, height) = self.bounds()?;
-        let center_x = x + width / 2.0;
-        let center_y = y + height / 2.0;
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-            AutomationError::PlatformError("Failed to create event source".to_string())
-        })?;
-        let scroll_amount = amount as i32;
-        let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
-            "up" => (0, -scroll_amount),
-            "down" => (0, scroll_amount),
-            "left" => (-scroll_amount, 0),
-            "right" => (scroll_amount, 0),
-            _ => {
-                return Err(AutomationError::InvalidArgument(format!(
-                    "Invalid scroll direction: {}. Must be up, down, left, or right",
-                    direction
-                )))
-            }
-        };
-        let scroll_event =
-            CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0).map_err(|_| {
-                AutomationError::PlatformError("Failed to create scroll event".to_string())
-            })?;
-        scroll_event.post(CGEventTapLocation::HID);
-        debug!(
-            "scrolled {} by {} lines at position ({}, {})",
-            direction, amount, center_x, center_y
-        );
-        Ok(())
+        // Use the shared implementation from interaction module
+        interaction::scroll(self, direction, amount)
     }
 
     fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
