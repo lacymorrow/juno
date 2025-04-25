@@ -10,7 +10,7 @@ import tauriConfig from "../src-tauri/tauri.conf.json";
 const floatingBarConfig = tauriConfig.app.windows.find(
   (window) => window.label === "floating-bar"
 );
-const DEFAULT_WIDTH = floatingBarConfig?.width || 100; // Fallback if not found
+const DEFAULT_WIDTH = floatingBarConfig?.width || 110; // Fallback if not found
 const DEFAULT_HEIGHT = floatingBarConfig?.height || 60; // Fallback if not found
 
 // Constants for expanded size (consider adding to config later if needed)

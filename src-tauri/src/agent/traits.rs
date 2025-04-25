@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use super::structs::{AgentAction, AgentError, Message, ToolCall, ToolDefinition, ToolResult};
+use crate::state::CancelReceiver;
 
 /// Manages the agent's memory (conversation history).
 #[async_trait]
@@ -47,10 +48,17 @@ pub trait AgentBrain: Send + Sync {
 #[async_trait]
 pub trait AgentRunnable: Send + Sync {
     /// Runs the agent loop with an initial prompt.
-    async fn run(&mut self, initial_prompt: String) -> Result<String, AgentError>;
+    async fn run(
+        &mut self,
+        initial_prompt: String,
+        cancel_rx: CancelReceiver,
+    ) -> Result<String, AgentError>;
 
     /// Executes a single step of the agent loop.
-    async fn step(&mut self) -> Result<AgentAction, AgentError>;
+    async fn step(
+        &mut self,
+        cancel_rx: CancelReceiver,
+    ) -> Result<AgentAction, AgentError>;
 
     // Maybe add methods for pausing, resuming, stopping?
     // async fn pause(&mut self) -> Result<(), AgentError>;
