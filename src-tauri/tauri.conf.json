@@ -22,7 +22,7 @@
       {
         "label": "floating-bar",
         "url": "/floating-bar",
-        "width": 120,
+        "width": 110,
         "height": 60,
         "decorations": false,
         "transparent": true,
