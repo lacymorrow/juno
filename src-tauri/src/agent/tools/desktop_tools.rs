@@ -328,16 +328,12 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<TripleClickInput>(input)
             .map_err(|e| format!("Failed to parse triple click input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Triple click: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
-
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_triple_click(app_handle_for_async, managed_state, original_x, original_y, None)
+                commands::mouse::dev_triple_click(app_handle_for_async, managed_state, args.x, args.y, None)
                     .await
                     .map_err(|e| format!("Error triple clicking: {}", e))
             })
@@ -479,16 +475,15 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<MousePositionInput>(input)
             .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Mouse move: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
+        // Removed coordinate transformation
+        info!("Mouse move at ({}, {}) - no transformation applied", args.x, args.y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_mouse_move(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_mouse_move(app_handle_for_async, managed_state, args.x, args.y)
                     .await
                     .map_err(|e| format!("Error moving mouse: {}", e))
             })
@@ -521,16 +516,15 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<MousePositionInput>(input)
             .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Left mouse down: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
+        // Removed coordinate transformation
+        info!("Left mouse down at ({}, {}) - no transformation applied", args.x, args.y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_left_mouse_down(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_left_mouse_down(app_handle_for_async, managed_state, args.x, args.y)
                     .await
                     .map_err(|e| format!("Error pressing left mouse down: {}", e))
             })
@@ -563,16 +557,15 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<MousePositionInput>(input)
             .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Left mouse up: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
+        // Removed coordinate transformation
+        info!("Left mouse up at ({}, {}) - no transformation applied", args.x, args.y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_left_mouse_up(app_handle_for_async, managed_state, original_x, original_y)
+                commands::mouse::dev_left_mouse_up(app_handle_for_async, managed_state, args.x, args.y)
                     .await
                     .map_err(|e| format!("Error releasing left mouse: {}", e))
             })
@@ -605,16 +598,15 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<MousePositionInput>(input)
             .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Left click: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
+        // Removed coordinate transformation
+        info!("Left click at ({}, {}) - no transformation applied", args.x, args.y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_left_click(app_handle_for_async, managed_state, original_x, original_y, None)
+                commands::mouse::dev_left_click(app_handle_for_async, managed_state, args.x, args.y, None)
                     .await
                     .map_err(|e| format!("Error left clicking: {}", e))
             })
@@ -647,16 +639,15 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<MousePositionInput>(input)
             .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Right click: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
+        // Removed coordinate transformation
+        info!("Right click at ({}, {}) - no transformation applied", args.x, args.y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_right_click(app_handle_for_async, managed_state, original_x, original_y, None)
+                commands::mouse::dev_right_click(app_handle_for_async, managed_state, args.x, args.y, None)
                     .await
                     .map_err(|e| format!("Error right clicking: {}", e))
             })
@@ -689,16 +680,15 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<MousePositionInput>(input)
             .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Middle click: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
+        // Removed coordinate transformation
+        info!("Middle click at ({}, {}) - no transformation applied", args.x, args.y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_middle_click(app_handle_for_async, managed_state, original_x, original_y, None)
+                commands::mouse::dev_middle_click(app_handle_for_async, managed_state, args.x, args.y, None)
                     .await
                     .map_err(|e| format!("Error middle clicking: {}", e))
             })
@@ -731,16 +721,15 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<MousePositionInput>(input)
             .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_x, original_y) = coordinates::transform_to_screen_coordinates(args.x, args.y);
-        info!("Double click: transforming from ({}, {}) to ({}, {})", args.x, args.y, original_x, original_y);
+        // Removed coordinate transformation
+        info!("Double click at ({}, {}) - no transformation applied", args.x, args.y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let app_handle_for_async = app_handle.clone();
-                commands::mouse::dev_double_click(app_handle_for_async, managed_state, original_x, original_y, None)
+                commands::mouse::dev_double_click(app_handle_for_async, managed_state, args.x, args.y, None)
                     .await
                     .map_err(|e| format!("Error double clicking: {}", e))
             })
@@ -775,13 +764,9 @@ async fn register_additional_computer_use_tools(
         let args = serde_json::from_value::<DragInput>(input)
             .map_err(|e| format!("Failed to parse drag input: {}", e))?;
 
-        // Transform coordinates from scaled to original
-        let (original_start_x, original_start_y) = coordinates::transform_to_screen_coordinates(args.start_x, args.start_y);
-        let (original_end_x, original_end_y) = coordinates::transform_to_screen_coordinates(args.end_x, args.end_y);
-
-        info!("Click and drag: transforming from ({}, {}) -> ({}, {}) to ({}, {}) -> ({}, {})",
-            args.start_x, args.start_y, args.end_x, args.end_y,
-            original_start_x, original_start_y, original_end_x, original_end_y);
+        // Removed coordinate transformation
+        info!("Click and drag from ({}, {}) to ({}, {}) - no transformation applied",
+            args.start_x, args.start_y, args.end_x, args.end_y);
 
         // Use a blocking task to handle the async operation
         let _result = tokio::task::block_in_place(|| {
@@ -791,10 +776,10 @@ async fn register_additional_computer_use_tools(
                 commands::mouse::dev_left_click_drag(
                     app_handle_for_async,
                     managed_state,
-                    original_start_x,
-                    original_start_y,
-                    original_end_x,
-                    original_end_y
+                    args.start_x, // Use original args
+                    args.start_y,
+                    args.end_x,
+                    args.end_y
                 )
                 .await
                 .map_err(|e| format!("Error performing click and drag: {}", e))
@@ -833,15 +818,13 @@ async fn register_additional_computer_use_tools(
             })
         })?;
 
-        // Transform the cursor coordinates from screen space to scaled space so they match the screenshot
-        let (x, y) = result;
-        let (scaled_x, scaled_y) = coordinates::transform_to_scaled_coordinates(x, y);
-
-        info!("Cursor position: transforming from screen ({}, {}) to scaled ({}, {})", x, y, scaled_x, scaled_y);
+        // Since we are not scaling, screen coordinates are the same as "scaled" coordinates
+        // We return the direct screen coordinates obtained from the system.
+        info!("Cursor position: returning screen coordinates ({}, {}) directly (no scaling applied)", result.0, result.1);
 
         Ok(json!({
-            "x": scaled_x,
-            "y": scaled_y
+            "x": result.0, // Return direct screen coordinates
+            "y": result.1
         }))
     };
     provider.register_tool(cursor_position_def, cursor_position_exec).await;

@@ -3,8 +3,77 @@ description:
 globs:
 alwaysApply: true
 ---
+# Anthropic Computer Use Features
 
-# Your rule content
+This rule describes the features and capabilities that should be implemented for Anthropic Computer Use tools.
 
-- You can @ files here
-- You can use markdown but dont have to
+## Core Features
+
+### User Interface Interaction
+- **Mouse Control**: Click, right click, double click, triple click, scroll, drag, and hover
+- **Keyboard Control**: Type text, press keyboard shortcuts, select text
+- **Text Operations**: Copy, paste, select, and edit text
+- **Clipboard Management**: Get and set clipboard contents
+
+### UI Navigation and Recognition
+- **Element Finding**: Locate UI elements by various attributes (text, role, position)
+- **Window Management**: Find, focus, and manipulate application windows
+- **Screen Capture**: Capture screenshots of the entire screen or specific regions
+- **OCR**: Recognize text in screen regions
+
+### System Integration
+- **File Operations**: Read, write, and manage files
+- **Application Control**: Launch, focus, and close applications
+- **System Information**: Access system information (OS, screen resolution, etc.)
+
+## Implementation Requirements
+
+### Reliability
+- Operations should be robust across different applications
+- Implement fallback mechanisms for when primary methods fail
+
+### Performance
+- Operations should execute with minimal latency
+- Resource usage should be optimized to minimize system impact
+
+### Security
+- Limit access to sensitive operations (file system, credentials)
+- Implement proper permission models for system access
+
+### Cross-Platform Support
+- Primary platforms: macOS, Windows, Linux
+- Consistent API across platforms with platform-specific implementations
+
+## Anthropic Computer Use Specific Features
+
+Based on Claude's computer use capabilities, our implementation should include:
+
+1. **UI Element Identification**
+   - Find elements by text, role, and other attributes
+   - Understand hierarchical relationships between elements
+
+2. **Natural Language Understanding**
+   - Convert natural language requests into specific actions
+   - Contextual understanding of user intentions
+
+3. **Observation Capabilities**
+   - Screen analysis to understand UI state
+   - Recognition of application context
+
+4. **Interaction Planning**
+   - Multi-step operations (e.g., "find the button and click it")
+   - Error recovery and alternate approaches
+
+5. **Feedback Loop**
+   - Report success/failure of actions
+   - Provide visible feedback on operations performed
+
+## Implementation Status
+
+Track implementation status for each feature, especially noting:
+- Complete implementations
+- Partially implemented features
+- Stubbed functions that need completion
+- Missing features that require implementation
+
+Update the implementation plan as features are completed or requirements change.
