@@ -4,7 +4,7 @@ use crate::tts;
 // use reqwest::Client; // Removed unused
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use image::{GenericImageView, ImageFormat}; // Keep if process_screenshot is kept/used
+use image::{GenericImageView, ImageFormat, EncodableLayout}; // Keep if process_screenshot is kept/used
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Keep if process_screenshot is kept/used
 use std::io::Cursor; // Keep if process_screenshot is kept/used
 use tracing::{error, info}; // Removed unused debug, warn
@@ -140,42 +140,28 @@ async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
             match image::load_from_memory(&image_bytes) {
                 Ok(img) => {
                     let (width, height) = img.dimensions();
-                    let max_dim = 1024.0; // Max dimension for resizing
-                    let scale = if width > height {
-                        max_dim / width as f32
-                    } else {
-                        max_dim / height as f32
-                    };
 
-                    let resized_img = if scale < 1.0 {
-                        let new_width = (width as f32 * scale).round() as u32;
-                        let new_height = (height as f32 * scale).round() as u32;
+                    // Always update scaling info with 1.0 factor, as we are not resizing
+                    coordinates::update_scaling_info(width, height, width, height, 1.0);
 
-                        // Store the scaling information
-                        coordinates::update_scaling_info(width, height, new_width, new_height, scale);
+                    // Encode as JPEG with quality 75
+                    let mut jpg_bytes = Vec::new();
+                    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_bytes, 75); // Quality 0-100
 
-                        img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
-                    } else {
-                        // No resizing needed, store 1:1 scaling
-                        coordinates::update_scaling_info(width, height, width, height, 1.0);
-                        img // No resize needed if already smaller or equal
-                    };
-
-                    let mut png_bytes = Vec::new();
-                    match resized_img.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png) {
+                    match encoder.encode(img.to_rgb8().as_bytes(), width, height, image::ColorType::Rgb8.into()) {
                         Ok(_) => {
-                             let resized_base64_data = BASE64_STANDARD.encode(&png_bytes);
+                             let jpeg_base64_data = BASE64_STANDARD.encode(&jpg_bytes);
                              Ok(json!([{ // Return as array of content blocks
                                 "type": "image",
                                 "source": {
                                     "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": resized_base64_data
+                                    "media_type": "image/jpeg", // Use JPEG media type
+                                    "data": jpeg_base64_data
                                 }
                              }]))
                         }
                         Err(e) => {
-                            let err_msg = format!("Failed to encode resized image to PNG: {}", e);
+                            let err_msg = format!("Failed to encode image to JPEG: {}", e);
                             error!("{}", err_msg);
                             // Return error as text block within the array
                             Ok(json!([{"type": "text", "text": err_msg}]))
