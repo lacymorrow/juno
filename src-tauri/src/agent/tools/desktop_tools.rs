@@ -202,21 +202,81 @@ pub async fn register_desktop_tools(
     let set_clipboard_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<SetClipboardContentInput>(input)
                 .map_err(|e| format!("Failed to parse set_clipboard_content input: {}", e))?;
-            let state_manager = app.state::<AppState>();
-            match commands::core::dev_set_clipboard(state_manager, args.content).await {
-                Ok(_) => Ok(json!({"success": true})),
-                Err(e) => Err(format!("Error setting clipboard content: {}", e))
-            }
+
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::core::dev_set_clipboard(args.content, state_manager).await
+                })
+            });
+
+            inner_result.map_err(|e| format!("Error setting clipboard content: {}", e))?;
+            Ok(json!({"success": true}))
         }
     };
     provider.register_async_tool(set_clipboard_def, set_clipboard_exec).await;
     info!("Registered tool: set_clipboard_content");
 
-    // --- Mouse Tools ---
+    // --- Register Desktop Click Tool ---
+    #[derive(serde::Deserialize)]
+    struct DesktopClickArgs {
+        x: f64,
+        y: f64,
+        click_type: Option<String>, // e.g., "left", "right", "double"
+        modifier: Option<String>, // e.g., "shift", "ctrl"
+    }
 
-    // Define input structs for mouse actions
+    let desktop_click_def = ToolDefinition {
+        name: "desktop_click".to_string(),
+        description: "Performs a mouse click (left, right, double) at the specified coordinates on the desktop screen. Coordinates should typically be obtained from 'get_focused_element_info' or a screenshot analysis.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "X-coordinate for the click." },
+                "y": { "type": "number", "description": "Y-coordinate for the click." },
+                "click_type": { "type": "string", "enum": ["left", "right", "double"], "description": "Type of click (defaults to left)." },
+                "modifier": { "type": "string", "enum": ["shift", "ctrl", "alt", "cmd"], "description": "Optional modifier key to hold during the click." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let desktop_click_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<DesktopClickArgs>(input)
+                .map_err(|e| format!("Failed to parse desktop_click input: {}", e))?;
+
+            // TODO: Handle coordinate transformation if necessary (e.g., if inputs are from a scaled context)
+            // For now, assume direct screen coordinates are provided by the agent
+            let x = args.x;
+            let y = args.y;
+            let modifier = args.modifier;
+
+            let click_result = match args.click_type.as_deref().unwrap_or("left") {
+                "left" => commands::mouse::dev_left_click(app.clone(), state_manager, x, y, modifier).await,
+                "right" => commands::mouse::dev_right_click(app.clone(), state_manager, x, y, modifier).await,
+                "double" => commands::mouse::dev_double_click(app.clone(), state_manager, x, y, modifier).await,
+                // Add other click types like middle, triple if needed
+                unknown => Err(format!("Unsupported click type: {}", unknown)),
+            };
+
+            click_result.map_err(|e| format!("Error performing desktop click: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(desktop_click_def, desktop_click_exec).await;
+    info!("Registered tool: desktop_click");
+
+    // Add new computer use tools based on the Anthropic documentation
+    register_additional_computer_use_tools(provider, app_handle.clone()).await;
+
+    // Define common input structs from tools2
     #[derive(serde::Deserialize)]
     struct MousePositionInput {
         x: f64,
@@ -231,6 +291,7 @@ pub async fn register_desktop_tools(
         end_y: f64,
     }
 
+    // scroll
     #[derive(serde::Deserialize)]
     struct ScrollInput {
         x: f64,
@@ -238,548 +299,473 @@ pub async fn register_desktop_tools(
         direction: String,
         amount: i32, // Keep as i32 as in tools2
     }
-
-    // mouse_move
-    let mouse_move_def = ToolDefinition {
-        name: "mouse_move".to_string(),
-        description: "Moves the mouse cursor to the specified screen coordinates (x, y).".to_string(),
+    let scroll_def = ToolDefinition {
+        name: "scroll".to_string(),
+        description: "Scroll the screen in a specified direction by a specified amount at given coordinates.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "x": { "type": "number", "description": "The horizontal coordinate." },
-                "y": { "type": "number", "description": "The vertical coordinate." }
+                "x": { "type": "number", "description": "The x coordinate to scroll at." },
+                "y": { "type": "number", "description": "The y coordinate to scroll at." },
+                "direction": { "type": "string", "description": "The direction to scroll: 'up', 'down', 'left', or 'right'." },
+                "amount": { "type": "integer", "description": "The number of scroll wheel clicks." }
+            },
+            "required": ["x", "y", "direction", "amount"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let scroll_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<ScrollInput>(input)
+                .map_err(|e| format!("Failed to parse scroll input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::window::dev_scroll_window(app.clone(), state_manager, args.direction, args.amount as f64, None, None).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error scrolling: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(scroll_def, scroll_exec).await;
+    info!("Registered tool: scroll");
+
+    // triple_click
+    let triple_click_def = ToolDefinition {
+        name: "triple_click".to_string(),
+        description: "Triple-click at specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate to click at." },
+                "y": { "type": "number", "description": "The y coordinate to click at." }
             },
             "required": ["x", "y"]
         }),
     };
-    let mouse_move_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone(); // Clone app_handle for this closure
+    let app_handle_clone = app_handle.clone();
+    let triple_click_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
         async move {
+            let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse_move input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>(); // Get state inside closure
-            let screen_coords = coordinates::window_to_screen_coords(app_handle_clone.clone(), args.x, args.y)?;
-            match commands::mouse::dev_mouse_move(state_manager, screen_coords.x as i32, screen_coords.y as i32).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error moving mouse: {}", e)),
-            }
+                .map_err(|e| format!("Failed to parse triple click input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_triple_click(app.clone(), state_manager, args.x, args.y, None).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error triple clicking: {}", e))?;
+            Ok(json!({"success": true}))
         }
     };
-    provider.register_async_tool(mouse_move_def, mouse_move_exec).await;
-    info!("Registered tool: mouse_move");
-
-    // mouse_click
-    #[derive(serde::Deserialize)]
-    struct MouseClickInput { button: String, click_type: String } // Added click_type
-    let mouse_click_def = ToolDefinition {
-        name: "mouse_click".to_string(),
-        description: "Performs a mouse click (left, right, middle, double, triple) at the current cursor position.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "button": { "type": "string", "enum": ["left", "right", "middle"] },
-                 "click_type": { "type": "string", "enum": ["single", "double", "triple"], "default": "single" }
-            },
-            "required": ["button"]
-        }),
-    };
-    let mouse_click_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<MouseClickInput>(input)
-                .map_err(|e| format!("Failed to parse mouse_click input: {}", e))?;
-             let state_manager = app_handle_clone.state::<AppState>(); // Get state inside closure
-            match commands::mouse::dev_mouse_click(state_manager, args.button, Some(args.click_type)).await { // Pass click_type
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error performing mouse click: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(mouse_click_def, mouse_click_exec).await;
-    info!("Registered tool: mouse_click");
-
-    // mouse_drag
-    let mouse_drag_def = ToolDefinition {
-        name: "mouse_drag".to_string(),
-        description: "Performs a mouse drag operation from start coordinates to end coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "start_x": { "type": "number" },
-                "start_y": { "type": "number" },
-                "end_x": { "type": "number" },
-                "end_y": { "type": "number" }
-            },
-            "required": ["start_x", "start_y", "end_x", "end_y"]
-        }),
-    };
-    let mouse_drag_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<DragInput>(input)
-                .map_err(|e| format!("Failed to parse mouse_drag input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-            // Convert window coordinates to screen coordinates for both start and end points
-            let start_screen_coords = coordinates::window_to_screen_coords(app_handle_clone.clone(), args.start_x, args.start_y)?;
-            let end_screen_coords = coordinates::window_to_screen_coords(app_handle_clone.clone(), args.end_x, args.end_y)?;
-            match commands::mouse::dev_mouse_drag(
-                state_manager,
-                start_screen_coords.x as i32, start_screen_coords.y as i32,
-                end_screen_coords.x as i32, end_screen_coords.y as i32,
-                "left".to_string() // Assuming left button drag for now
-            ).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error performing mouse drag: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(mouse_drag_def, mouse_drag_exec).await;
-    info!("Registered tool: mouse_drag");
-
-    // scroll_window (assuming scroll happens at current mouse position or center of window)
-    // Note: `scroll_window` command in Rust seems to take direction (up/down) not coordinates/amount. Adapting tool.
-    #[derive(serde::Deserialize)]
-    struct ScrollWindowInput { direction: String }
-    let scroll_window_def = ToolDefinition {
-        name: "scroll_window".to_string(),
-        description: "Scrolls the currently focused window up or down.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "direction": { "type": "string", "enum": ["up", "down"] }
-            },
-            "required": ["direction"]
-        }),
-    };
-    let scroll_window_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<ScrollWindowInput>(input)
-                .map_err(|e| format!("Failed to parse scroll_window input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-            match commands::mouse::dev_scroll_window(state_manager, args.direction).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error scrolling window: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(scroll_window_def, scroll_window_exec).await;
-    info!("Registered tool: scroll_window");
-
-    // --- Other Desktop Tools ---
+    provider.register_async_tool(triple_click_def, triple_click_exec).await;
+    info!("Registered tool: triple_click");
 
     // wait
     #[derive(serde::Deserialize)]
-    struct WaitInput { duration: f64 } // duration in seconds
-
+    struct WaitInput { duration: f64 }
     let wait_def = ToolDefinition {
         name: "wait".to_string(),
-        description: "Pauses execution for a specified duration.".to_string(),
+        description: "Wait for a specified duration in seconds.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "duration": { "type": "number", "description": "Duration to wait in seconds." }
+                "duration": { "type": "number", "description": "The duration to wait in seconds." }
             },
             "required": ["duration"]
         }),
     };
-
+    let app_handle_clone = app_handle.clone();
     let wait_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
         async move {
+            let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<WaitInput>(input)
                 .map_err(|e| format!("Failed to parse wait input: {}", e))?;
-            let duration_ms = (args.duration * 1000.0) as u64; // Convert seconds to milliseconds
-             match commands::core::dev_wait(duration_ms).await {
-                 Ok(_) => Ok(json!({"success": true})),
-                 Err(e) => Err(format!("Error waiting: {}", e))
-             }
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::core::dev_wait(args.duration, state_manager).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error during wait: {}", e))?;
+            Ok(json!({"success": true}))
         }
     };
     provider.register_async_tool(wait_def, wait_exec).await;
     info!("Registered tool: wait");
 
-    // --- Keyboard Tools ---
-
-    // press_key
+    // hold_key (Separate Hold)
     #[derive(serde::Deserialize)]
     struct KeyInput { key: String }
-
-    let press_key_def = ToolDefinition {
-        name: "press_key".to_string(),
-        description: "Simulates pressing a specific key or key combination (e.g., 'a', 'Enter', 'Cmd+S').".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "key": { "type": "string", "description": "The key or combination to press." }
-            },
-            "required": ["key"]
-        }),
-    };
-
-    let press_key_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<KeyInput>(input)
-                .map_err(|e| format!("Failed to parse press_key input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-            match commands::keyboard::dev_press_key(state_manager, args.key).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error pressing key: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(press_key_def, press_key_exec).await;
-    info!("Registered tool: press_key");
-
-    // hold_key
-     let hold_key_def = ToolDefinition {
+    let hold_key_def = ToolDefinition {
         name: "hold_key".to_string(),
-        description: "Simulates holding down a modifier key (e.g., 'Shift', 'Cmd', 'Ctrl', 'Alt').".to_string(),
+        description: "Presses and holds a specific key (e.g., 'Shift', 'Cmd'). Use 'release_key' to release it.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "key": { "type": "string", "description": "The modifier key to hold." }
+                "key": { "type": "string", "description": "The key to hold (e.g., 'Shift', 'Cmd', 'A')." }
             },
             "required": ["key"]
         }),
     };
-
+    let app_handle_clone = app_handle.clone();
     let hold_key_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
+        let app = app_handle_clone.clone();
         async move {
+            let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<KeyInput>(input)
-                .map_err(|e| format!("Failed to parse hold_key input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-            match commands::keyboard::dev_hold_key(state_manager, args.key).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error holding key: {}", e)),
-            }
+                .map_err(|e| format!("Failed to parse hold key input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::keyboard::dev_hold_key(args.key, None, state_manager).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error holding key: {}", e))?;
+            Ok(json!({"success": true}))
         }
     };
     provider.register_async_tool(hold_key_def, hold_key_exec).await;
     info!("Registered tool: hold_key");
 
-    // release_key
+    // release_key (Separate Release)
     let release_key_def = ToolDefinition {
         name: "release_key".to_string(),
-        description: "Simulates releasing a previously held modifier key.".to_string(),
+        description: "Releases a previously held key.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "key": { "type": "string", "description": "The modifier key to release." }
+                "key": { "type": "string", "description": "The key to release (e.g., 'Shift', 'Cmd', 'A')." }
             },
             "required": ["key"]
         }),
     };
-
+    let app_handle_clone = app_handle.clone();
     let release_key_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
+        let app = app_handle_clone.clone();
         async move {
+            let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<KeyInput>(input)
-                .map_err(|e| format!("Failed to parse release_key input: {}", e))?;
-             let state_manager = app_handle_clone.state::<AppState>();
-            match commands::keyboard::dev_release_key(state_manager, args.key).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error releasing key: {}", e)),
-            }
+                .map_err(|e| format!("Failed to parse release key input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::keyboard::dev_release_key(args.key, state_manager).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error releasing key: {}", e))?;
+            Ok(json!({"success": true}))
         }
     };
     provider.register_async_tool(release_key_def, release_key_exec).await;
     info!("Registered tool: release_key");
 
-    // get_selected_text
-    let get_selected_text_def = ToolDefinition {
-        name: "get_selected_text".to_string(),
-        description: "Retrieves the currently selected text in the active application.".to_string(),
+    // mouse_move
+    let mouse_move_def = ToolDefinition {
+        name: "mouse_move".to_string(),
+        description: "Move the mouse cursor to the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate to move to." },
+                "y": { "type": "number", "description": "The y coordinate to move to." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let mouse_move_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<MousePositionInput>(input)
+                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_mouse_move(app.clone(), state_manager, args.x, args.y).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error moving mouse: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(mouse_move_def, mouse_move_exec).await;
+    info!("Registered tool: mouse_move");
+
+    // left_mouse_down
+    let left_mouse_down_def = ToolDefinition {
+        name: "left_mouse_down".to_string(),
+        description: "Press the left mouse button down at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let left_mouse_down_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<MousePositionInput>(input)
+                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_left_mouse_down(app.clone(), state_manager, args.x, args.y).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error pressing left mouse down: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(left_mouse_down_def, left_mouse_down_exec).await;
+    info!("Registered tool: left_mouse_down");
+
+    // left_mouse_up
+    let left_mouse_up_def = ToolDefinition {
+        name: "left_mouse_up".to_string(),
+        description: "Release the left mouse button at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let left_mouse_up_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<MousePositionInput>(input)
+                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_left_mouse_up(app.clone(), state_manager, args.x, args.y).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error releasing left mouse: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(left_mouse_up_def, left_mouse_up_exec).await;
+    info!("Registered tool: left_mouse_up");
+
+    // left_click
+    let left_click_def = ToolDefinition {
+        name: "left_click".to_string(),
+        description: "Perform a left click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let left_click_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<MousePositionInput>(input)
+                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, None).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error left clicking: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(left_click_def, left_click_exec).await;
+    info!("Registered tool: left_click");
+
+    // right_click
+    let right_click_def = ToolDefinition {
+        name: "right_click".to_string(),
+        description: "Perform a right click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let right_click_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<MousePositionInput>(input)
+                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_right_click(app.clone(), state_manager, args.x, args.y, None).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error right clicking: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(right_click_def, right_click_exec).await;
+    info!("Registered tool: right_click");
+
+    // middle_click
+    let middle_click_def = ToolDefinition {
+        name: "middle_click".to_string(),
+        description: "Perform a middle click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let middle_click_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<MousePositionInput>(input)
+                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_middle_click(app.clone(), state_manager, args.x, args.y, None).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error middle clicking: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(middle_click_def, middle_click_exec).await;
+    info!("Registered tool: middle_click");
+
+    // double_click
+    let double_click_def = ToolDefinition {
+        name: "double_click".to_string(),
+        description: "Perform a double click at the specified coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "The x coordinate." },
+                "y": { "type": "number", "description": "The y coordinate." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let double_click_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<MousePositionInput>(input)
+                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_double_click(app.clone(), state_manager, args.x, args.y, None).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error double clicking: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(double_click_def, double_click_exec).await;
+    info!("Registered tool: double_click");
+
+    // left_click_drag
+    let left_click_drag_def = ToolDefinition {
+        name: "left_click_drag".to_string(),
+        description: "Perform a drag operation with the left mouse button from start coordinates to end coordinates.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "start_x": { "type": "number", "description": "The starting x coordinate." },
+                "start_y": { "type": "number", "description": "The starting y coordinate." },
+                "end_x": { "type": "number", "description": "The ending x coordinate." },
+                "end_y": { "type": "number", "description": "The ending y coordinate." }
+            },
+            "required": ["start_x", "start_y", "end_x", "end_y"]
+        }),
+    };
+    let app_handle_clone = app_handle.clone();
+    let left_click_drag_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<DragInput>(input)
+                .map_err(|e| format!("Failed to parse drag input: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_left_click_drag(
+                        app.clone(),
+                        state_manager,
+                        args.start_x,
+                        args.start_y,
+                        args.end_x,
+                        args.end_y
+                    ).await
+                })
+            });
+            inner_result.map_err(|e| format!("Error performing click and drag: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(left_click_drag_def, left_click_drag_exec).await;
+    info!("Registered tool: left_click_drag");
+
+    // cursor_position
+    let cursor_position_def = ToolDefinition {
+        name: "cursor_position".to_string(),
+        description: "Get the current cursor position.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
             "required": []
         }),
     };
-
-    let get_selected_text_exec = move |_input: Value| {
-         let app_handle_clone = app_handle.clone(); // Clone app_handle
+    let app_handle_clone = app_handle.clone();
+    let cursor_position_exec = move |_input: Value| {
+        let app = app_handle_clone.clone();
         async move {
-            let state_manager = app_handle_clone.state::<AppState>(); // Get state inside closure
-             match commands::element::dev_get_selected_text(state_manager).await {
-                 Ok(text) => Ok(json!({ "selected_text": text })),
-                 Err(e) => Err(format!("Error getting selected text: {}", e)),
-             }
+            let state_manager = app.state::<AppState>();
+            let result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_get_cursor_position(app.clone(), state_manager).await
+                })
+            });
+            let (x, y) = result.map_err(|e| format!("Error getting cursor position: {}", e))?;
+            Ok(json!({ "x": x, "y": y }))
         }
     };
-    provider.register_async_tool(get_selected_text_def, get_selected_text_exec).await;
-    info!("Registered tool: get_selected_text");
+    provider.register_async_tool(cursor_position_def, cursor_position_exec).await;
+    info!("Registered tool: cursor_position");
 
-    // --- Window Management Tools ---
-
-    // get_window_list
-    let get_window_list_def = ToolDefinition {
-        name: "get_window_list".to_string(),
-        description: "Retrieves a list of currently open windows with their IDs, titles, and application names.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {},
-            "required": []
-        }),
-    };
-
-    let get_window_list_exec = move |_input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-             let state_manager = app_handle_clone.state::<AppState>(); // Get state inside closure
-            match commands::window::dev_get_window_list(state_manager).await {
-                Ok(list) => Ok(json!(list)), // Assuming list is already serializable
-                Err(e) => Err(format!("Error getting window list: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(get_window_list_def, get_window_list_exec).await;
-    info!("Registered tool: get_window_list");
-
-    // get_window_info
-    #[derive(serde::Deserialize)]
-    struct WindowIdInput { window_id: String }
-
-    let get_window_info_def = ToolDefinition {
-        name: "get_window_info".to_string(),
-        description: "Retrieves detailed information about a specific window using its ID (e.g., position, size, title).".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "window_id": { "type": "string", "description": "The unique identifier of the window." }
-            },
-            "required": ["window_id"]
-        }),
-    };
-
-    let get_window_info_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<WindowIdInput>(input)
-                .map_err(|e| format!("Failed to parse get_window_info input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-            match commands::window::dev_get_window_info(state_manager, args.window_id).await {
-                Ok(info) => Ok(json!(info)), // Assuming info is already serializable
-                Err(e) => Err(format!("Error getting window info: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(get_window_info_def, get_window_info_exec).await;
-    info!("Registered tool: get_window_info");
-
-    // focus_window
-    let focus_window_def = ToolDefinition {
-        name: "focus_window".to_string(),
-        description: "Brings a specific window to the foreground and makes it active.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "window_id": { "type": "string", "description": "The unique identifier of the window to focus." }
-            },
-            "required": ["window_id"]
-        }),
-    };
-
-    let focus_window_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<WindowIdInput>(input)
-                .map_err(|e| format!("Failed to parse focus_window input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-             match commands::window::dev_focus_window(state_manager, args.window_id).await {
-                 Ok(_) => Ok(json!({ "success": true })),
-                 Err(e) => Err(format!("Error focusing window: {}", e)),
-             }
-        }
-    };
-    provider.register_async_tool(focus_window_def, focus_window_exec).await;
-    info!("Registered tool: focus_window");
-
-    // resize_window
-    #[derive(serde::Deserialize)]
-    struct ResizeWindowInput { window_id: String, width: i32, height: i32 }
-
-    let resize_window_def = ToolDefinition {
-        name: "resize_window".to_string(),
-        description: "Resizes a specific window to the given width and height.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "window_id": { "type": "string", "description": "The ID of the window to resize." },
-                "width": { "type": "integer", "description": "The desired width in pixels." },
-                "height": { "type": "integer", "description": "The desired height in pixels." }
-            },
-            "required": ["window_id", "width", "height"]
-        }),
-    };
-
-    let resize_window_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<ResizeWindowInput>(input)
-                .map_err(|e| format!("Failed to parse resize_window input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-            match commands::window::dev_resize_window(state_manager, args.window_id, args.width, args.height).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error resizing window: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(resize_window_def, resize_window_exec).await;
-    info!("Registered tool: resize_window");
-
-     // move_window
-    #[derive(serde::Deserialize)]
-    struct MoveWindowInput { window_id: String, x: i32, y: i32 }
-
-    let move_window_def = ToolDefinition {
-        name: "move_window".to_string(),
-        description: "Moves a specific window to the given screen coordinates (top-left corner).".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "window_id": { "type": "string", "description": "The ID of the window to move." },
-                "x": { "type": "integer", "description": "The desired X coordinate." },
-                "y": { "type": "integer", "description": "The desired Y coordinate." }
-            },
-            "required": ["window_id", "x", "y"]
-        }),
-    };
-
-    let move_window_exec = move |input: Value| {
-        let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<MoveWindowInput>(input)
-                .map_err(|e| format!("Failed to parse move_window input: {}", e))?;
-            let state_manager = app_handle_clone.state::<AppState>();
-             match commands::window::dev_move_window(state_manager, args.window_id, args.x, args.y).await {
-                 Ok(_) => Ok(json!({ "success": true })),
-                 Err(e) => Err(format!("Error moving window: {}", e)),
-             }
-        }
-    };
-    provider.register_async_tool(move_window_def, move_window_exec).await;
-    info!("Registered tool: move_window");
-
-    // close_window
-    let close_window_def = ToolDefinition {
-        name: "close_window".to_string(),
-        description: "Closes a specific window using its ID.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "window_id": { "type": "string", "description": "The ID of the window to close." }
-            },
-            "required": ["window_id"]
-        }),
-    };
-
-    let close_window_exec = move |input: Value| {
-         let app_handle_clone = app_handle.clone();
-        async move {
-            let args = serde_json::from_value::<WindowIdInput>(input)
-                .map_err(|e| format!("Failed to parse close_window input: {}", e))?;
-             let state_manager = app_handle_clone.state::<AppState>();
-            match commands::window::dev_close_window(state_manager, args.window_id).await {
-                Ok(_) => Ok(json!({ "success": true })),
-                Err(e) => Err(format!("Error closing window: {}", e)),
-            }
-        }
-    };
-    provider.register_async_tool(close_window_def, close_window_exec).await;
-    info!("Registered tool: close_window");
-
-
-    // --- File System Tools ---
-
-    // list_files
-     #[derive(serde::Deserialize)]
-     struct PathInput { path: String }
-
-     let list_files_def = ToolDefinition {
-         name: "list_files".to_string(),
-         description: "Lists the files and directories within a specified path.".to_string(),
-         input_schema: json!({
-             "type": "object",
-             "properties": {
-                 "path": { "type": "string", "description": "The directory path to list." }
-             },
-             "required": ["path"]
-         }),
-     };
-
-     let list_files_exec = move |input: Value| {
-         async move {
-             let args = serde_json::from_value::<PathInput>(input)
-                 .map_err(|e| format!("Failed to parse list_files input: {}", e))?;
-             // Use the imported `dev_list_files` function directly
-             match commands::filesystem::dev_list_files(args.path).await {
-                 Ok(files) => Ok(json!(files)),
-                 Err(e) => Err(format!("Error listing files: {}", e)),
-             }
-         }
-     };
-     provider.register_async_tool(list_files_def, list_files_exec).await;
-     info!("Registered tool: list_files");
-
-     // get_file_content
-     let get_file_content_def = ToolDefinition {
-         name: "get_file_content".to_string(),
-         description: "Reads and returns the content of a specified file as a string.".to_string(),
-         input_schema: json!({
-             "type": "object",
-             "properties": {
-                 "path": { "type": "string", "description": "The path to the file to read." }
-             },
-             "required": ["path"]
-         }),
-     };
-
-     let get_file_content_exec = move |input: Value| {
-         async move {
-             let args = serde_json::from_value::<PathInput>(input)
-                 .map_err(|e| format!("Failed to parse get_file_content input: {}", e))?;
-             // Use the imported `dev_get_file_content` function directly
-             match commands::filesystem::dev_get_file_content(args.path).await {
-                 Ok(content) => Ok(json!({ "content": content })),
-                 Err(e) => Err(format!("Error getting file content: {}", e)),
-             }
-         }
-     };
-     provider.register_async_tool(get_file_content_def, get_file_content_exec).await;
-     info!("Registered tool: get_file_content");
-
-     // set_file_content
-     #[derive(serde::Deserialize)]
-     struct SetFileInput { path: String, content: String }
-
-     let set_file_content_def = ToolDefinition {
-         name: "set_file_content".to_string(),
-         description: "Writes the provided string content to a specified file, overwriting it if it exists.".to_string(),
-         input_schema: json!({
-             "type": "object",
-             "properties": {
-                 "path": { "type": "string", "description": "The path to the file to write." },
-                 "content": { "type": "string", "description": "The content to write to the file." }
-             },
-             "required": ["path", "content"]
-         }),
-     };
-
-     let set_file_content_exec = move |input: Value| {
-         async move {
-             let args = serde_json::from_value::<SetFileInput>(input)
-                 .map_err(|e| format!("Failed to parse set_file_content input: {}", e))?;
-             // Use the imported `dev_set_file_content` function directly
-             match commands::filesystem::dev_set_file_content(args.path, args.content).await {
-                 Ok(_) => Ok(json!({ "success": true })),
-                 Err(e) => Err(format!("Error setting file content: {}", e)),
-             }
-         }
-     };
-     provider.register_async_tool(set_file_content_def, set_file_content_exec).await;
-     info!("Registered tool: set_file_content");
-
-    info!("Finished registering desktop tools.");
+    info!("Desktop tool registration completed.");
 }
