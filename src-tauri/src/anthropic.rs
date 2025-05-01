@@ -1,6 +1,5 @@
 use crate::state::AppState;
 // use crate::tools::{list_tools, handle_tool_call}; // Removed unused
-use crate::tts;
 // use reqwest::Client; // Removed unused
 use serde::{Deserialize, Serialize};
 use serde_json::{Value}; // Keep Value
@@ -157,7 +156,7 @@ pub async fn submit_query(
                 let controller_lock = controller_arc.clone(); // Clone Arc again for async block
                 let name = tool_name.clone();
                 async move {
-                    let mut controller = controller_lock.lock().await; // Lock the Mutex
+                    let controller = controller_lock.lock().await; // Lock the Mutex
                     let result = match name.as_str() {
                         "browser_navigate" => controller.navigate(&input).await,
                         "browser_extract_content" => controller.extract_content(&input).await,
