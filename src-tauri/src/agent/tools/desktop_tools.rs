@@ -269,7 +269,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_scroll(app.clone(), state_manager, args.x, args.y, args.direction, args.amount as f64).await
+                    commands::window::dev_scroll_window(app.clone(), state_manager, args.direction, args.amount as f64, None, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error scrolling: {}", e))?;
@@ -302,7 +302,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_triple_click(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_triple_click(app.clone(), state_manager, args.x, args.y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error triple clicking: {}", e))?;
@@ -370,7 +370,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::keyboard::dev_hold_key(args.key, state_manager).await
+                    commands::keyboard::dev_hold_key(args.key, None, state_manager).await
                 })
             });
             inner_result.map_err(|e| format!("Error holding key: {}", e))?;
@@ -534,7 +534,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error left clicking: {}", e))?;
@@ -567,7 +567,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_right_click(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_right_click(app.clone(), state_manager, args.x, args.y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error right clicking: {}", e))?;
@@ -600,7 +600,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_middle_click(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_middle_click(app.clone(), state_manager, args.x, args.y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error middle clicking: {}", e))?;
@@ -633,7 +633,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_double_click(app.clone(), state_manager, args.x, args.y).await
+                    commands::mouse::dev_double_click(app.clone(), state_manager, args.x, args.y, None).await
                 })
             });
             inner_result.map_err(|e| format!("Error double clicking: {}", e))?;

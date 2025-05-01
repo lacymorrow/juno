@@ -21,6 +21,9 @@ use crate::agent::{
         memory_manager::SimpleMemoryManager,
         tool_provider::LocalToolProvider,
         agent_runner::DefaultAgentRunner,
+        agent_brain::AnthropicBrain, // Import AnthropicBrain directly
+        // Need BrainFactory if we use it here
+        // Removed BrainFactory import as it doesn't exist in the merged code
     },
     traits::AgentRunnable, // Import the trait for the run method
     tools::{ // Changed this block
@@ -29,8 +32,7 @@ use crate::agent::{
         browser_tools::get_browser_tool_definitions,
         browser_controller::BrowserController,
     },
-    // Need BrainFactory if we use it here
-    providers::factory::BrainFactory,
+    // Removed BrainFactory import as it doesn't exist in the merged code
 };
 
 // --- Agent State ---
@@ -178,9 +180,9 @@ pub async fn submit_query(
         info!("Skipping browser tool registration as controller failed to initialize.");
     }
 
-    // Instantiate the brain using the factory
-    let agent_brain = match BrainFactory::create_brain() { // Use BrainFactory
-        Ok(brain) => brain,
+    // Instantiate the brain directly using AnthropicBrain::from_env()
+    let agent_brain = match AnthropicBrain::from_env() { // Instantiate AnthropicBrain
+        Ok(brain) => brain, // Pass the concrete type directly
         Err(e) => {
              let err_msg = format!("Failed to initialize agent brain: {}", e);
              error!("{}", err_msg);
@@ -201,7 +203,7 @@ pub async fn submit_query(
     let mut agent_runner = DefaultAgentRunner::new(
         memory_manager,
         tool_provider, // This now contains all registered tools
-        agent_brain,   // Pass the Box<dyn AgentBrain>
+        agent_brain,   // Pass the concrete AnthropicBrain instance
         MAX_ITERATIONS,
     );
     info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
