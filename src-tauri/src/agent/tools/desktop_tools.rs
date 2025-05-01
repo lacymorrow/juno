@@ -31,7 +31,7 @@ pub async fn register_desktop_tools(
     // get_focused_element_info
     let get_focused_def = ToolDefinition {
         name: "get_focused_element_info".to_string(),
-        description: "Get information about the currently focused UI element.".to_string(),
+        description: "Get accessibility information about the currently focused UI element in the active desktop application.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
@@ -60,7 +60,7 @@ pub async fn register_desktop_tools(
     // capture_screenshot
     let capture_screenshot_def = ToolDefinition {
         name: "capture_screenshot".to_string(),
-        description: "Captures a screenshot of the entire screen.".to_string(),
+        description: "Captures a screenshot of the entire desktop screen.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
@@ -88,7 +88,7 @@ pub async fn register_desktop_tools(
     // capture_element_screenshot
     let capture_element_screenshot_def = ToolDefinition {
         name: "capture_element_screenshot".to_string(),
-        description: "Captures a screenshot of the currently focused UI element.".to_string(),
+        description: "Captures a screenshot of the currently focused UI element on the desktop.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
@@ -120,7 +120,7 @@ pub async fn register_desktop_tools(
 
     let type_text_def = ToolDefinition {
         name: "type_text".to_string(),
-        description: "Types the given text, optionally with a delay between characters.".to_string(),
+        description: "Types the given text into the active desktop application, optionally with a delay between characters.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -156,7 +156,7 @@ pub async fn register_desktop_tools(
     // --- Register Get Clipboard Tool ---
     let get_clipboard_def = ToolDefinition {
         name: "get_clipboard".to_string(),
-        description: "Get the current contents of the clipboard.".to_string(),
+        description: "Get the current text contents of the operating system clipboard.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {},
@@ -186,7 +186,7 @@ pub async fn register_desktop_tools(
 
     let set_clipboard_def = ToolDefinition {
         name: "set_clipboard_content".to_string(),
-        description: "Sets the system clipboard content.".to_string(),
+        description: "Sets the operating system clipboard content to the provided text.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -218,6 +218,59 @@ pub async fn register_desktop_tools(
     };
     provider.register_async_tool(set_clipboard_def, set_clipboard_exec).await;
     info!("Registered tool: set_clipboard_content");
+
+    // --- Register Desktop Click Tool ---
+    #[derive(serde::Deserialize)]
+    struct DesktopClickArgs {
+        x: f64,
+        y: f64,
+        click_type: Option<String>, // e.g., "left", "right", "double"
+        modifier: Option<String>, // e.g., "shift", "ctrl"
+    }
+
+    let desktop_click_def = ToolDefinition {
+        name: "desktop_click".to_string(),
+        description: "Performs a mouse click (left, right, double) at the specified coordinates on the desktop screen. Coordinates should typically be obtained from 'get_focused_element_info' or a screenshot analysis.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "number", "description": "X-coordinate for the click." },
+                "y": { "type": "number", "description": "Y-coordinate for the click." },
+                "click_type": { "type": "string", "enum": ["left", "right", "double"], "description": "Type of click (defaults to left)." },
+                "modifier": { "type": "string", "enum": ["shift", "ctrl", "alt", "cmd"], "description": "Optional modifier key to hold during the click." }
+            },
+            "required": ["x", "y"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let desktop_click_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<DesktopClickArgs>(input)
+                .map_err(|e| format!("Failed to parse desktop_click input: {}", e))?;
+
+            // TODO: Handle coordinate transformation if necessary (e.g., if inputs are from a scaled context)
+            // For now, assume direct screen coordinates are provided by the agent
+            let x = args.x;
+            let y = args.y;
+            let modifier = args.modifier;
+
+            let click_result = match args.click_type.as_deref().unwrap_or("left") {
+                "left" => commands::mouse::dev_left_click(app.clone(), state_manager, x, y, modifier).await,
+                "right" => commands::mouse::dev_right_click(app.clone(), state_manager, x, y, modifier).await,
+                "double" => commands::mouse::dev_double_click(app.clone(), state_manager, x, y, modifier).await,
+                // Add other click types like middle, triple if needed
+                unknown => Err(format!("Unsupported click type: {}", unknown)),
+            };
+
+            click_result.map_err(|e| format!("Error performing desktop click: {}", e))?;
+            Ok(json!({"success": true}))
+        }
+    };
+    provider.register_async_tool(desktop_click_def, desktop_click_exec).await;
+    info!("Registered tool: desktop_click");
 
     // Add new computer use tools based on the Anthropic documentation
     register_additional_computer_use_tools(provider, app_handle.clone()).await;
