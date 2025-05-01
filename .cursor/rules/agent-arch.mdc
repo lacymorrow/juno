@@ -1,0 +1,38 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Agent Architecture Overview
+
+This rule describes the composable agent architecture implemented in `src-tauri/src/agent`. The goal is to separate concerns like reasoning (brain), memory management, tool execution, and the main execution loop (runner).
+
+## Core Components
+
+- **Traits ([src-tauri/src/agent/traits.rs](mdc:dotdot/dotdot/src-tauri/src/agent/traits.rs))**: Defines the core interfaces:
+    - `AgentBrain`: Decides the next action (e.g., call LLM).
+    - `MemoryManager`: Stores and retrieves conversation history.
+    - `ToolProvider`: Lists available tools and executes them.
+    - `AgentRunnable`: Defines the main execution loop (`run`, `step`).
+- **Structs ([src-tauri/src/agent/structs.rs](mdc:dotdot/dotdot/src-tauri/src/agent/structs.rs))**: Contains fundamental data structures:
+    - `Message`: Represents user, assistant, system, or tool messages.
+    - `ToolDefinition`, `ToolCall`, `ToolResult`: Define tool structure, invocation, and results.
+    - `AgentAction`: Enum representing the next action decided by the brain (e.g., `ExecuteTool`, `Finish`).
+    - `AgentError`: Custom error type for agent operations.
+    - `AgentState`: Represents the agent's current state (e.g., `Thinking`, `Executing`, `Finished`).
+- **Implementations ([src-tauri/src/agent/implementations/](mdc:dotdot/dotdot/src-tauri/src/agent/implementations))**: Provides concrete implementations of the traits:
+    - `DefaultAgentRunner` ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:dotdot/dotdot/src-tauri/src/agent/implementations/agent_runner.rs)): Orchestrates the agent flow using the other components. Implements `AgentRunnable`.
+    - `AnthropicBrain` ([src-tauri/src/agent/implementations/agent_brain.rs](mdc:dotdot/dotdot/src-tauri/src/agent/implementations/agent_brain.rs)): Implements `AgentBrain` using the Anthropic API.
+    - `SimpleMemoryManager` ([src-tauri/src/agent/implementations/memory_manager.rs](mdc:dotdot/dotdot/src-tauri/src/agent/implementations/memory_manager.rs)): Basic in-memory implementation of `MemoryManager`.
+    - `LocalToolProvider` ([src-tauri/src/agent/implementations/tool_provider.rs](mdc:dotdot/dotdot/src-tauri/src/agent/implementations/tool_provider.rs)): Basic in-memory implementation of `ToolProvider`.
+- **Tools ([src-tauri/src/agent/tools/](mdc:dotdot/dotdot/src-tauri/src/agent/tools))**: Contains tool definitions and execution logic (see `agent-tools.mdc`).
+
+## Execution Flow
+
+1. An external caller (e.g., a Tauri command) instantiates the desired Brain, MemoryManager, and ToolProvider implementations.
+2. These components are passed to the `DefaultAgentRunner`.
+3. The `run` method on the `DefaultAgentRunner` is called with an initial prompt.
+4. The runner executes a loop, calling the `AgentBrain` to decide the next `AgentAction`, using the `ToolProvider` to execute tools if requested, and updating the `MemoryManager`.
+5. The loop continues until the `AgentBrain` decides to `Finish` or an error occurs.
+
+Refer to `agent-integration.mdc` for how this agent is used within the Tauri application.
