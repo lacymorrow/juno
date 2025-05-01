@@ -1,24 +1,31 @@
 use async_trait::async_trait;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tauri::AppHandle;
+use serde_json::Value;
 
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::traits::ToolProvider;
 use crate::agent::tool_logger;
 
-// TODO: Define a proper Tool executable trait/struct later
-type ToolFn = Box<dyn Fn(serde_json::Value) -> Result<serde_json::Value, String> + Send + Sync>;
+// Define an async tool function type
+// It takes a Value input and returns a BoxFuture that resolves to Result<Value, String>
+// Needs Send + Sync bounds for async execution
+// Add 'static lifetime bound
+// Make the type alias public
+pub type AsyncToolFn = Box<
+    dyn Fn(Value) -> BoxFuture<'static, Result<Value, String>> + Send + Sync + 'static
+>;
 
-/// A simple ToolProvider holding tools in memory.
+/// A ToolProvider holding tools in memory, supporting async execution.
 #[derive(Clone)]
 pub struct LocalToolProvider {
-    // Stores tool definitions (name, description, schema)
     definitions: Arc<RwLock<HashMap<String, ToolDefinition>>>,
-    // Stores the actual executable tool functions
-    executors: Arc<RwLock<HashMap<String, ToolFn>>>,
-    // App handle to emit events
+    // Use the AsyncToolFn type
+    executors: Arc<RwLock<HashMap<String, AsyncToolFn>>>,
     app_handle: Option<AppHandle>,
 }
 
@@ -45,20 +52,35 @@ impl LocalToolProvider {
         self.app_handle = Some(app_handle);
     }
 
-    /// Registers a tool with its definition and execution logic.
-    pub async fn register_tool<F>(
-        &mut self,
-        definition: ToolDefinition,
-        executor: F,
-    )
+    /// Registers an async tool with its definition and execution logic.
+    pub async fn register_async_tool<F, Fut>(&mut self, definition: ToolDefinition, executor: F)
     where
-        F: Fn(serde_json::Value) -> Result<serde_json::Value, String> + Send + Sync + 'static,
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
         let name = definition.name.clone();
         let mut defs = self.definitions.write().await;
         defs.insert(name.clone(), definition);
+
+        // Box the executor into the AsyncToolFn type
+        let boxed_executor: AsyncToolFn = Box::new(move |input| Box::pin(executor(input)));
+
         let mut execs = self.executors.write().await;
-        execs.insert(name, Box::new(executor));
+        execs.insert(name, boxed_executor);
+    }
+
+    /// Deprecated: Registers a synchronous tool. Use register_async_tool instead.
+    #[deprecated(note = "Use register_async_tool for all tools going forward")]
+    pub async fn register_tool<F>(&mut self, definition: ToolDefinition, executor: F)
+    where
+        F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
+    {
+        let async_executor = move |input: Value| {
+            // Wrap the synchronous function in an async block
+            let result = executor(input);
+            async move { result } // This future resolves immediately
+        };
+        self.register_async_tool(definition, async_executor).await;
     }
 }
 
@@ -72,37 +94,43 @@ impl ToolProvider for LocalToolProvider {
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         let execs = self.executors.read().await;
         if let Some(executor) = execs.get(&tool_call.name) {
-            // Use the tool logger if we have an app handle
-            if let Some(app_handle) = &self.app_handle {
-                match tool_logger::log_tool_execution(
-                    app_handle,
-                    &tool_call.name,
+            let app_handle = self.app_handle.clone();
+            let tool_name = tool_call.name.clone();
+            let tool_input = tool_call.input.clone();
+            let call_id = tool_call.id.clone();
+
+            let execution_future = async move {
+                executor(tool_input).await
+            };
+
+            let result_output = if let Some(handle) = app_handle {
+                tool_logger::log_async_tool_execution(
+                    &handle,
+                    &tool_name,
                     tool_call.input.clone(),
-                    |input| executor(input),
-                ).await {
-                    Ok(output) => Ok(ToolResult {
-                        call_id: tool_call.id,
-                        output,
-                    }),
-                    Err(e) => Err(AgentError::ToolError(format!(
-                        "Error executing tool '{}': {}",
-                        tool_call.name,
-                        e
-                    ))),
-                }
+                    execution_future,
+                )
+                .await
             } else {
-                // Fall back to direct execution without logging if no app handle
-                match executor(tool_call.input) {
-                    Ok(output) => Ok(ToolResult {
-                        call_id: tool_call.id,
-                        output,
-                    }),
-                    Err(e) => Err(AgentError::ToolError(format!(
-                        "Error executing tool '{}': {}",
-                        tool_call.name,
-                        e
-                    ))),
+                log::warn!("Executing tool '{}' without logging via app handle.", tool_name);
+                // Use the catch_unwind from FutureExt
+                match std::panic::AssertUnwindSafe(execution_future).catch_unwind().await {
+                    Ok(Ok(output)) => Ok(output),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Err("Tool execution panicked".to_string()),
                 }
+            };
+
+            match result_output {
+                Ok(output) => Ok(ToolResult {
+                    call_id,
+                    output,
+                }),
+                Err(e) => Err(AgentError::ToolError(format!(
+                    "Error executing tool '{}': {}",
+                    tool_call.name,
+                    e
+                ))),
             }
         } else {
             Err(AgentError::ToolNotFound(tool_call.name))
