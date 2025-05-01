@@ -71,7 +71,7 @@ pub trait AccessibilityEngine: Send + Sync + Any {
     fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError>;
 
     /// Hold down a modifier key
-    fn hold_key(&self, key: &str) -> Result<(), AutomationError>;
+    fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError>;
 
     /// Release a modifier key
     fn release_key(&self, key: &str) -> Result<(), AutomationError>;
@@ -98,19 +98,19 @@ pub trait AccessibilityEngine: Send + Sync + Any {
     fn left_mouse_up(&self, x: f64, y: f64) -> Result<(), AutomationError>;
 
     /// Simulate a standard left click (down + up) at specified coordinates.
-    fn left_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+    fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
     /// Simulate a right click (down + up) at specified coordinates.
-    fn right_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+    fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
     /// Simulate a middle click (down + up) at specified coordinates.
-    fn middle_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+    fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
     /// Simulate a double left click at the specified coordinates.
-    fn double_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+    fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
     /// Simulate a triple left click at the specified coordinates.
-    fn triple_click(&self, x: f64, y: f64) -> Result<(), AutomationError>;
+    fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError>;
 
     /// Simulate dragging with the left mouse button from a start point to an end point.
     fn left_click_drag(

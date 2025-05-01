@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex; // Using Mutex for mutable access to MemoryManager
+use crate::state::CancelReceiver; // Import the type alias
 
 use crate::agent::structs::{
-    AgentAction, AgentError, AgentState, Message, Role, ToolCall, ToolResult,
+    AgentAction, AgentError, AgentState, Message, Role, // Removed ToolCall, ToolResult
 };
 use crate::agent::traits::{
     AgentBrain, AgentRunnable, MemoryManager, ToolProvider
@@ -27,7 +28,7 @@ where
 
 impl<M, T, B> DefaultAgentRunner<M, T, B>
 where
-    M: MemoryManager + Send + Sync + 'static, // 'static needed for Arc<Mutex<>>
+    M: MemoryManager + Send + Sync + 'static,
     T: ToolProvider + Send + Sync + 'static,
     B: AgentBrain + Send + Sync + 'static,
 {
@@ -56,12 +57,19 @@ where
     T: ToolProvider + Send + Sync + 'static,
     B: AgentBrain + Send + Sync + 'static,
 {
-    async fn run(&mut self, initial_prompt: String) -> Result<String, AgentError> {
+    async fn run(
+        &mut self,
+        initial_prompt: String,
+        cancel_rx: CancelReceiver, // Use watch receiver (no longer needs mut)
+    ) -> Result<String, AgentError> {
         if self.state != AgentState::Idle {
             return Err(AgentError::StateError(
                 "Agent must be in Idle state to start.".to_string(),
             ));
         }
+
+        // Clone the receiver for the step function
+        let step_cancel_rx = cancel_rx.clone();
 
         self.transition_state(AgentState::Thinking).await;
         self.current_step = 0;
@@ -75,18 +83,29 @@ where
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
-            }).await?;
+            })
+            .await?;
         }
 
         loop {
+            // --- Cancellation Check (Start of Loop) ---
+            // Check if the cancel signal has been received
+            if *cancel_rx.borrow() {
+                log::info!("Agent run cancelled.");
+                self.transition_state(AgentState::Failed("Cancelled".to_string())).await;
+                return Err(AgentError::Terminated);
+            }
+
             if self.current_step >= self.max_steps {
-                self.transition_state(AgentState::Failed("Max steps reached".to_string())).await;
+                self.transition_state(AgentState::Failed("Max steps reached".to_string()))
+                    .await;
                 return Err(AgentError::MaxStepsReached);
             }
             self.current_step += 1;
             log::info!("Agent Step {}/{}", self.current_step, self.max_steps);
 
-            let action = self.step().await?;
+            // Pass the cloned receiver to the step function
+            let action = self.step(step_cancel_rx.clone()).await?;
 
             match action {
                 AgentAction::Finish(final_message) => {
@@ -100,26 +119,26 @@ where
                             tool_calls: None,
                             tool_call_id: None,
                             name: None,
-                        }).await?;
+                        })
+                        .await?;
                     }
                     log::info!("Agent finished.");
                     return Ok(final_message);
                 }
                 AgentAction::Error(e) => {
                     let error_message = e.to_string();
-                    self.transition_state(AgentState::Failed(error_message)).await;
+                    self.transition_state(AgentState::Failed(error_message))
+                        .await;
                     return Err(e);
                 }
-                // AgentAction::Think and AgentAction::ExecuteTool are handled within step()
-                // and don't terminate the loop directly.
-                 AgentAction::Think => {
+                AgentAction::Think => {
                     // Continue loop, state remains Thinking or shifts during step
                     continue;
-                 }
-                 AgentAction::RespondToUser(intermediate_response) => {
+                }
+                AgentAction::RespondToUser(intermediate_response) => {
                     // Log or emit intermediate response, then continue thinking
                     log::info!("Agent intermediate response: {}", intermediate_response);
-                     {
+                    {
                         let mut mem = self.memory.lock().await;
                         mem.add_message(Message {
                             role: Role::Assistant,
@@ -127,25 +146,33 @@ where
                             tool_calls: None,
                             tool_call_id: None,
                             name: None,
-                        }).await?;
+                        })
+                        .await?;
                     }
                     self.transition_state(AgentState::Thinking).await;
                     continue;
-                 }
-                 // Explicitly handle ExecuteTool case if step doesn't fully process it.
-                 // Currently, step should handle the execution and add results to memory.
-                 AgentAction::ExecuteTool(_) => {
+                }
+                AgentAction::ExecuteTool(_) => {
                     // This case might indicate an issue if step() isn't fully processing tools.
                     // Assume step() handles execution and adds results, then returns Think or another Action.
                     log::warn!("AgentRunner received ExecuteTool action directly. Assuming step() handled it.");
                     self.transition_state(AgentState::Thinking).await;
-                     continue;
-                 }
+                    continue;
+                }
             }
         }
     }
 
-    async fn step(&mut self) -> Result<AgentAction, AgentError> {
+    // Modify step to accept the CancelReceiver
+    async fn step(
+        &mut self,
+        cancel_rx: CancelReceiver, // Use watch receiver (no longer needs mut)
+    ) -> Result<AgentAction, AgentError> {
+        // --- Cancellation Check (Start of Step) ---
+        if *cancel_rx.borrow() {
+            return Err(AgentError::Terminated);
+        }
+
         self.transition_state(AgentState::Thinking).await;
 
         let messages = {
@@ -178,14 +205,30 @@ where
                         tool_calls: Some(message_tool_calls),
                         tool_call_id: None,
                         name: None,
-                    }).await?;
+                    })
+                    .await?;
                 }
 
                 // Execute tools sequentially for now
                 // TODO: Consider parallel execution if tools are independent
                 for tool_call in tool_calls {
-                    log::info!("Executing tool: {} with ID: {}", tool_call.name, tool_call.id);
+                    // --- Cancellation Check (Before Tool Execution) ---
+                    if *cancel_rx.borrow() {
+                        return Err(AgentError::Terminated);
+                    }
+
+                    log::info!(
+                        "Executing tool: {} with ID: {}",
+                        tool_call.name,
+                        tool_call.id
+                    );
                     let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+
+                    // --- Cancellation Check (After Tool Execution) ---
+                    // Check even if tool execution failed, to ensure timely termination
+                    if *cancel_rx.borrow() {
+                        return Err(AgentError::Terminated);
+                    }
 
                     // Add tool result message to memory immediately after execution
                     match tool_result {
@@ -194,28 +237,34 @@ where
                             log::debug!("Tool {} finished successfully.", tool_call.name);
                             mem.add_message(Message {
                                 role: Role::Tool,
-                                content: serde_json::to_string(&result.output).unwrap_or_else(|_| "[Serialization Error]".to_string()),
+                                content: serde_json::to_string(&result.output).unwrap_or_else(
+                                    |_| "[Serialization Error]".to_string(),
+                                ),
                                 tool_calls: None,
                                 tool_call_id: Some(result.call_id),
                                 name: Some(tool_call.name.clone()), // Often tool name goes here
-                            }).await?;
+                            })
+                            .await?;
                         }
                         Err(e) => {
-                            log::error!("Tool execution failed for {}: {}", tool_call.name, e);
+                            // If a tool fails, add an error message to memory
+                            // and let the brain decide the next step.
+                            log::error!("Tool {} failed: {}", tool_call.name, e);
                             let mut mem = self.memory.lock().await;
                             mem.add_message(Message {
                                 role: Role::Tool,
-                                content: format!("[Tool Execution Error: {}]", e),
+                                content: format!("Error executing tool: {}", e),
                                 tool_calls: None,
-                                tool_call_id: Some(tool_call.id),
+                                tool_call_id: Some(tool_call.id.clone()), // Use original call ID
                                 name: Some(tool_call.name.clone()),
-                            }).await?;
-                            // Decide whether to stop or let the brain handle the error.
-                            // For now, let's continue and let the brain see the error message.
+                            })
+                            .await?;
+                            // Potentially return AgentAction::Error(e) here if we want to stop on any tool error
+                            // For now, let the LLM handle the tool error
                         }
                     }
                 }
-                // After executing all tools (or encountering an error), go back to thinking
+                // After executing tools, transition back to Thinking for the next loop iteration
                 Ok(AgentAction::Think)
             }
             AgentAction::RespondToUser(response) => {
@@ -238,6 +287,8 @@ where
                 // Keep state as Thinking
                  Ok(AgentAction::Think)
             }
+            // Other actions are returned directly
+            other_action => Ok(other_action),
         }
     }
 }

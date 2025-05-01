@@ -1,11 +1,11 @@
-use super::actions::ClickMethodSelection;
+use accessibility::{AXAttribute, AXUIElement};
+use accessibility_sys::AXUIElementRef;
 use super::constants::*;
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
-use accessibility::{AXAttribute, AXUIElement};
-use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
+use accessibility_sys::{AXUIElementSetAttributeValue};
 use core_foundation::base::{TCFType, CFTypeRef};
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
@@ -19,6 +19,11 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
+use super::ffi::AXValueCreate; // Import AXValueCreate
+
+// Define key code constants for keyboard shortcuts
+const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
+const KEYCODE_A: CGKeyCode = 0;    // 'A' key
 
 // --- Moved from element.rs --- //
 
@@ -46,14 +51,8 @@ pub(crate) fn get_application(element: &MacOSUIElement) -> Option<MacOSUIElement
 
 pub(crate) fn click_with_method(
     element: &MacOSUIElement,
-    method: ClickMethodSelection,
 ) -> Result<ClickResult, AutomationError> {
-    match method {
-        ClickMethodSelection::Auto => click_auto(element),
-        ClickMethodSelection::AXPress => click_press(element),
-        ClickMethodSelection::AXClick => click_accessibility_click(element),
-        ClickMethodSelection::MouseSimulation => click_mouse_simulation(element),
-    }
+    click_auto(element)
 }
 
 pub(crate) fn click_auto(element: &MacOSUIElement) -> Result<ClickResult, AutomationError> {
@@ -304,8 +303,9 @@ pub(crate) fn left_mouse_up(x: f64, y: f64) -> Result<(), AutomationError> {
 }
 
 /// Simulate a standard left click (down + up) at specified coordinates.
-pub(crate) fn left_click(x: f64, y: f64) -> Result<(), AutomationError> {
-    debug!("Performing left click at ({}, {})", x, y);
+/// Optionally apply modifier keys to the click.
+pub(crate) fn left_click(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Result<(), AutomationError> {
+    debug!("Performing left click at ({}, {}) with modifiers: {:?}", x, y, modifiers);
     let point = CGPoint::new(x, y);
     mouse_move(x, y)?; // Ensure cursor is at the correct position
     std::thread::sleep(std::time::Duration::from_millis(20)); // Short pause after move
@@ -317,13 +317,25 @@ pub(crate) fn left_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
         .map_err(|_| AutomationError::PlatformError("Failed to create left mouse down event".to_string()))?;
     down_event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
+
+    // Apply modifiers if provided
+    if let Some(flags) = modifiers {
+        down_event.set_flags(flags);
+    }
+
     down_event.post(CGEventTapLocation::HID);
-    std::thread::sleep(std::time::Duration::from_millis(50)); // Pause between down and up
+    std::thread::sleep(Duration::from_millis(50)); // Pause between down and up
 
     // Mouse up with click state 1
     let up_event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
         .map_err(|_| AutomationError::PlatformError("Failed to create left mouse up event".to_string()))?;
     up_event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
+
+    // Apply the same modifiers to the up event
+    if let Some(flags) = modifiers {
+        up_event.set_flags(flags);
+    }
+
     up_event.post(CGEventTapLocation::HID);
     Ok(())
 }
@@ -848,19 +860,67 @@ pub(crate) fn scroll(
     Ok(())
 }
 
-pub(crate) fn select_text(_element: &MacOSUIElement) -> Result<(), AutomationError> {
-    // TODO: Implement select_text using AXSelectText action or Cmd+A simulation
-    warn!("select_text function is not yet implemented for macOS");
+pub(crate) fn select_text(element: &MacOSUIElement) -> Result<(), AutomationError> {
+    debug!("Attempting to select all text in element");
+
+    // First, focus the element to ensure it's active
+    element.focus()?;
+    thread::sleep(Duration::from_millis(100)); // Give time for focus to register
+
+    // Try using AXSelectText action if available
+    let select_attr = AXAttribute::new(&CFString::new("AXSelectText"));
+    match element.element.0.perform_action(&select_attr.as_CFString()) {
+        Ok(_) => {
+            debug!("Successfully selected text using AXSelectText action");
+            return Ok(());
+        }
+        Err(e) => {
+            debug!("AXSelectText action failed: {:?}, trying alternative methods", e);
+        }
+    }
+
+    // If AXSelectText failed, try using Cmd+A shortcut
+    debug!("Attempting to select all text with Command+A shortcut");
+
+    // Create event source
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for select_text".to_string()))?;
+
+    // Key codes for Command+A
+    let cmd_down = CGEvent::new_keyboard_event(source.clone(), KEYCODE_CMD, true)
+        .map_err(|_| AutomationError::PlatformError("Failed to create command key down event".to_string()))?;
+    cmd_down.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+
+    let a_down = CGEvent::new_keyboard_event(source.clone(), KEYCODE_A, true)
+        .map_err(|_| AutomationError::PlatformError("Failed to create 'A' key down event".to_string()))?;
+    a_down.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+
+    let a_up = CGEvent::new_keyboard_event(source.clone(), KEYCODE_A, false)
+        .map_err(|_| AutomationError::PlatformError("Failed to create 'A' key up event".to_string()))?;
+    a_up.post(CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+
+    let cmd_up = CGEvent::new_keyboard_event(source, KEYCODE_CMD, false)
+        .map_err(|_| AutomationError::PlatformError("Failed to create command key up event".to_string()))?;
+    cmd_up.post(CGEventTapLocation::HID);
+
+    debug!("Successfully simulated Command+A for text selection");
     Ok(())
 }
 
 /// Gets the current text content from the system clipboard.
 pub(crate) fn get_clipboard_contents() -> Result<String, AutomationError> {
-    // clipboard_macos likely uses a static method or a context struct
-    // Based on docs.rs, it seems to use a Clipboard struct
     match Clipboard::new() {
         Ok(clipboard) => match clipboard.read() {
             Ok(content) => {
+                if content.is_empty() {
+                    // Handle empty clipboard content case
+                    return Err(AutomationError::PlatformError(
+                        "Clipboard content is empty".to_string(),
+                    ));
+                }
                 debug!("Retrieved clipboard content (length: {})", content.len());
                 Ok(content)
             }
@@ -897,8 +957,9 @@ pub(crate) fn set_clipboard_contents(text: &str) -> Result<(), AutomationError> 
 }
 
 /// Holds down a specified modifier key.
-pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), AutomationError> {
-    debug!("Holding key: code={}, flags={:?}", key_code, flags);
+/// If duration_ms is provided, the key will be released after that duration.
+pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags, duration_ms: Option<u64>) -> Result<(), AutomationError> {
+    debug!("Holding key: code={}, flags={:?}, duration={:?}ms", key_code, flags, duration_ms);
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_|
         AutomationError::PlatformError("Failed to create event source for hold_key".to_string())
     )?;
@@ -910,6 +971,25 @@ pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags) -> Result<(), A
     // Set the appropriate flags for the modifier key itself
     key_down.set_flags(flags);
     key_down.post(CGEventTapLocation::HID);
+
+    // If duration is provided, wait and then release the key
+    if let Some(duration) = duration_ms {
+        let duration = std::time::Duration::from_millis(duration);
+
+        // Spawn a thread to release the key after the specified duration
+        std::thread::spawn(move || {
+            std::thread::sleep(duration);
+
+            // Create release event
+            if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+                if let Ok(key_up) = CGEvent::new_keyboard_event(source, key_code, false) {
+                    key_up.set_flags(flags);
+                    key_up.post(CGEventTapLocation::HID);
+                    debug!("Auto-released key after {:?}ms", duration_ms);
+                }
+            }
+        });
+    }
 
     Ok(())
 }
@@ -950,19 +1030,5 @@ pub(crate) fn press_key_with_modifier(key_code: CGKeyCode, modifier_flags: CGEve
     thread::sleep(Duration::from_millis(50));
 
     debug!("Key press simulated for key code: {}", key_code);
-    Ok(())
-}
-
-// --- Old/Internal key sequence logic (if needed for reference, keep private) ---
-fn press_key_sequence(keys: &[(CGKeyCode, Option<CGEventFlags>)]) -> Result<(), AutomationError> {
-    // Placeholder implementation or keep the original logic if needed internally
-    debug!("Internal press_key_sequence called (currently placeholder)");
-    // Example: iterate through keys and simulate presses
-    for (key_code, modifier_flags_opt) in keys {
-        let modifier_flags = modifier_flags_opt.unwrap_or_else(CGEventFlags::empty);
-        // Simulate key down
-        // Simulate key up
-        debug!("Simulating press for key: {} with flags: {:?}", key_code, modifier_flags);
-    }
     Ok(())
 }

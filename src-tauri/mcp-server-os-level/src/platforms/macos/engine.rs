@@ -1,8 +1,8 @@
 use super::element::MacOSUIElement;
 use super::permissions::check_accessibility_permissions;
 use super::utils::{
-    element_contains_text, get_pid_for_element, get_running_application_pids,
-    map_generic_role_to_macos_roles,
+    element_contains_text,
+    get_running_application_pids, map_generic_role_to_macos_roles,
 };
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::platforms::tree_search::{
@@ -118,77 +118,6 @@ impl MacOSEngine {
         let _ = self.system_wide.0.attribute_names();
 
         Ok(())
-    }
-
-    pub(crate) fn focus_application_with_cache(
-        &self,
-        app_name: &str,
-        app_cache: Option<&ThreadSafeAXUIElement>,
-    ) -> Result<ThreadSafeAXUIElement, AutomationError> {
-        debug!("focusing application: {}", app_name);
-
-        if let Some(cached_element) = app_cache {
-            debug!("using cached application element");
-
-            match cached_element.0.role() {
-                Ok(role) if role.to_string() == "AXApplication" => unsafe {
-                    use objc::{class, msg_send, sel, sel_impl};
-                    let pid = get_pid_for_element(cached_element);
-
-                    let nsra_class = class!(NSRunningApplication);
-                    let app: *mut objc::runtime::Object =
-                        msg_send![nsra_class, runningApplicationWithProcessIdentifier:pid];
-                    if !app.is_null() {
-                        let _: () = msg_send![app, activateWithOptions:1];
-                        debug!("Activated application using cached element");
-
-                        return Ok(cached_element.clone());
-                    }
-                },
-                _ => {
-                    debug!("Cached element is no longer valid");
-                }
-            }
-        }
-
-        self.refresh_accessibility_tree(Some(app_name))?;
-
-        unsafe {
-            use objc::{class, msg_send, sel, sel_impl};
-
-            let workspace_class = class!(NSWorkspace);
-            let shared_workspace: *mut objc::runtime::Object =
-                msg_send![workspace_class, sharedWorkspace];
-            let apps: *mut objc::runtime::Object = msg_send![shared_workspace, runningApplications];
-            let count: usize = msg_send![apps, count];
-
-            for i in 0..count {
-                let app: *mut objc::runtime::Object = msg_send![apps, objectAtIndex:i];
-                let app_name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
-
-                if !app_name_obj.is_null() {
-                    let app_name_str: &str = {
-                        let nsstring = app_name_obj as *const objc::runtime::Object;
-                        let bytes: *const std::os::raw::c_char = msg_send![nsstring, UTF8String];
-                        let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
-                        let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
-                        std::str::from_utf8_unchecked(bytes_slice)
-                    };
-
-                    if app_name_str.to_lowercase() == app_name.to_lowercase() {
-                        let pid: i32 = msg_send![app, processIdentifier];
-                        let ax_element = ThreadSafeAXUIElement::application(pid);
-
-                        return Ok(ax_element);
-                    }
-                }
-            }
-        }
-
-        Err(AutomationError::ElementNotFound(format!(
-            "Application '{}' not found",
-            app_name
-        )))
     }
 
     pub(crate) fn scroll_at_position(
@@ -446,27 +375,9 @@ impl AccessibilityEngine for MacOSEngine {
 
         let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
         let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
-        // Attribute for checking activation policy manually if needed (though get_pid might be better)
-        let policy_attr = accessibility::AXAttribute::<CFType>::new(&CFString::new("AXActivationPolicy"));
 
         for pid in pids {
             let app_element = accessibility::AXUIElement::application(pid);
-
-            // Optional: Manually skip background-only apps if get_running_application_pids(true) includes them unexpectedly
-            // It *shouldn't* based on NSWorkspace docs, but let's be safe.
-            // We'll rely on the kAXFrontmost check primarily.
-            /*
-            if let Ok(policy_val) = app_element.attribute(&policy_attr) {
-                if let Some(policy_num) = policy_val.downcast_into::<CFNumber>() {
-                    if let Some(policy_int) = policy_num.to_i64() {
-                        if policy_int == 2 { // NSApplicationActivationPolicyProhibited
-                             trace!("Skipping PID {} due to activation policy 2", pid);
-                             continue;
-                        }
-                    }
-                }
-            }
-            */
 
             // Get attribute as CFType, then downcast
             match app_element.attribute(&frontmost_attr) {
@@ -1358,7 +1269,7 @@ impl AccessibilityEngine for MacOSEngine {
         interaction::set_clipboard_contents(content)
     }
 
-    fn hold_key(&self, key: &str) -> Result<(), AutomationError> {
+    fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
         let lower_key = key.to_lowercase();
         let (key_code, flags) = match lower_key.as_str() {
             "shift" => (SHIFT_KEYCODE, MODIFIER_SHIFT),
@@ -1370,7 +1281,7 @@ impl AccessibilityEngine for MacOSEngine {
                 key
             ))),
         };
-        interaction::hold_key(key_code, flags)
+        interaction::hold_key(key_code, flags, duration_ms)
     }
 
     fn release_key(&self, key: &str) -> Result<(), AutomationError> {
@@ -1408,10 +1319,11 @@ impl AccessibilityEngine for MacOSEngine {
         let key_code = super::constants::key_name_to_keycode(key_name)
             .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid key name: {}", key_name)))?;
 
-        let modifier_flags = match modifier {
-            Some(mod_name) => super::constants::modifier_name_to_flags(mod_name)
-                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?,
-            None => CGEventFlags::empty(),
+        let modifier_flags = if let Some(mod_name) = modifier {
+            super::constants::modifier_name_to_flags(mod_name)
+                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?
+        } else {
+            CGEventFlags::empty()
         };
 
         interaction::press_key_with_modifier(key_code, modifier_flags)
@@ -1434,23 +1346,49 @@ impl AccessibilityEngine for MacOSEngine {
         interaction::left_mouse_up(x, y)
     }
 
-    fn left_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        interaction::left_click(x, y)
+    fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        let flags = if let Some(mod_name) = modifiers {
+            super::constants::modifier_name_to_flags(mod_name)
+                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?
+        } else {
+            CGEventFlags::empty()
+        };
+        interaction::left_click(x, y, Some(flags))
     }
 
-    fn right_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, right_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for right_click");
+        }
         interaction::right_click(x, y)
     }
 
-    fn middle_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, middle_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for middle_click");
+        }
         interaction::middle_click(x, y)
     }
 
-    fn double_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, double_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for double_click");
+        }
         interaction::double_click(x, y)
     }
 
-    fn triple_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+    fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        // For now, triple_click implementation doesn't support modifiers
+        // This method signature is updated for consistency
+        if modifiers.is_some() {
+            warn!("Modifiers are not currently supported for triple_click");
+        }
         interaction::triple_click(x, y)
     }
 
