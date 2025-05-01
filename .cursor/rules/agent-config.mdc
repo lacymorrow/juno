@@ -1,0 +1,25 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Agent Configuration
+
+Configuration for the agent components is necessary for proper operation.
+
+## Anthropic Brain:
+
+-   The `AnthropicBrain` ([src-tauri/src/agent/implementations/agent_brain.rs](mdc:dotdot/src-tauri/src/agent/implementations/agent_brain.rs)) requires an API key for accessing the Anthropic API.
+-   The `AnthropicBrain::from_env()` constructor loads the key from the `ANTHROPIC_API_KEY` environment variable. Ensure this variable is set in your environment (e.g., via a `.env` file loaded by `dotenvy` at application startup, or system environment variables).
+-   Optional environment variables can override defaults:
+    -   `ANTHROPIC_MODEL`: Sets the specific Claude model (e.g., `claude-3-5-sonnet-20240620`). Defaults to a value specified in `agent_brain.rs`.
+    -   `ANTHROPIC_MAX_TOKENS`: Sets the `max_tokens` parameter for the API call.
+    -   `ANTHROPIC_SYSTEM_PROMPT`: Provides a system prompt string to the LLM.
+
+## Agent Runner:
+
+-   The `DefaultAgentRunner` ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:dotdot/src-tauri/src/agent/implementations/agent_runner.rs)) takes a `max_steps` parameter in its constructor (`DefaultAgentRunner::new`). This limits the number of steps (LLM calls, tool executions) the agent can take per `run` cycle. It's configured in [src-tauri/src/anthropic.rs](mdc:dotdot/src-tauri/src/anthropic.rs).
+
+## Tools:
+
+-   Specific tools might require their own configuration (e.g., API keys for web search tools, paths for file system tools). This configuration should be handled within the tool's implementation or registration process.
