@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
-use super::ffi::AXValueCreate; // Import AXValueCreate
+ // Import AXValueCreate
 
 // Define key code constants for keyboard shortcuts
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
