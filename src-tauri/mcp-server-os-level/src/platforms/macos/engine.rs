@@ -1,8 +1,8 @@
 use super::element::MacOSUIElement;
 use super::permissions::check_accessibility_permissions;
 use super::utils::{
-    element_contains_text, get_pid_for_element, get_running_application_pids,
-    map_generic_role_to_macos_roles,
+    element_contains_text,
+    get_running_application_pids, map_generic_role_to_macos_roles,
 };
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::platforms::tree_search::{
@@ -120,78 +120,7 @@ impl MacOSEngine {
         Ok(())
     }
 
-    pub(crate) fn focus_application_with_cache(
-        &self,
-        app_name: &str,
-        app_cache: Option<&ThreadSafeAXUIElement>,
-    ) -> Result<ThreadSafeAXUIElement, AutomationError> {
-        debug!("focusing application: {}", app_name);
-
-        if let Some(cached_element) = app_cache {
-            debug!("using cached application element");
-
-            match cached_element.0.role() {
-                Ok(role) if role.to_string() == "AXApplication" => unsafe {
-                    use objc::{class, msg_send, sel, sel_impl};
-                    let pid = get_pid_for_element(cached_element);
-
-                    let nsra_class = class!(NSRunningApplication);
-                    let app: *mut objc::runtime::Object =
-                        msg_send![nsra_class, runningApplicationWithProcessIdentifier:pid];
-                    if !app.is_null() {
-                        let _: () = msg_send![app, activateWithOptions:1];
-                        debug!("Activated application using cached element");
-
-                        return Ok(cached_element.clone());
-                    }
-                },
-                _ => {
-                    debug!("Cached element is no longer valid");
-                }
-            }
-        }
-
-        self.refresh_accessibility_tree(Some(app_name))?;
-
-        unsafe {
-            use objc::{class, msg_send, sel, sel_impl};
-
-            let workspace_class = class!(NSWorkspace);
-            let shared_workspace: *mut objc::runtime::Object =
-                msg_send![workspace_class, sharedWorkspace];
-            let apps: *mut objc::runtime::Object = msg_send![shared_workspace, runningApplications];
-            let count: usize = msg_send![apps, count];
-
-            for i in 0..count {
-                let app: *mut objc::runtime::Object = msg_send![apps, objectAtIndex:i];
-                let app_name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
-
-                if !app_name_obj.is_null() {
-                    let app_name_str: &str = {
-                        let nsstring = app_name_obj as *const objc::runtime::Object;
-                        let bytes: *const std::os::raw::c_char = msg_send![nsstring, UTF8String];
-                        let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
-                        let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
-                        std::str::from_utf8_unchecked(bytes_slice)
-                    };
-
-                    if app_name_str.to_lowercase() == app_name.to_lowercase() {
-                        let pid: i32 = msg_send![app, processIdentifier];
-                        let ax_element = ThreadSafeAXUIElement::application(pid);
-
-                        return Ok(ax_element);
-                    }
-                }
-            }
-        }
-
-        Err(AutomationError::ElementNotFound(format!(
-            "Application '{}' not found",
-            app_name
-        )))
-    }
-
-    // Enhanced scroll implementation with full directional support for Claude 3.7
+    // This is the primary scroll implementation using interaction module
     fn scroll_at_position(
         &self,
         x: f64,
@@ -531,22 +460,6 @@ impl AccessibilityEngine for MacOSEngine {
 
         for pid in pids {
             let app_element = accessibility::AXUIElement::application(pid);
-
-            // Optional: Manually skip background-only apps if get_running_application_pids(true) includes them unexpectedly
-            // It *shouldn't* based on NSWorkspace docs, but let's be safe.
-            // We'll rely on the kAXFrontmost check primarily.
-            /*
-            if let Ok(policy_val) = app_element.attribute(&policy_attr) {
-                if let Some(policy_num) = policy_val.downcast_into::<CFNumber>() {
-                    if let Some(policy_int) = policy_num.to_i64() {
-                        if policy_int == 2 { // NSApplicationActivationPolicyProhibited
-                             trace!("Skipping PID {} due to activation policy 2", pid);
-                             continue;
-                        }
-                    }
-                }
-            }
-            */
 
             // Get attribute as CFType, then downcast
             match app_element.attribute(&frontmost_attr) {
@@ -1577,11 +1490,14 @@ impl AccessibilityEngine for MacOSEngine {
             AutomationError::InvalidArgument(format!("Invalid key name: {}", key_name))
         )?;
 
-        let modifier_flags = parse_modifiers(modifier); // Use the same helper as for mouse clicks
+        let modifier_flags = if let Some(mod_name) = modifier {
+            super::constants::modifier_name_to_flags(mod_name)
+                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?
+        } else {
+            CGEventFlags::empty()
+        };
 
-        // Post key down then key up
-        post_keyboard_event(key_code, modifier_flags, true)?; // Key Down
-        post_keyboard_event(key_code, modifier_flags, false) // Key Up
+        interaction::press_key_with_modifier(key_code, modifier_flags)
     }
 
     /// Get the current mouse cursor position.

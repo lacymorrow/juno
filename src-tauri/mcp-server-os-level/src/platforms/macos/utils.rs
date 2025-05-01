@@ -1,8 +1,10 @@
-use super::wrappers::ThreadSafeAXUIElement;
-use crate::AutomationError;
+// Removed unused import use super::wrappers::ThreadSafeAXUIElement;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes}; // Import AXUIElementAttributes trait
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use core_foundation::base::TCFType; // Import TCFType trait
+// Removed unused import use accessibility_sys::AXUIElementGetTypeID;
+use base64::prelude::{Engine as _, BASE64_STANDARD};
+// Removed unused import use core_foundation::base::TCFType;
+// Removed unused import use core_foundation::boolean::CFBoolean;
+// Removed unused import use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::{CGDisplay, CGDisplayBounds, CGMainDisplayID, CGGetActiveDisplayList, CGDirectDisplayID}; // Use CGGetActiveDisplayList
 use core_graphics::geometry::{CGRect, CGPoint}; // Removed CGPointMake, CGRectContainsPoint
@@ -12,29 +14,9 @@ use std::io::Cursor; // Added for image encoding
 use tracing::{debug, warn}; // Added warn
 use super::element::MacOSUIElement; // Added for the new function
 use crate::element::UIElementImpl; // Import the trait providing .attributes()
-use core_graphics::event::{CGEvent}; // Removed CGEventTapLocation, CGEventType
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-
-// Helper function to get PID from an AXUIElement
-pub(crate) fn get_pid_for_element(element: &ThreadSafeAXUIElement) -> i32 {
-    // Use accessibility API to get the PID
-    unsafe {
-        let element_ref = element.0.as_concrete_TypeRef() as *mut ::std::os::raw::c_void;
-
-        // Use imported function
-        use crate::platforms::macos::ffi::AXUIElementGetPid;
-
-        let mut pid: i32 = 0;
-        let result = AXUIElementGetPid(element_ref, &mut pid);
-
-        if result == 0 {
-            return pid;
-        }
-
-        // Fallback to -1 if we couldn't get the PID
-        -1
-    }
-}
+use core_graphics::event::{CGEvent}; // From HEAD
+use core_graphics::event_source::{CGEventSource, CGEventSourceStateID}; // From HEAD
+use crate::AutomationError; // From Main
 
 // Modified to return Vec<String> for multiple possible role matches
 pub(crate) fn map_generic_role_to_macos_roles(role: &str) -> Vec<String> {
@@ -472,64 +454,6 @@ fn find_display_containing_point(point: CGPoint) -> Result<CGDirectDisplayID, Au
     }
 }
 
-/// Encodes a CGImage into a base64 PNG string.
-fn encode_cgimage_to_base64_png(cg_image: CGImage) -> Result<String, AutomationError> {
-    // Get image dimensions
-    let width = cg_image.width();
-    let height = cg_image.height();
-
-    // Get raw pixel data
-    let data = cg_image.data(); // Returns CFDataRef directly
-    let bytes = data.bytes(); // &[u8]
-
-    // Ensure data length matches expected size (RGBA or BGRA)
-    let expected_len_min = width * height * 4;
-    if bytes.len() < expected_len_min {
-        return Err(AutomationError::PlatformError(format!(
-            "Screenshot data length mismatch: expected at least {}, got {}",
-            expected_len_min,
-            bytes.len()
-        )));
-    }
-
-    // Create an RgbaImage from the raw bytes
-    // We need to handle potential byte order issues and alpha channel position (BGRA vs RGBA)
-    // macOS screenshots are typically BGRA. The `image` crate expects RGBA.
-    let mut img_buffer = ImageBuffer::new(width as u32, height as u32);
-
-    for y in 0..height {
-        for x in 0..width {
-            // Calculate index considering bytes per row for potential padding
-            let index = (y * cg_image.bytes_per_row()) + (x * 4);
-            if index + 3 >= bytes.len() {
-                // Avoid out-of-bounds access if data is shorter than expected
-                warn!(
-                    "Reached end of screenshot data prematurely at ({}, {}), index {}",
-                    x, y, index
-                );
-                break; // Stop processing this row
-            }
-            // Assuming BGRA format from macOS screenshot
-            let b = bytes[index];
-            let g = bytes[index + 1];
-            let r = bytes[index + 2];
-            let a = bytes[index + 3];
-            img_buffer.put_pixel(x as u32, y as u32, Rgba([r, g, b, a]));
-        }
-    }
-
-    // Encode the buffer to PNG format in memory
-    let mut png_data = Cursor::new(Vec::new());
-    img_buffer
-        .write_to(&mut png_data, ImageFormat::Png)
-        .map_err(|e| AutomationError::PlatformError(format!("Failed to encode PNG: {}", e)))?;
-
-    // Encode the PNG data to base64
-    let base64_string = BASE64_STANDARD.encode(png_data.into_inner());
-
-    Ok(base64_string)
-}
-
 /// Checks if the current process has accessibility permissions.
 pub fn check_accessibility_permissions() -> bool {
     unsafe {
@@ -550,5 +474,55 @@ pub fn get_display_bounds(display_id: Option<CGDirectDisplayID>) -> Result<CGRec
         } else {
             Ok(bounds)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_macos_role_to_generic_role_known() {
+        assert_eq!(macos_role_to_generic_role("AXWindow"), vec!["window"]);
+        assert_eq!(macos_role_to_generic_role("AXButton"), vec!["button"]);
+        assert_eq!(macos_role_to_generic_role("AXMenuItem"), vec!["button"]);
+        assert_eq!(macos_role_to_generic_role("AXMenuBarItem"), vec!["button"]);
+        assert_eq!(macos_role_to_generic_role("axtextfield"), vec!["textfield", "input", "textbox", "url", "urlfield"]); // Case insensitive
+        assert_eq!(macos_role_to_generic_role("AXList"), vec!["list"]);
+        assert_eq!(macos_role_to_generic_role("AXCell"), vec!["listitem"]);
+        assert_eq!(macos_role_to_generic_role("AXSheet"), vec!["dialog"]);
+        assert_eq!(macos_role_to_generic_role("AXDialog"), vec!["dialog"]);
+        assert_eq!(macos_role_to_generic_role("AXGroup"), vec!["group", "genericElement"]);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_unknown() {
+        assert_eq!(macos_role_to_generic_role("AXUnknownRole"), vec!["AXUnknownRole"]);
+        assert_eq!(macos_role_to_generic_role("SomeOtherRole"), vec!["SomeOtherRole"]);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_case_insensitivity() {
+        assert_eq!(macos_role_to_generic_role("axwindow"), vec!["window"]);
+        assert_eq!(macos_role_to_generic_role("aXbUtToN"), vec!["button"]);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_textfield_variants() {
+        let expected = vec!["textfield", "input", "textbox", "url", "urlfield"];
+        assert_eq!(macos_role_to_generic_role("AXTextField"), expected);
+        assert_eq!(macos_role_to_generic_role("AXTextArea"), expected);
+        assert_eq!(macos_role_to_generic_role("AXTextEdit"), expected);
+        assert_eq!(macos_role_to_generic_role("AXSearchField"), expected);
+        assert_eq!(macos_role_to_generic_role("AXURIField"), expected);
+        assert_eq!(macos_role_to_generic_role("AXAddressField"), expected);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_group_variants() {
+        let expected = vec!["group", "genericElement"];
+        assert_eq!(macos_role_to_generic_role("AXGroup"), expected);
+        assert_eq!(macos_role_to_generic_role("AXGenericElement"), expected);
+        assert_eq!(macos_role_to_generic_role("AXWebArea"), expected);
     }
 }

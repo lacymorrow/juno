@@ -1,4 +1,5 @@
-use super::actions::ClickMethodSelection;
+use accessibility::{AXAttribute, AXUIElement};
+use accessibility_sys::AXValueRef;
 use super::constants::*;
 use super::engine::MacOSEngine;
 use super::ffi::AXValueGetValue;
@@ -9,7 +10,7 @@ use crate::platforms::macos::attributes::parse_ax_attribute_value;
 use crate::platforms::tree_search::ElementsCollectorWithWindows;
 use crate::UIElementAttributes;
 use crate::{element::UIElementImpl, AutomationError, ClickResult, Locator, Selector, UIElement};
-use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes as AXAttrsTrait};
+use accessibility::{AXUIElementAttributes as AXAttrsTrait};
 use anyhow::Result;
 use core_foundation::base::TCFType;
 use core_foundation::number::CFNumber;
@@ -472,12 +473,12 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn click(&self) -> Result<ClickResult, AutomationError> {
-        interaction::click_with_method(self, ClickMethodSelection::Auto)
+        interaction::click_with_method(self)
     }
 
     fn double_click(&self) -> Result<ClickResult, AutomationError> {
-        let first_click = interaction::click_with_method(self, ClickMethodSelection::Auto)?;
-        match interaction::click_with_method(self, ClickMethodSelection::Auto) {
+        let first_click = interaction::click_with_method(self)?;
+        match interaction::click_with_method(self) {
             Ok(second_click) => Ok(ClickResult {
                 method: second_click.method,
                 coordinates: second_click.coordinates,
@@ -831,5 +832,17 @@ impl UIElementImpl for MacOSUIElement {
             bounds: self.bounds().ok(), // Get bounds, ignore errors for the tree
             children: child_nodes,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // We will add tests here later.
+
+    // Example placeholder test
+    #[test]
+    fn test_placeholder() {
+        assert_eq!(2 + 2, 4);
     }
 }

@@ -284,7 +284,7 @@ function App() {
 
   return (
     <main className="h-screen flex flex-col">
-      {/* Click Visualizer - overlays the entire app to show click indicators */}
+      {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
       <ClickVisualizer />
 
       <div className="w-screen h-screen bg-background text-foreground">
@@ -424,8 +424,8 @@ function App() {
             <ResizablePanel
               collapsible
               collapsedSize={0} // Completely collapses
-              minSize={50} // Minimum size when expanded
-              defaultSize={100} // Default size when expanded
+              minSize={50} // Minimum size when expanded - Updated min size from main
+              defaultSize={100} // Default size when expanded - Updated default size from main
               className={cn(
                 isDevPanelOpen ? "block" : "hidden",
                 "overflow-hidden" // Ensure panel itself doesn't scroll
