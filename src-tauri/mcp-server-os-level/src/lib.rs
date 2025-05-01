@@ -178,8 +178,8 @@ impl Desktop {
     }
 
     /// Hold down a modifier key.
-    pub fn hold_key(&self, key: &str) -> Result<(), AutomationError> {
-        self.engine.hold_key(key)
+    pub fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
+        self.engine.hold_key(key, duration_ms)
     }
 
     /// Release a modifier key.
@@ -213,28 +213,28 @@ impl Desktop {
     }
 
     /// Simulate a standard left click (down + up) at specified coordinates.
-    pub fn left_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        self.engine.left_click(x, y)
+    pub fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.left_click(x, y, modifiers)
     }
 
     /// Simulate a right click (down + up) at specified coordinates.
-    pub fn right_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        self.engine.right_click(x, y)
+    pub fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.right_click(x, y, modifiers)
     }
 
     /// Simulate a middle click (down + up) at specified coordinates.
-    pub fn middle_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        self.engine.middle_click(x, y)
+    pub fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.middle_click(x, y, modifiers)
     }
 
     /// Simulate a double left click at the specified coordinates.
-    pub fn double_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        self.engine.double_click(x, y)
+    pub fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.double_click(x, y, modifiers)
     }
 
     /// Simulate a triple left click at the specified coordinates.
-    pub fn triple_click(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        self.engine.triple_click(x, y)
+    pub fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.triple_click(x, y, modifiers)
     }
 
     /// Simulate dragging with the left mouse button from a start point to an end point.
@@ -326,19 +326,27 @@ impl Desktop {
             },
             ToolDefinition {
                 name: "holdKey".to_string(),
-                description: "Holds down a specified modifier key (Shift, Command/Cmd/Meta, Control/Ctrl, Option/Alt). The key remains held until 'releaseKey' is called.".to_string(),
+                description: "Holds down a specified modifier key (Shift, Command/Cmd/Meta, Control/Ctrl, Option/Alt). The key remains held until 'releaseKey' is called or the specified duration passes.".to_string(),
                 input_schema: ToolInputSchema {
                     type_: "object".to_string(),
-                    properties: [(
-                        "key".to_string(),
-                        ToolParameter {
-                            type_: "string".to_string(),
-                            description: "The modifier key to hold (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
-                        },
-                    )]
-                    .iter()
-                    .cloned()
-                    .collect(),
+                    properties: {
+                        let mut props = HashMap::new();
+                        props.insert(
+                            "key".to_string(),
+                            ToolParameter {
+                                type_: "string".to_string(),
+                                description: "The modifier key to hold (e.g., 'shift', 'cmd', 'ctrl', 'alt').".to_string(),
+                            },
+                        );
+                        props.insert(
+                            "duration_ms".to_string(),
+                            ToolParameter {
+                                type_: "number".to_string(),
+                                description: "Optional duration in milliseconds to hold the key before automatically releasing it.".to_string(),
+                            },
+                        );
+                        props
+                    },
                     required: vec!["key".to_string()],
                 },
             },
@@ -1067,7 +1075,8 @@ impl Desktop {
                 let key = args["key"].as_str().ok_or_else(|| {
                     AutomationError::InvalidArgument("Missing or invalid 'key' argument for holdKey".to_string())
                 })?;
-                self.hold_key(key)?;
+                let duration_ms = args.get("duration_ms").and_then(|v| v.as_u64());
+                self.hold_key(key, duration_ms)?;
                 Ok(Value::String(format!("Key '{}' held successfully.", key)))
             }
             "releaseKey" => {
@@ -1115,35 +1124,35 @@ impl Desktop {
                 #[derive(Deserialize)]
                 struct ClickArgs { x: f64, y: f64 }
                 let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing leftClick args: {}", e)))?;
-                self.left_click(args.x, args.y)?;
+                self.left_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "rightClick" => {
                 #[derive(Deserialize)]
                 struct ClickArgs { x: f64, y: f64 }
                 let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing rightClick args: {}", e)))?;
-                self.right_click(args.x, args.y)?;
+                self.right_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "middleClick" => {
                 #[derive(Deserialize)]
                 struct ClickArgs { x: f64, y: f64 }
                 let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing middleClick args: {}", e)))?;
-                self.middle_click(args.x, args.y)?;
+                self.middle_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "doubleClick" => {
                 #[derive(Deserialize)]
                 struct ClickArgs { x: f64, y: f64 }
                 let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing doubleClick args: {}", e)))?;
-                self.double_click(args.x, args.y)?;
+                self.double_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "tripleClick" => {
                 #[derive(Deserialize)]
                 struct ClickArgs { x: f64, y: f64 }
                 let args: ClickArgs = from_value(args).map_err(|e| AutomationError::InvalidArgument(format!("Error parsing tripleClick args: {}", e)))?;
-                self.triple_click(args.x, args.y)?;
+                self.triple_click(args.x, args.y, None)?;
                 Ok(json!(null))
             }
             "leftClickDrag" => {

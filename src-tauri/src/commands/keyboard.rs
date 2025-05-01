@@ -95,9 +95,13 @@ pub(crate) async fn dev_global_type_text(text: String, state: tauri::State<'_, A
 }
 
 #[tauri::command]
-pub(crate) async fn dev_hold_key(key: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    info!("Executing dev_hold_key with key: {}", key);
-    state.desktop.hold_key(&key)
+pub(crate) async fn dev_hold_key(
+    key: String,
+    duration_ms: Option<u64>,
+    state: tauri::State<'_, AppState>
+) -> Result<(), String> {
+    info!("Executing dev_hold_key with key: {}, duration: {:?}ms", key, duration_ms);
+    state.desktop.hold_key(&key, duration_ms)
         .map_err(|e| format!("Error holding key '{}': {}", key, e))
 }
 
