@@ -833,3 +833,15 @@ impl UIElementImpl for MacOSUIElement {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // We will add tests here later.
+
+    // Example placeholder test
+    #[test]
+    fn test_placeholder() {
+        assert_eq!(2 + 2, 4);
+    }
+}

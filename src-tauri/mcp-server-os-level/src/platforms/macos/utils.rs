@@ -519,3 +519,53 @@ pub fn get_display_bounds(display_id: Option<CGDirectDisplayID>) -> Result<CGRec
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_macos_role_to_generic_role_known() {
+        assert_eq!(macos_role_to_generic_role("AXWindow"), vec!["window"]);
+        assert_eq!(macos_role_to_generic_role("AXButton"), vec!["button"]);
+        assert_eq!(macos_role_to_generic_role("AXMenuItem"), vec!["button"]);
+        assert_eq!(macos_role_to_generic_role("AXMenuBarItem"), vec!["button"]);
+        assert_eq!(macos_role_to_generic_role("axtextfield"), vec!["textfield", "input", "textbox", "url", "urlfield"]); // Case insensitive
+        assert_eq!(macos_role_to_generic_role("AXList"), vec!["list"]);
+        assert_eq!(macos_role_to_generic_role("AXCell"), vec!["listitem"]);
+        assert_eq!(macos_role_to_generic_role("AXSheet"), vec!["dialog"]);
+        assert_eq!(macos_role_to_generic_role("AXDialog"), vec!["dialog"]);
+        assert_eq!(macos_role_to_generic_role("AXGroup"), vec!["group", "genericElement"]);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_unknown() {
+        assert_eq!(macos_role_to_generic_role("AXUnknownRole"), vec!["AXUnknownRole"]);
+        assert_eq!(macos_role_to_generic_role("SomeOtherRole"), vec!["SomeOtherRole"]);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_case_insensitivity() {
+        assert_eq!(macos_role_to_generic_role("axwindow"), vec!["window"]);
+        assert_eq!(macos_role_to_generic_role("aXbUtToN"), vec!["button"]);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_textfield_variants() {
+        let expected = vec!["textfield", "input", "textbox", "url", "urlfield"];
+        assert_eq!(macos_role_to_generic_role("AXTextField"), expected);
+        assert_eq!(macos_role_to_generic_role("AXTextArea"), expected);
+        assert_eq!(macos_role_to_generic_role("AXTextEdit"), expected);
+        assert_eq!(macos_role_to_generic_role("AXSearchField"), expected);
+        assert_eq!(macos_role_to_generic_role("AXURIField"), expected);
+        assert_eq!(macos_role_to_generic_role("AXAddressField"), expected);
+    }
+
+    #[test]
+    fn test_macos_role_to_generic_role_group_variants() {
+        let expected = vec!["group", "genericElement"];
+        assert_eq!(macos_role_to_generic_role("AXGroup"), expected);
+        assert_eq!(macos_role_to_generic_role("AXGenericElement"), expected);
+        assert_eq!(macos_role_to_generic_role("AXWebArea"), expected);
+    }
+}
