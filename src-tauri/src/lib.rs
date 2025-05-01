@@ -140,11 +140,6 @@ pub fn run() {
             dev_text_editor_str_replace,
             dev_text_editor_insert,
             dev_text_editor_undo_edit,
-            // Debug commands
-            commands::debug::debug_displays,
-            commands::debug::debug_cursor,
-            commands::debug::debug_point,
-            commands::debug::debug_click,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();

@@ -9,7 +9,6 @@ pub mod input;
 pub mod permissions;
 pub mod utils;
 pub mod wrappers;
-pub mod debug_mouse;
 
 // No platform-level imports needed here after refactoring
 
