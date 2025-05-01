@@ -12,6 +12,12 @@ use tauri::{Manager, Emitter}; // Import Manager and Emitter
 // use futures::future; // Removed unused
 use std::sync::Arc;
 use crate::agent::structs::{AgentError};
+use crate::agent::tools::{
+    basic_tools::register_basic_tools,
+    browser_controller::BrowserController,
+    desktop_tools::{setup_tools},
+    browser_tools::get_browser_tool_definitions,
+};
 
 // --- Agent Integration ---
 use crate::agent::{
@@ -24,12 +30,12 @@ use crate::agent::{
         // agent_brain::AnthropicBrain, // Remove direct import
     },
     traits::AgentRunnable, // Import the trait for the run method
-    tools::{ // Changed this block
-        basic_tools::register_basic_tools,
-        desktop_tools::register_desktop_tools,
-        browser_tools::get_browser_tool_definitions,
-        browser_controller::BrowserController,
-    },
+    // tools::{ // Remove this entire block as it's redundant/incorrect
+    //     basic_tools::register_basic_tools,
+    //     desktop_tools::register_desktop_tools,
+    //     browser_tools::get_browser_tool_definitions,
+    //     browser_controller::BrowserController,
+    // },
      providers::factory::BrainFactory, // Keep BrainFactory import
 };
 
@@ -138,9 +144,8 @@ pub async fn submit_query(
     register_basic_tools(&mut tool_provider).await;
     info!("Registered basic tools for the agent.");
 
-    // Register desktop tools
-    register_desktop_tools(&mut tool_provider, app_handle.clone(), state.clone()).await;
-    info!("Registered desktop tools for the agent.");
+    // Setup tools
+    setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
 
     // --- Register Browser Tools (only if controller initialized) ---
     if let Some(browser_controller) = browser_controller {
@@ -254,7 +259,7 @@ pub async fn submit_query(
 // --- Browser Cleanup Function ---
 
 #[tauri::command]
-pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String> {
+pub async fn cleanup_browser(_app_handle: tauri::AppHandle) -> Result<(), String> {
     log::info!("Cleaning up browser resources...");
 
     // Simplified cleanup - assuming BrowserController handles its own drop

@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use base64;
 use std::path::PathBuf;
 use std::env;
-use tracing::{info, error};
+// use tracing::{self};
 
 use crate::agent::structs::{AgentError, ToolResult};
 
@@ -15,12 +15,11 @@ type ControllerResult<T> = Result<T, AgentError>;
 
 // Timeout defaults
 const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
-const DEFAULT_ACTION_TIMEOUT_MS: u64 = 5000;
 
 #[derive(Clone)]
 pub struct BrowserController {
     // Store Playwright components
-    playwright: Arc<Playwright>,
+    // playwright: Arc<Playwright>, // Keep playwright instance alive
     browser: Arc<Browser>,
     context: Arc<BrowserContext>,
     // Store page in mutex for thread safety
@@ -81,7 +80,7 @@ impl BrowserController {
         let page = Arc::new(Mutex::new(None));
 
         Ok(BrowserController {
-            playwright: Arc::new(playwright),
+            // playwright: Arc::new(playwright), // Store to keep it alive
             browser: Arc::new(browser),
             context: Arc::new(context),
             page,
