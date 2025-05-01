@@ -24,12 +24,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
+  screenshot_base64?: string; // Optional base64 screenshot data
 };
 
 // Type for the result from submit_query
 type SubmitQueryResult = {
   text: string;
   audio_base64?: string; // Optional base64 audio data
+  agent_state: string;
+  screenshot_base64?: string; // Optional base64 screenshot data
 };
 
 // Type for the backend response event payload
@@ -71,10 +74,11 @@ function App() {
 
       // Add user query message
       const userMessage: ChatMessage = { role: "user", content: query };
-      // Add assistant response message
+      // Add assistant response message with screenshot if available
       const assistantMessage: ChatMessage = {
         role: "assistant",
         content: response.text,
+        screenshot_base64: response.screenshot_base64,
       };
 
       setConversation((prev) => [...prev, userMessage, assistantMessage]);
@@ -87,10 +91,39 @@ function App() {
       // Potentially reset processing state if managed globally here
       setIsProcessing(false); // Assuming Bar.tsx also sets this true
     }, 100), // Debounce for 100ms
-    [] // Dependencies for useCallback (playAudioFromBase64 might need to be included if not stable)
+    [] // Dependencies for useCallback
     // Note: If playAudioFromBase64 relies on state/props, add them here or wrap playAudioFromBase64 in useCallback too.
     // For now, assuming playAudioFromBase64 is stable or relies only on its arguments and `currentAudio` state/setter.
   );
+
+  // Add tool usage event listener to update the conversation with screenshots
+  useEffect(() => {
+    const unlisten = listen<any>("tool-usage", (event) => {
+      // Only process screenshot tools
+      if (
+        (event.payload.tool === "capture_screenshot" ||
+          event.payload.tool === "screenshot") &&
+        event.payload.screenshot_base64 &&
+        event.payload.success
+      ) {
+        console.log("Received screenshot from tool usage");
+
+        // Add system message with the screenshot
+        const screenshotMessage: ChatMessage = {
+          role: "system",
+          content:
+            "The AI captured a screenshot of your screen to help complete your request.",
+          screenshot_base64: event.payload.screenshot_base64,
+        };
+
+        setConversation((prev) => [...prev, screenshotMessage]);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
 
   // Check server status on mount
   useEffect(() => {
@@ -251,7 +284,7 @@ function App() {
 
   return (
     <main className="h-screen flex flex-col">
-      {/* Click Visualizer - overlays the entire app to show click indicators */}
+      {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
       <ClickVisualizer />
 
       <div className="w-screen h-screen bg-background text-foreground">
@@ -321,10 +354,34 @@ function App() {
                             ? "bg-primary text-primary-foreground"
                             : msg.role === "assistant"
                             ? "bg-muted"
+                            : msg.role === "system" && msg.screenshot_base64
+                            ? "bg-muted/80 border border-primary/20 p-2"
                             : "bg-secondary text-secondary-foreground text-xs italic opacity-80"
                         )}
                       >
                         {msg.content}
+                        {msg.screenshot_base64 && (
+                          <div
+                            className={cn(
+                              "mt-2",
+                              msg.role !== "system" && "border-t pt-2"
+                            )}
+                          >
+                            <div className="text-xs text-muted-foreground mb-1">
+                              {msg.role === "system"
+                                ? "Screenshot captured by AI:"
+                                : "Screenshot:"}
+                            </div>
+                            <div className="relative">
+                              <img
+                                src={`data:image/png;base64,${msg.screenshot_base64}`}
+                                alt="Screenshot"
+                                className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+                            </div>
+                          </div>
+                        )}
                       </span>
                     </div>
                   ))}
@@ -367,8 +424,8 @@ function App() {
             <ResizablePanel
               collapsible
               collapsedSize={0} // Completely collapses
-              minSize={50} // Minimum size when expanded
-              defaultSize={100} // Default size when expanded
+              minSize={50} // Minimum size when expanded - Updated min size from main
+              defaultSize={100} // Default size when expanded - Updated default size from main
               className={cn(
                 isDevPanelOpen ? "block" : "hidden",
                 "overflow-hidden" // Ensure panel itself doesn't scroll

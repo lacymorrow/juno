@@ -1,4 +1,5 @@
-use super::actions::ClickMethodSelection;
+use accessibility::{AXAttribute, AXUIElement};
+use accessibility_sys::AXValueRef;
 use super::constants::*;
 use super::engine::MacOSEngine;
 use super::ffi::AXValueGetValue;
@@ -9,7 +10,7 @@ use crate::platforms::macos::attributes::parse_ax_attribute_value;
 use crate::platforms::tree_search::ElementsCollectorWithWindows;
 use crate::UIElementAttributes;
 use crate::{element::UIElementImpl, AutomationError, ClickResult, Locator, Selector, UIElement};
-use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes as AXAttrsTrait};
+use accessibility::{AXUIElementAttributes as AXAttrsTrait};
 use anyhow::Result;
 use core_foundation::base::TCFType;
 use core_foundation::number::CFNumber;
@@ -472,12 +473,12 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn click(&self) -> Result<ClickResult, AutomationError> {
-        interaction::click_with_method(self, ClickMethodSelection::Auto)
+        interaction::click_with_method(self)
     }
 
     fn double_click(&self) -> Result<ClickResult, AutomationError> {
-        let first_click = interaction::click_with_method(self, ClickMethodSelection::Auto)?;
-        match interaction::click_with_method(self, ClickMethodSelection::Auto) {
+        let first_click = interaction::click_with_method(self)?;
+        match interaction::click_with_method(self) {
             Ok(second_click) => Ok(ClickResult {
                 method: second_click.method,
                 coordinates: second_click.coordinates,
@@ -716,36 +717,8 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn scroll(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
-        let _ = self.focus();
-        let (x, y, width, height) = self.bounds()?;
-        let center_x = x + width / 2.0;
-        let center_y = y + height / 2.0;
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-            AutomationError::PlatformError("Failed to create event source".to_string())
-        })?;
-        let scroll_amount = amount as i32;
-        let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
-            "up" => (0, -scroll_amount),
-            "down" => (0, scroll_amount),
-            "left" => (-scroll_amount, 0),
-            "right" => (scroll_amount, 0),
-            _ => {
-                return Err(AutomationError::InvalidArgument(format!(
-                    "Invalid scroll direction: {}. Must be up, down, left, or right",
-                    direction
-                )))
-            }
-        };
-        let scroll_event =
-            CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0).map_err(|_| {
-                AutomationError::PlatformError("Failed to create scroll event".to_string())
-            })?;
-        scroll_event.post(CGEventTapLocation::HID);
-        debug!(
-            "scrolled {} by {} lines at position ({}, {})",
-            direction, amount, center_x, center_y
-        );
-        Ok(())
+        // Use the shared implementation from interaction module
+        interaction::scroll(self, direction, amount)
     }
 
     fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
@@ -859,5 +832,17 @@ impl UIElementImpl for MacOSUIElement {
             bounds: self.bounds().ok(), // Get bounds, ignore errors for the tree
             children: child_nodes,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // We will add tests here later.
+
+    // Example placeholder test
+    #[test]
+    fn test_placeholder() {
+        assert_eq!(2 + 2, 4);
     }
 }
