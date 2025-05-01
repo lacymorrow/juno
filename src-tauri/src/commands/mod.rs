@@ -11,7 +11,6 @@ pub mod mouse;
 pub mod shell;
 pub mod text_editor;
 pub mod window;
-pub mod debug;
 
 // Re-export all command functions for easy access in main.rs - REMOVED as they are pub(crate)
 // pub use app_url::*;

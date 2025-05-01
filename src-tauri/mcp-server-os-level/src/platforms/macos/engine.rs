@@ -204,25 +204,8 @@ impl MacOSEngine {
             direction, amount, x, y
         );
 
-        // Convert amount to integer to use as scroll wheel units
-        let scroll_units = (amount * 3.0).round() as i32;
-
-        // Determine which axes to use for scrolling based on direction
-        let (wheel_count, line_count) = match direction.to_lowercase().as_str() {
-            "up" => (0, -scroll_units), // Negative for up
-            "down" => (0, scroll_units), // Positive for down
-            "left" => (scroll_units, 0), // Positive for left (wheel axis)
-            "right" => (-scroll_units, 0), // Negative for right (wheel axis)
-            _ => {
-                return Err(AutomationError::InvalidArgument(format!(
-                    "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'.",
-                    direction
-                )))
-            }
-        };
-
-        // Use the improved implementation with our helper function
-        post_scroll_event(CGPoint::new(x, y), wheel_count, line_count, None)
+        // Use the improved implementation in the interaction module that supports all directions
+        interaction::scroll_with_modifiers(x, y, direction, amount, None)
     }
 
     // Add another method for scrolling with modifiers
@@ -239,28 +222,34 @@ impl MacOSEngine {
             direction, amount, x, y, modifiers
         );
 
-        // Convert amount to integer to use as scroll wheel units
-        let scroll_units = (amount * 3.0).round() as i32;
+        let parsed_modifiers = match modifiers {
+            Some(mods) => {
+                let mut flags = CGEventFlags::empty();
 
-        // Determine which axes to use for scrolling based on direction
-        let (wheel_count, line_count) = match direction.to_lowercase().as_str() {
-            "up" => (0, -scroll_units), // Negative for up
-            "down" => (0, scroll_units), // Positive for down
-            "left" => (scroll_units, 0), // Positive for left (wheel axis)
-            "right" => (-scroll_units, 0), // Negative for right (wheel axis)
-            _ => {
-                return Err(AutomationError::InvalidArgument(format!(
-                    "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'.",
-                    direction
-                )))
-            }
+                for modifier in mods.split('+') {
+                    let modifier_flag = match modifier.trim().to_lowercase().as_str() {
+                        "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
+                        "shift" => CGEventFlags::CGEventFlagShift,
+                        "option" | "alt" => CGEventFlags::CGEventFlagAlternate,
+                        "control" | "ctrl" => CGEventFlags::CGEventFlagControl,
+                        "fn" => CGEventFlags::CGEventFlagSecondaryFn,
+                        _ => {
+                            return Err(AutomationError::InvalidArgument(format!(
+                                "Unknown modifier: {}. Use standard modifier names.",
+                                modifier
+                            )))
+                        }
+                    };
+                    flags |= modifier_flag;
+                }
+
+                Some(flags)
+            },
+            None => None,
         };
 
-        // Parse modifiers if provided
-        let parsed_modifiers = parse_modifiers(modifiers);
-
-        // Use the improved implementation with our helper function
-        post_scroll_event(CGPoint::new(x, y), wheel_count, line_count, Some(parsed_modifiers))
+        // Use the improved implementation in the interaction module that supports modifiers
+        interaction::scroll_with_modifiers(x, y, direction, amount, parsed_modifiers)
     }
 
     fn scroll_at_current_position(
@@ -270,12 +259,21 @@ impl MacOSEngine {
     ) -> Result<(), AutomationError> {
         debug!("getting current mouse location using CGEvent::new with a valid event source");
 
-        // Get the current mouse position
-        let current_pos = self.cursor_position()?;
-        debug!("Current mouse position: ({}, {})", current_pos.0, current_pos.1);
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("failed to create event source".to_string())
+        })?;
+        debug!("created event source successfully");
 
-        // Delegate to scroll_at_position with the current position
-        self.scroll_at_position(current_pos.0, current_pos.1, direction, amount)
+        let event = CGEvent::new(source).map_err(|_| {
+            AutomationError::PlatformError(
+                "failed to create event for obtaining current mouse position".to_string(),
+            )
+        })?;
+        debug!("got current event; mouse position: {:?}", event.location());
+
+        let current_pos = event.location();
+
+        self.scroll_at_position(current_pos.x, current_pos.y, direction, amount)
     }
 
     // Method to get the UI tree, starting from the focused application or a specified one
@@ -419,27 +417,7 @@ fn check_ax_element_attributes_match(
     true // All specified attributes matched
 }
 
-// Helper function to parse modifier string into CGEventFlags
-fn parse_modifiers(modifier_str: Option<&str>) -> CGEventFlags {
-    let mut flags = CGEventFlags::empty();
-
-    if let Some(mods) = modifier_str {
-        for modifier in mods.split('+') {
-            match modifier.trim().to_lowercase().as_str() {
-                "command" | "cmd" => flags |= CGEventFlags::CGEventFlagCommand,
-                "shift" => flags |= CGEventFlags::CGEventFlagShift,
-                "option" | "alt" => flags |= CGEventFlags::CGEventFlagAlternate,
-                "control" | "ctrl" => flags |= CGEventFlags::CGEventFlagControl,
-                "fn" => flags |= CGEventFlags::CGEventFlagSecondaryFn,
-                _ => debug!("Unknown modifier: {}", modifier),
-            }
-        }
-    }
-
-    flags
-}
-
-// Helper function to create and post a mouse event
+// Helper function to post mouse events
 fn post_mouse_event(
     event_type: CGEventType,
     point: CGPoint,
@@ -466,13 +444,37 @@ fn post_mouse_event(
         event.set_flags(flags);
     }
 
+
     event.post(CGEventTapLocation::HID);
     // Add a small delay after posting, can improve reliability sometimes
     std::thread::sleep(std::time::Duration::from_millis(20));
     Ok(())
 }
 
-// Helper function to create and post a keyboard event
+// Helper function to parse modifier string into CGEventFlags
+fn parse_modifiers(modifier_str: Option<&str>) -> CGEventFlags {
+    let mut flags = CGEventFlags::empty();
+    if let Some(s) = modifier_str {
+        let lower = s.to_lowercase();
+        if lower.contains("cmd") || lower.contains("command") || lower.contains("meta") {
+            // Use correct flag constants (e.g., CGEventFlags::CGEventFlagCommand)
+            flags |= CGEventFlags::CGEventFlagCommand;
+        }
+        if lower.contains("shift") {
+            flags |= CGEventFlags::CGEventFlagShift;
+        }
+        if lower.contains("option") || lower.contains("alt") {
+            flags |= CGEventFlags::CGEventFlagAlternate;
+        }
+        if lower.contains("ctrl") || lower.contains("control") {
+            flags |= CGEventFlags::CGEventFlagControl;
+        }
+        // Add other modifiers like CAPSLOCK if needed (e.g., CGEventFlags::CGEventFlagAlphaShift)
+    }
+    flags
+}
+
+// Helper function to post keyboard events
 fn post_keyboard_event(
     key_code: u16,
     flags: CGEventFlags,
@@ -482,60 +484,14 @@ fn post_keyboard_event(
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
 
     let event = CGEvent::new_keyboard_event(source, key_code, is_down)
-        .map_err(|_| AutomationError::PlatformError(format!(
-            "Failed to create keyboard event for key_code {}, is_down: {}",
-            key_code, is_down
-        )))?;
+        .map_err(|e| AutomationError::PlatformError(format!("Failed to create keyboard event: {:?}", e)))?;
 
-    if !flags.is_empty() {
-        event.set_flags(flags);
-    }
+    // Set modifier flags AFTER creating the event
+    event.set_flags(flags);
 
     event.post(CGEventTapLocation::HID);
-    Ok(())
-}
-
-// Helper function for scroll events
-fn post_scroll_event(
-    point: CGPoint,
-    wheel_count: i32,
-    line_count: i32,
-    modifiers: Option<CGEventFlags>
-) -> Result<(), AutomationError> {
-    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for scroll".to_string()))?;
-
-    // Move mouse to position first
-    post_mouse_event(CGEventType::MouseMoved, point, CGMouseButton::Left, None, modifiers)?;
-
-    // Create a scroll event manually since new_scroll_wheel_event is not available
-    let scroll_event = CGEvent::new(source)
-        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
-
-    // Constants for scroll wheel event
-    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
-    const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta (main scroll axis)
-    const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
-    const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll (as opposed to pixel scroll)
-
-    // Set event type using CGEventType transmute
-    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
-
-    // Apply modifiers if provided
-    if let Some(flags) = modifiers {
-        scroll_event.set_flags(flags);
-    }
-
-    // Set the line scroll bit (field 120 = scroll wheel event options)
-    scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
-
-    // Set the delta values
-    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, line_count as i64);
-    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, wheel_count as i64);
-
-    // Post the event
-    scroll_event.post(CGEventTapLocation::HID);
-
+    // Small delay, especially after key down
+    std::thread::sleep(std::time::Duration::from_millis(10));
     Ok(())
 }
 
