@@ -20,7 +20,6 @@ use tracing::info;
 
 // Ensure all necessary command modules are imported - keep even if some are unused for now
 // as they might be needed by the stubbed function later.
-use crate::commands::{core, element, keyboard, mouse};
 
 // Stub function to resolve compilation error
 async fn register_additional_computer_use_tools(

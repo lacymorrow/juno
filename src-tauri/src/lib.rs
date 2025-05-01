@@ -16,7 +16,7 @@ use tauri::{
     WebviewWindow, // Keep WebviewWindow
     Wry, // Keep Wry if needed elsewhere, remove if not
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Modifiers, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
 
