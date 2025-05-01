@@ -1,7 +1,7 @@
 ---
 description:
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
 # Project Structure for Anthropic Computer Use Tools
 
@@ -10,21 +10,21 @@ This is a Tauri v2 application that implements Anthropic Computer Use functional
 ## Key Components
 
 - **Main Application**
-  - [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Core application initialization and Tauri setup
-  - [src-tauri/src/commands/](mdc:src-tauri/src/commands/) - Tauri commands for user interface to backend communication
+  - [src-tauri/src/lib.rs](mdc:dotdot/src-tauri/src/lib.rs) - Core application initialization and Tauri setup
+  - [src-tauri/src/commands/](mdc:dotdot/src-tauri/src/commands) - Tauri commands for user interface to backend communication
 
 - **Computer Use SDK**
-  - [src-tauri/mcp-server-os-level/](mdc:src-tauri/mcp-server-os-level/) - Core SDK implementation for desktop automation
-  - [src-tauri/mcp-server-os-level/src/platforms/](mdc:src-tauri/mcp-server-os-level/src/platforms/) - Platform-specific implementations (macOS, Windows, Linux)
+  - [src-tauri/mcp-server-os-level/](mdc:dotdot/src-tauri/mcp-server-os-level) - Core SDK implementation for desktop automation
+  - [src-tauri/mcp-server-os-level/src/platforms/](mdc:dotdot/src-tauri/mcp-server-os-level/src/platforms) - Platform-specific implementations (macOS, Windows, Linux)
 
 - **Testing Framework**
-  - [test-rust-units.sh](mdc:test-rust-units.sh) - Runs Rust unit tests with verbose output
-  - [run-tests.sh](mdc:run-tests.sh) - Main test runner script for basic tests
-  - [test-qa.sh](mdc:test-qa.sh) - QA testing for user interface automation features
-  - [qa-test-plan.md](mdc:qa-test-plan.md) - Comprehensive test plan for the project
+  - [test-rust-units.sh](mdc:dotdot/test-rust-units.sh) - Runs Rust unit tests with verbose output
+  - [run-tests.sh](mdc:dotdot/run-tests.sh) - Main test runner script for basic tests
+  - [test-qa.sh](mdc:dotdot/test-qa.sh) - QA testing for user interface automation features
+  - [qa-test-plan.md](mdc:dotdot/qa-test-plan.md) - Comprehensive test plan for the project
 
 - **Frontend Implementation**
-  - [src/](mdc:src/) - React frontend implementation
-  - [src/components/](mdc:src/components/) - UI components including DevToolsPanel for testing
+  - [src/](mdc:dotdot/src) - React frontend implementation
+  - [src/components/](mdc:dotdot/src/components) - UI components including DevToolsPanel for testing
 
 The application follows a layered architecture with clear separation between UI commands, core functionality in the SDK, and platform-specific implementations. Each platform implementation (macOS, Windows, Linux) is separated within the SDK.

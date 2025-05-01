@@ -3,3 +3,27 @@ description:
 globs:
 alwaysApply: false
 ---
+# Screenshot Processing and Coordinate Handling
+
+This rule describes how screenshots are captured, processed, and how coordinates from the AI are handled for mouse interactions.
+
+## Screenshot Capture and Processing
+
+1.  **Capture**: Screenshots are captured using platform-specific functions, primarily located in [src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs](mdc:dotdot/src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs) for macOS. The capture logic targets the specific display containing the mouse cursor.
+2.  **Processing**: The captured image data (as base64 PNG initially) is processed in the `process_screenshot` function within [src-tauri/src/anthropic.rs](mdc:dotdot/src-tauri/src/anthropic.rs).
+    *   **No Resizing**: The image is **not** resized or scaled down.
+    *   **Encoding**: To reduce data size for the AI prompt, the image is encoded as a JPEG with a quality setting of 75.
+    *   **Scaling Info**: The `update_scaling_info` function in [src-tauri/src/utils/coordinates.rs](mdc:dotdot/src-tauri/src/utils/coordinates.rs) is called, but always with a scale factor of `1.0` to indicate no scaling was performed.
+
+## Coordinate Handling
+
+1.  **AI Input**: The AI receives the unscaled, JPEG-encoded screenshot.
+2.  **AI Output**: The AI returns coordinates (x, y) relative to the top-left corner of the image it received.
+3.  **Tool Execution**: The tool wrappers defined in [src-tauri/src/agent/tools/desktop_tools.rs](mdc:dotdot/src-tauri/src/agent/tools/desktop_tools.rs) receive these coordinates.
+    *   **No Transformation**: The `coordinates::transform_to_screen_coordinates` function is **not** called for standard mouse actions (click, drag, move, etc.).
+    *   **Direct Use**: The coordinates (`args.x`, `args.y`) are passed directly to the underlying command functions (e.g., `commands::mouse::dev_left_click`).
+4.  **Platform Interaction**: The platform-specific interaction functions (e.g., `click_mouse_simulation` in [src-tauri/mcp-server-os-level/src/platforms/macos/interaction.rs](mdc:dotdot/src-tauri/mcp-server-os-level/src/platforms/macos/interaction.rs)) receive these coordinates and interpret them as global screen coordinates, which is the expected format for macOS `CGEvent` functions.
+
+## Coordinate Utilities (`coordinates.rs`)
+
+The file [src-tauri/src/utils/coordinates.rs](mdc:dotdot/src-tauri/src/utils/coordinates.rs) contains functions for transforming coordinates between scaled and screen space (`transform_to_screen_coordinates`, `transform_to_scaled_coordinates`). However, since image scaling is no longer performed before sending to the AI, these transformation functions are **not used** in the main agent tool execution path. They are currently only referenced by QA/testing functions in [src-tauri/src/commands/mouse.rs](mdc:dotdot/src-tauri/src/commands/mouse.rs).
