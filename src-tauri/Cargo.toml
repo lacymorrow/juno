@@ -18,31 +18,45 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0-beta", features = ["macos-private-api", "tray-icon", "unstable"] }
+tauri = { version = "2.0.0-beta", features = [
+    "macos-private-api",
+    "tray-icon",
+    "unstable",
+] }
 tauri-plugin-opener = "2.2.6"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 computer-use-ai-sdk = { path = "./mcp-server-os-level" }
 dotenvy = "0.15"
-reqwest = { version = "0.12.5", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
-base64 = "0.22.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["full", "sync"] }
+base64 = "0.22"
 axum = "0.7"
 tower-http = { version = "0.5", features = ["cors"] }
 log = "0.4"
-image = "0.25.1"
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4.5.11", features = ["derive"] }
+clap = { version = "4.4", features = ["derive"] }
 tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 wait-timeout = "0.2"
 futures-util = "0.3.31"
 futures = "0.3"
-tempfile = "3.10"
+tempfile = "3.10.1"
 # Additions for native macOS interop
 cocoa = { version = "0.25", optional = true }
 objc = { version = "0.2", optional = true }
 shlex = "1.3.0"
+glob = "0.3.1"
+dirs = "5.0"
+thiserror = "1.0"
+async-trait = "0.1"
+once_cell = "1.17"
+tauri-plugin-global-shortcut = "2.2.0"
+playwright = "0.0.20"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
@@ -53,3 +67,5 @@ default = ["custom-protocol", "macos-proxy"]
 macos-proxy = ["tauri/macos-proxy", "cocoa", "objc"]
 custom-protocol = ["tauri/custom-protocol"]
 
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-global-shortcut = "2.2.0"

@@ -110,8 +110,8 @@ The core tools and their actions required by the Anthropic `computer_20250124` s
 3.  **Add Tests:** *(Medium Priority)*
     *   Implement unit and integration tests for the Tauri command handlers (`commands.rs`) and underlying tool logic (e.g., file system operations, process execution).
 4.  **Address `computer` Tool Gaps:** *(High Priority for Anthropic Compliance)*
-    *   **`hold_key` Duration:** Modify `dev_hold_key` (and underlying SDK function) to accept an optional duration.
-    *   **Modifier Keys:** Update SDK click/scroll functions and corresponding `dev_...` commands to accept and handle modifier key parameters.
+    *   **`hold_key` Duration:** Modify `dev_hold_key` (and underlying SDK function) to accept an optional duration. **[Done]**
+    *   **Modifier Keys:** Update SDK click/scroll functions and corresponding `dev_...` commands to accept and handle modifier key parameters. **[Done for left_click; Remaining click functions support the parameter but implementation is pending]**
     *   **Global `key`:** Evaluate the need for and potentially implement a `dev_global_press_key` command for global hotkey simulation distinct from element-focused input.
 5.  **Implement `bash.restart`:** *(Low Priority unless required)*
     *   Investigate requirements and feasibility of managing and restarting a persistent shell process if needed.
