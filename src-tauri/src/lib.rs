@@ -123,6 +123,7 @@ pub fn run() {
             list_apps,
             check_server_status,
             submit_query,
+            anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             capture_screenshot_command,
             dev_get_focused_element_info,
