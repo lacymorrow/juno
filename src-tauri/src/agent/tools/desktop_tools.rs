@@ -34,8 +34,8 @@ async fn register_additional_computer_use_tools(
 // Function to register all desktop tools with the tool provider
 pub async fn register_desktop_tools(
     provider: &mut LocalToolProvider,
+    _state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    state: State<'_, AppState>,
 ) {
     info!("Registering desktop tools...");
 
@@ -129,6 +129,7 @@ pub async fn register_desktop_tools(
 
     // type_text
     #[derive(serde::Deserialize)]
+    #[allow(dead_code)] // Allow unused fields for now
     struct TypeTextArgs { text: String, delay: Option<f64> }
 
     let type_text_def = ToolDefinition {
@@ -284,7 +285,11 @@ pub async fn register_desktop_tools(
     info!("Registered tool: desktop_click");
 
     // Add new computer use tools based on the Anthropic documentation
-    register_additional_computer_use_tools(provider, app_handle.clone()).await;
+    // Handle the result of the registration
+    if let Err(e) = register_additional_computer_use_tools(provider, app_handle.clone()).await {
+        log::error!("Failed to register additional computer use tools: {}", e);
+        // Depending on requirements, might want to panic or return an error here
+    }
 
     // Define common input structs from tools2
     #[derive(serde::Deserialize)]
@@ -303,6 +308,7 @@ pub async fn register_desktop_tools(
 
     // scroll
     #[derive(serde::Deserialize)]
+    #[allow(dead_code)] // Allow unused fields for now
     struct ScrollInput {
         x: f64,
         y: f64,
@@ -778,4 +784,17 @@ pub async fn register_desktop_tools(
     info!("Registered tool: cursor_position");
 
     info!("Desktop tool registration completed.");
+}
+
+pub async fn setup_tools(
+    provider: &mut LocalToolProvider,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) {
+    register_desktop_tools(provider, state, app_handle.clone()).await;
+
+    // Register additional tools, handling the result
+    if let Err(e) = register_additional_computer_use_tools(provider, app_handle.clone()).await {
+        log::error!("Failed to register additional computer use tools in setup_tools: {}", e);
+    }
 }
