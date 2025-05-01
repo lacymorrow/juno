@@ -1,6 +1,12 @@
 use computer_use_ai_sdk::{Desktop, ToolDefinition, ToolInputSchema, ToolParameter};
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::agent::structs::{AgentError, ToolCall};
+use async_trait::async_trait;
+use serde_json::Value;
+use tokio::sync::Mutex;
+
+pub mod macos_tools;
 
 // --- Tool Definitions ---
 
@@ -522,4 +528,43 @@ pub fn list_tools(desktop: &Arc<Desktop>) -> Vec<ToolDefinition> {
     }
 
     tools
+}
+
+/// Defines the interface for a tool that the agent can execute.
+#[async_trait]
+pub trait Tool: Send + Sync {
+    /// Returns the definition of the tool (name, description, schema).
+    fn definition(&self) -> ToolDefinition;
+
+    /// Executes the tool with the given arguments.
+    /// `args` should be a JSON Value that conforms to the tool's input schema.
+    async fn execute(&self, args: Value) -> Result<Value, AgentError>;
+}
+
+/// Manages a collection of available tools.
+pub struct ToolRegistry {
+    tools: HashMap<String, Arc<dyn Tool>>,
+}
+
+impl ToolRegistry {
+    pub fn new(tools: Vec<Arc<dyn Tool>>) -> Self {
+        let tools_map = tools
+            .into_iter()
+            .map(|tool| (tool.definition().name.clone(), tool))
+            .collect();
+        ToolRegistry { tools: tools_map }
+    }
+
+    /// Returns definitions of all registered tools.
+    pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.tools.values().map(|tool| tool.definition()).collect()
+    }
+
+    /// Executes a specific tool call.
+    pub async fn execute_tool(&self, tool_call: &ToolCall) -> Result<Value, AgentError> {
+        match self.tools.get(&tool_call.name) {
+            Some(tool) => tool.execute(tool_call.input.clone()).await,
+            None => Err(AgentError::ToolNotFound(tool_call.name.clone())),
+        }
+    }
 }
