@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 // Shell session manager to maintain persistent sessions
 #[derive(Clone)]
-pub(crate) struct ShellSession {
+pub struct ShellSession {
     process: Arc<Mutex<Child>>,
     timed_out: bool,
 }
@@ -174,7 +174,7 @@ impl ShellSession {
 }
 
 // Store sessions in app state
-pub(crate) type ShellSessions = Arc<Mutex<HashMap<String, ShellSession>>>;
+pub type ShellSessions = Arc<Mutex<HashMap<String, ShellSession>>>;
 
 // Initialize shell sessions in app state
 pub fn init_shell_state(app_state: &AppState) {
