@@ -1,5 +1,4 @@
 use accessibility::{AXAttribute, AXUIElement};
-use accessibility_sys::AXValueRef;
 use super::constants::*;
 use super::engine::MacOSEngine;
 use super::ffi::AXValueGetValue;
