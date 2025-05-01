@@ -5,6 +5,7 @@ pub mod element;
 pub mod engine;
 pub mod ffi;
 pub mod interaction;
+pub mod input;
 pub mod permissions;
 pub mod utils;
 pub mod wrappers;

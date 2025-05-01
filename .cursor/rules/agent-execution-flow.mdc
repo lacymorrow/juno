@@ -1,0 +1,40 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Agent Execution Flow
+
+The agent interaction is initiated by the `submit_query` Tauri command in [src-tauri/src/anthropic.rs](mdc:dotdot/src-tauri/src/anthropic.rs).
+
+## Steps:
+
+1.  **Initialization:**
+    -   `submit_query` instantiates the agent components: `SimpleMemoryManager`, `LocalToolProvider`, `AnthropicBrain`.
+    -   Tools are registered with the `LocalToolProvider` (e.g., via `register_basic_tools`).
+    -   `DefaultAgentRunner` is created, holding the initialized components.
+2.  **Run Loop:**
+    -   `agent_runner.run(query)` is called.
+    -   The `DefaultAgentRunner` enters its main loop ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:dotdot/src-tauri/src/agent/implementations/agent_runner.rs)).
+    -   Inside the loop, `runner.step()` is called repeatedly.
+3.  **Agent Step (`step` method):**
+    -   Gets current messages from `MemoryManager`.
+    -   Gets available tools from `ToolProvider`.
+    -   Calls `brain.decide_next_action()` ([AnthropicBrain](mdc:dotdot/src-tauri/src/agent/implementations/agent_brain.rs)) with messages and tools.
+    -   The brain calls the LLM API.
+    -   The brain returns an `AgentAction` (e.g., `ExecuteTool`, `Finish`).
+4.  **Action Handling:**
+    -   If `ExecuteTool(calls)`:
+        -   The runner adds an assistant message with the tool calls to memory.
+        -   It iterates through `calls`, calling `tool_provider.execute_tool()` for each.
+        -   Each tool result (or error) is added as a `Role::Tool` message to memory.
+        -   `step` returns `AgentAction::Think`, causing the loop to continue (calling the brain again with the new tool results).
+    -   If `Finish(response)`:
+        -   The runner adds the final assistant response to memory.
+        -   The `run` loop terminates, returning the final response string.
+    -   If `Error(e)`:
+        -   The `run` loop terminates, returning the error.
+5.  **Result Processing:**
+    -   Back in `submit_query`, the `Result<String, AgentError>` from `run` is handled.
+    -   TTS is performed on the final text.
+    -   A `SubmitQueryResult` is created and emitted to the frontend via the `backend-response` event.
