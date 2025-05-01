@@ -85,13 +85,48 @@ impl Desktop {
         self.engine.scroll_at_current_position(direction, amount)
     }
 
-    // /// Get the current clipboard content
-    // pub fn get_clipboard_content(&self) -> Result<String, AutomationError> {
-    //     self.engine.get_clipboard_content()
-    // }
-    //
-    // /// Set the clipboard content
-    // pub fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError> {
-    //     self.engine.set_clipboard_content(content)
-    // }
+    /// Get the current clipboard content
+    pub fn get_clipboard_content(&self) -> Result<String, AutomationError> {
+        self.engine.get_clipboard_content()
+    }
+
+    /// Set the clipboard content
+    pub fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError> {
+        self.engine.set_clipboard_content(content)
+    }
+
+    /// Hold down a modifier key, optionally for a specific duration
+    pub fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
+        self.engine.hold_key(key, duration_ms)
+    }
+
+    /// Release a modifier key
+    pub fn release_key(&self, key: &str) -> Result<(), AutomationError> {
+        self.engine.release_key(key)
+    }
+
+    /// Simulate a standard left click (down + up) at specified coordinates.
+    pub fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.left_click(x, y, modifiers)
+    }
+
+    /// Simulate a right click (down + up) at specified coordinates.
+    pub fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.right_click(x, y, modifiers)
+    }
+
+    /// Simulate a middle click (down + up) at specified coordinates.
+    pub fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.middle_click(x, y, modifiers)
+    }
+
+    /// Simulate a double left click at the specified coordinates.
+    pub fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.double_click(x, y, modifiers)
+    }
+
+    /// Simulate a triple left click at the specified coordinates.
+    pub fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.triple_click(x, y, modifiers)
+    }
 }
