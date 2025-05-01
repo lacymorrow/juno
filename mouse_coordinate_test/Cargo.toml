@@ -1,0 +1,9 @@
+[package]
+name = "mouse_coordinate_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+computer-use-ai-sdk = { path = "../src-tauri/mcp-server-os-level" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

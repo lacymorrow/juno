@@ -214,7 +214,7 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
 /// Captures a screenshot of the main display and encodes it as base64 PNG.
 pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
     // 1. Get current cursor position
-    let cursor_point = unsafe {
+    let cursor_point = {
         // Use kCGEventSourceStateHIDSystemState to get the event source for system events
         let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
             .map_err(|_| AutomationError::PlatformError("Failed to create HID event source".to_string()))?;

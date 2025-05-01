@@ -13,7 +13,7 @@ use crate::{AutomationError, Selector, UIElement};
 use accessibility::{AXAttribute, AXUIElementAttributes, Error as AXError};
 use accessibility_sys::{kAXFocusedUIElementAttribute, AXUIElementRef, kAXFrontmostAttribute, AXUIElementGetTypeID, kAXErrorNoValue};
 use anyhow::Result;
-use core_foundation::base::{CFType, TCFType, CFTypeID, CFGetTypeID};
+use core_foundation::base::{TCFType, CFTypeID, CFGetTypeID, CFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
@@ -23,11 +23,11 @@ use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use libc;
 use std::collections::BTreeMap;
 use tracing::{debug, trace, warn};
+// Re-add interaction module for non-mouse actions
 use crate::platforms::macos::interaction::{self};
-use crate::platforms::macos::constants::{
-    COMMAND_KEYCODE, CONTROL_KEYCODE, OPTION_KEYCODE, SHIFT_KEYCODE, // Key codes
-    MODIFIER_COMMAND, MODIFIER_SHIFT, MODIFIER_OPTION, MODIFIER_CONTROL, // Modifier flags
-};
+// Import keycode mapping function
+use crate::platforms::macos::constants::key_name_to_keycode;
+
 use serde_json::{json, Value as JsonValue};
 use crate::element::ElementTreeNode;
 
@@ -191,7 +191,8 @@ impl MacOSEngine {
         )))
     }
 
-    pub(crate) fn scroll_at_position(
+    // Enhanced scroll implementation with full directional support for Claude 3.7
+    fn scroll_at_position(
         &self,
         x: f64,
         y: f64,
@@ -203,75 +204,78 @@ impl MacOSEngine {
             direction, amount, x, y
         );
 
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-            AutomationError::PlatformError("Failed to create event source".to_string())
-        })?;
+        // Convert amount to integer to use as scroll wheel units
+        let scroll_units = (amount * 3.0).round() as i32;
 
-        let scroll_amount = amount as i32;
-
-        let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
-            "up" => (0, -scroll_amount),
-            "down" => (0, scroll_amount),
-            "left" => (-scroll_amount, 0),
-            "right" => (scroll_amount, 0),
+        // Determine which axes to use for scrolling based on direction
+        let (wheel_count, line_count) = match direction.to_lowercase().as_str() {
+            "up" => (0, -scroll_units), // Negative for up
+            "down" => (0, scroll_units), // Positive for down
+            "left" => (scroll_units, 0), // Positive for left (wheel axis)
+            "right" => (-scroll_units, 0), // Negative for right (wheel axis)
             _ => {
                 return Err(AutomationError::InvalidArgument(format!(
-                    "Invalid scroll direction: {}. Must be up, down, left, or right",
+                    "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'.",
                     direction
                 )))
             }
         };
 
-        let point = CGPoint::new(x, y);
-        let mouse_move = CGEvent::new_mouse_event(
-            source.clone(),
-            CGEventType::MouseMoved,
-            point,
-            CGMouseButton::Left,
-        )
-        .map_err(|_| {
-            AutomationError::PlatformError("Failed to create mouse move event".to_string())
-        })?;
-        mouse_move.post(CGEventTapLocation::HID);
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        let scroll_event =
-            CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0).map_err(|_| {
-                AutomationError::PlatformError("Failed to create scroll event".to_string())
-            })?;
-
-        scroll_event.post(CGEventTapLocation::HID);
-
-        debug!(
-            "scrolled {} by {} at position ({}, {})",
-            direction, amount, x, y
-        );
-        Ok(())
+        // Use the improved implementation with our helper function
+        post_scroll_event(CGPoint::new(x, y), wheel_count, line_count, None)
     }
 
-    pub fn scroll_at_current_position(
+    // Add another method for scrolling with modifiers
+    pub fn scroll_at_position_with_modifiers(
+        &self,
+        x: f64,
+        y: f64,
+        direction: &str,
+        amount: f64,
+        modifiers: Option<&str>,
+    ) -> Result<(), AutomationError> {
+        debug!(
+            "scrolling {} by {} at position ({}, {}) with modifiers: {:?}",
+            direction, amount, x, y, modifiers
+        );
+
+        // Convert amount to integer to use as scroll wheel units
+        let scroll_units = (amount * 3.0).round() as i32;
+
+        // Determine which axes to use for scrolling based on direction
+        let (wheel_count, line_count) = match direction.to_lowercase().as_str() {
+            "up" => (0, -scroll_units), // Negative for up
+            "down" => (0, scroll_units), // Positive for down
+            "left" => (scroll_units, 0), // Positive for left (wheel axis)
+            "right" => (-scroll_units, 0), // Negative for right (wheel axis)
+            _ => {
+                return Err(AutomationError::InvalidArgument(format!(
+                    "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'.",
+                    direction
+                )))
+            }
+        };
+
+        // Parse modifiers if provided
+        let parsed_modifiers = parse_modifiers(modifiers);
+
+        // Use the improved implementation with our helper function
+        post_scroll_event(CGPoint::new(x, y), wheel_count, line_count, Some(parsed_modifiers))
+    }
+
+    fn scroll_at_current_position(
         &self,
         direction: &str,
         amount: f64,
     ) -> Result<(), AutomationError> {
         debug!("getting current mouse location using CGEvent::new with a valid event source");
 
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-            AutomationError::PlatformError("failed to create event source".to_string())
-        })?;
-        debug!("created event source successfully");
+        // Get the current mouse position
+        let current_pos = self.cursor_position()?;
+        debug!("Current mouse position: ({}, {})", current_pos.0, current_pos.1);
 
-        let event = CGEvent::new(source).map_err(|_| {
-            AutomationError::PlatformError(
-                "failed to create event for obtaining current mouse position".to_string(),
-            )
-        })?;
-        debug!("got current event; mouse position: {:?}", event.location());
-
-        let current_pos = event.location();
-
-        self.scroll_at_position(current_pos.x, current_pos.y, direction, amount)
+        // Delegate to scroll_at_position with the current position
+        self.scroll_at_position(current_pos.0, current_pos.1, direction, amount)
     }
 
     // Method to get the UI tree, starting from the focused application or a specified one
@@ -415,6 +419,126 @@ fn check_ax_element_attributes_match(
     true // All specified attributes matched
 }
 
+// Helper function to parse modifier string into CGEventFlags
+fn parse_modifiers(modifier_str: Option<&str>) -> CGEventFlags {
+    let mut flags = CGEventFlags::empty();
+
+    if let Some(mods) = modifier_str {
+        for modifier in mods.split('+') {
+            match modifier.trim().to_lowercase().as_str() {
+                "command" | "cmd" => flags |= CGEventFlags::CGEventFlagCommand,
+                "shift" => flags |= CGEventFlags::CGEventFlagShift,
+                "option" | "alt" => flags |= CGEventFlags::CGEventFlagAlternate,
+                "control" | "ctrl" => flags |= CGEventFlags::CGEventFlagControl,
+                "fn" => flags |= CGEventFlags::CGEventFlagSecondaryFn,
+                _ => debug!("Unknown modifier: {}", modifier),
+            }
+        }
+    }
+
+    flags
+}
+
+// Helper function to create and post a mouse event
+fn post_mouse_event(
+    event_type: CGEventType,
+    point: CGPoint,
+    button: CGMouseButton,
+    click_count: Option<i64>, // For clicks/double/triple
+    modifiers: Option<CGEventFlags>, // For modifier keys during click
+) -> Result<(), AutomationError> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
+
+    // Remove `mut` as event is not modified after creation unless flags/count are set
+    let event = CGEvent::new_mouse_event(source, event_type, point, button)
+        .map_err(|e| AutomationError::PlatformError(format!("Failed to create mouse event: {:?}", e)))?; // Added error details
+
+    if let Some(count) = click_count {
+        // Use the correct constant kCGMouseEventClickState - try fully qualified path
+        // event.set_integer_value_field(core_graphics::event::CGEventField::MouseEventClickState, count);
+        // Fallback to raw field ID 93 if constant lookup fails
+        const MOUSE_EVENT_CLICK_STATE_FIELD: u32 = 93;
+        event.set_integer_value_field(MOUSE_EVENT_CLICK_STATE_FIELD, count);
+    }
+
+    if let Some(flags) = modifiers {
+        event.set_flags(flags);
+    }
+
+    event.post(CGEventTapLocation::HID);
+    // Add a small delay after posting, can improve reliability sometimes
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    Ok(())
+}
+
+// Helper function to create and post a keyboard event
+fn post_keyboard_event(
+    key_code: u16,
+    flags: CGEventFlags,
+    is_down: bool,
+) -> Result<(), AutomationError> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
+
+    let event = CGEvent::new_keyboard_event(source, key_code, is_down)
+        .map_err(|_| AutomationError::PlatformError(format!(
+            "Failed to create keyboard event for key_code {}, is_down: {}",
+            key_code, is_down
+        )))?;
+
+    if !flags.is_empty() {
+        event.set_flags(flags);
+    }
+
+    event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
+// Helper function for scroll events
+fn post_scroll_event(
+    point: CGPoint,
+    wheel_count: i32,
+    line_count: i32,
+    modifiers: Option<CGEventFlags>
+) -> Result<(), AutomationError> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for scroll".to_string()))?;
+
+    // Move mouse to position first
+    post_mouse_event(CGEventType::MouseMoved, point, CGMouseButton::Left, None, modifiers)?;
+
+    // Create a scroll event manually since new_scroll_wheel_event is not available
+    let scroll_event = CGEvent::new(source)
+        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+
+    // Constants for scroll wheel event
+    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta (main scroll axis)
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
+    const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll (as opposed to pixel scroll)
+
+    // Set event type using CGEventType transmute
+    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
+
+    // Apply modifiers if provided
+    if let Some(flags) = modifiers {
+        scroll_event.set_flags(flags);
+    }
+
+    // Set the line scroll bit (field 120 = scroll wheel event options)
+    scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
+
+    // Set the delta values
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, line_count as i64);
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, wheel_count as i64);
+
+    // Post the event
+    scroll_event.post(CGEventTapLocation::HID);
+
+    Ok(())
+}
+
 impl AccessibilityEngine for MacOSEngine {
     fn get_applications(&self) -> Result<Vec<UIElement>, AutomationError> {
         // Get running application PIDs using NSWorkspace
@@ -447,7 +571,7 @@ impl AccessibilityEngine for MacOSEngine {
         let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
         let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
         // Attribute for checking activation policy manually if needed (though get_pid might be better)
-        let policy_attr = accessibility::AXAttribute::<CFType>::new(&CFString::new("AXActivationPolicy"));
+        // let policy_attr = accessibility::AXAttribute::<CFType>::new(&CFString::new("AXActivationPolicy"));
 
         for pid in pids {
             let app_element = accessibility::AXUIElement::application(pid);
@@ -1345,53 +1469,142 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn type_text(&self, text: &str) -> Result<(), AutomationError> {
-        // For global typing, we don't have a specific element context
-        // We will simulate key presses directly
-        interaction::type_text_global(text)
+        // interaction::type_text_global(text) // Keep interaction reference if needed elsewhere
+        debug!("Typing text: '{}' using CGEvent", text);
+        // Decompose text into individual key presses
+        for char in text.chars() {
+            // This is a simplified approach; doesn't handle complex layouts, dead keys, or all unicode.
+            // It relies on key_name_to_keycode mapping single characters.
+            let char_str = char.to_string();
+            let key_code = key_name_to_keycode(&char_str).ok_or_else(||
+                AutomationError::InvalidArgument(format!("Cannot map character '{}' to keycode", char))
+            )?;
+
+            // Determine if shift is needed (basic check for uppercase ASCII)
+            let mut flags = CGEventFlags::empty();
+            if char.is_ascii_uppercase() {
+                flags |= CGEventFlags::CGEventFlagShift;
+            }
+            // TODO: Add more sophisticated shift/modifier handling based on character map if needed.
+
+            // Post key down then key up
+            post_keyboard_event(key_code, flags, true)?; // Key Down
+            post_keyboard_event(key_code, flags, false)?; // Key Up
+        }
+        Ok(())
     }
 
     fn get_clipboard_content(&self) -> Result<String, AutomationError> {
+        // Keep using interaction module for this
         interaction::get_clipboard_contents()
     }
 
     fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError> {
+        // Keep using interaction module for this
         interaction::set_clipboard_contents(content)
     }
 
     fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
-        let lower_key = key.to_lowercase();
-        let (key_code, flags) = match lower_key.as_str() {
-            "shift" => (SHIFT_KEYCODE, MODIFIER_SHIFT),
-            "cmd" | "command" | "meta" => (COMMAND_KEYCODE, MODIFIER_COMMAND),
-            "ctrl" | "control" => (CONTROL_KEYCODE, MODIFIER_CONTROL),
-            "alt" | "option" => (OPTION_KEYCODE, MODIFIER_OPTION),
-            _ => return Err(AutomationError::InvalidArgument(format!(
-                "Unsupported or non-modifier key for hold_key: {}",
-                key
-            ))),
+        debug!("holding key {} for {:?}ms", key, duration_ms);
+
+        // Get the key code and flags from the key name
+        let key_code = match key_name_to_keycode(key) {
+            Some(code) => code,
+            None => {
+                return Err(AutomationError::InvalidArgument(format!(
+                    "Unknown key: {}. Use standard key names.",
+                    key
+                )))
+            }
         };
+
+        // Extract any modifiers from the key string (like ctrl, shift, etc.)
+        let mut flags = CGEventFlags::empty();
+
+        // Parse modifiers if key contains a "+" character (e.g., "ctrl+s")
+        if key.contains('+') {
+            let parts: Vec<&str> = key.split('+').collect();
+            for part in &parts[..parts.len() - 1] {
+                let modifier_flag = match part.to_lowercase().as_str() {
+                    "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
+                    "shift" => CGEventFlags::CGEventFlagShift,
+                    "option" | "alt" => CGEventFlags::CGEventFlagAlternate,
+                    "control" | "ctrl" => CGEventFlags::CGEventFlagControl,
+                    "fn" => CGEventFlags::CGEventFlagSecondaryFn,
+                    _ => {
+                        return Err(AutomationError::InvalidArgument(format!(
+                            "Unknown modifier: {}. Use standard modifier names.",
+                            part
+                        )))
+                    }
+                };
+                flags |= modifier_flag;
+            }
+        }
+
+        // Use interaction module's hold_key implementation
         interaction::hold_key(key_code, flags, duration_ms)
     }
 
     fn release_key(&self, key: &str) -> Result<(), AutomationError> {
-        let lower_key = key.to_lowercase();
-        let (key_code, flags) = match lower_key.as_str() {
-             "shift" => (SHIFT_KEYCODE, MODIFIER_SHIFT),
-            "cmd" | "command" | "meta" => (COMMAND_KEYCODE, MODIFIER_COMMAND),
-            "ctrl" | "control" => (CONTROL_KEYCODE, MODIFIER_CONTROL),
-            "alt" | "option" => (OPTION_KEYCODE, MODIFIER_OPTION),
-            _ => return Err(AutomationError::InvalidArgument(format!(
-                "Unsupported or non-modifier key for release_key: {}",
-                key
-            ))),
+        debug!("releasing key {}", key);
+
+        // Get the key code and flags from the key name
+        let key_code = match key_name_to_keycode(key) {
+            Some(code) => code,
+            None => {
+                return Err(AutomationError::InvalidArgument(format!(
+                    "Unknown key: {}. Use standard key names.",
+                    key
+                )))
+            }
         };
-        interaction::release_key(key_code, flags)
+
+        // Extract any modifiers from the key string (like ctrl, shift, etc.)
+        let mut flags = CGEventFlags::empty();
+
+        // Parse modifiers if key contains a "+" character (e.g., "ctrl+s")
+        if key.contains('+') {
+            let parts: Vec<&str> = key.split('+').collect();
+            for part in &parts[..parts.len() - 1] {
+                let modifier_flag = match part.to_lowercase().as_str() {
+                    "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
+                    "shift" => CGEventFlags::CGEventFlagShift,
+                    "option" | "alt" => CGEventFlags::CGEventFlagAlternate,
+                    "control" | "ctrl" => CGEventFlags::CGEventFlagControl,
+                    "fn" => CGEventFlags::CGEventFlagSecondaryFn,
+                    _ => {
+                        return Err(AutomationError::InvalidArgument(format!(
+                            "Unknown modifier: {}. Use standard modifier names.",
+                            part
+                        )))
+                    }
+                };
+                flags |= modifier_flag;
+            }
+        }
+
+        // Manually create key up event to release the key
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("Failed to create event source for key release".to_string())
+        })?;
+
+        let key_up = CGEvent::new_keyboard_event(source, key_code, false).map_err(|_| {
+            AutomationError::PlatformError(format!("Failed to create key up event for {}", key))
+        })?;
+
+        if flags != CGEventFlags::empty() {
+            key_up.set_flags(flags);
+        }
+
+        key_up.post(CGEventTapLocation::HID);
+
+        Ok(())
     }
 
-    fn wait(&self, duration_ms: u64) -> Result<(), AutomationError> {
-        debug!("waiting for {} milliseconds", duration_ms);
-        std::thread::sleep(std::time::Duration::from_millis(duration_ms));
-        Ok(())
+    fn wait(&self, duration_seconds: u64) -> Result<(), AutomationError> {
+        debug!("Engine calling wait for {} seconds", duration_seconds);
+        interaction::wait(duration_seconds)
     }
 
     fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError> {
@@ -1403,81 +1616,93 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
-        debug!("pressing key: {} with modifier: {:?}", key_name, modifier);
+        debug!("Pressing key: '{}' with modifier: {:?} using CGEvent", key_name, modifier);
+        let key_code = key_name_to_keycode(key_name).ok_or_else(||
+            AutomationError::InvalidArgument(format!("Invalid key name: {}", key_name))
+        )?;
 
-        let key_code = super::constants::key_name_to_keycode(key_name)
-            .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid key name: {}", key_name)))?;
+        let modifier_flags = parse_modifiers(modifier); // Use the same helper as for mouse clicks
 
-        let modifier_flags = match modifier {
-            Some(mod_name) => super::constants::modifier_name_to_flags(mod_name)
-                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?,
-            None => CGEventFlags::empty(),
-        };
-
-        interaction::press_key_with_modifier(key_code, modifier_flags)
+        // Post key down then key up
+        post_keyboard_event(key_code, modifier_flags, true)?; // Key Down
+        post_keyboard_event(key_code, modifier_flags, false) // Key Up
     }
 
     /// Get the current mouse cursor position.
     fn cursor_position(&self) -> Result<(f64, f64), AutomationError> {
-        interaction::get_cursor_position()
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+            .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
+        let event = CGEvent::new(source) // Create a null event just to get location
+             .map_err(|_| AutomationError::PlatformError("Failed to create null event for location".to_string()))?;
+        let point = event.location();
+        Ok((point.x, point.y))
     }
 
     fn mouse_move(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        interaction::mouse_move(x, y)
+        debug!("Moving mouse to ({}, {}) using CGEvent", x, y);
+        let point = CGPoint::new(x, y);
+        post_mouse_event(CGEventType::MouseMoved, point, CGMouseButton::Left, None, None) // Button doesn't matter for move
     }
 
     fn left_mouse_down(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        interaction::left_mouse_down(x, y)
+        debug!("Engine calling left_mouse_down at ({}, {})", x, y);
+        // Use the updated implementation with None for modifiers
+        interaction::left_mouse_down(x, y, None)
     }
 
     fn left_mouse_up(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        interaction::left_mouse_up(x, y)
+        debug!("Engine calling left_mouse_up at ({}, {})", x, y);
+        // Use the updated implementation with None for modifiers
+        interaction::left_mouse_up(x, y, None)
     }
 
     fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        let flags = if let Some(mod_name) = modifiers {
-            super::constants::modifier_name_to_flags(mod_name)
-                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?
-        } else {
-            CGEventFlags::empty()
-        };
-        interaction::left_click(x, y, Some(flags))
+        debug!("Engine calling left_click at ({}, {}) with modifiers: {:?}", x, y, modifiers);
+
+        let parsed_modifiers = modifiers.map(|m| parse_modifiers(Some(m)));
+        interaction::left_click(x, y, parsed_modifiers)
     }
 
     fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        // For now, right_click implementation doesn't support modifiers
-        // This method signature is updated for consistency
-        if modifiers.is_some() {
-            warn!("Modifiers are not currently supported for right_click");
-        }
-        interaction::right_click(x, y)
+        debug!("Right click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        let point = CGPoint::new(x, y);
+         let flags = parse_modifiers(modifiers);
+        // Simulate down then up
+        post_mouse_event(CGEventType::RightMouseDown, point, CGMouseButton::Right, Some(1), Some(flags))?;
+        post_mouse_event(CGEventType::RightMouseUp, point, CGMouseButton::Right, Some(1), Some(flags))
     }
 
     fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        // For now, middle_click implementation doesn't support modifiers
-        // This method signature is updated for consistency
-        if modifiers.is_some() {
-            warn!("Modifiers are not currently supported for middle_click");
-        }
-        interaction::middle_click(x, y)
+        debug!("Middle click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        let point = CGPoint::new(x, y);
+         let flags = parse_modifiers(modifiers);
+        // Simulate down then up
+        post_mouse_event(CGEventType::OtherMouseDown, point, CGMouseButton::Center, Some(1), Some(flags))?;
+        post_mouse_event(CGEventType::OtherMouseUp, point, CGMouseButton::Center, Some(1), Some(flags))
     }
 
     fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        // For now, double_click implementation doesn't support modifiers
-        // This method signature is updated for consistency
-        if modifiers.is_some() {
-            warn!("Modifiers are not currently supported for double_click");
-        }
-        interaction::double_click(x, y)
+         debug!("Double click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        let point = CGPoint::new(x, y);
+         let flags = parse_modifiers(modifiers);
+        // Simulate two clicks (down, up, down, up) with click count 2
+        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(1), Some(flags))?; // Click 1 down
+        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(1), Some(flags))?;   // Click 1 up
+        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(2), Some(flags))?; // Click 2 down (state=2)
+        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(2), Some(flags))     // Click 2 up (state=2)
     }
 
     fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        // For now, triple_click implementation doesn't support modifiers
-        // This method signature is updated for consistency
-        if modifiers.is_some() {
-            warn!("Modifiers are not currently supported for triple_click");
-        }
-        interaction::triple_click(x, y)
+         debug!("Triple click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        let point = CGPoint::new(x, y);
+        let flags = parse_modifiers(modifiers);
+        // Simulate three clicks
+        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(1), Some(flags))?;
+        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(1), Some(flags))?;
+        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(2), Some(flags))?;
+        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(2), Some(flags))?;
+        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(3), Some(flags))?;
+        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(3), Some(flags))
     }
 
     fn left_click_drag(
@@ -1487,7 +1712,20 @@ impl AccessibilityEngine for MacOSEngine {
         end_x: f64,
         end_y: f64,
     ) -> Result<(), AutomationError> {
-        interaction::left_click_drag(start_x, start_y, end_x, end_y)
+         debug!("Left click drag from ({}, {}) to ({}, {}) using CGEvent", start_x, start_y, end_x, end_y);
+        let start_point = CGPoint::new(start_x, start_y);
+        let end_point = CGPoint::new(end_x, end_y);
+
+        // Mouse down at start
+        post_mouse_event(CGEventType::LeftMouseDown, start_point, CGMouseButton::Left, Some(1), None)?;
+        // Small delay before dragging
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Drag to end
+        post_mouse_event(CGEventType::LeftMouseDragged, end_point, CGMouseButton::Left, None, None)?; // Button indicates drag type
+        // Small delay at end
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        // Mouse up at end
+        post_mouse_event(CGEventType::LeftMouseUp, end_point, CGMouseButton::Left, Some(1), None)
     }
 
     fn get_window_title(&self) -> Result<String, AutomationError> {
