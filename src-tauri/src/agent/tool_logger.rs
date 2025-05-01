@@ -3,7 +3,6 @@ use serde_json::{Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Emitter};
 use tracing::{info, warn};
-use crate::agent::implementations::tool_provider::AsyncToolFn;
 use futures::FutureExt;
 
 /// Type for tool usage events sent to the frontend

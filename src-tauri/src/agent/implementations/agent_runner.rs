@@ -106,8 +106,6 @@ where
             .await?;
         }
 
-        let mut final_response = String::new();
-
         loop {
             // --- Cancellation Check (Start of Loop) ---
             if *cancel_rx.borrow() {
@@ -133,8 +131,8 @@ where
                 AgentAction::Finish(text) => {
                     log::info!("Agent finished with text response");
                     self.transition_state(AgentState::Finished).await;
-                    final_response = text;
-                    break; // Exit the loop successfully
+                    let final_response = text;
+                    return Ok(final_response);
                 }
                  AgentAction::RespondToUser(text) => {
                     log::info!("Agent intermediate response: {}", text);
@@ -171,7 +169,11 @@ where
             self.current_step += 1;
         }
 
-        Ok(final_response)
+        // The loop should only exit via return statements within its body
+        // (e.g., Finish, Error, Cancelled, MaxStepsReached).
+        // Code here is unreachable.
+        // log::warn!(\"Agent loop completed without reaching a Finish state.\");
+        // Err(AgentError::Terminated)
     }
 
     // Modify step to accept the CancelReceiver
