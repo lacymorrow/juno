@@ -1,11 +1,11 @@
-use super::actions::ClickMethodSelection;
+use accessibility::{AXAttribute, AXUIElement};
+use accessibility_sys::AXUIElementRef;
 use super::constants::*;
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
-use accessibility::{AXAttribute, AXUIElement};
-use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
+use accessibility_sys::{AXUIElementSetAttributeValue};
 use core_foundation::base::{TCFType, CFTypeRef};
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::event::{
@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
+use super::ffi::AXValueCreate; // Import AXValueCreate
 
 // Define key code constants for keyboard shortcuts
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
@@ -50,14 +51,8 @@ pub(crate) fn get_application(element: &MacOSUIElement) -> Option<MacOSUIElement
 
 pub(crate) fn click_with_method(
     element: &MacOSUIElement,
-    method: ClickMethodSelection,
 ) -> Result<ClickResult, AutomationError> {
-    match method {
-        ClickMethodSelection::Auto => click_auto(element),
-        ClickMethodSelection::AXPress => click_press(element),
-        ClickMethodSelection::AXClick => click_accessibility_click(element),
-        ClickMethodSelection::MouseSimulation => click_mouse_simulation(element),
-    }
+    click_auto(element)
 }
 
 pub(crate) fn click_auto(element: &MacOSUIElement) -> Result<ClickResult, AutomationError> {
@@ -329,7 +324,7 @@ pub(crate) fn left_click(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Res
     }
 
     down_event.post(CGEventTapLocation::HID);
-    std::thread::sleep(std::time::Duration::from_millis(50)); // Pause between down and up
+    std::thread::sleep(Duration::from_millis(50)); // Pause between down and up
 
     // Mouse up with click state 1
     let up_event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
@@ -1035,19 +1030,5 @@ pub(crate) fn press_key_with_modifier(key_code: CGKeyCode, modifier_flags: CGEve
     thread::sleep(Duration::from_millis(50));
 
     debug!("Key press simulated for key code: {}", key_code);
-    Ok(())
-}
-
-// --- Old/Internal key sequence logic (if needed for reference, keep private) ---
-fn press_key_sequence(keys: &[(CGKeyCode, Option<CGEventFlags>)]) -> Result<(), AutomationError> {
-    // Placeholder implementation or keep the original logic if needed internally
-    debug!("Internal press_key_sequence called (currently placeholder)");
-    // Example: iterate through keys and simulate presses
-    for (key_code, modifier_flags_opt) in keys {
-        let modifier_flags = modifier_flags_opt.unwrap_or_else(CGEventFlags::empty);
-        // Simulate key down
-        // Simulate key up
-        debug!("Simulating press for key: {} with flags: {:?}", key_code, modifier_flags);
-    }
     Ok(())
 }
