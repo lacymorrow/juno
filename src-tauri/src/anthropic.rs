@@ -11,6 +11,7 @@ use tracing::{error, info}; // Removed unused debug, warn
 use tauri::State;
 use tauri::{Manager, Emitter}; // Import Manager and Emitter
 // use futures::future; // Removed unused
+use std::sync::Arc;
 
 // --- Agent Integration ---
 use crate::agent::{
@@ -22,8 +23,12 @@ use crate::agent::{
     },
     structs::AgentError,
     traits::AgentRunnable, // Import the trait for the run method
-    tools::basic_tools::register_basic_tools, // Import the tool registration helper
-    tools::desktop_tools::register_desktop_tools, // Import the new desktop tool registration helper
+    tools::{ // Changed this block
+        basic_tools::register_basic_tools,
+        desktop_tools::register_desktop_tools,
+        browser_tools::get_browser_tool_definitions,
+        browser_controller::BrowserController,
+    },
 };
 
 // --- Agent State ---
@@ -204,149 +209,212 @@ async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
 pub async fn submit_query(
     query: String,
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle, // Pass AppHandle
-) -> Result<(), String> { // Return Ok(()) or Err(string) for command result
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     info!("Received query: {}", query);
 
-    // --- Get the CancelReceiver from AppState ---
-    // Clone the receiver to pass it to the agent run.
     let cancel_rx = state.cancel_rx.clone();
 
     // --- Instantiate Agent Components ---
     let memory_manager = SimpleMemoryManager::new();
 
-    // Create tool provider with app handle for event emission
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-    // Register tools
-    // TODO: This currently registers only basic file/shell tools.
-    // Adapt `register_basic_tools` or create new registration functions
-    // to include the richer set of desktop interaction tools previously defined
-    // in `src-tauri/src/tools/definitions.rs` once they are implemented
-    // according to the `ToolProvider` trait requirements.
+    // --- Instantiate Browser Controller ---
+    // This needs to be Arc<Mutex<>> or similar if shared across async tasks/threads
+    // Or clone it into each tool closure if only used there.
+    // Let's clone it into closures for now.
+    let browser_controller = match BrowserController::new().await {
+        Ok(controller) => {
+            info!("Browser Controller initialized successfully.");
+            controller // Not wrapped in Arc/Mutex yet
+        }
+        Err(e) => {
+            error!("Failed to initialize Browser Controller: {}. Browser tools will not be available.", e);
+            // Return error immediately if browser is essential
+             let err_msg = format!("Failed to start browser automation: {}", e);
+             let result = SubmitQueryResult { text: err_msg.clone(), audio_base64: None, agent_state: "Failed".to_string(), screenshot_base64: None };
+             let payload = BackendResponsePayload { query, response: result };
+             if let Some(window) = app_handle.get_window("main") {
+                 window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
+             } else { error!("Main window not found, cannot emit initial browser error."); }
+             return Err(err_msg);
+            // Or, allow agent to continue without browser tools:
+            // None
+        }
+    };
+
+    // Register basic file/shell tools
     register_basic_tools(&mut tool_provider).await;
     info!("Registered basic tools for the agent.");
 
-    // Register desktop tools (currently placeholders)
-    // Pass cloned app_handle and state for the closures to capture
+    // Register desktop tools
     register_desktop_tools(&mut tool_provider, app_handle.clone(), state.clone()).await;
-    info!("Registered desktop tools for the agent (placeholders).");
+    info!("Registered desktop tools for the agent.");
 
-    // Instantiate the brain, handling potential env var errors
+    // --- Register Browser Tools ---
+    let browser_definitions = get_browser_tool_definitions();
+
+    // Store the browser controller in an Arc to share it safely
+    let shared_browser_controller = Arc::new(browser_controller);
+
+    for definition in browser_definitions {
+        let tool_name = definition.name.clone();
+        let log_tool_name = tool_name.clone(); // Clone for logging outside the closure
+
+        // Clone the Arc for each iteration, not the controller itself
+        let controller_arc = shared_browser_controller.clone();
+
+        let executor = move |input: Value| {
+            let controller_ref = controller_arc.clone();
+            let name = tool_name.clone();
+            async move {
+                let result = match name.as_str() {
+                    "browser_navigate" => controller_ref.navigate(&input).await,
+                    "browser_extract_content" => controller_ref.extract_content(&input).await,
+                    "browser_interact" => controller_ref.interact(&input).await,
+                    "browser_get_current_url" => controller_ref.get_current_url(&input).await,
+                    "browser_screenshot" => controller_ref.screenshot(&input).await,
+                    // Add other browser tool cases here
+                    _ => Err(AgentError::ToolNotFound(name)),
+                };
+
+                // Convert the result to the expected format (Value or String error)
+                match result {
+                    Ok(tool_result) => Ok(tool_result.output),
+                    Err(agent_error) => Err(agent_error.to_string()),
+                }
+            }
+        };
+
+        tool_provider.register_async_tool(definition, executor).await;
+        info!("Registered browser tool: {}", log_tool_name);
+    }
+
+    // Instantiate the brain
     let agent_brain = match AnthropicBrain::from_env() {
         Ok(brain) => brain,
         Err(e) => {
+            // ... (existing error handling) ...
              let err_msg = format!("Failed to initialize agent brain: {}", e);
              error!("{}", err_msg);
-              // Emit error response immediately
-             let result = SubmitQueryResult {
-                 text: err_msg.clone(),
-                 audio_base64: None,
-                 agent_state: "Failed".to_string(),
-                 screenshot_base64: None,
-             };
-             let payload = BackendResponsePayload { query, response: result };
-             // Use a blocking send or spawn a task if emit needs to be async within a sync context
-             // For now, assume direct emit works or handle potential blocking issues if they arise.
+             let result = SubmitQueryResult { text: err_msg.clone(), audio_base64: None, agent_state: "Failed".to_string(), screenshot_base64: None };
+             let payload = BackendResponsePayload { query: query.clone(), response: result };
              if let Some(window) = app_handle.get_window("main") {
-                 window.emit("backend-response", payload)
-                     .map_err(|e| format!("Emit failed: {}", e))?;
-             } else {
-                 error!("Main window not found, cannot emit initial error.");
-             }
-             return Err(err_msg); // Return error from the command itself
-         }
-     };
+                 window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
+             } else { error!("Main window not found, cannot emit initial brain error."); }
+             return Err(err_msg);
+        }
+    };
     info!("Agent brain initialized.");
 
-    // Max steps for the agent loop
-    const MAX_ITERATIONS: u32 = 15; // Set a reasonable limit
+    const MAX_ITERATIONS: u32 = 15;
 
-    // Create the agent runner
     let mut agent_runner = DefaultAgentRunner::new(
         memory_manager,
-        tool_provider,
+        tool_provider, // This now contains all registered tools
         agent_brain,
         MAX_ITERATIONS,
     );
     info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
 
-    // --- Run the Agent ---
     info!("Starting agent run...");
-    // Pass the cloned cancellation receiver to the run method
     let agent_result = agent_runner.run(query.clone(), cancel_rx).await;
 
-    // --- Reset Cancellation Signal --- (Do this regardless of agent outcome)
     state.reset_cancel();
     info!("Agent cancellation signal reset.");
 
     // --- Process Agent Result ---
-    let (final_response_text, final_state_str) = match agent_result {
-        Ok(final_text) => {
-            info!("Agent finished successfully.");
-            (final_text, "Finished".to_string())
-        }
-        Err(agent_error) => {
-             error!("Agent failed: {:?}", agent_error);
-             // Provide a user-friendly error message based on the AgentError type
-             let user_error_message = match agent_error {
-                 AgentError::Terminated => "Agent execution was terminated.".to_string(), // Handle Terminated specifically
-                 AgentError::MaxStepsReached => format!("Agent stopped after reaching the maximum {} steps. The task might be too complex or require more iterations.", MAX_ITERATIONS),
-                 AgentError::LlmError(s) => format!("An error occurred while communicating with the AI model: {}", s),
-                 AgentError::ToolError(s) => format!("An error occurred while executing a required tool: {}", s),
-                 AgentError::ToolNotFound(s) => format!("A required tool ('{}') could not be found.", s),
-                 AgentError::ConfigurationError(s) => format!("Agent configuration error: {}", s),
-                 AgentError::MemoryError(s) => format!("Agent memory error: {}", s),
-                 AgentError::StateError(s) => format!("Agent encountered an invalid state: {}", s),
-                 AgentError::InputError(s) => format!("Invalid input provided to the agent: {}", s),
-                 AgentError::OutputError(s) => format!("Error processing agent output: {}", s),
-                 AgentError::LoopError(s) => format!("An internal error occurred in the agent loop: {}", s),
-                 AgentError::Unknown(s) => format!("An unknown error occurred: {}", s),
-                 // Consider adding more specific handling if needed
-             };
-            (user_error_message, "Failed".to_string())
-        }
-    };
-
-    info!("Agent final response text: {}", final_response_text);
-
-    // --- Perform TTS Synthesis --- (Only if not terminated)
-    let audio_base64 = if final_state_str != "Failed" || final_response_text != "Agent execution was terminated." {
-        match tts::invoke_tts(final_response_text.clone(), state.clone()).await {
-            Ok(base64) => Some(base64),
-            Err(e) => {
-                error!("TTS synthesis failed: {}", e);
-                None // Proceed without audio if TTS fails
+    let final_response = match agent_result {
+        Ok(message) => SubmitQueryResult {
+            text: message,
+            audio_base64: None, // Add TTS later if needed
+            agent_state: "Finished".to_string(),
+            screenshot_base64: None, // Capture screenshot if needed
+        },
+        Err(e) => {
+            error!("Agent run failed: {}", e);
+            // Map AgentError to a user-friendly state/message
+            let (state_str, msg) = match e {
+                AgentError::Terminated => ("Cancelled".to_string(), "Agent execution was cancelled.".to_string()),
+                AgentError::MaxStepsReached => ("Failed".to_string(), "Agent reached maximum steps.".to_string()),
+                _ => ("Failed".to_string(), format!("Agent error: {}", e)),
+            };
+            SubmitQueryResult {
+                text: msg,
+                audio_base64: None,
+                agent_state: state_str,
+                screenshot_base64: None,
             }
         }
+    };
+
+    info!("Agent run complete. Final state: {}", final_response.agent_state);
+
+    // --- Emit Final Response --- //
+    let payload = BackendResponsePayload { query, response: final_response };
+    if let Some(window) = app_handle.get_window("main") {
+        window.emit("backend-response", payload)
+            .map_err(|e| format!("Emit failed: {}", e))?;
+        info!("Final response emitted to frontend.");
     } else {
-        None // Don't synthesize if agent was terminated or failed critically before finishing
-    };
+        error!("Main window not found, cannot emit final response.");
+    }
 
-    // --- Prepare and Emit Final Result ---
-    let result = SubmitQueryResult {
-        text: final_response_text,
-        audio_base64,
-        agent_state: final_state_str,
-        screenshot_base64: None, // Default to None, could be updated in future to include last screenshot
-    };
-    let payload = BackendResponsePayload {
-        query: query.clone(), // Use the original query
-        response: result,
-    };
+    Ok(())
+}
 
-    info!("Emitting final backend-response");
-     match app_handle.get_window("main") {
-         Some(window) => {
-             window.emit("backend-response", payload)
-                 .map_err(|e| format!("Failed to emit backend-response event: {}", e))?;
-             info!("Successfully emitted backend-response event.");
-             Ok(()) // Command succeeded
-         }
-         None => {
-             let err_msg = "Main window not found, cannot emit event.".to_string();
-             error!("{}", err_msg);
-             Err(err_msg) // Command failed
-         }
-     }
+// --- Browser Cleanup Function ---
+
+#[tauri::command]
+pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String> {
+    log::info!("Cleaning up browser resources...");
+
+    // The state should hold a reference to the browser controller if we want to keep it alive
+    // between queries. For now, we just ensure any Playwright processes are terminated.
+
+    // On macOS, attempt to kill any lingering playwright/chromium processes
+    if cfg!(target_os = "macos") {
+        match std::process::Command::new("pkill")
+            .arg("-f")
+            .arg("playwright")
+            .output() {
+                Ok(_) => log::info!("Playwright processes terminated."),
+                Err(e) => log::warn!("Failed to terminate Playwright processes: {}", e),
+            }
+
+        // Also try to terminate chromium processes spawned by playwright
+        match std::process::Command::new("pkill")
+            .arg("-f")
+            .arg("chromium")
+            .output() {
+                Ok(_) => log::info!("Chromium processes terminated."),
+                Err(e) => log::warn!("Failed to terminate Chromium processes: {}", e),
+            }
+    }
+
+    log::info!("Browser cleanup completed.");
+    Ok(())
+}
+
+// --- TTS Function ---
+
+#[tauri::command]
+pub async fn get_tts_audio(text: String, _state: State<'_, AppState>) -> Result<String, String> {
+    // STUB: Remove dependency on AppState fields for now
+    // let client = state.anthropic_client.lock().await;
+    // let api_key = state.api_key.lock().await;
+
+    // if let Some(ref key) = *api_key {
+    //     match tts::generate_tts(&client, key, &text).await {
+    //         Ok(audio_bytes) => Ok(BASE64_STANDARD.encode(audio_bytes)),
+    //         Err(e) => Err(format!("TTS generation failed: {}", e)),
+    //     }
+    // } else {
+    //     Err("API key not set for TTS generation".to_string())
+    // }
+    let _ = text; // Mark text as used
+    error!("TTS function is currently stubbed out.");
+    Err("TTS functionality is temporarily disabled.".to_string())
+
 }
