@@ -21,9 +21,8 @@ use crate::agent::{
         memory_manager::SimpleMemoryManager,
         tool_provider::LocalToolProvider,
         agent_runner::DefaultAgentRunner,
-        agent_brain::AnthropicBrain, // Import AnthropicBrain directly
-        // Need BrainFactory if we use it here
-        // Removed BrainFactory import as it doesn't exist in the merged code
+        // AnthropicBrain is now selected via the factory
+        // agent_brain::AnthropicBrain, // Remove direct import
     },
     traits::AgentRunnable, // Import the trait for the run method
     tools::{ // Changed this block
@@ -32,7 +31,7 @@ use crate::agent::{
         browser_tools::get_browser_tool_definitions,
         browser_controller::BrowserController,
     },
-    // Removed BrainFactory import as it doesn't exist in the merged code
+     providers::factory::BrainFactory, // Keep BrainFactory import
 };
 
 // --- Agent State ---
@@ -180,9 +179,9 @@ pub async fn submit_query(
         info!("Skipping browser tool registration as controller failed to initialize.");
     }
 
-    // Instantiate the brain directly using AnthropicBrain::from_env()
-    let agent_brain = match AnthropicBrain::from_env() { // Instantiate AnthropicBrain
-        Ok(brain) => brain, // Pass the concrete type directly
+    // Use the BrainFactory to create the appropriate AI provider brain
+    let agent_brain = match BrainFactory::create_brain() { // Keep using BrainFactory
+        Ok(brain) => brain,
         Err(e) => {
              let err_msg = format!("Failed to initialize agent brain: {}", e);
              error!("{}", err_msg);
@@ -198,12 +197,11 @@ pub async fn submit_query(
 
     const MAX_ITERATIONS: u32 = 15;
 
-    // Use the DefaultAgentRunner::new constructor if it doesn't require a boxed brain
-    // If it requires a boxed brain, use DefaultAgentRunner::with_boxed_brain
-    let mut agent_runner = DefaultAgentRunner::new(
+    // Create the agent runner using with_boxed_brain because BrainFactory returns a Box
+    let mut agent_runner = DefaultAgentRunner::with_boxed_brain(
         memory_manager,
         tool_provider, // This now contains all registered tools
-        agent_brain,   // Pass the concrete AnthropicBrain instance
+        agent_brain,   // Pass the Box<dyn AgentBrain>
         MAX_ITERATIONS,
     );
     info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
