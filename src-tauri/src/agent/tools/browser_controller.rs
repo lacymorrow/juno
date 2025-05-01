@@ -4,8 +4,9 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use base64;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::env;
+// use tracing::{self};
 
 use crate::agent::structs::{AgentError, ToolResult};
 
@@ -14,12 +15,11 @@ type ControllerResult<T> = Result<T, AgentError>;
 
 // Timeout defaults
 const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
-const DEFAULT_ACTION_TIMEOUT_MS: u64 = 5000;
 
 #[derive(Clone)]
 pub struct BrowserController {
     // Store Playwright components
-    playwright: Arc<Playwright>,
+    // playwright: Arc<Playwright>, // Keep playwright instance alive
     browser: Arc<Browser>,
     context: Arc<BrowserContext>,
     // Store page in mutex for thread safety
@@ -80,7 +80,7 @@ impl BrowserController {
         let page = Arc::new(Mutex::new(None));
 
         Ok(BrowserController {
-            playwright: Arc::new(playwright),
+            // playwright: Arc::new(playwright), // Store to keep it alive
             browser: Arc::new(browser),
             context: Arc::new(context),
             page,
@@ -534,58 +534,69 @@ impl BrowserController {
 
     // Ensure browser is closed gracefully
     pub async fn cleanup(&self) -> Result<(), AgentError> {
-        log::info!("Closing browser...");
+        log::info!("Cleaning up browser controller resources...");
 
-        // First close any open page
-        {
-            let mut page_guard = self.page.lock().await;
-            if let Some(page) = page_guard.take() {
-                if let Err(e) = page.close(Some(true)).await {
-                    log::warn!("Failed to close page: {}", e);
-                    // Continue with cleanup even if page close fails
+        // Close the page if it exists
+        { // Scope for page_guard
+            let mut page_guard = self.page.lock().await; // Lock mutex
+            if let Some(page) = page_guard.take() { // Take ownership from Option
+                if let Err(e) = page.close(None).await {
+                    log::error!("Failed to close browser page gracefully: {}", e);
+                } else {
+                    log::info!("Browser page closed.");
                 }
             }
-        }
+        } // MutexGuard is dropped here
 
-        // Then close the browser context
+        // Close the context
         if let Err(e) = self.context.close().await {
-            log::warn!("Failed to close browser context: {}", e);
-            // Continue with cleanup even if context close fails
+            log::error!("Failed to close browser context gracefully: {}", e);
+        } else {
+            log::info!("Browser context closed.");
         }
 
-        // Finally close the browser
+        // Close the browser
         if let Err(e) = self.browser.close().await {
-            log::error!("Failed to close browser: {}", e);
-            return Err(AgentError::ToolError(format!("Failed to close browser: {}", e)));
+            log::error!("Failed to close browser gracefully: {}", e);
+        } else {
+            log::info!("Browser instance closed.");
         }
 
-        log::info!("Browser closed successfully");
         Ok(())
     }
 }
 
-// Add a shutdown hook to handle cleanup on application exit
+// Implement Drop to ensure cleanup happens if controller goes out of scope unexpectedly
 impl Drop for BrowserController {
     fn drop(&mut self) {
-        log::info!("BrowserController is being dropped, scheduling cleanup");
+        // We need an async context to call cleanup properly.
+        // Using block_on is generally discouraged, but might be necessary in Drop
+        // if we can't change the surrounding architecture.
+        // Consider if cleanup needs to be manually called instead.
+        // For now, log a warning if resources might be left dangling.
 
-        // We can't run async code directly in drop, so let's spawn a task
-        // This approach is not guaranteed to complete if the application exits abruptly
-        let browser_clone = self.browser.clone();
-        let context_clone = self.context.clone();
+        // Attempt synchronous cleanup if possible, or log
+        // Note: playwright-rust's close methods are async.
+        // A truly robust cleanup in Drop would require a runtime handle or a different design.
 
-        tokio::spawn(async move {
-            log::info!("Performing cleanup for dropped BrowserController");
+        log::warn!("BrowserController dropped. Ensure cleanup() was called explicitly to release browser resources.");
 
-            if let Err(e) = context_clone.close().await {
-                log::warn!("Failed to close browser context during cleanup: {}", e);
-            }
+        // Example using a local tokio runtime (use with caution in drop):
+        // if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        //     rt.block_on(async {
+        //         // Clone necessary Arcs before moving into the async block
+        //         let context_clone = self.context.clone();
+        //         let browser_clone = self.browser.clone();
+        //         let page_guard = self.page.lock().await; // Still need async for lock
+        //         let page_opt = page_guard.as_ref().cloned(); // Clone the Option<Page> if Page is Clone
 
-            if let Err(e) = browser_clone.close().await {
-                log::error!("Failed to close browser during cleanup: {}", e);
-            } else {
-                log::info!("Browser cleanup completed successfully");
-            }
-        });
+        //         // Perform async cleanup actions here...
+        //         // Example: Closing context and browser (Page closing needs more care)
+        //          if let Err(e) = context_clone.close().await { log::error!("Error closing context in drop: {}", e); }
+        //          if let Err(e) = browser_clone.close().await { log::error!("Error closing browser in drop: {}", e); }
+        //     });
+        // } else {
+        //     log::error!("Failed to create Tokio runtime in BrowserController drop handler.");
+        // }
     }
 }
