@@ -18,7 +18,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.2.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0-beta", features = ["macos-private-api", "tray-icon", "unstable"] }
+tauri = { version = "2.0.0-beta", features = [
+    "macos-private-api",
+    "tray-icon",
+    "unstable",
+] }
 tauri-plugin-opener = "2.2.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -30,7 +34,10 @@ base64 = "0.22"
 axum = "0.7"
 tower-http = { version = "0.5", features = ["cors"] }
 log = "0.4"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.4", features = ["derive"] }
@@ -38,7 +45,7 @@ tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-works
 wait-timeout = "0.2"
 futures-util = "0.3.31"
 futures = "0.3"
-tempfile = "3.10"
+tempfile = "3.8.0"
 # Additions for native macOS interop
 cocoa = { version = "0.25", optional = true }
 objc = { version = "0.2", optional = true }
@@ -49,6 +56,7 @@ thiserror = "1.0"
 async-trait = "0.1"
 once_cell = "1.17"
 tauri-plugin-global-shortcut = "2.2.0"
+playwright = "0.0.20"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
@@ -61,4 +69,3 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-global-shortcut = "2.2.0"
-
