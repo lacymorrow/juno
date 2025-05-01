@@ -3,15 +3,16 @@ use crate::state::AppState;
 use crate::tts;
 // use reqwest::Client; // Removed unused
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use image::{GenericImageView, ImageFormat}; // Keep if process_screenshot is kept/used
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Keep if process_screenshot is kept/used
-use std::io::Cursor; // Keep if process_screenshot is kept/used
-use tracing::{error, info}; // Removed unused debug, warn
+use serde_json::{Value}; // Keep Value
+// use image::{GenericImageView, ImageFormat}; // Removed unused
+// use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Removed unused
+// use std::io::Cursor; // Removed unused
+use tracing::{error, info};
 use tauri::State;
 use tauri::{Manager, Emitter}; // Import Manager and Emitter
 // use futures::future; // Removed unused
 use std::sync::Arc;
+use crate::agent::structs::{AgentError};
 
 // --- Agent Integration ---
 use crate::agent::{
@@ -21,7 +22,6 @@ use crate::agent::{
         tool_provider::LocalToolProvider,
         agent_runner::DefaultAgentRunner,
     },
-    structs::AgentError,
     traits::AgentRunnable, // Import the trait for the run method
     tools::{ // Changed this block
         basic_tools::register_basic_tools,
@@ -33,22 +33,22 @@ use crate::agent::{
 
 // --- Agent State ---
 
-#[derive(Debug, Clone, PartialEq, Serialize)] // Added Serialize for potential logging/debugging
-enum AgentState {
-    Thinking,
-    Acting,
-    ProcessingActionResult,
-    Finished,
-    Failed,
-}
+// Removed unused enum AgentState
+// enum AgentState {
+//     Idle,
+//     Thinking,
+//     ProcessingTool,
+//     Responding,
+// }
 
 // --- Anthropic API Structs ---
 
-#[derive(Serialize, Clone)]
-pub(crate) struct AnthropicMessage {
-    pub(crate) role: String,
-    pub(crate) content: Value, // Keep as Value to handle complex content
-}
+// Removed unused struct AnthropicMessage
+// #[derive(Serialize, Debug)]
+// pub(crate) struct AnthropicMessage {
+//     role: String,
+//     content: Vec<AnthropicContentBlock>,
+// }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -70,16 +70,15 @@ pub(crate) struct AnthropicContentBlock {
     // pub(crate) is_error: Option<bool>,
 }
 
-
-#[derive(Serialize, Clone)] // Added Clone
-pub(crate) struct ToolResultBlock {
-    #[serde(rename = "type")]
-    pub(crate) type_: String, // Always "tool_result"
-    pub(crate) tool_use_id: String,
-    pub(crate) content: Value, // Changed to Value to match Anthropic's structure [ { "type": "text", "text": "..." } ] or [ { "type": "image", ... } ]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) is_error: Option<bool>,
-}
+// Removed unused struct ToolResultBlock
+// #[derive(Serialize, Debug)]
+// pub(crate) struct ToolResultBlock {
+//     #[serde(rename = "type")]
+//     type_: String,
+//     tool_use_id: String,
+//     content: String, // Can be JSON string or simple text
+//     // TODO: Add is_error field if needed
+// }
 
 // Keep this for payload structure, ensure Clone is derived
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -106,17 +105,17 @@ struct BackendResponsePayload {
 //     budget_tokens: u32,
 // }
 
-#[derive(Serialize)]
-struct AnthropicRequest<'a> {
-    model: &'a str,
-    max_tokens: u32,
-    messages: Vec<AnthropicMessage>,
-    tools: Vec<computer_use_ai_sdk::ToolDefinition>, // Use full path
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-    // #[serde(skip_serializing_if = "Option::is_none")] // Removed thinking budget
-    // thinking: Option<AnthropicThinkingBudget>,
-}
+// Removed unused struct AnthropicRequest
+// #[derive(Serialize, Debug)]
+// struct AnthropicRequest<'a> {
+//     model: &'a str,
+//     max_tokens: u32,
+//     messages: &'a [AnthropicMessage],
+//     system: Option<&'a str>,
+//     tools: Option<&'a [ToolDefinition]>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     tool_choice: Option<serde_json::Value>,
+// }
 
 #[derive(Deserialize, Debug)]
 struct AnthropicUsage {
@@ -128,80 +127,23 @@ struct AnthropicUsage {
 
 #[derive(Deserialize, Debug)]
 struct AnthropicResponse {
-    content: Vec<AnthropicContentBlock>,
-    stop_reason: String,
-    #[allow(dead_code)] // Allow dead code for potentially unused fields
-    usage: AnthropicUsage,
+    _id: Option<String>,
+    #[serde(rename = "type")]
+    _type_: Option<String>,
+    _role: Option<String>,
+    _model: Option<String>,
+    _content: Option<Vec<AnthropicContentBlock>>,
+    _stop_reason: Option<String>,
+    _stop_sequence: Option<String>,
+    _usage: Option<AnthropicUsage>,
 }
-
-// Import the coordinates utility
-use crate::utils::coordinates;
 
 // --- Helper Functions ---
 
-async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
-     match BASE64_STANDARD.decode(base64_data) {
-        Ok(image_bytes) => {
-            match image::load_from_memory(&image_bytes) {
-                Ok(img) => {
-                    let (width, height) = img.dimensions();
-                    let max_dim = 1024.0; // Max dimension for resizing
-                    let scale = if width > height {
-                        max_dim / width as f32
-                    } else {
-                        max_dim / height as f32
-                    };
-
-                    let resized_img = if scale < 1.0 {
-                        let new_width = (width as f32 * scale).round() as u32;
-                        let new_height = (height as f32 * scale).round() as u32;
-
-                        // Store the scaling information
-                        coordinates::update_scaling_info(width, height, new_width, new_height, scale);
-
-                        img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
-                    } else {
-                        // No resizing needed, store 1:1 scaling
-                        coordinates::update_scaling_info(width, height, width, height, 1.0);
-                        img // No resize needed if already smaller or equal
-                    };
-
-                    let mut png_bytes = Vec::new();
-                    match resized_img.write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png) {
-                        Ok(_) => {
-                             let resized_base64_data = BASE64_STANDARD.encode(&png_bytes);
-                             Ok(json!([{ // Return as array of content blocks
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": resized_base64_data
-                                }
-                             }]))
-                        }
-                        Err(e) => {
-                            let err_msg = format!("Failed to encode resized image to PNG: {}", e);
-                            error!("{}", err_msg);
-                            // Return error as text block within the array
-                            Ok(json!([{"type": "text", "text": err_msg}]))
-                        }
-                    }
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to load image from screenshot bytes: {}", e);
-                    error!("{}", err_msg);
-                     Ok(json!([{"type": "text", "text": err_msg}]))
-                }
-            }
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to decode base64 screenshot data: {}", e);
-            error!("{}", err_msg);
-             Ok(json!([{"type": "text", "text": err_msg}]))
-        }
-    }
-}
-
+// Removed unused function process_screenshot
+// async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
+//     Ok(json!("screenshot data processed")) // Placeholder
+// }
 
 // --- Submit Query Function (Refactored with New Agent) ---
 
