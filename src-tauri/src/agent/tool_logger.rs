@@ -1,8 +1,10 @@
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Emitter};
 use tracing::{info, warn};
+use crate::agent::implementations::tool_provider::AsyncToolFn;
+use futures::FutureExt;
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -82,4 +84,55 @@ where
 
     // Return the original result
     result
+}
+
+// Add a function to log async tool execution
+pub async fn log_async_tool_execution<'a, Fut>(
+    app_handle: &tauri::AppHandle,
+    tool_name: &str,
+    input: serde_json::Value,
+    executor: Fut, // Accept the future directly
+) -> Result<serde_json::Value, String>
+where
+    Fut: std::future::Future<Output = Result<serde_json::Value, String>> + Send + 'a,
+{
+    // Emit start event
+    if let Err(e) = app_handle.emit("tool-execution-start", (tool_name, &input)) {
+        log::warn!("Failed to emit tool-execution-start event: {}", e);
+    }
+
+    // Execute the future and capture the result
+    let result = std::panic::AssertUnwindSafe(executor).catch_unwind().await;
+
+    // Process the result and emit end/error event
+    match result {
+        Ok(Ok(output)) => {
+            if let Err(e) = app_handle.emit("tool-execution-end", (tool_name, &output)) {
+                log::warn!("Failed to emit tool-execution-end event: {}", e);
+            }
+            Ok(output)
+        }
+        Ok(Err(error_msg)) => {
+             let error_val = serde_json::json!({ "error": error_msg });
+             if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
+                log::warn!("Failed to emit tool-execution-error event: {}", e);
+            }
+            Err(error_msg)
+        }
+        Err(panic_payload) => {
+            let error_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                format!("Tool execution panicked: {}", s)
+            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                format!("Tool execution panicked: {}", s)
+            } else {
+                "Tool execution panicked with unknown payload".to_string()
+            };
+            log::error!("Tool '{}' panicked: {}", tool_name, error_msg);
+            let error_val = serde_json::json!({ "error": &error_msg });
+             if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
+                log::warn!("Failed to emit tool-execution-error event after panic: {}", e);
+            }
+            Err(error_msg)
+        }
+    }
 }

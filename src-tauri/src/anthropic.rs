@@ -3,47 +3,44 @@ use crate::state::AppState;
 use crate::tts;
 // use reqwest::Client; // Removed unused
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use image::{GenericImageView, ImageFormat, EncodableLayout}; // Keep if process_screenshot is kept/used
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Keep if process_screenshot is kept/used
-use std::io::Cursor; // Keep if process_screenshot is kept/used
-use tracing::{error, info}; // Removed unused debug, warn
+use serde_json::{Value}; // Keep Value
+// use image::{GenericImageView, ImageFormat}; // Removed unused
+// use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Removed unused
+// use std::io::Cursor; // Removed unused
+use tracing::{error, info};
 use tauri::State;
 use tauri::{Manager, Emitter}; // Import Manager and Emitter
 // use futures::future; // Removed unused
+use std::sync::Arc;
+use crate::agent::structs::{AgentError};
 
 // --- Agent Integration ---
 use crate::agent::{
     implementations::{
-        agent_brain::AnthropicBrain, // Use the new brain
+        // Correct path based on resolved structure
         memory_manager::SimpleMemoryManager,
         tool_provider::LocalToolProvider,
         agent_runner::DefaultAgentRunner,
+        // AnthropicBrain is now selected via the factory
+        // agent_brain::AnthropicBrain, // Remove direct import
     },
-    structs::AgentError,
     traits::AgentRunnable, // Import the trait for the run method
-    tools::basic_tools::register_basic_tools, // Import the tool registration helper
-    tools::desktop_tools::register_desktop_tools, // Import the new desktop tool registration helper
+    tools::{ // Changed this block
+        basic_tools::register_basic_tools,
+        desktop_tools::register_desktop_tools,
+        browser_tools::get_browser_tool_definitions,
+        browser_controller::BrowserController,
+    },
+     providers::factory::BrainFactory, // Keep BrainFactory import
 };
 
 // --- Agent State ---
 
-#[derive(Debug, Clone, PartialEq, Serialize)] // Added Serialize for potential logging/debugging
-enum AgentState {
-    Thinking,
-    Acting,
-    ProcessingActionResult,
-    Finished,
-    Failed,
-}
+// Removed unused enum AgentState
 
 // --- Anthropic API Structs ---
 
-#[derive(Serialize, Clone)]
-pub(crate) struct AnthropicMessage {
-    pub(crate) role: String,
-    pub(crate) content: Value, // Keep as Value to handle complex content
-}
+// Removed unused struct AnthropicMessage
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -59,22 +56,9 @@ pub(crate) struct AnthropicContentBlock {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) input: Option<Value>,
     // Fields related to tool_result (we create these, don't expect from API)
-    // #[serde(skip_serializing_if = "Option::is_none")]
-    // pub(crate) tool_use_id: Option<String>,
-    // #[serde(skip_serializing_if = "Option::is_none")]
-    // pub(crate) is_error: Option<bool>,
 }
 
-
-#[derive(Serialize, Clone)] // Added Clone
-pub(crate) struct ToolResultBlock {
-    #[serde(rename = "type")]
-    pub(crate) type_: String, // Always "tool_result"
-    pub(crate) tool_use_id: String,
-    pub(crate) content: Value, // Changed to Value to match Anthropic's structure [ { "type": "text", "text": "..." } ] or [ { "type": "image", ... } ]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) is_error: Option<bool>,
-}
+// Removed unused struct ToolResultBlock
 
 // Keep this for payload structure, ensure Clone is derived
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -83,7 +67,6 @@ pub struct SubmitQueryResult {
     pub audio_base64: Option<String>,
     pub agent_state: String, // Send final state to frontend
     pub screenshot_base64: Option<String>, // Optional screenshot data from the session
-    // pub conversation_history: Vec<AnthropicMessage>, // Optionally send history for debugging
 }
 
 // Define the payload structure for the event
@@ -94,24 +77,8 @@ struct BackendResponsePayload {
 }
 
 // Removed AnthropicThinkingBudget as it was commented out
-// #[derive(Serialize)]
-// struct AnthropicThinkingBudget {
-//     #[serde(rename = "type")]
-//     type_: String,
-//     budget_tokens: u32,
-// }
 
-#[derive(Serialize)]
-struct AnthropicRequest<'a> {
-    model: &'a str,
-    max_tokens: u32,
-    messages: Vec<AnthropicMessage>,
-    tools: Vec<computer_use_ai_sdk::ToolDefinition>, // Use full path
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
-    // #[serde(skip_serializing_if = "Option::is_none")] // Removed thinking budget
-    // thinking: Option<AnthropicThinkingBudget>,
-}
+// Removed unused struct AnthropicRequest
 
 #[derive(Deserialize, Debug)]
 struct AnthropicUsage {
@@ -123,66 +90,20 @@ struct AnthropicUsage {
 
 #[derive(Deserialize, Debug)]
 struct AnthropicResponse {
-    content: Vec<AnthropicContentBlock>,
-    stop_reason: String,
-    #[allow(dead_code)] // Allow dead code for potentially unused fields
-    usage: AnthropicUsage,
+    _id: Option<String>,
+    #[serde(rename = "type")]
+    _type_: Option<String>,
+    _role: Option<String>,
+    _model: Option<String>,
+    _content: Option<Vec<AnthropicContentBlock>>,
+    _stop_reason: Option<String>,
+    _stop_sequence: Option<String>,
+    _usage: Option<AnthropicUsage>,
 }
-
-// Import the coordinates utility
-use crate::utils::coordinates;
 
 // --- Helper Functions ---
 
-async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
-     match BASE64_STANDARD.decode(base64_data) {
-        Ok(image_bytes) => {
-            match image::load_from_memory(&image_bytes) {
-                Ok(img) => {
-                    let (width, height) = img.dimensions();
-
-                    // Always update scaling info with 1.0 factor, as we are not resizing
-                    coordinates::update_scaling_info(width, height, width, height, 1.0);
-
-                    // Encode as JPEG with quality 75
-                    let mut jpg_bytes = Vec::new();
-                    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_bytes, 75); // Quality 0-100
-
-                    match encoder.encode(img.to_rgb8().as_bytes(), width, height, image::ColorType::Rgb8.into()) {
-                        Ok(_) => {
-                             let jpeg_base64_data = BASE64_STANDARD.encode(&jpg_bytes);
-                             Ok(json!([{ // Return as array of content blocks
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/jpeg", // Use JPEG media type
-                                    "data": jpeg_base64_data
-                                }
-                             }]))
-                        }
-                        Err(e) => {
-                            let err_msg = format!("Failed to encode image to JPEG: {}", e);
-                            error!("{}", err_msg);
-                            // Return error as text block within the array
-                            Ok(json!([{"type": "text", "text": err_msg}]))
-                        }
-                    }
-                }
-                Err(e) => {
-                    let err_msg = format!("Failed to load image from screenshot bytes: {}", e);
-                    error!("{}", err_msg);
-                     Ok(json!([{"type": "text", "text": err_msg}]))
-                }
-            }
-        }
-        Err(e) => {
-            let err_msg = format!("Failed to decode base64 screenshot data: {}", e);
-            error!("{}", err_msg);
-             Ok(json!([{"type": "text", "text": err_msg}]))
-        }
-    }
-}
-
+// Removed unused function process_screenshot
 
 // --- Submit Query Function (Refactored with New Agent) ---
 
@@ -190,136 +111,173 @@ async fn process_screenshot(base64_data: &str) -> Result<Value, String> {
 pub async fn submit_query(
     query: String,
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle, // Pass AppHandle
-) -> Result<(), String> { // Return Ok(()) or Err(string) for command result
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     info!("Received query: {}", query);
+
+    let cancel_rx = state.cancel_rx.clone();
 
     // --- Instantiate Agent Components ---
     let memory_manager = SimpleMemoryManager::new();
 
-    // Create tool provider with app handle for event emission
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-    // Register tools
-    // TODO: This currently registers only basic file/shell tools.
-    // Adapt `register_basic_tools` or create new registration functions
-    // to include the richer set of desktop interaction tools previously defined
-    // in `src-tauri/src/tools/definitions.rs` once they are implemented
-    // according to the `ToolProvider` trait requirements.
+    // --- Instantiate Browser Controller ---
+    let browser_controller = match BrowserController::new().await {
+        Ok(controller) => {
+            info!("Browser Controller initialized successfully.");
+            Some(controller) // Store as Option
+        }
+        Err(e) => {
+            error!("Failed to initialize Browser Controller: {}. Browser tools will not be available.", e);
+            // Allow agent to continue without browser tools, just log the error.
+            None
+        }
+    };
+
+    // Register basic file/shell tools
     register_basic_tools(&mut tool_provider).await;
     info!("Registered basic tools for the agent.");
 
-    // Register desktop tools (currently placeholders)
-    // Pass cloned app_handle and state for the closures to capture
+    // Register desktop tools
     register_desktop_tools(&mut tool_provider, app_handle.clone(), state.clone()).await;
-    info!("Registered desktop tools for the agent (placeholders).");
+    info!("Registered desktop tools for the agent.");
 
-    // Instantiate the brain, handling potential env var errors
-    let agent_brain = match AnthropicBrain::from_env() {
+    // --- Register Browser Tools (only if controller initialized) ---
+    if let Some(browser_controller) = browser_controller {
+        let browser_definitions = get_browser_tool_definitions();
+        let shared_browser_controller = Arc::new(tokio::sync::Mutex::new(browser_controller)); // Wrap in Arc<Mutex>
+
+        for definition in browser_definitions {
+            let tool_name = definition.name.clone();
+            let log_tool_name = tool_name.clone();
+            let controller_arc = shared_browser_controller.clone(); // Clone Arc
+
+            let executor = move |input: Value| {
+                let controller_lock = controller_arc.clone(); // Clone Arc again for async block
+                let name = tool_name.clone();
+                async move {
+                    let mut controller = controller_lock.lock().await; // Lock the Mutex
+                    let result = match name.as_str() {
+                        "browser_navigate" => controller.navigate(&input).await,
+                        "browser_extract_content" => controller.extract_content(&input).await,
+                        "browser_interact" => controller.interact(&input).await,
+                        "browser_get_current_url" => controller.get_current_url(&input).await,
+                        "browser_screenshot" => controller.screenshot(&input).await,
+                        _ => Err(AgentError::ToolNotFound(name)),
+                    };
+                    match result {
+                        Ok(tool_result) => Ok(tool_result.output),
+                        Err(agent_error) => Err(agent_error.to_string()),
+                    }
+                }
+            };
+            tool_provider.register_async_tool(definition, executor).await;
+            info!("Registered browser tool: {}", log_tool_name);
+        }
+    } else {
+        info!("Skipping browser tool registration as controller failed to initialize.");
+    }
+
+    // Use the BrainFactory to create the appropriate AI provider brain
+    let agent_brain = match BrainFactory::create_brain() { // Keep using BrainFactory
         Ok(brain) => brain,
         Err(e) => {
              let err_msg = format!("Failed to initialize agent brain: {}", e);
              error!("{}", err_msg);
-              // Emit error response immediately
-             let result = SubmitQueryResult {
-                 text: err_msg.clone(),
-                 audio_base64: None,
-                 agent_state: "Failed".to_string(),
-                 screenshot_base64: None,
-             };
-             let payload = BackendResponsePayload { query, response: result };
-             // Use a blocking send or spawn a task if emit needs to be async within a sync context
-             // For now, assume direct emit works or handle potential blocking issues if they arise.
+             let result = SubmitQueryResult { text: err_msg.clone(), audio_base64: None, agent_state: "Failed".to_string(), screenshot_base64: None };
+             let payload = BackendResponsePayload { query: query.clone(), response: result };
              if let Some(window) = app_handle.get_window("main") {
-                 window.emit("backend-response", payload)
-                     .map_err(|e| format!("Emit failed: {}", e))?;
-             } else {
-                 error!("Main window not found, cannot emit initial error.");
-             }
-             return Err(err_msg); // Return error from the command itself
-         }
-     };
+                 window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
+             } else { error!("Main window not found, cannot emit initial brain error."); }
+             return Err(err_msg);
+        }
+    };
     info!("Agent brain initialized.");
 
-    // Max steps for the agent loop
-    const MAX_ITERATIONS: u32 = 15; // Set a reasonable limit
+    const MAX_ITERATIONS: u32 = 15;
 
-    // Create the agent runner
-    let mut agent_runner = DefaultAgentRunner::new(
+    // Create the agent runner using with_boxed_brain because BrainFactory returns a Box
+    let mut agent_runner = DefaultAgentRunner::with_boxed_brain(
         memory_manager,
-        tool_provider,
-        agent_brain,
+        tool_provider, // This now contains all registered tools
+        agent_brain,   // Pass the Box<dyn AgentBrain>
         MAX_ITERATIONS,
     );
     info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
 
-    // --- Run the Agent ---
     info!("Starting agent run...");
-    let agent_result = agent_runner.run(query.clone()).await;
+    let agent_result = agent_runner.run(query.clone(), cancel_rx).await;
+
+    state.reset_cancel();
+    info!("Agent cancellation signal reset.");
 
     // --- Process Agent Result ---
-    let (final_response_text, final_state_str) = match agent_result {
-        Ok(final_text) => {
-            info!("Agent finished successfully.");
-            (final_text, "Finished".to_string())
-        }
-        Err(agent_error) => {
-             error!("Agent failed: {:?}", agent_error);
-             // Provide a user-friendly error message based on the AgentError type
-             let user_error_message = match agent_error {
-                 AgentError::MaxStepsReached => format!("Agent stopped after reaching the maximum {} steps. The task might be too complex or require more iterations.", MAX_ITERATIONS),
-                 AgentError::LlmError(s) => format!("An error occurred while communicating with the AI model: {}", s),
-                 AgentError::ToolError(s) => format!("An error occurred while executing a required tool: {}", s),
-                 AgentError::ToolNotFound(s) => format!("A required tool ('{}') could not be found.", s),
-                 AgentError::ConfigurationError(s) => format!("Agent configuration error: {}", s),
-                 AgentError::MemoryError(s) => format!("Agent memory error: {}", s),
-                 AgentError::StateError(s) => format!("Agent encountered an invalid state: {}", s),
-                 AgentError::InputError(s) => format!("Invalid input provided to the agent: {}", s),
-                 AgentError::OutputError(s) => format!("Error processing agent output: {}", s),
-                 AgentError::LoopError(s) => format!("An internal error occurred in the agent loop: {}", s),
-                 AgentError::Terminated => "Agent execution was terminated.".to_string(),
-                 AgentError::Unknown(s) => format!("An unknown error occurred: {}", s),
-                 // Consider adding more specific handling if needed
-             };
-            (user_error_message, "Failed".to_string())
-        }
-    };
-
-    info!("Agent final response text: {}", final_response_text);
-
-    // --- Perform TTS Synthesis ---
-    let audio_base64 = match tts::invoke_tts(final_response_text.clone(), state.clone()).await {
-        Ok(base64) => Some(base64),
+    let final_response = match agent_result {
+        Ok(message) => SubmitQueryResult {
+            text: message,
+            audio_base64: None, // Add TTS later if needed
+            agent_state: "Finished".to_string(),
+            screenshot_base64: None, // Capture screenshot if needed
+        },
         Err(e) => {
-            error!("TTS synthesis failed: {}", e);
-            None // Proceed without audio if TTS fails
+            error!("Agent run failed: {}", e);
+            // Map AgentError to a user-friendly state/message
+            let (state_str, msg) = match e {
+                AgentError::Terminated => ("Cancelled".to_string(), "Agent execution was cancelled.".to_string()),
+                AgentError::MaxStepsReached => ("Failed".to_string(), "Agent reached maximum steps.".to_string()),
+                _ => ("Failed".to_string(), format!("Agent error: {}", e)),
+            };
+            SubmitQueryResult {
+                text: msg,
+                audio_base64: None,
+                agent_state: state_str,
+                screenshot_base64: None,
+            }
         }
     };
 
-    // --- Prepare and Emit Final Result ---
-    let result = SubmitQueryResult {
-        text: final_response_text,
-        audio_base64,
-        agent_state: final_state_str,
-        screenshot_base64: None, // Default to None, could be updated in future to include last screenshot
-    };
-    let payload = BackendResponsePayload {
-        query: query.clone(), // Use the original query
-        response: result,
-    };
+    info!("Agent run complete. Final state: {}", final_response.agent_state);
 
-    info!("Emitting final backend-response");
-     match app_handle.get_window("main") {
-         Some(window) => {
-             window.emit("backend-response", payload)
-                 .map_err(|e| format!("Failed to emit backend-response event: {}", e))?;
-             info!("Successfully emitted backend-response event.");
-             Ok(()) // Command succeeded
-         }
-         None => {
-             let err_msg = "Main window not found, cannot emit event.".to_string();
-             error!("{}", err_msg);
-             Err(err_msg) // Command failed
-         }
-     }
+    // --- Emit Final Response --- //
+    let payload = BackendResponsePayload { query, response: final_response };
+    if let Some(window) = app_handle.get_window("main") {
+        window.emit("backend-response", payload)
+            .map_err(|e| format!("Emit failed: {}", e))?;
+        info!("Final response emitted to frontend.");
+    } else {
+        error!("Main window not found, cannot emit final response.");
+    }
+
+    Ok(())
+}
+
+// --- Browser Cleanup Function ---
+
+#[tauri::command]
+pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String> {
+    log::info!("Cleaning up browser resources...");
+
+    // Simplified cleanup - assuming BrowserController handles its own drop
+    // Or rely on OS to clean up processes on app exit.
+    // The pkill approach might be too aggressive or fail.
+
+    // If BrowserController needs explicit cleanup, call it here.
+    // e.g., if state holds Arc<Mutex<BrowserController>>:
+    // let state = app_handle.state::<AppState>();
+    // if let Some(controller) = state.browser_controller.lock().await {
+    //     controller.close().await; // Assuming a close method exists
+    // }
+
+    log::info!("Browser cleanup check completed (manual pkill removed).");
+    Ok(())
+}
+
+// --- TTS Function ---
+
+#[tauri::command]
+pub async fn get_tts_audio(text: String, _state: State<'_, AppState>) -> Result<String, String> {
+    let _ = text; // Mark text as used
+    error!("TTS function is currently stubbed out.");
+    Err("TTS functionality is temporarily disabled.".to_string())
 }

@@ -1,6 +1,6 @@
-use std::fmt;
+// Removed unused import use std::fmt;
 
-// Enum to represent which click method was used - move to module level
+/* Removed unused enum ClickMethod
 pub(crate) enum ClickMethod {
     AXPress,
     AXClick,
@@ -16,7 +16,9 @@ impl fmt::Display for ClickMethod {
         }
     }
 }
+*/
 
+/* Removed unused enum ClickMethodSelection (except for Auto variant which is implied by default logic)
 // Define enum for click method selection
 #[derive(Debug)]
 pub(crate) enum ClickMethodSelection {
@@ -35,3 +37,4 @@ impl Default for ClickMethodSelection {
         ClickMethodSelection::Auto
     }
 }
+*/

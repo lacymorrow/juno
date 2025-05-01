@@ -905,7 +905,8 @@ const DevToolsPanel: React.FC = () => {
 
     if (isNaN(x) || isNaN(y)) {
       console.error("Invalid coordinates entered");
-      setCoordinateTestResult({ error: "Invalid coordinates entered" });
+      // Use toast for user feedback instead of state
+      toast.error("Invalid coordinates entered for QA test.");
       return;
     }
 
@@ -921,7 +922,10 @@ const DevToolsPanel: React.FC = () => {
       setCoordinateTestResult(result);
     } catch (error) {
       console.error("Coordinate Transformation Test Error:", error);
-      setCoordinateTestResult({ error: String(error) });
+      // Use toast for error feedback
+      toast.error(`Coordinate Test Failed: ${error}`);
+      // Optionally set state to show error in UI if needed
+      // setCoordinateTestResult({ error: String(error) });
     } finally {
       setCoordTestLoading(false);
     }
@@ -2139,6 +2143,21 @@ const DevToolsPanel: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+      {/* Test Click Visualization */}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={handleTestClickVisualization}
+          disabled={loadingStates.testClickVisualization}
+          variant="outline"
+          title="Test Click Visualization"
+        >
+          <MousePointerClick size={14} className="mr-1" />
+          {loadingStates.testClickVisualization
+            ? "Testing..."
+            : "Test Click Visualization"}
+        </Button>
       </div>
     </div>
   );
