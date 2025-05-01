@@ -16,6 +16,7 @@ use tauri::{
     WebviewWindow, // Keep WebviewWindow
     Wry, // Keep Wry if needed elsewhere, remove if not
 };
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Modifiers, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
 
@@ -41,7 +42,7 @@ pub mod utils;
 pub mod agent;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, keyboard::*, mouse::*, shell::*, text_editor::*, window::*};
+use commands::{app_url::*, core::*, element::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -66,6 +67,14 @@ pub fn run() {
         }
     };
 
+    // --- Initialize Provider Settings ---
+    if let Err(e) = agent::providers::factory::BrainFactory::init() {
+        tracing::warn!("Failed to initialize AI provider settings: {}", e);
+        tracing::info!("Continuing with environment variables or fallback defaults");
+    } else {
+        tracing::info!("Provider settings initialized from configuration");
+    }
+
     // --- Handle CLI Commands ---
     // If handle_cli_commands returns true, it means a command was executed
     // and the application should exit.
@@ -87,12 +96,42 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| { // Event type inferred or use generic
+            // Log the event state
+            println!("[GlobalShortcut State] {:?}", event.state());
+
+            // Define the specific shortcut we're interested in
+            let escape_shortcut = Shortcut::new(None, Code::Escape); // No modifiers for Escape key
+
+            // Check if the triggered shortcut is the one we defined
+            if shortcut == &escape_shortcut {
+                // Match on the event state
+                match event.state() {
+                    ShortcutState::Pressed => {
+                        println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
+                        // --- Get AppState and trigger cancellation ---
+                        let app_state = app.state::<state::AppState>();
+                        app_state.signal_cancel(); // Use the new method
+                        info!("Agent cancellation signal sent."); // Use info macro
+
+                        // Emit event to frontend to potentially update UI (e.g., show "stopping...")
+                        if let Err(e) = app.emit("agent-stopping", ()) { // Use a different event name
+                            eprintln!("[GlobalShortcut Error] Failed to emit agent-stopping event: {}", e);
+                        }
+                    }
+                    ShortcutState::Released => {
+                        println!("[GlobalShortcut] Escape released.");
+                    }
+                }
+            }
+        }).build())
         .manage(app_state) // Manage the AppState
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
             list_apps,
             check_server_status,
             submit_query,
+            anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             capture_screenshot_command,
             dev_get_focused_element_info,
@@ -126,13 +165,6 @@ pub fn run() {
             dev_double_click,
             dev_get_cursor_position,
             dev_test_click_visualization,
-            // QA Mouse Testing Functions
-            commands::mouse::qa_test_click,
-            commands::mouse::qa_test_click_series,
-            commands::mouse::qa_test_coordinate_transformation,
-            commands::mouse::qa_test_click_visualization,
-            commands::mouse::qa_test_select_text,
-            commands::mouse::qa_test_scroll,
             dev_bash_command,
             // Text Editor Commands
             dev_text_editor_view,
@@ -140,6 +172,16 @@ pub fn run() {
             dev_text_editor_str_replace,
             dev_text_editor_insert,
             dev_text_editor_undo_edit,
+            // Provider Management Commands
+            get_providers,
+            get_active_provider,
+            set_active_provider,
+            get_provider_settings,
+            update_provider_api_key,
+            update_provider_model,
+            update_provider_max_tokens,
+            update_provider_temperature,
+            update_provider_system_prompt,
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
@@ -222,6 +264,13 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
+            // --- Register the Global Shortcut ---
+            app_handle
+                .global_shortcut()
+                .register("Escape")
+                .expect("Failed to register Escape shortcut");
+
+            // --- Menu Setup ---
             let toggle_panel_item = MenuItemBuilder::new("Show Panel")
                 .id("toggle_panel")
                 .build(&app_handle)

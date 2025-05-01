@@ -1,11 +1,10 @@
-use super::actions::ClickMethodSelection;
+use accessibility::{AXAttribute, AXUIElement, Error as AXError};
+use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
 use super::constants::*;
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
-use accessibility::{AXAttribute, AXUIElement, Error as AXError};
-use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
 use core_foundation::base::{CFType, TCFType, CFTypeRef};
 use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::base::CGFloat;
@@ -22,6 +21,7 @@ use std::thread;
 use std::time::Duration;
 use core_foundation::array::CFArray;
 use core_graphics::display::CGSize;
+use super::ffi::AXValueCreate;
 
 // Define key code constants for keyboard shortcuts
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
@@ -53,14 +53,8 @@ pub(crate) fn get_application(element: &MacOSUIElement) -> Option<MacOSUIElement
 
 pub(crate) fn click_with_method(
     element: &MacOSUIElement,
-    method: ClickMethodSelection,
 ) -> Result<ClickResult, AutomationError> {
-    match method {
-        ClickMethodSelection::Auto => click_auto(element),
-        ClickMethodSelection::AXPress => click_press(element),
-        ClickMethodSelection::AXClick => click_accessibility_click(element),
-        ClickMethodSelection::MouseSimulation => click_mouse_simulation(element),
-    }
+    click_auto(element)
 }
 
 pub(crate) fn click_auto(element: &MacOSUIElement) -> Result<ClickResult, AutomationError> {
