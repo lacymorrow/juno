@@ -2,24 +2,35 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::structs::ToolDefinition;
 use crate::state::AppState;
 use crate::commands;
-use crate::utils::coordinates; // Import the coordinates module
-use tauri::{AppHandle, State, Manager};
+// use crate::utils::coordinates; // Unused
+use tauri::{State, Manager}; // Removed unused AppHandle
 use serde_json::{Value, json};
 use tracing::info;
-use std::fs;
-use std::process::Command;
-use std::io::Write; // Import the Write trait
-use std::sync::Arc;
+// use std::fs; // Unused
+// use std::process::Command; // Unused
+// use std::io::Write; // Unused
+// use std::sync::Arc; // Unused
 
-// Import missing functions that are registered at the crate root
-use crate::{
-    capture_screenshot_command,
-    dev_get_clipboard,
-    dev_set_clipboard,
-};
+// Removed unused imports: capture_screenshot_command, dev_get_clipboard, dev_set_clipboard
+// use crate::{
+//     capture_screenshot_command,
+//     dev_get_clipboard,
+//     dev_set_clipboard,
+// };
 
-// Ensure all necessary command modules are imported
+// Ensure all necessary command modules are imported - keep even if some are unused for now
+// as they might be needed by the stubbed function later.
 use crate::commands::{core, element, keyboard, mouse};
+
+// Stub function to resolve compilation error
+async fn register_additional_computer_use_tools(
+    _provider: &mut LocalToolProvider,
+    _app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // TODO: Implement registration of additional computer use tools
+    // e.g., file system, window management, etc. based on Anthropic spec
+    Ok(())
+}
 
 // Function to register all desktop tools with the tool provider
 pub async fn register_desktop_tools(
