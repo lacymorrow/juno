@@ -1378,10 +1378,9 @@ pub(crate) fn post_mouse_event(
     Ok(())
 }
 
-/// Wait for a specified duration in seconds
-pub(crate) fn wait(duration_seconds: u64) -> Result<(), AutomationError> {
-    let duration_ms = duration_seconds * 1000;
-    debug!("Waiting for {} seconds ({} ms)", duration_seconds, duration_ms);
+/// Wait for a specified duration in milliseconds
+pub(crate) fn wait(duration_ms: u64) -> Result<(), AutomationError> {
+    debug!("Waiting for {} ms", duration_ms);
 
     std::thread::sleep(std::time::Duration::from_millis(duration_ms));
 
