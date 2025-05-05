@@ -5,7 +5,6 @@ use std::{env, fs::File, io::Write};
 use std::io::ErrorKind;
 use tracing::{info, error};
 use crate::agent::structs::AgentError;
-use crate::agent::providers::factory::Provider;
 
 /// Configuration structure for AI providers
 #[derive(Serialize, Deserialize, Debug, Clone)]

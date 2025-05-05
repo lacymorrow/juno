@@ -37,44 +37,22 @@ pub(crate) async fn dev_type_text(
 pub(crate) async fn dev_press_key(
     app: AppHandle,
     state: State<'_, AppState>,
-    key: String
+    key: String,
+    modifier: Option<String>
 ) -> Result<(), String> {
-    println!("[DEV_TOOL] Attempting to press key sequence: {}", key);
+    println!("[DEV_TOOL] Attempting to press key sequence: {} with modifier: {:?}", key, modifier);
 
     #[cfg(target_os = "macos")]
     {
-         // Get the focused element first
-        let focused_element = match state.desktop.focused_element() {
-            Ok(el) => el,
-            Err(e) => {
-                let err_msg = format!("Failed to get focused element for key press: {}", e);
-                println!("[DEV_TOOL] Error: {}", err_msg);
-                return Err(err_msg);
-            }
-        };
-
-        // Coerce single lowercase letters to uppercase for the SDK
-        let key_to_press = if key.len() == 1 {
-            let char = key.chars().next().unwrap();
-            if char.is_ascii_lowercase() {
-                println!("[DEV_TOOL] Coercing lowercase key '{}' to uppercase '{}'", char, char.to_ascii_uppercase());
-                char.to_ascii_uppercase().to_string()
-            } else {
-                key // Use original if not lowercase
-            }
-        } else {
-            key // Use original if not single char
-        };
-
-        // Press key on the element using the potentially coerced key
-        match focused_element.press_key(&key_to_press) {
-             Ok(_) => {
-                println!("[DEV_TOOL] press_key succeeded for: {}", key_to_press); // Log the key actually pressed
-                send_dev_tool_notification(&app, "Press Key", &format!("Pressed key(s): {}", key_to_press))?; // Send notification
+        // Directly call the engine's press_key which handles modifiers
+        match state.desktop.press_key(&key, modifier.as_deref()) {
+            Ok(_) => {
+                println!("[DEV_TOOL] press_key succeeded for: {} with modifier: {:?}", key, modifier);
+                send_dev_tool_notification(&app, "Press Key", &format!("Pressed key(s): {} Modifier: {:?}", key, modifier))?;
                 Ok(())
             }
             Err(e) => {
-                let err_msg = format!("Failed to call press_key for '{}': {}", key_to_press, e); // Log the key actually pressed
+                let err_msg = format!("Failed to call press_key for '{}' with modifier {:?}: {}", key, modifier, e);
                 println!("[DEV_TOOL] Error: {}", err_msg);
                 Err(err_msg)
             }

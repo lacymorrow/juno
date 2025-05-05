@@ -63,9 +63,13 @@ struct OpenAIToolFunction {
 
 #[derive(Deserialize, Debug)]
 struct OpenAIResponse {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     object: String,
+    #[allow(dead_code)]
     created: u64,
+    #[allow(dead_code)]
     model: String,
     choices: Vec<OpenAIChoice>,
     // usage: OpenAIUsage,
@@ -73,8 +77,10 @@ struct OpenAIResponse {
 
 #[derive(Deserialize, Debug)]
 struct OpenAIChoice {
+    #[allow(dead_code)]
     index: u32,
     message: OpenAIMessage,
+    #[allow(dead_code)]
     finish_reason: String,
 }
 
