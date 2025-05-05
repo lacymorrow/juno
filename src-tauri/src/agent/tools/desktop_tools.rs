@@ -689,40 +689,6 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(triple_click_def, triple_click_exec).await;
     info!("Registered tool: triple_click");
 
-    // wait
-    #[derive(serde::Deserialize)]
-    struct WaitInput { duration: f64 }
-    let wait_def = ToolDefinition {
-        name: "wait".to_string(),
-        description: "Wait for a specified duration in seconds.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "duration": { "type": "number", "description": "The duration to wait in seconds." }
-            },
-            "required": ["duration"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let wait_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<WaitInput>(input)
-                .map_err(|e| format!("Failed to parse wait input: {}", e))?;
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::core::dev_wait(args.duration, state_manager).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error during wait: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(wait_def, wait_exec).await;
-    info!("Registered tool: wait");
-
     // hold_key (Separate Hold)
     #[derive(serde::Deserialize)]
     struct KeyInput { key: String }
