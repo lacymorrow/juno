@@ -7,8 +7,8 @@ use tokio::sync::RwLock;
 use tauri::AppHandle;
 use serde_json::Value;
 
-use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
-use crate::agent::traits::ToolProvider;
+// Use the consolidated core module
+use crate::agent::core::{AgentError, ToolCall, ToolDefinition, ToolResult, ToolProvider};
 use crate::agent::tool_logger;
 
 // Define an async tool function type

@@ -1,0 +1,20 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# AI Agent Architecture
+
+The AI agent has been refactored from a monolithic structure (`src-tauri/src/agent/implementations/agent_runner.rs`) to an **Orchestrator-Worker** pattern.
+
+## Key Components:
+
+*   **Orchestrator**: The central coordinating component located in [`orchestrator.rs`](mdc:src-tauri/src/agents/orchestrator.rs). It receives user commands, uses an [`AgentBrain`](mdc:src-tauri/src/agent/traits.rs) (like `AnthropicBrain`) to plan tasks, and delegates execution to specialized agents.
+*   **Specialized Agents**: Located in the [`src-tauri/src/agents/`](mdc:src-tauri/src/agents/) directory. Each agent handles a specific domain:
+    *   [`browser_agent.rs`](mdc:src-tauri/src/agents/browser_agent.rs): Handles browser interactions, utilizing the [`browser_controller.rs`](mdc:src-tauri/src/agent/tools/browser_controller.rs).
+    *   [`desktop_agent.rs`](mdc:src-tauri/src/agents/desktop_agent.rs): Handles desktop UI interactions (clicks, typing, etc.). (Implementation pending)
+    *   [`basic_agent.rs`](mdc:src-tauri/src/agents/basic_agent.rs): Handles basic tasks like file I/O or shell commands. (Implementation pending)
+*   **Agent Initiation**: The `Orchestrator` is instantiated and its `process_command` method is called within the `submit_query` command handler in [`anthropic.rs`](mdc:src-tauri/src/anthropic.rs).
+*   **Core Structs**: Definitions for tasks, outputs, errors, etc., are in [`structs.rs`](mdc:src-tauri/src/agent/structs.rs).
+
+This structure aims to improve modularity, maintainability, and separation of concerns compared to the previous implementation.

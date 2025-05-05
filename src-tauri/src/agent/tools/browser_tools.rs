@@ -1,5 +1,6 @@
-use crate::agent::structs::ToolDefinition;
-use serde_json::json;
+use crate::agent::core::ToolDefinition;
+use crate::agent::tools::browser_controller::BrowserController;
+use serde_json::{json, Value};
 
 pub fn get_browser_tool_definitions() -> Vec<ToolDefinition> {
     vec![

@@ -1,6 +1,6 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
 # Anthropic Computer Use Features
@@ -70,10 +70,52 @@ Based on Claude's computer use capabilities, our implementation should include:
 
 ## Implementation Status
 
-Track implementation status for each feature, especially noting:
-- Complete implementations
-- Partially implemented features
-- Stubbed functions that need completion
-- Missing features that require implementation
+The following tools related to computer use are currently implemented and registered in [src-tauri/src/agent/tools/desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs) and [src-tauri/src/agent/tools/basic_tools.rs](mdc:src-tauri/src/agent/tools/basic_tools.rs):
+
+**Implemented:**
+
+*   **Mouse Control:**
+    *   `desktop_click` (left, right, double)
+    *   `triple_click`
+    *   `scroll`
+    *   `left_click_drag`
+    *   `mouse_move`
+    *   `left_mouse_down`
+    *   `left_mouse_up`
+    *   `left_click`
+    *   `right_click`
+    *   `middle_click`
+    *   `double_click`
+    *   `cursor_position`
+*   **Keyboard Control:**
+    *   `type_text`
+    *   `hold_key`
+    *   `release_key`
+*   **Clipboard Management:**
+    *   `get_clipboard`
+    *   `set_clipboard_content`
+*   **UI Navigation/Recognition:**
+    *   `get_focused_element_info`
+    *   `capture_screenshot` (full screen)
+    *   `capture_element_screenshot` (focused element)
+*   **System Integration:**
+    *   `wait` (Pause execution)
+    *   `run_terminal_command` (Basic tools)
+*   **File Operations (Basic):**
+    *   `read_file` (Basic tools)
+
+**Partially Implemented / Stubbed:**
+
+*   `register_additional_computer_use_tools` function in `desktop_tools.rs` is a stub for adding more features.
+*   `run_terminal_command` and `read_file` lack security hardening (sandboxing, path validation).
+
+**Missing Features (Examples based on Core Features list):**
+
+*   **Mouse Control:** Hover
+*   **Keyboard Control:** Press keyboard shortcuts (e.g., Cmd+C), Select text
+*   **Text Operations:** Copy, paste, edit text (beyond clipboard)
+*   **UI Navigation/Recognition:** Find element by attributes/selector (beyond focused), Window management (find, focus, manipulate), OCR
+*   **System Integration:** Write/manage files (beyond basic read), Launch/focus/close specific applications, Get system info
+*   **Browser Tools:** Separate tools exist but integration/status needs review.
 
 Update the implementation plan as features are completed or requirements change.

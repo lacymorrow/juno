@@ -1,10 +1,13 @@
+//! Module for handling low-level interactions with desktop UI elements and controls.
+
 use computer_use_ai_sdk::{Desktop, ToolDefinition, ToolInputSchema, ToolParameter};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::agent::structs::{AgentError, ToolCall};
+use crate::agent::core::{AgentError, ToolCall};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::sync::Mutex;
+use tracing::info;
 
 pub mod macos_tools;
 
@@ -538,21 +541,22 @@ pub trait Tool: Send + Sync {
 
     /// Executes the tool with the given arguments.
     /// `args` should be a JSON Value that conforms to the tool's input schema.
-    async fn execute(&self, args: Value) -> Result<Value, AgentError>;
+    async fn execute(&self, desktop: &Desktop, args: Value) -> Result<Value, AgentError>;
 }
 
 /// Manages a collection of available tools.
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
+    desktop: Mutex<Arc<Desktop>>,
 }
 
 impl ToolRegistry {
-    pub fn new(tools: Vec<Arc<dyn Tool>>) -> Self {
+    pub fn new(tools: Vec<Arc<dyn Tool>>, desktop: Arc<Desktop>) -> Self {
         let tools_map = tools
             .into_iter()
             .map(|tool| (tool.definition().name.clone(), tool))
             .collect();
-        ToolRegistry { tools: tools_map }
+        ToolRegistry { tools: tools_map, desktop: Mutex::new(desktop) }
     }
 
     /// Returns definitions of all registered tools.
@@ -563,7 +567,12 @@ impl ToolRegistry {
     /// Executes a specific tool call.
     pub async fn execute_tool(&self, tool_call: &ToolCall) -> Result<Value, AgentError> {
         match self.tools.get(&tool_call.name) {
-            Some(tool) => tool.execute(tool_call.input.clone()).await,
+            Some(tool) => {
+                // Lock the desktop mutex to get a reference
+                let desktop_guard = self.desktop.lock().await;
+                // Pass the locked desktop reference and the args
+                tool.execute(&*desktop_guard, tool_call.input.clone()).await
+            },
             None => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }
     }

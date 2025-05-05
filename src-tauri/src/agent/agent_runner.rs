@@ -3,10 +3,19 @@ use std::sync::Arc;
 use tokio::sync::Mutex; // Using Mutex for mutable access to MemoryManager
 use crate::state::CancelReceiver; // Import the type alias
 
-// Update imports to use the new core module
-use crate::agent::core::{*
-    // AgentAction, AgentError, AgentState, AgentBrain, AgentRunnable,
-    // MemoryManager, Message, Role, ToolCall, ToolDefinition, ToolProvider, ToolResult
+// Use the consolidated core module
+use crate::agent::core::{
+    AgentAction,
+    AgentError,
+    AgentState,
+    Message,
+    Role,
+    AgentBrain,
+    AgentRunnable,
+    MemoryManager,
+    ToolProvider,
+    ToolCall, // Add ToolCall and ToolResult back here
+    ToolResult,
 };
 
 /// Default implementation of the AgentRunnable trait.

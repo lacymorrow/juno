@@ -7,32 +7,47 @@ use serde_json::{Value}; // Keep Value
 // use image::{GenericImageView, ImageFormat}; // Removed unused
 // use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Removed unused
 // use std::io::Cursor; // Removed unused
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tauri::State;
 use tauri::{Manager, Emitter}; // Import Manager and Emitter
 // use futures::future; // Removed unused
 use std::sync::Arc;
-use crate::agent::structs::{AgentError};
+
+// Update agent imports to use consolidated structure
+use crate::agent::{
+    // Import concrete types from implementations
+    implementations::{SimpleMemoryManager, AnthropicBrain, DefaultAgentRunner, LocalToolProvider},
+    core::{AgentError, AgentRunnable}, // Import core traits and types
+    // Import tool registration functions via agent module re-export
+    register_basic_tools,
+    // register_desktop_tools, // Try importing directly from sub-module
+    // Still need specific browser imports if used
+    tools::browser_tools::get_browser_tool_definitions,
+    tools::browser_controller::BrowserController,
+    // Import register_desktop_tools directly
+    tools::desktop_tools::register_desktop_tools,
+};
+// Correct import for BrainFactory
+use crate::agent::providers::factory::BrainFactory;
 
 // --- Agent Integration ---
-use crate::agent::{
-    implementations::{
-        // Correct path based on resolved structure
-        memory_manager::SimpleMemoryManager,
-        tool_provider::LocalToolProvider,
-        agent_runner::DefaultAgentRunner,
-        // AnthropicBrain is now selected via the factory
-        // agent_brain::AnthropicBrain, // Remove direct import
-    },
-    traits::AgentRunnable, // Import the trait for the run method
-    tools::{ // Changed this block
-        basic_tools::register_basic_tools,
-        desktop_tools::register_desktop_tools,
-        browser_tools::get_browser_tool_definitions,
-        browser_controller::BrowserController,
-    },
-     providers::factory::BrainFactory, // Keep BrainFactory import
-};
+// Use the new Orchestrator
+// use crate::agents::orchestrator::Orchestrator;
+// use crate::agent::{
+//     implementations::{
+//         memory_manager::SimpleMemoryManager,
+//         // Remove tool_provider and agent_runner
+//         // AnthropicBrain is now selected via the factory
+//     },
+//     // Remove AgentRunnable
+//     tools::{ // Keep tools for now, might be needed by specific agents
+//         basic_tools::register_basic_tools, // Moved
+//         desktop_tools::register_desktop_tools, // Moved
+//         browser_tools::get_browser_tool_definitions, // Moved
+//         browser_controller::BrowserController, // Moved
+//     },
+//      providers::factory::BrainFactory, // Moved
+// };
 
 // --- Agent State ---
 
@@ -105,7 +120,7 @@ struct AnthropicResponse {
 
 // Removed unused function process_screenshot
 
-// --- Submit Query Function (Refactored with New Agent) ---
+// --- Submit Query Function (Refactored with AgentRunner) ---
 
 #[tauri::command]
 pub async fn submit_query(
@@ -115,76 +130,31 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
+    // --- Cancellation Setup ---
     let cancel_rx = state.cancel_rx.clone();
 
     // --- Instantiate Agent Components ---
+    // Use correct path for SimpleMemoryManager
     let memory_manager = SimpleMemoryManager::new();
 
+    // --- Create Tool Provider ---
+    // Use correct path for LocalToolProvider
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
-
-    // --- Instantiate Browser Controller ---
-    let browser_controller = match BrowserController::new().await {
-        Ok(controller) => {
-            info!("Browser Controller initialized successfully.");
-            Some(controller) // Store as Option
-        }
-        Err(e) => {
-            error!("Failed to initialize Browser Controller: {}. Browser tools will not be available.", e);
-            // Allow agent to continue without browser tools, just log the error.
-            None
-        }
-    };
-
-    // Register basic file/shell tools
+    // Use imported registration functions directly
     register_basic_tools(&mut tool_provider).await;
-    info!("Registered basic tools for the agent.");
-
-    // Register desktop tools
     register_desktop_tools(&mut tool_provider, app_handle.clone(), state.clone()).await;
-    info!("Registered desktop tools for the agent.");
+    // TODO: Register browser tools if needed
+    info!("Tool provider initialized with basic and desktop tools.");
 
-    // --- Register Browser Tools (only if controller initialized) ---
-    if let Some(browser_controller) = browser_controller {
-        let browser_definitions = get_browser_tool_definitions();
-        let shared_browser_controller = Arc::new(tokio::sync::Mutex::new(browser_controller)); // Wrap in Arc<Mutex>
-
-        for definition in browser_definitions {
-            let tool_name = definition.name.clone();
-            let log_tool_name = tool_name.clone();
-            let controller_arc = shared_browser_controller.clone(); // Clone Arc
-
-            let executor = move |input: Value| {
-                let controller_lock = controller_arc.clone(); // Clone Arc again for async block
-                let name = tool_name.clone();
-                async move {
-                    let mut controller = controller_lock.lock().await; // Lock the Mutex
-                    let result = match name.as_str() {
-                        "browser_navigate" => controller.navigate(&input).await,
-                        "browser_extract_content" => controller.extract_content(&input).await,
-                        "browser_interact" => controller.interact(&input).await,
-                        "browser_get_current_url" => controller.get_current_url(&input).await,
-                        "browser_screenshot" => controller.screenshot(&input).await,
-                        _ => Err(AgentError::ToolNotFound(name)),
-                    };
-                    match result {
-                        Ok(tool_result) => Ok(tool_result.output),
-                        Err(agent_error) => Err(agent_error.to_string()),
-                    }
-                }
-            };
-            tool_provider.register_async_tool(definition, executor).await;
-            info!("Registered browser tool: {}", log_tool_name);
-        }
-    } else {
-        info!("Skipping browser tool registration as controller failed to initialize.");
-    }
-
-    // Use the BrainFactory to create the appropriate AI provider brain
-    let agent_brain = match BrainFactory::create_brain() { // Keep using BrainFactory
+    // --- Create Brain ---
+    // Use corrected BrainFactory import
+    let agent_brain_result = BrainFactory::create_brain();
+    let agent_brain = match agent_brain_result {
         Ok(brain) => brain,
         Err(e) => {
              let err_msg = format!("Failed to initialize agent brain: {}", e);
              error!("{}", err_msg);
+             // Error reporting to frontend (keep this logic)
              let result = SubmitQueryResult { text: err_msg.clone(), audio_base64: None, agent_state: "Failed".to_string(), screenshot_base64: None };
              let payload = BackendResponsePayload { query: query.clone(), response: result };
              if let Some(window) = app_handle.get_window("main") {
@@ -195,89 +165,105 @@ pub async fn submit_query(
     };
     info!("Agent brain initialized.");
 
-    const MAX_ITERATIONS: u32 = 15;
-
-    // Create the agent runner using with_boxed_brain because BrainFactory returns a Box
+    // --- Create Agent Runner ---
+    const MAX_STEPS: u32 = 15;
+    // Use imported DefaultAgentRunner directly
     let mut agent_runner = DefaultAgentRunner::with_boxed_brain(
         memory_manager,
-        tool_provider, // This now contains all registered tools
-        agent_brain,   // Pass the Box<dyn AgentBrain>
-        MAX_ITERATIONS,
+        tool_provider,
+        agent_brain, // Pass the boxed brain directly
+        MAX_STEPS,
     );
-    info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
+    info!("Agent runner initialized.");
 
-    info!("Starting agent run...");
-    let agent_result = agent_runner.run(query.clone(), cancel_rx).await;
+    // --- Run Agent ---
+    let final_result = agent_runner.run(query.clone(), cancel_rx).await;
 
-    state.reset_cancel();
-    info!("Agent cancellation signal reset.");
-
-    // --- Process Agent Result ---
-    let final_response = match agent_result {
-        Ok(message) => SubmitQueryResult {
-            text: message,
-            audio_base64: None, // Add TTS later if needed
-            agent_state: "Finished".to_string(),
-            screenshot_base64: None, // Capture screenshot if needed
-        },
+    // --- Process Result ---
+    let (final_text, final_state_str) = match final_result {
+        Ok(text) => {
+            info!("Agent run finished successfully.");
+            (text, "Finished".to_string())
+        }
         Err(e) => {
             error!("Agent run failed: {}", e);
-            // Map AgentError to a user-friendly state/message
-            let (state_str, msg) = match e {
-                AgentError::Terminated => ("Cancelled".to_string(), "Agent execution was cancelled.".to_string()),
-                AgentError::MaxStepsReached => ("Failed".to_string(), "Agent reached maximum steps.".to_string()),
-                _ => ("Failed".to_string(), format!("Agent error: {}", e)),
+            let state_str = match e {
+                AgentError::MaxStepsReached => "MaxStepsReached".to_string(),
+                AgentError::Terminated => "Cancelled".to_string(),
+                _ => "Failed".to_string(),
             };
-            SubmitQueryResult {
-                text: msg,
-                audio_base64: None,
-                agent_state: state_str,
-                screenshot_base64: None,
-            }
+            (format!("Agent Error: {}", e), state_str)
         }
     };
 
-    info!("Agent run complete. Final state: {}", final_response.agent_state);
+    // --- Get Screenshot (Optional) ---
+    let screenshot_base64: Option<String> = None; // TODO: Implement screenshot retrieval
 
-    // --- Emit Final Response --- //
-    let payload = BackendResponsePayload { query, response: final_response };
+    // --- TTS (Optional) ---
+    let audio_base64 = match get_tts_audio(final_text.clone(), state.clone()).await {
+        Ok(audio) => Some(audio),
+        Err(e) => {
+            error!("TTS generation failed: {}", e);
+            None
+        }
+    };
+
+    // --- Emit Final Result to Frontend ---
+    let result = SubmitQueryResult {
+        text: final_text,
+        audio_base64,
+        agent_state: final_state_str,
+        screenshot_base64,
+    };
+
+    let payload = BackendResponsePayload { query, response: result };
+
+    info!("Emitting final response to frontend.");
     if let Some(window) = app_handle.get_window("main") {
-        window.emit("backend-response", payload)
-            .map_err(|e| format!("Emit failed: {}", e))?;
-        info!("Final response emitted to frontend.");
+        window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
     } else {
         error!("Main window not found, cannot emit final response.");
+        return Err("Main window not found".to_string());
     }
 
     Ok(())
 }
 
-// --- Browser Cleanup Function ---
-
+// --- Browser Cleanup Function (Keep for now, maybe move later) ---
 #[tauri::command]
-pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String> {
-    log::info!("Cleaning up browser resources...");
+pub async fn cleanup_browser(_app_handle: tauri::AppHandle) -> Result<(), String> {
+    info!("Received request to clean up browser resources.");
 
-    // Simplified cleanup - assuming BrowserController handles its own drop
-    // Or rely on OS to clean up processes on app exit.
-    // The pkill approach might be too aggressive or fail.
+    // How to access the BrowserController now? It lives inside BrowserAgent.
+    // We might need a way to signal cleanup to the agent or access it via AppState?
+    // For now, this command won't work correctly after the refactor.
+    // Let's comment out the actual cleanup attempt.
 
-    // If BrowserController needs explicit cleanup, call it here.
-    // e.g., if state holds Arc<Mutex<BrowserController>>:
     // let state = app_handle.state::<AppState>();
-    // if let Some(controller) = state.browser_controller.lock().await {
-    //     controller.close().await; // Assuming a close method exists
+    // if let Some(controller_arc) = state.browser_controller.lock().await.as_ref() {
+    //     let mut controller = controller_arc.lock().await;
+    //     if let Err(e) = controller.close().await {
+    //         error!("Error cleaning up browser controller: {}", e);
+    //         return Err(format!("Cleanup failed: {}", e));
+    //     }
+    //     info!("Browser resources cleaned up successfully.");
+    // } else {
+    //     info!("No active browser controller found to clean up.");
     // }
+    warn!("Browser cleanup logic needs refactoring after agent changes.");
 
-    log::info!("Browser cleanup check completed (manual pkill removed).");
     Ok(())
 }
 
-// --- TTS Function ---
+// Removed unused function get_tool_definitions
 
+// Removed unused function handle_agent_action
+
+// Keep get_tts_audio
 #[tauri::command]
-pub async fn get_tts_audio(text: String, _state: State<'_, AppState>) -> Result<String, String> {
-    let _ = text; // Mark text as used
-    error!("TTS function is currently stubbed out.");
-    Err("TTS functionality is temporarily disabled.".to_string())
+pub async fn get_tts_audio(text: String, state: State<'_, AppState>) -> Result<String, String> {
+    info!("Received request for TTS audio.");
+    tts::invoke_tts(text, state)
+        .await
+        .map_err(|e| e.to_string())
 }

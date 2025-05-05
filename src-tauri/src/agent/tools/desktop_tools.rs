@@ -1,5 +1,5 @@
-use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::agent::structs::ToolDefinition;
+use crate::agent::implementations::basic::LocalToolProvider;
+use crate::agent::core::ToolDefinition;
 use crate::state::AppState;
 use crate::commands;
 // use crate::utils::coordinates; // Unused

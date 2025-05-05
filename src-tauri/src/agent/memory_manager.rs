@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::agent::structs::{AgentError, Message};
-use crate::agent::traits::MemoryManager;
+// Use the consolidated core module
+use crate::agent::core::{AgentError, Message, MemoryManager};
 
 /// A simple in-memory implementation of the MemoryManager trait.
 #[derive(Debug, Clone)]

@@ -4,14 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 
-// Replace specific imports with a wildcard from the new core module
-use crate::agent::core::{AgentAction, AgentBrain, AgentError, Message, Role, ToolCall, ToolDefinition};
-// Remove struct imports, they are now in core
-// use crate::agent::structs::{
-//     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
-// };
-// Remove trait import, it's now in core
-// use crate::agent::traits::AgentBrain;
+// Use the consolidated core module
+use crate::agent::core::{AgentAction, AgentError, AgentBrain, Message, Role, ToolCall, ToolDefinition};
 
 // --- Placeholder Anthropic API Structs --- //
 // Renamed to avoid potential conflicts
@@ -443,20 +437,14 @@ impl AgentBrain for SimpleBrain {
         messages: &[Message],
         _available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
-        // Extremely simple logic: Respond based on the last message.
+        // Extremely basic logic: If the last message was from the user, respond and finish.
         if let Some(last_message) = messages.last() {
-            // Use core::Role
-            if last_message.role == crate::agent::core::Role::User {
-            // if last_message.role == crate::agent::structs::Role::User { // Remove old import path
-                let response = format!("Simple Brain received: {}", last_message.content);
-                Ok(AgentAction::Finish(response))
-            } else {
-                // If the last message wasn't from the user, maybe just finish silently or indicate thinking?
-                Ok(AgentAction::Finish("Simple Brain decided to finish.".to_string()))
+            if last_message.role == crate::agent::structs::Role::User {
+                let response = format!("SimpleBrain received: {}", last_message.content);
+                return Ok(AgentAction::Finish(response));
             }
-        } else {
-            Ok(AgentAction::Finish("Simple Brain received no messages.".to_string()))
         }
+        Ok(AgentAction::Finish("SimpleBrain has nothing more to do.".to_string()))
     }
 }
 

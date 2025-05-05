@@ -3,3 +3,33 @@ description:
 globs:
 alwaysApply: false
 ---
+# Agent Cancellation Mechanism
+
+This rule describes how agent execution can be cancelled.
+
+## Overview
+
+The cancellation mechanism uses a `tokio::sync::watch` channel managed within the `AppState` ([src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)).
+
+- **`AppState` holds:**
+    - `cancel_tx: Arc<watch::Sender<bool>>`: Used to signal cancellation (`true`) or reset (`false`).
+    - `cancel_rx: watch::Receiver<bool>`: Cloned and passed down to check the cancellation status.
+- **Signaling:** The `AppState::signal_cancel()` method sends `true` through the `cancel_tx`.
+- **Resetting:** The `AppState::reset_cancel()` method sends `false` through the `cancel_tx` (usually called before starting a new agent run).
+- **Checking:** Code that needs to be cancellable borrows the `cancel_rx` and checks its current value (`*cancel_rx.borrow()`). If `true`, the operation should terminate gracefully, typically by returning `Err(AgentError::Terminated)`.
+
+## Integration with Agent Runner
+
+- The `submit_query` command ([src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs)) clones the `cancel_rx` from `AppState` and passes it to the `DefaultAgentRunner::run` method.
+- The `DefaultAgentRunner` ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:src-tauri/src/agent/implementations/agent_runner.rs)) checks the `cancel_rx` at several points:
+    - At the beginning of the main `run` loop.
+    - At the beginning of each `step`.
+    - Before calling the `AgentBrain`'s `decide_next_action`.
+    - Before executing each tool call within `step`.
+    - After executing each tool call within `step`.
+- If cancellation is detected (`*cancel_rx.borrow()` is `true`), the runner returns `Err(AgentError::Terminated)`.
+
+## Global Shortcut
+
+- A global shortcut (currently `Escape`) is registered in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs).
+- When the shortcut is pressed, the handler calls `AppState::signal_cancel()` to trigger the agent cancellation.

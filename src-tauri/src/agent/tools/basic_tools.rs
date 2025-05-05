@@ -2,15 +2,17 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::agent::structs::ToolDefinition;
-use crate::agent::implementations::tool_provider::LocalToolProvider;
+// Update imports to use core types and basic implementations
+use crate::agent::core::ToolDefinition;
+use crate::agent::implementations::basic::LocalToolProvider;
 
 // Define the implementation module first
 mod basic_tools_impl {
     use serde_json::{json, Value};
     use std::fs;
     use std::path::PathBuf;
-    use crate::agent::structs::ToolDefinition;
+    // Update import inside module
+    use crate::agent::core::ToolDefinition;
 
     pub fn read_file_definition() -> ToolDefinition {
         ToolDefinition {

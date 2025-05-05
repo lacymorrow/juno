@@ -6,8 +6,12 @@ use tokio::sync::Mutex;
 use base64;
 use std::path::{Path, PathBuf};
 use std::env;
+use thirtyfour::prelude::*;
+use thirtyfour::WebDriver;
+use tauri::Config;
+use tracing::{info, error, warn};
 
-use crate::agent::structs::{AgentError, ToolResult};
+use crate::agent::core::{AgentError, ToolResult};
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;

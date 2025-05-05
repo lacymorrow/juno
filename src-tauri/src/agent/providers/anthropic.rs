@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 
-use crate::agent::structs::{
+use crate::agent::core::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
-use crate::agent::traits::AgentBrain;
+use crate::agent::core::AgentBrain;
 
 // --- Anthropic API Structs --- //
 

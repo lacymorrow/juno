@@ -1,12 +1,11 @@
 use std::env;
 use tracing::{info, warn};
 
+// Use the consolidated core module
 use crate::agent::core::{AgentError, AgentBrain};
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to_env};
-use crate::agent::implementations::agent_brain::SimpleBrain;
-use std::sync::Arc;
 
 /// Enumeration of available AI providers
 #[derive(Debug, Clone, PartialEq, Eq)]

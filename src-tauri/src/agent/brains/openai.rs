@@ -4,10 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 
-use crate::agent::core::{
-    AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
-};
-use crate::agent::core::AgentBrain;
+// Use the consolidated core module
+use crate::agent::core::{AgentAction, AgentError, AgentBrain, Message, Role, ToolCall, ToolDefinition};
 
 // --- OpenAI API Structs --- //
 

@@ -57,6 +57,7 @@ async-trait = "0.1"
 once_cell = "1.17"
 tauri-plugin-global-shortcut = "2.2.0"
 playwright = "0.0.20"
+thirtyfour = "0.34"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

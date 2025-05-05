@@ -32,14 +32,15 @@ use {
 };
 
 // Declare modules
-pub mod tts;
-pub mod state;
-pub mod anthropic;
-pub mod tools;
-pub mod commands;
-pub mod cli;
-pub mod utils;
+pub mod actions;
 pub mod agent;
+pub mod anthropic;
+pub mod cli;
+pub mod commands;
+pub mod state;
+pub mod tools;
+pub mod tts;
+pub mod utils;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, element::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
@@ -68,7 +69,7 @@ pub fn run() {
     };
 
     // --- Initialize Provider Settings ---
-    if let Err(e) = agent::providers::factory::BrainFactory::init() {
+    if let Err(e) = crate::agent::providers::factory::BrainFactory::init() {
         tracing::warn!("Failed to initialize AI provider settings: {}", e);
         tracing::info!("Continuing with environment variables or fallback defaults");
     } else {
