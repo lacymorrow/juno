@@ -1471,9 +1471,9 @@ impl AccessibilityEngine for MacOSEngine {
         Ok(())
     }
 
-    fn wait(&self, duration_seconds: u64) -> Result<(), AutomationError> {
-        debug!("Engine calling wait for {} seconds", duration_seconds);
-        interaction::wait(duration_seconds)
+    fn wait(&self, duration_ms: u64) -> Result<(), AutomationError> {
+        debug!("Engine calling wait for {} ms", duration_ms);
+        interaction::wait(duration_ms)
     }
 
     fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError> {
