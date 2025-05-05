@@ -22,6 +22,7 @@ use std::time::Duration;
 use core_foundation::array::CFArray;
 use core_graphics::display::CGSize;
 use super::ffi::AXValueCreate;
+ // Import AXValueCreate
 
 // Define key code constants for keyboard shortcuts
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key

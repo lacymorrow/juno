@@ -43,6 +43,7 @@ pub struct ClickQAResult {
 }
 
 #[tauri::command]
+#[allow(dead_code)] // Called via Tauri from frontend QA tools
 pub(crate) async fn qa_test_click(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -86,6 +87,7 @@ pub(crate) async fn qa_test_click(
 }
 
 #[tauri::command]
+#[allow(dead_code)] // Called via Tauri from frontend QA tools
 pub(crate) async fn qa_test_click_series(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -126,6 +128,7 @@ pub(crate) async fn qa_test_click_series(
 }
 
 #[tauri::command]
+#[allow(dead_code)] // Called via Tauri from frontend QA tools
 pub(crate) async fn qa_test_coordinate_transformation(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -203,6 +206,7 @@ pub(crate) async fn qa_test_coordinate_transformation(
 }
 
 #[tauri::command]
+#[allow(dead_code)] // Called via Tauri from frontend QA tools
 pub(crate) async fn qa_test_click_visualization(
     app: AppHandle,
 ) -> Result<serde_json::Value, String> {
@@ -241,6 +245,7 @@ pub(crate) async fn qa_test_click_visualization(
 }
 
 #[tauri::command]
+#[allow(dead_code)] // Called via Tauri from frontend QA tools
 pub(crate) async fn qa_test_select_text(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -285,6 +290,7 @@ pub(crate) async fn qa_test_select_text(
 }
 
 #[tauri::command]
+#[allow(dead_code)] // Called via Tauri from frontend QA tools
 pub(crate) async fn qa_test_scroll(
     app: AppHandle,
     state: State<'_, AppState>,
