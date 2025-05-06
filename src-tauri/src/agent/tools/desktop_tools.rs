@@ -572,8 +572,6 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<DesktopClickArgs>(input)
                 .map_err(|e| format!("Failed to parse desktop_click input: {}", e))?;
 
-            // TODO: Handle coordinate transformation if necessary (e.g., if inputs are from a scaled context)
-            // For now, assume direct screen coordinates are provided by the agent
             let x = args.x;
             let y = args.y;
             let modifier = args.modifier;
@@ -691,40 +689,6 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(triple_click_def, triple_click_exec).await;
     info!("Registered tool: triple_click");
 
-    // wait
-    #[derive(serde::Deserialize)]
-    struct WaitInput { duration: f64 }
-    let wait_def = ToolDefinition {
-        name: "wait".to_string(),
-        description: "Wait for a specified duration in seconds.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "duration": { "type": "number", "description": "The duration to wait in seconds." }
-            },
-            "required": ["duration"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let wait_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<WaitInput>(input)
-                .map_err(|e| format!("Failed to parse wait input: {}", e))?;
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::core::dev_wait(args.duration, state_manager).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error during wait: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(wait_def, wait_exec).await;
-    info!("Registered tool: wait");
-
     // hold_key (Separate Hold)
     #[derive(serde::Deserialize)]
     struct KeyInput { key: String }
@@ -811,6 +775,10 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Mouse move at ({}, {}) - no transformation applied", args.x, args.y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -844,6 +812,10 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Left mouse down at ({}, {}) - no transformation applied", args.x, args.y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -877,6 +849,10 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Left mouse up at ({}, {}) - no transformation applied", args.x, args.y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -910,6 +886,10 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Left click at ({}, {}) - no transformation applied", args.x, args.y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -943,6 +923,10 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Right click at ({}, {}) - no transformation applied", args.x, args.y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -976,6 +960,10 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Middle click at ({}, {}) - no transformation applied", args.x, args.y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -1009,6 +997,10 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Double click at ({}, {}) - no transformation applied", args.x, args.y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -1044,6 +1036,11 @@ pub async fn register_desktop_tools(
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<DragInput>(input)
                 .map_err(|e| format!("Failed to parse drag input: {}", e))?;
+
+            // info! message from HEAD
+            info!("Click and drag from ({}, {}) to ({}, {}) - no transformation applied",
+                args.start_x, args.start_y, args.end_x, args.end_y);
+
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -1086,6 +1083,10 @@ pub async fn register_desktop_tools(
                 })
             });
             let (x, y) = result.map_err(|e| format!("Error getting cursor position: {}", e))?;
+
+            // info! message from HEAD
+            info!("Cursor position: returning screen coordinates ({}, {}) directly (no scaling applied)", x, y);
+
             Ok(json!({ "x": x, "y": y }))
         }
     };

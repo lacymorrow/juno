@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"; // To handle potential
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea"; // Added for Set File Content
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event"; // Import listen for tool usage events
 import {
   AppWindow, // Example icon
   ArrowUpDown, // Example icon
@@ -29,7 +30,6 @@ import {
 } from "lucide-react"; // Import some icons
 import React, { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { listen } from "@tauri-apps/api/event"; // Import listen for tool usage events
 
 // Helper type for tracking loading states
 type LoadingStates = {
@@ -690,7 +690,7 @@ const DevToolsPanel: React.FC = () => {
     setFileListResult(null); // Clear previous result
     const result = await invokeCommand<string | null>( // Using string for now, might refine
       "dev_list_files",
-      { path: pathToList.trim() },
+      { pathStr: pathToList.trim() }, // Changed `path` to `pathStr`
       "listFiles"
     );
 
@@ -726,7 +726,7 @@ const DevToolsPanel: React.FC = () => {
     setFileContentResult(null); // Clear previous result
     const result = await invokeCommand<string | null>(
       "dev_get_file_content",
-      { path: pathGetContent.trim() },
+      { pathStr: pathGetContent.trim() }, // Changed path to pathStr
       "getFileContent"
     );
     if (result !== null) {
@@ -745,7 +745,7 @@ const DevToolsPanel: React.FC = () => {
     // Note: No check for empty content, allow writing empty files
     await invokeCommand(
       "dev_set_file_content",
-      { path: pathSetContent.trim(), content: fileContentToSet },
+      { pathStr: pathSetContent.trim(), content: fileContentToSet }, // Changed path to pathStr
       "setFileContent"
     );
     // No result to display, success/error handled by invokeCommand

@@ -1,10 +1,30 @@
 ---
 description:
 globs:
-alwaysApply: true
+alwaysApply: false
 ---
+# Project Structure for Anthropic Computer Use Tools
 
-# Your rule content
+This is a Tauri v2 application that implements Anthropic Computer Use functionality, allowing Claude to interact with a computer's desktop environment.
 
-- You can @ files here
-- You can use markdown but dont have to
+## Key Components
+
+- **Main Application**
+  - [src-tauri/src/lib.rs](mdc:dotdot/src-tauri/src/lib.rs) - Core application initialization and Tauri setup
+  - [src-tauri/src/commands/](mdc:dotdot/src-tauri/src/commands) - Tauri commands for user interface to backend communication
+
+- **Computer Use SDK**
+  - [src-tauri/mcp-server-os-level/](mdc:dotdot/src-tauri/mcp-server-os-level) - Core SDK implementation for desktop automation
+  - [src-tauri/mcp-server-os-level/src/platforms/](mdc:dotdot/src-tauri/mcp-server-os-level/src/platforms) - Platform-specific implementations (macOS, Windows, Linux)
+
+- **Testing Framework**
+  - [test-rust-units.sh](mdc:dotdot/test-rust-units.sh) - Runs Rust unit tests with verbose output
+  - [run-tests.sh](mdc:dotdot/run-tests.sh) - Main test runner script for basic tests
+  - [test-qa.sh](mdc:dotdot/test-qa.sh) - QA testing for user interface automation features
+  - [qa-test-plan.md](mdc:dotdot/qa-test-plan.md) - Comprehensive test plan for the project
+
+- **Frontend Implementation**
+  - [src/](mdc:dotdot/src) - React frontend implementation
+  - [src/components/](mdc:dotdot/src/components) - UI components including DevToolsPanel for testing
+
+The application follows a layered architecture with clear separation between UI commands, core functionality in the SDK, and platform-specific implementations. Each platform implementation (macOS, Windows, Linux) is separated within the SDK.

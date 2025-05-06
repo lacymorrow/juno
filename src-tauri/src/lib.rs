@@ -19,6 +19,11 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
+use tauri_plugin_notification::NotificationExt;
+use tracing::{error, level_filters::LevelFilter};
+use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 // macOS specific imports
 #[cfg(target_os = "macos")]
@@ -42,7 +47,7 @@ pub mod utils;
 pub mod agent;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
+use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -166,6 +171,9 @@ pub fn run() {
             dev_get_cursor_position,
             dev_test_click_visualization,
             dev_bash_command,
+            dev_list_files,
+            dev_get_file_content,
+            dev_set_file_content,
             // Text Editor Commands
             dev_text_editor_view,
             dev_text_editor_create,

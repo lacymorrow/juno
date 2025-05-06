@@ -158,3 +158,27 @@
     @apply text-foreground;
   }
 }
+
+/* New Loading Bar Animation */
+.loading-bar-thin {
+  width: 80%; /* Adjust width relative to its container */
+  height: 2px; /* Make it thin */
+  background-color: white;
+  border-radius: 1px;
+  animation: loading-bar-thin-anim 3.2s infinite ease-in-out;
+}
+
+@keyframes loading-bar-thin-anim {
+  0% {
+    transform: translateX(-99%);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateX(99%);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateX(-99%);
+    opacity: 0.7;
+  }
+}
