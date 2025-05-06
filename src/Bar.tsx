@@ -27,7 +27,7 @@ type BarState =
   | "success";
 
 export function FloatingBar() {
-  const [barState, setBarState] = useState<BarState>("loading");
+  const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
