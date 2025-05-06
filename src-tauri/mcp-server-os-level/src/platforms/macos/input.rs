@@ -1,12 +1,19 @@
+/*
+This file is no longer needed as Enigo is being removed.
+Input actions will be handled directly in engine.rs using CGEvent.
+
+Original content commented out:
+
 use crate::{AutomationError, element::UIElement};
-use enigo::{Enigo, Key, Keyboard, Settings, Mouse, Richtung}; // Import Enigo and traits
+use enigo::{Enigo, Key, Keyboard, Settings, Mouse}; // Removed Richtung
 use once_cell::sync::Lazy; // For lazy static initialization
 use parking_lot::Mutex; // For thread-safe mutable static
 use std::{thread, time::Duration};
-use tracing::{debug, error};
+use tracing::{debug, error, warn}; // Added warn import
 
 // Lazy static initialization of Enigo instance for thread safety
-static ENIGO: Lazy<Mutex<Enigo>> = Lazy::new(|| Mutex::new(Enigo::new(&Settings::default()).unwrap()));
+// Removing static ENIGO due to Send/Sync issues
+// static ENIGO: Lazy<Mutex<Enigo>> = Lazy::new(|| Mutex::new(Enigo::new(&Settings::default()).unwrap()));
 
 // Helper function to map string representation to enigo::Key
 fn string_to_key(key_str: &str) -> Result<Key, AutomationError> {
@@ -61,7 +68,8 @@ fn string_to_key(key_str: &str) -> Result<Key, AutomationError> {
 
 pub fn press_key(key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
     debug!("Pressing key: '{}' with modifier: {:?}", key_name, modifier);
-    let mut enigo = ENIGO.lock();
+    // Instantiate Enigo locally
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| AutomationError::Internal(format!("Failed to create Enigo instance: {}", e)))?;
 
     let main_key = string_to_key(key_name)?;
 
@@ -83,7 +91,7 @@ pub fn press_key(key_name: &str, modifier: Option<&str>) -> Result<(), Automatio
     if let Err(e) = enigo.key_click(main_key) {
          // Attempt to release modifier even if main click fails
          if let Some(m_key) = modifier_key {
-             enigo.key_up(m_key); // Ignore error during cleanup
+             let _ = enigo.key_up(m_key); // Ignore error during cleanup
          }
          return Err(AutomationError::Internal(format!("Enigo failed to click key {}: {}", key_name, e)));
     }
@@ -103,7 +111,7 @@ pub fn press_key(key_name: &str, modifier: Option<&str>) -> Result<(), Automatio
 
 pub fn type_text(text: &str) -> Result<(), AutomationError> {
     debug!("Typing text: '{}'", text);
-    let mut enigo = ENIGO.lock();
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| AutomationError::Internal(format!("Failed to create Enigo instance: {}", e)))?;
     if let Err(e) = enigo.text(text) {
          Err(AutomationError::Internal(format!("Enigo failed to type text: {}", e)))
     } else {
@@ -114,7 +122,7 @@ pub fn type_text(text: &str) -> Result<(), AutomationError> {
 
 pub fn hold_key(key: &str) -> Result<(), AutomationError> {
     debug!("Holding key: '{}'", key);
-    let mut enigo = ENIGO.lock();
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| AutomationError::Internal(format!("Failed to create Enigo instance: {}", e)))?;
     let key_to_hold = string_to_key(key)?;
      if let Err(e) = enigo.key_down(key_to_hold) {
          Err(AutomationError::Internal(format!("Enigo failed to hold key {}: {}", key, e)))
@@ -125,7 +133,7 @@ pub fn hold_key(key: &str) -> Result<(), AutomationError> {
 
 pub fn release_key(key: &str) -> Result<(), AutomationError> {
     debug!("Releasing key: '{}'", key);
-    let mut enigo = ENIGO.lock();
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| AutomationError::Internal(format!("Failed to create Enigo instance: {}", e)))?;
     let key_to_release = string_to_key(key)?;
     if let Err(e) = enigo.key_up(key_to_release) {
         Err(AutomationError::Internal(format!("Enigo failed to release key {}: {}", key, e)))
@@ -136,6 +144,7 @@ pub fn release_key(key: &str) -> Result<(), AutomationError> {
 
 // --- Mouse Actions (using Enigo) ---
 
+/* // Removing Enigo mouse functions as they are now handled by CGEvent in engine.rs
 pub fn get_mouse_location() -> Result<(i32, i32), AutomationError> {
      let enigo = ENIGO.lock();
      match enigo.location() {
@@ -206,6 +215,7 @@ pub fn mouse_scroll(direction: &str, amount: f64) -> Result<(), AutomationError>
         Ok(())
      }
 }
+*/
 
 // --- Other ---
 pub fn wait(duration_ms: u64) -> Result<(), AutomationError> {
@@ -218,28 +228,32 @@ pub fn wait(duration_ms: u64) -> Result<(), AutomationError> {
 // These need careful review and potential reimplementation if direct element interaction is needed
 // beyond what Enigo provides (e.g., getting text, attributes).
 
-pub fn get_element_text(_element: Box<dyn UIElement>) -> Result<String, AutomationError> {
+pub fn get_element_text(_element: &UIElement) -> Result<String, AutomationError> { // Changed to &UIElement
     // Enigo cannot directly get text from an arbitrary element.
     // This might require using the clipboard or AX API again.
     Err(AutomationError::UnsupportedOperation("Getting element text directly is not supported by Enigo implementation.".to_string()))
 }
 
-pub fn click_element(_element: Box<dyn UIElement>, _hold_keys: Option<Vec<String>>) -> Result<(), AutomationError> {
+pub fn click_element(_element: &UIElement, _hold_keys: Option<Vec<String>>) -> Result<(), AutomationError> { // Changed to &UIElement
      // Enigo clicks at coordinates, not elements. Need element bounds first.
      // This requires integrating AX API calls to get bounds before using Enigo mouse actions.
      Err(AutomationError::UnsupportedOperation("Clicking element requires element bounds; not implemented in base Enigo switch.".to_string()))
  }
 
-pub fn type_into_element(_element: Box<dyn UIElement>, text: &str, _hold_keys: Option<Vec<String>>) -> Result<(), AutomationError> {
+pub fn type_into_element(_element: &UIElement, text: &str, _hold_keys: Option<Vec<String>>) -> Result<(), AutomationError> { // Changed to &UIElement
     // Could potentially focus element first (using AX API), then use enigo.text()
     // For now, just use global type_text as a fallback.
     warn!("type_into_element called, falling back to global type_text. Element focusing not implemented.");
-    type_text(text)
+    // type_text(text) // This would call the Enigo version, which we are removing
+    Err(AutomationError::UnsupportedOperation("Typing into specific element requires focus + CGEvent implementation".to_string()))
 }
 
-pub fn press_key_in_element(_element: Box<dyn UIElement>, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
+pub fn press_key_in_element(_element: &UIElement, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> { // Changed to &UIElement
     // Could potentially focus element first (using AX API), then use enigo press_key
     // For now, just use global press_key as a fallback.
      warn!("press_key_in_element called, falling back to global press_key. Element focusing not implemented.");
-     press_key(key_name, modifier)
+     // press_key(key_name, modifier) // This would call the Enigo version, which we are removing
+     Err(AutomationError::UnsupportedOperation("Pressing key in specific element requires focus + CGEvent implementation".to_string()))
 }
+
+*/
