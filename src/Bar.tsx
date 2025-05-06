@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Window, PhysicalSize } from "@tauri-apps/api/window";
+import { PhysicalSize, Window } from "@tauri-apps/api/window";
 import { Check, Send } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { cn } from "./lib/utils";
 import tauriConfig from "../src-tauri/tauri.conf.json";
+import { cn } from "./lib/utils";
 
 // Get default window dimensions from tauri.conf.json
 const floatingBarConfig = tauriConfig.app.windows.find(
@@ -27,7 +27,7 @@ type BarState =
   | "success";
 
 export function FloatingBar() {
-  const [barState, setBarState] = useState<BarState>("default");
+  const [barState, setBarState] = useState<BarState>("loading");
   const [inputValue, setInputValue] = useState("");
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -343,10 +343,8 @@ export function FloatingBar() {
 
           {/* Loading State Content */}
           {barState === "loading" && (
-            <div className="gooey-container flex items-center justify-center w-full h-full">
-              <div className="gooey-dot bg-emerald-400"></div>
-              <div className="gooey-dot bg-emerald-400"></div>
-              <div className="gooey-dot bg-emerald-400"></div>
+            <div className="w-full h-full flex items-center justify-center overflow-hidden">
+              <div className="loading-bar-thin"></div>
             </div>
           )}
         </div>
