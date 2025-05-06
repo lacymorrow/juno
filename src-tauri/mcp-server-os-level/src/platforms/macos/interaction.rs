@@ -1,15 +1,14 @@
-use accessibility::{AXAttribute, AXUIElement, Error as AXError};
+use accessibility::{AXAttribute, AXUIElement};
 use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
 use super::constants::*;
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
-use core_foundation::base::{CFType, TCFType, CFTypeRef};
+use core_foundation::base::{TCFType, CFTypeRef};
 use core_foundation::string::{CFString, CFStringRef};
-use core_graphics::base::CGFloat;
 use core_graphics::event::{
-    CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton, ScrollEventUnit,
+    CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
@@ -19,9 +18,6 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
-use core_foundation::array::CFArray;
-use core_graphics::display::CGSize;
-use super::ffi::AXValueCreate;
  // Import AXValueCreate
 
 // Define key code constants for keyboard shortcuts

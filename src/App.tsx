@@ -1,5 +1,5 @@
-import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
 import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
+import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
 import {
