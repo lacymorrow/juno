@@ -33,6 +33,7 @@ export function FloatingBar() {
   const inputRef = useRef<HTMLInputElement>(null);
   const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
+  const isPreparingToDrag = useRef(false); // Added: Flag for drag operation
 
   // For debugging - log state changes
   useEffect(() => {
@@ -146,6 +147,14 @@ export function FloatingBar() {
 
   const handleInputBlur = () => {
     // Only shrink if the bar is in 'input' state AND the input field is empty (trimmed).
+    // AND a drag operation isn't being initiated on the bar itself.
+    if (isPreparingToDrag.current) {
+      console.log(
+        "handleInputBlur: Potential drag operation in progress, not shrinking."
+      );
+      return;
+    }
+
     if (barState === "input" && !inputValue.trim()) {
       console.log(
         "handleInputBlur: Shrinking bar because state is 'input' and inputValue is empty."
@@ -256,6 +265,40 @@ export function FloatingBar() {
     // Dependencies: Include states and handlers used inside the effect
   }, [barState, inputValue, handleBarClick, handleInputBlur]);
 
+  // Effect for global mouseup to handle end of drag or click on bar
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isPreparingToDrag.current) {
+        console.log("Global mouseup: Clearing isPreparingToDrag flag.");
+        isPreparingToDrag.current = false;
+
+        // After a potential drag, check if the bar should shrink
+        if (
+          barState === "input" &&
+          !inputValue.trim() &&
+          document.activeElement !== inputRef.current
+        ) {
+          console.log(
+            "Global mouseup: Conditions to shrink met post-drag/click. Shrinking."
+          );
+          if (transitionTimeoutRef.current) {
+            clearTimeout(transitionTimeoutRef.current);
+          }
+          setBarState("shrinking");
+          transitionTimeoutRef.current = setTimeout(() => {
+            setInputValue(""); // Clear input when shrinking back to default
+            setBarState("default");
+          }, 300); // Match the CSS transition duration
+        }
+      }
+    };
+
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+    };
+  }, [barState, inputValue, setBarState, setInputValue]); // Dependencies for the effect
+
   // Determine dimensions based on state
   const getBarStyles = () => {
     switch (barState) {
@@ -280,7 +323,6 @@ export function FloatingBar() {
 
   return (
     <div
-      data-tauri-drag-region
       data-window-hovered={isWindowHovered}
       className={cn(
         "w-screen h-screen flex items-start justify-start p-1"
@@ -297,6 +339,7 @@ export function FloatingBar() {
       <div className="relative z-50">
         {/* Universal Bar Container - Now positioned within the flex container */}
         <div
+          data-tauri-drag-region
           className={cn(
             `
             flex items-center justify-center bg-black/90 backdrop-blur-md text-white
@@ -309,6 +352,15 @@ export function FloatingBar() {
             barState === "default" && isWindowHovered && "scale-105"
           )}
           onClick={barState === "default" ? handleBarClick : undefined}
+          onMouseDownCapture={(e) => {
+            // If the bar is in input mode and the mousedown is on the bar itself (not its children like input/button)
+            if (barState === "input" && e.target === e.currentTarget) {
+              console.log(
+                "Mousedown on bar (drag region) in input state. Setting isPreparingToDrag."
+              );
+              isPreparingToDrag.current = true;
+            }
+          }}
         >
           {/* Default State Content */}
           {(barState === "default" || barState === "finishing") && (
@@ -340,6 +392,24 @@ export function FloatingBar() {
                 placeholder="Type a command..."
                 className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/50"
                 disabled={barState !== "input"}
+                onMouseDown={async (e) => {
+                  if (barState === "input") {
+                    console.log(
+                      "Input MouseDown: Setting isPreparingToDrag and attempting to start window drag."
+                    );
+                    isPreparingToDrag.current = true;
+                    e.preventDefault(); // Prevent text selection/focus stealing
+                    try {
+                      await Window.getCurrent().startDragging();
+                      console.log("Window drag started via input.");
+                    } catch (err) {
+                      console.error(
+                        "Failed to start dragging from input:",
+                        err
+                      );
+                    }
+                  }
+                }}
               />
               <button
                 type="submit"
