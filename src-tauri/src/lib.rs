@@ -172,6 +172,8 @@ pub fn run() {
             dev_test_click_visualization,
             dev_bash_command,
             dev_list_files,
+            dev_get_file_content,
+            dev_set_file_content,
             // Text Editor Commands
             dev_text_editor_view,
             dev_text_editor_create,

@@ -726,7 +726,7 @@ const DevToolsPanel: React.FC = () => {
     setFileContentResult(null); // Clear previous result
     const result = await invokeCommand<string | null>(
       "dev_get_file_content",
-      { path: pathGetContent.trim() },
+      { pathStr: pathGetContent.trim() }, // Changed path to pathStr
       "getFileContent"
     );
     if (result !== null) {
@@ -745,7 +745,7 @@ const DevToolsPanel: React.FC = () => {
     // Note: No check for empty content, allow writing empty files
     await invokeCommand(
       "dev_set_file_content",
-      { path: pathSetContent.trim(), content: fileContentToSet },
+      { pathStr: pathSetContent.trim(), content: fileContentToSet }, // Changed path to pathStr
       "setFileContent"
     );
     // No result to display, success/error handled by invokeCommand
