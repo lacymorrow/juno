@@ -190,6 +190,13 @@ pub fn run() {
             update_provider_max_tokens,
             update_provider_temperature,
             update_provider_system_prompt,
+            // QA Test Commands from mouse.rs
+            qa_test_click,
+            qa_test_click_series,
+            qa_test_coordinate_transformation,
+            qa_test_click_visualization,
+            qa_test_select_text,
+            qa_test_scroll
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
