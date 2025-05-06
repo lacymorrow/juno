@@ -95,28 +95,35 @@ pub async fn log_async_tool_execution<'a, Fut>(
 where
     Fut: std::future::Future<Output = Result<serde_json::Value, String>> + Send + 'a,
 {
-    // Emit start event
+    // Emit start event (keep this for potential real-time feedback)
     if let Err(e) = app_handle.emit("tool-execution-start", (tool_name, &input)) {
         log::warn!("Failed to emit tool-execution-start event: {}", e);
     }
 
     // Execute the future and capture the result
-    let result = std::panic::AssertUnwindSafe(executor).catch_unwind().await;
+    let execution_result = std::panic::AssertUnwindSafe(executor).catch_unwind().await;
 
-    // Process the result and emit end/error event
-    match result {
+    // --- Add logic to emit tool-usage event ---
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let (final_result, success, result_payload) = match execution_result {
         Ok(Ok(output)) => {
+            // Emit end event (success)
             if let Err(e) = app_handle.emit("tool-execution-end", (tool_name, &output)) {
                 log::warn!("Failed to emit tool-execution-end event: {}", e);
             }
-            Ok(output)
+            (Ok(output.clone()), true, Some(output)) // Return original output for function result, indicate success, provide output for entry
         }
         Ok(Err(error_msg)) => {
-             let error_val = serde_json::json!({ "error": error_msg });
-             if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
+            let error_val = serde_json::json!({ "error": error_msg });
+            // Emit error event
+            if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
                 log::warn!("Failed to emit tool-execution-error event: {}", e);
             }
-            Err(error_msg)
+            (Err(error_msg.clone()), false, Some(error_val)) // Return original error, indicate failure, provide error JSON for entry
         }
         Err(panic_payload) => {
             let error_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
@@ -128,10 +135,29 @@ where
             };
             log::error!("Tool '{}' panicked: {}", tool_name, error_msg);
             let error_val = serde_json::json!({ "error": &error_msg });
-             if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
+            // Emit error event (panic)
+            if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
                 log::warn!("Failed to emit tool-execution-error event after panic: {}", e);
             }
-            Err(error_msg)
+             (Err(error_msg), false, Some(error_val)) // Return panic message, indicate failure, provide error JSON for entry
         }
+    };
+
+    // Construct the ToolUsageEntry
+    let entry = ToolUsageEntry {
+        timestamp,
+        tool: tool_name.to_string(),
+        inputs: input.clone(), // Clone the input
+        result: result_payload, // Use the captured output or error JSON
+        success,
+        screenshot_base64: None, // TODO: Consider adding screenshot logic here if feasible for async
+    };
+
+    // Emit the consolidated "tool-usage" event
+    if let Err(e) = app_handle.emit("tool-usage", entry) {
+        warn!("Failed to emit consolidated tool-usage event: {}", e);
     }
+    // --- End of added logic ---
+
+    final_result // Return the original execution result (Ok or Err)
 }

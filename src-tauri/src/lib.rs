@@ -19,10 +19,6 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
-use tauri_plugin_notification::NotificationExt;
-use tracing::{error, level_filters::LevelFilter};
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 // macOS specific imports
@@ -190,6 +186,13 @@ pub fn run() {
             update_provider_max_tokens,
             update_provider_temperature,
             update_provider_system_prompt,
+            // QA Test Commands from mouse.rs
+            qa_test_click,
+            qa_test_click_series,
+            qa_test_coordinate_transformation,
+            qa_test_click_visualization,
+            qa_test_select_text,
+            qa_test_scroll
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
@@ -390,7 +393,7 @@ pub fn run() {
 // Unit tests module
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn test_focused_element_info_placeholder() {

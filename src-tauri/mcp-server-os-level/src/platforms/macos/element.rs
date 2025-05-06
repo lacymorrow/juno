@@ -836,7 +836,7 @@ impl UIElementImpl for MacOSUIElement {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     // We will add tests here later.
 
     // Example placeholder test
