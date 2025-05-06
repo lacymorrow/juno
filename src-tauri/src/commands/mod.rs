@@ -15,18 +15,10 @@ pub mod text_editor;
 pub mod window;
 
 // Re-export commands for easy access in lib.rs
-pub use self::app_url::*;
 pub use self::core::*;
-pub use self::element::*;
-pub use self::filesystem::*;
-pub use self::keyboard::*;
 pub use self::mouse::*;
-pub use self::providers::*;
 pub use self::shell::*;
-pub use self::text_editor::*;
-pub use self::window::*;
 
-use tauri::AppHandle;
 
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::
