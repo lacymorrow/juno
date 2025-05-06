@@ -5,6 +5,7 @@ use crate::agent::structs::AgentError;
 use crate::agent::traits::AgentBrain;
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::openai::OpenAIBrain;
+use crate::agent::providers::rig::RigBrain;
 use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to_env};
 
 /// Enumeration of available AI providers
@@ -12,6 +13,7 @@ use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to
 pub enum Provider {
     Anthropic,
     OpenAI,
+    Rig,
     // Add other providers as needed
 }
 
@@ -21,6 +23,7 @@ impl Provider {
         match s.to_lowercase().as_str() {
             "anthropic" => Some(Provider::Anthropic),
             "openai" => Some(Provider::OpenAI),
+            "rig" => Some(Provider::Rig),
             // Add other provider matches as needed
             _ => None,
         }
@@ -31,6 +34,7 @@ impl Provider {
         match self {
             Provider::Anthropic => "Anthropic Claude",
             Provider::OpenAI => "OpenAI GPT",
+            Provider::Rig => "Rig AI Agent",
         }
     }
 
@@ -39,6 +43,7 @@ impl Provider {
         match self {
             Provider::Anthropic => "anthropic",
             Provider::OpenAI => "openai",
+            Provider::Rig => "rig",
         }
     }
 }
@@ -63,49 +68,28 @@ impl BrainFactory {
 
     /// Get the current provider from configuration or environment
     pub fn get_current_provider() -> Provider {
-        // First try from environment (set during runtime)
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
-            // If not in env, try to load from config
             match ProviderConfig::load() {
                 Ok(config) => config.active_provider,
                 Err(_) => "anthropic".to_string(), // Default fallback
             }
         });
-
         Provider::from_str(&provider_str).unwrap_or(Provider::Anthropic)
     }
 
     /// Get list of all available providers with their status
     pub fn list_providers() -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
-        let providers = vec![Provider::Anthropic, Provider::OpenAI];
-
-        // Try to load config to check for stored API keys
+        let providers = vec![Provider::Anthropic, Provider::OpenAI, Provider::Rig];
         let config = ProviderConfig::load().ok();
 
         providers.into_iter().map(|provider| {
             let provider_id = provider.id();
-
-            // A provider is available if either:
-            // 1. Its API key is already in the environment, or
-            // 2. Its API key is stored in the config
             let is_available = match provider {
-                Provider::Anthropic => {
-                    env::var("ANTHROPIC_API_KEY").is_ok() ||
-                    config.as_ref()
-                        .and_then(|c| c.get_provider_settings(provider_id))
-                        .and_then(|s| s.api_key.as_ref())
-                        .is_some()
-                },
-                Provider::OpenAI => {
-                    env::var("OPENAI_API_KEY").is_ok() ||
-                    config.as_ref()
-                        .and_then(|c| c.get_provider_settings(provider_id))
-                        .and_then(|s| s.api_key.as_ref())
-                        .is_some()
-                },
+                Provider::Anthropic => env::var("ANTHROPIC_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
+                Provider::OpenAI => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
+                Provider::Rig => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings("openai")).and_then(|s| s.api_key.as_ref()).is_some() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
             };
-
             ProviderInfo {
                 id: provider_id.to_string(),
                 name: provider.display_name().to_string(),
@@ -117,34 +101,54 @@ impl BrainFactory {
 
     /// Create an AgentBrain implementation based on provider configuration
     pub fn create_brain() -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
-        // Apply settings from config to environment before creating the brain
+        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_|
+            ProviderConfig::load()
+                .map(|config| config.active_provider)
+                .unwrap_or_else(|e|
+                    {
+                        warn!("AI_PROVIDER env not set and config failed to load ({}). Defaulting to anthropic.", e);
+                        "anthropic".to_string()
+                    }
+                )
+        );
+        info!("Attempting to use AI provider: {}", provider_str);
+        env::set_var("AI_PROVIDER", &provider_str);
         apply_provider_settings_to_env()?;
-
-        // Get provider from environment variable or use default
-        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| "anthropic".to_string());
-        info!("Using AI provider from environment: {}", provider_str);
 
         match Provider::from_str(&provider_str) {
             Some(Provider::Anthropic) => {
                 info!("Initializing Anthropic brain...");
-                let brain = AnthropicBrain::from_env()?;
-                Ok(Box::new(brain))
-            },
+                AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+            }
             Some(Provider::OpenAI) => {
-                info!("Initializing OpenAI brain...");
+                info!("Attempting to initialize OpenAI brain...");
                 match OpenAIBrain::from_env() {
-                    Ok(brain) => Ok(Box::new(brain)),
+                    Ok(brain) => Ok(Box::new(brain) as Box<dyn AgentBrain + Send + Sync>),
                     Err(e) => {
-                        warn!("Failed to initialize OpenAI brain: {}. Falling back to Anthropic.", e);
-                        let brain = AnthropicBrain::from_env()?;
-                        Ok(Box::new(brain))
+                        warn!("Failed to initialize OpenAI brain ({}). Falling back to Anthropic.", e);
+                        env::set_var("AI_PROVIDER", "anthropic");
+                        apply_provider_settings_to_env()?;
+                        AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
                     }
                 }
-            },
+            }
+            Some(Provider::Rig) => {
+                info!("Attempting to initialize Rig brain...");
+                match RigBrain::from_env() {
+                    Ok(brain) => Ok(Box::new(brain) as Box<dyn AgentBrain + Send + Sync>),
+                    Err(e) => {
+                        warn!("Failed to initialize Rig brain ({}). Falling back to Anthropic.", e);
+                        env::set_var("AI_PROVIDER", "anthropic");
+                        apply_provider_settings_to_env()?;
+                        AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                    }
+                }
+            }
             None => {
                 warn!("Unknown AI provider specified: '{}'. Using Anthropic as fallback.", provider_str);
-                let brain = AnthropicBrain::from_env()?;
-                Ok(Box::new(brain))
+                env::set_var("AI_PROVIDER", "anthropic");
+                apply_provider_settings_to_env()?;
+                AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
         }
     }

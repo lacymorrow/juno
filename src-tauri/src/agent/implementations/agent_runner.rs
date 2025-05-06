@@ -36,6 +36,7 @@ where
         brain: impl AgentBrain + Send + Sync + 'static,
         max_steps: u32
     ) -> Self {
+        log::info!("DefaultAgentRunner::new created. max_steps: {}, current_step: 0 (hardcoded init)", max_steps);
         DefaultAgentRunner {
             state: AgentState::Idle,
             memory: Arc::new(Mutex::new(memory)),
@@ -53,6 +54,7 @@ where
         brain: Box<dyn AgentBrain + Send + Sync>,
         max_steps: u32,
     ) -> Self {
+        log::info!("DefaultAgentRunner::with_boxed_brain created. max_steps: {}, current_step: 0 (hardcoded init)", max_steps);
         DefaultAgentRunner {
             state: AgentState::Idle,
             memory: Arc::new(Mutex::new(memory)),
@@ -81,6 +83,13 @@ where
         initial_prompt: String,
         cancel_rx: CancelReceiver, // Use watch receiver (no longer needs mut)
     ) -> Result<String, AgentError> {
+        log::info!(
+            "DefaultAgentRunner::run called. Initial state - current_step: {}, max_steps: {}, agent_state: {:?}",
+            self.current_step,
+            self.max_steps,
+            self.state
+        );
+
         if self.state != AgentState::Idle {
             return Err(AgentError::StateError(
                 "Agent must be in Idle state to start.".to_string(),
@@ -92,6 +101,11 @@ where
 
         self.transition_state(AgentState::Thinking).await;
         self.current_step = 0;
+        log::info!(
+            "DefaultAgentRunner::run starting loop. current_step reset to: {}, max_steps: {}",
+            self.current_step,
+            self.max_steps
+        );
 
         // Add initial user message to memory
         {
@@ -172,7 +186,7 @@ where
         // The loop should only exit via return statements within its body
         // (e.g., Finish, Error, Cancelled, MaxStepsReached).
         // Code here is unreachable.
-        // log::warn!(\"Agent loop completed without reaching a Finish state.\");
+        // log::warn(\"Agent loop completed without reaching a Finish state.\");
         // Err(AgentError::Terminated)
     }
 
