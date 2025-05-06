@@ -40,19 +40,80 @@ pub const FUNCTION_KEYCODE: CGKeyCode = 63; // Fn key
 
 // Helper function to map key name string to CGKeyCode
 pub(crate) fn key_name_to_keycode(key_name: &str) -> Option<CGKeyCode> {
-    match key_name.to_lowercase().as_str() {
+    let key_lower = key_name.to_lowercase();
+
+    // First check our predefined special keys
+    match key_lower.as_str() {
         "return" | "enter" => Some(KEY_RETURN),
         "tab" => Some(KEY_TAB),
         "space" => Some(KEY_SPACE),
         "delete" | "backspace" => Some(KEY_DELETE),
-        "escape" => Some(KEY_ESCAPE),
+        "escape" | "esc" => Some(KEY_ESCAPE),
         "left" | "arrowleft" => Some(KEY_ARROW_LEFT),
         "right" | "arrowright" => Some(KEY_ARROW_RIGHT),
         "down" | "arrowdown" => Some(KEY_ARROW_DOWN),
         "up" | "arrowup" => Some(KEY_ARROW_UP),
         "v" => Some(KEY_V),
-        // Add more mappings as needed
-        _ => None,
+        // Handle other single-character keys
+        _ => {
+            // If not a special key, try treating as a single character
+            if key_lower.len() == 1 {
+                let c = key_lower.chars().next().unwrap();
+
+                // Handle alphabetic keys (a-z)
+                if c.is_ascii_alphabetic() {
+                    return Some(match c {
+                        'a' => 0,
+                        'b' => 11,
+                        'c' => 8,
+                        'd' => 2,
+                        'e' => 14,
+                        'f' => 3,
+                        'g' => 5,
+                        'h' => 4,
+                        'i' => 34,
+                        'j' => 38,
+                        'k' => 40,
+                        'l' => 37,
+                        'm' => 46,
+                        'n' => 45,
+                        'o' => 31,
+                        'p' => 35,
+                        'q' => 12,
+                        'r' => 15,
+                        's' => 1,
+                        't' => 17,
+                        'u' => 32,
+                        'v' => 9,
+                        'w' => 13,
+                        'x' => 7,
+                        'y' => 16,
+                        'z' => 6,
+                        _ => return None,
+                    });
+                }
+
+                // Handle numeric keys (0-9)
+                if c.is_ascii_digit() {
+                    return Some(match c {
+                        '0' => 29,
+                        '1' => 18,
+                        '2' => 19,
+                        '3' => 20,
+                        '4' => 21,
+                        '5' => 23,
+                        '6' => 22,
+                        '7' => 26,
+                        '8' => 28,
+                        '9' => 25,
+                        _ => return None,
+                    });
+                }
+            }
+
+            // Not recognized
+            None
+        }
     }
 }
 

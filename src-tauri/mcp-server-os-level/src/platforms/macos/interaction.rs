@@ -734,7 +734,8 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     Ok(())
 }
 
-fn get_key_code(key: &str) -> Result<u16, AutomationError> {
+pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
+    // First, check our predefined key map for special keys
     let key_map: HashMap<&str, u16> = [
         ("return", KEY_RETURN),
         ("enter", KEY_RETURN),
@@ -748,14 +749,81 @@ fn get_key_code(key: &str) -> Result<u16, AutomationError> {
         ("right", KEY_ARROW_RIGHT),
         ("down", KEY_ARROW_DOWN),
         ("up", KEY_ARROW_UP),
+        // Add more special keys here as needed
     ]
     .iter()
     .cloned()
     .collect();
-    key_map
-        .get(key.to_lowercase().as_str())
-        .copied()
-        .ok_or_else(|| AutomationError::InvalidArgument(format!("Unknown key: {}", key)))
+
+    let key_lower = key.to_lowercase();
+
+    // First check if it's in our predefined map
+    if let Some(&code) = key_map.get(key_lower.as_str()) {
+        return Ok(code);
+    }
+
+    // If not in predefined map, check if it's a single alphanumeric character
+    if key_lower.len() == 1 {
+        let c = key_lower.chars().next().unwrap();
+
+        // Handle alphabetic keys (a-z)
+        if c.is_ascii_alphabetic() {
+            // ASCII values: 'a' is 0, 'b' is 11, etc.
+            // These are standard macOS virtual key codes
+            let vk = match c {
+                'a' => 0,
+                'b' => 11,
+                'c' => 8,
+                'd' => 2,
+                'e' => 14,
+                'f' => 3,
+                'g' => 5,
+                'h' => 4,
+                'i' => 34,
+                'j' => 38,
+                'k' => 40,
+                'l' => 37,
+                'm' => 46,
+                'n' => 45,
+                'o' => 31,
+                'p' => 35,
+                'q' => 12,
+                'r' => 15,
+                's' => 1,
+                't' => 17,
+                'u' => 32,
+                'v' => 9,
+                'w' => 13,
+                'x' => 7,
+                'y' => 16,
+                'z' => 6,
+                _ => return Err(AutomationError::InvalidArgument(format!("Unsupported character: {}", c))),
+            };
+            return Ok(vk);
+        }
+
+        // Handle numeric keys (0-9)
+        if c.is_ascii_digit() {
+            // macOS virtual key codes for digits
+            let vk = match c {
+                '0' => 29,
+                '1' => 18,
+                '2' => 19,
+                '3' => 20,
+                '4' => 21,
+                '5' => 23,
+                '6' => 22,
+                '7' => 26,
+                '8' => 28,
+                '9' => 25,
+                _ => return Err(AutomationError::InvalidArgument(format!("Unsupported digit: {}", c))),
+            };
+            return Ok(vk);
+        }
+    }
+
+    // If we get here, the key wasn't recognized
+    Err(AutomationError::InvalidArgument(format!("Unknown key: {}", key)))
 }
 
 pub(crate) fn parse_key_combination(
