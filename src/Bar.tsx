@@ -10,8 +10,8 @@ import { cn } from "./lib/utils";
 const floatingBarConfig = tauriConfig.app.windows.find(
   (window) => window.label === "floating-bar"
 );
-const DEFAULT_WIDTH = floatingBarConfig?.width || 110; // Fallback if not found
-const DEFAULT_HEIGHT = floatingBarConfig?.height || 60; // Fallback if not found
+const DEFAULT_WIDTH = floatingBarConfig?.width || 120; // Fallback if not found
+const DEFAULT_HEIGHT = floatingBarConfig?.height || 70; // Fallback if not found
 
 // Constants for expanded size (consider adding to config later if needed)
 const EXPANDED_WIDTH = 280;
@@ -97,7 +97,7 @@ export function FloatingBar() {
     // Store the submitted value to display during transitions
     setLastSubmittedValue(query);
     setInputValue(""); // Clear input immediately
-    inputRef.current?.blur(); // Blur input
+    // inputRef.current?.blur(); // REMOVED: Let disabled prop and state changes handle focus/interactivity
 
     // First show a brief success state
     setBarState("success");
@@ -145,16 +145,27 @@ export function FloatingBar() {
   };
 
   const handleInputBlur = () => {
-    // Always shrink when input loses focus, regardless of content
-    if (barState === "input") {
+    // Only shrink if the bar is in 'input' state AND the input field is empty (trimmed).
+    if (barState === "input" && !inputValue.trim()) {
+      console.log(
+        "handleInputBlur: Shrinking bar because state is 'input' and inputValue is empty."
+      );
       // Start shrinking animation
       setBarState("shrinking");
 
+      // Clear any existing timeout that might conflict before setting a new one.
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+      }
       // After shrinking animation, return to default
       transitionTimeoutRef.current = setTimeout(() => {
+        setInputValue(""); // Clear input when shrinking back to default
         setBarState("default");
-        setInputValue(""); // Clear input when shrinking back
       }, 300); // Match the CSS transition duration
+    } else if (barState === "input") {
+      console.log(
+        "handleInputBlur: Input blurred in 'input' state but inputValue is not empty. Bar remains expanded."
+      );
     }
   };
 
@@ -201,19 +212,35 @@ export function FloatingBar() {
           if (isFocused) {
             // When window gains focus, if in default state, expand it
             if (barState === "default") {
+              console.log("Window focused: Expanding from default state.");
               handleBarClick(); // Use existing click handler to expand and focus
             } else if (barState === "input" && inputRef.current) {
               // If already in input state, ensure focus
+              console.log(
+                "Window focused: Ensuring input focus in 'input' state."
+              );
               inputRef.current.focus();
             }
           } else {
             // When window loses focus
-            if (barState === "input" && !inputValue) {
-              // If in input state and input is empty, collapse
-              handleInputBlur(); // Use existing blur handler to shrink
-            } else if (barState === "input" && inputRef.current) {
-              // If it has text or is not in input state, just blur
-              inputRef.current.blur();
+            if (barState === "input") {
+              if (!inputValue.trim()) {
+                // If in input state and input is empty, collapse by calling handleInputBlur.
+                console.log(
+                  "Window lost focus: Input is empty and state is 'input'. Calling handleInputBlur."
+                );
+                handleInputBlur();
+              } else {
+                // If in input state and input has text, do nothing to the bar state.
+                // The input field will lose focus naturally. Bar remains expanded.
+                console.log(
+                  "Window lost focus: Input has text and state is 'input'. Bar remains expanded."
+                );
+              }
+            } else {
+              console.log(
+                "Window lost focus: Bar not in 'input' state. No action."
+              );
             }
           }
         }

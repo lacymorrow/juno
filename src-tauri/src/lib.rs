@@ -19,10 +19,6 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
-use tauri_plugin_notification::NotificationExt;
-use tracing::{error, level_filters::LevelFilter};
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 // macOS specific imports
@@ -397,7 +393,7 @@ pub fn run() {
 // Unit tests module
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn test_focused_element_info_placeholder() {
