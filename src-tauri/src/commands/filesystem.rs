@@ -123,3 +123,148 @@ pub(crate) async fn dev_list_files(
         }
     }
 }
+
+#[tauri::command]
+pub(crate) async fn dev_get_file_content(
+    app: AppHandle,
+    _state: State<'_, AppState>,
+    path_str: String, // Use path_str for consistency
+) -> Result<String, String> {
+    info!("[DEV_TOOL] Getting content for file: {}", path_str);
+
+    let expanded_path = if path_str.starts_with("~") {
+        match dirs::home_dir() {
+            Some(home) => {
+                if path_str == "~" {
+                    // Technically, listing home dir as file content is an error, but path expansion is generic.
+                    // The function should ideally check if it's a file before reading.
+                    // For now, let it proceed and fail at read_to_string if it's a directory.
+                    home
+                } else if path_str.starts_with("~/" ){
+                    home.join(&path_str[2..])
+                } else {
+                    PathBuf::from(path_str.clone())
+                }
+            }
+            None => {
+                let err_msg = "Failed to resolve home directory for path starting with ~".to_string();
+                info!("[DEV_TOOL] Error: {}", err_msg);
+                send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+                return Err(err_msg);
+            }
+        }
+    } else {
+        PathBuf::from(path_str.clone())
+    };
+
+    info!("[DEV_TOOL] Expanded path to read: {:?}", expanded_path);
+    let file_path = expanded_path.as_path();
+
+    if !file_path.exists() {
+        let err_msg = format!("File does not exist: {:?}", file_path);
+        info!("[DEV_TOOL] Error: {}", err_msg);
+        send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+        return Err(err_msg);
+    }
+
+    if file_path.is_dir() {
+        let err_msg = format!("Path is a directory, not a file: {:?}", file_path);
+        info!("[DEV_TOOL] Error: {}", err_msg);
+        send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+        return Err(err_msg);
+    }
+
+    match fs::read_to_string(file_path) {
+        Ok(content) => {
+            send_dev_tool_notification(
+                &app,
+                "Get File Content",
+                &format!("Read content from {:?}", file_path),
+            )?;
+            Ok(content)
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to read file '{:?}': {}", file_path, e);
+            info!("[DEV_TOOL] Error: {}", err_msg);
+            send_dev_tool_notification(&app, "Get Content Error", &err_msg)?;
+            Err(err_msg)
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn dev_set_file_content(
+    app: AppHandle,
+    _state: State<'_, AppState>,
+    path_str: String, // Use path_str for consistency
+    content: String,
+) -> Result<(), String> {
+    info!("[DEV_TOOL] Setting content for file: {}", path_str);
+
+    let expanded_path = if path_str.starts_with("~") {
+        match dirs::home_dir() {
+            Some(home) => {
+                if path_str == "~" {
+                     // Cannot write content to home directory directly like this
+                    let err_msg = "Cannot set content for home directory '~' as if it were a file.".to_string();
+                    info!("[DEV_TOOL] Error: {}", err_msg);
+                    send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+                    return Err(err_msg);
+                } else if path_str.starts_with("~/" ){
+                    home.join(&path_str[2..])
+                } else {
+                    PathBuf::from(path_str.clone())
+                }
+            }
+            None => {
+                let err_msg = "Failed to resolve home directory for path starting with ~".to_string();
+                info!("[DEV_TOOL] Error: {}", err_msg);
+                send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+                return Err(err_msg);
+            }
+        }
+    } else {
+        PathBuf::from(path_str.clone())
+    };
+
+    info!("[DEV_TOOL] Expanded path to write: {:?}", expanded_path);
+    let file_path = expanded_path.as_path();
+
+    // Optional: Create parent directories if they don't exist
+    if let Some(parent_dir) = file_path.parent() {
+        if !parent_dir.exists() {
+            if let Err(e) = fs::create_dir_all(parent_dir) {
+                let err_msg = format!("Failed to create parent directories for '{:?}': {}", file_path, e);
+                info!("[DEV_TOOL] Error: {}", err_msg);
+                send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+                return Err(err_msg);
+            }
+            info!("[DEV_TOOL] Created parent directories for {:?}", file_path);
+        }
+    }
+
+    // If it's a directory, we shouldn't write to it as if it's a file.
+    if file_path.is_dir() {
+        let err_msg = format!("Path is a directory, cannot write file content: {:?}", file_path);
+        info!("[DEV_TOOL] Error: {}", err_msg);
+        send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+        return Err(err_msg);
+    }
+
+    match fs::write(file_path, content) {
+        Ok(_) => {
+            send_dev_tool_notification(
+                &app,
+                "Set File Content",
+                &format!("Wrote content to {:?}", file_path),
+            )?;
+            Ok(())
+        }
+        Err(e) => {
+            let err_msg = format!("Failed to write file '{:?}': {}", file_path, e);
+            info!("[DEV_TOOL] Error: {}", err_msg);
+            send_dev_tool_notification(&app, "Set Content Error", &err_msg)?;
+            Err(err_msg)
+        }
+    }
+}
