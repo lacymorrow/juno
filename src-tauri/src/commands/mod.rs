@@ -6,6 +6,7 @@ use tauri_plugin_notification::NotificationExt;
 pub mod app_url;
 pub mod core;
 pub mod element;
+pub mod filesystem;
 pub mod keyboard;
 pub mod mouse;
 pub mod providers;
@@ -13,15 +14,19 @@ pub mod shell;
 pub mod text_editor;
 pub mod window;
 
-// Re-export all command functions for easy access in main.rs - REMOVED as they are pub(crate)
-// pub use app_url::*;
-// pub use core::*;
-// pub use element::*;
-// pub use keyboard::*;
-// pub use mouse::*;
-// pub use shell::*;
-// pub use text_editor::*;
-// pub use window::*;
+// Re-export commands for easy access in lib.rs
+pub use self::app_url::*;
+pub use self::core::*;
+pub use self::element::*;
+pub use self::filesystem::*;
+pub use self::keyboard::*;
+pub use self::mouse::*;
+pub use self::providers::*;
+pub use self::shell::*;
+pub use self::text_editor::*;
+pub use self::window::*;
+
+use tauri::AppHandle;
 
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::

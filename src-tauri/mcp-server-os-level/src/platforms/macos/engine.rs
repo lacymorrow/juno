@@ -1326,7 +1326,8 @@ impl AccessibilityEngine for MacOSEngine {
         direction: &str,
         amount: f64,
     ) -> Result<(), AutomationError> {
-        self.scroll_at_position(x, y, direction, amount)
+        // Call the non-trait method MacOSEngine::scroll_at_position
+        MacOSEngine::scroll_at_position(self, x, y, direction, amount)
     }
 
     fn scroll_at_current_position(
@@ -1334,33 +1335,12 @@ impl AccessibilityEngine for MacOSEngine {
         direction: &str,
         amount: f64,
     ) -> Result<(), AutomationError> {
-        self.scroll_at_current_position(direction, amount)
+        // Call the non-trait method MacOSEngine::scroll_at_current_position
+        MacOSEngine::scroll_at_current_position(self, direction, amount)
     }
 
     fn type_text(&self, text: &str) -> Result<(), AutomationError> {
-        // interaction::type_text_global(text) // Keep interaction reference if needed elsewhere
-        debug!("Typing text: '{}' using CGEvent", text);
-        // Decompose text into individual key presses
-        for char in text.chars() {
-            // This is a simplified approach; doesn't handle complex layouts, dead keys, or all unicode.
-            // It relies on key_name_to_keycode mapping single characters.
-            let char_str = char.to_string();
-            let key_code = key_name_to_keycode(&char_str).ok_or_else(||
-                AutomationError::InvalidArgument(format!("Cannot map character '{}' to keycode", char))
-            )?;
-
-            // Determine if shift is needed (basic check for uppercase ASCII)
-            let mut flags = CGEventFlags::empty();
-            if char.is_ascii_uppercase() {
-                flags |= CGEventFlags::CGEventFlagShift;
-            }
-            // TODO: Add more sophisticated shift/modifier handling based on character map if needed.
-
-            // Post key down then key up
-            post_keyboard_event(key_code, flags, true)?; // Key Down
-            post_keyboard_event(key_code, flags, false)?; // Key Up
-        }
-        Ok(())
+        interaction::type_text_global(text)
     }
 
     fn get_clipboard_content(&self) -> Result<String, AutomationError> {
@@ -1376,23 +1356,12 @@ impl AccessibilityEngine for MacOSEngine {
     fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
         debug!("holding key {} for {:?}ms", key, duration_ms);
 
-        // Get the key code and flags from the key name
-        let key_code = match key_name_to_keycode(key) {
-            Some(code) => code,
-            None => {
-                return Err(AutomationError::InvalidArgument(format!(
-                    "Unknown key: {}. Use standard key names.",
-                    key
-                )))
-            }
-        };
-
-        // Extract any modifiers from the key string (like ctrl, shift, etc.)
+        let mut actual_key_name = key;
         let mut flags = CGEventFlags::empty();
 
-        // Parse modifiers if key contains a "+" character (e.g., "ctrl+s")
         if key.contains('+') {
             let parts: Vec<&str> = key.split('+').collect();
+            actual_key_name = parts.last().unwrap_or(&key); // Get the last part as the key
             for part in &parts[..parts.len() - 1] {
                 let modifier_flag = match part.to_lowercase().as_str() {
                     "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
@@ -1411,30 +1380,23 @@ impl AccessibilityEngine for MacOSEngine {
             }
         }
 
-        // Use interaction module's hold_key implementation
+        let key_code = match key_name_to_keycode(actual_key_name) {
+            Some(code) => code,
+            None => interaction::get_key_code(actual_key_name)?
+        };
+
         interaction::hold_key(key_code, flags, duration_ms)
     }
 
     fn release_key(&self, key: &str) -> Result<(), AutomationError> {
         debug!("releasing key {}", key);
 
-        // Get the key code and flags from the key name
-        let key_code = match key_name_to_keycode(key) {
-            Some(code) => code,
-            None => {
-                return Err(AutomationError::InvalidArgument(format!(
-                    "Unknown key: {}. Use standard key names.",
-                    key
-                )))
-            }
-        };
-
-        // Extract any modifiers from the key string (like ctrl, shift, etc.)
+        let mut actual_key_name = key;
         let mut flags = CGEventFlags::empty();
 
-        // Parse modifiers if key contains a "+" character (e.g., "ctrl+s")
         if key.contains('+') {
             let parts: Vec<&str> = key.split('+').collect();
+            actual_key_name = parts.last().unwrap_or(&key);
             for part in &parts[..parts.len() - 1] {
                 let modifier_flag = match part.to_lowercase().as_str() {
                     "command" | "cmd" => CGEventFlags::CGEventFlagCommand,
@@ -1453,13 +1415,17 @@ impl AccessibilityEngine for MacOSEngine {
             }
         }
 
-        // Manually create key up event to release the key
+        let key_code = match key_name_to_keycode(actual_key_name) {
+            Some(code) => code,
+            None => interaction::get_key_code(actual_key_name)?
+        };
+
         let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
             AutomationError::PlatformError("Failed to create event source for key release".to_string())
         })?;
 
         let key_up = CGEvent::new_keyboard_event(source, key_code, false).map_err(|_| {
-            AutomationError::PlatformError(format!("Failed to create key up event for {}", key))
+            AutomationError::PlatformError(format!("Failed to create key up event for {}", actual_key_name))
         })?;
 
         if flags != CGEventFlags::empty() {
@@ -1477,7 +1443,8 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn get_ui_tree(&self, app_name: Option<&str>) -> Result<JsonValue, AutomationError> {
-        self.get_ui_tree(app_name) // Call the struct's method
+        // Call the non-trait method MacOSEngine::get_ui_tree
+        MacOSEngine::get_ui_tree(self, app_name)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
