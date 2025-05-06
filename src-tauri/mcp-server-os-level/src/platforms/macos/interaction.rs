@@ -1,15 +1,15 @@
-use accessibility::{AXAttribute, AXUIElement};
-use accessibility_sys::AXUIElementRef;
+use accessibility::{AXAttribute, AXUIElement, Error as AXError};
+use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
 use super::constants::*;
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
 use crate::{AutomationError, ClickResult};
-use accessibility_sys::{AXUIElementSetAttributeValue};
-use core_foundation::base::{TCFType, CFTypeRef};
+use core_foundation::base::{CFType, TCFType, CFTypeRef};
 use core_foundation::string::{CFString, CFStringRef};
+use core_graphics::base::CGFloat;
 use core_graphics::event::{
-    CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
+    CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton, ScrollEventUnit,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
@@ -19,6 +19,9 @@ use std::collections::HashMap;
 use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
+use core_foundation::array::CFArray;
+use core_graphics::display::CGSize;
+use super::ffi::AXValueCreate;
  // Import AXValueCreate
 
 // Define key code constants for keyboard shortcuts
@@ -267,37 +270,85 @@ pub(crate) fn mouse_move(x: f64, y: f64) -> Result<(), AutomationError> {
 }
 
 /// Press down the left mouse button at specified coordinates.
-pub(crate) fn left_mouse_down(x: f64, y: f64) -> Result<(), AutomationError> {
-    debug!("Pressing left mouse down at ({}, {})", x, y);
-    let point = CGPoint::new(x, y);
+pub(crate) fn left_mouse_down(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Result<(), AutomationError> {
+    debug!("Mouse down at ({}, {}) with modifiers: {:?}", x, y, modifiers);
 
-    // Move to position first
-    mouse_move(x, y)?;
-    std::thread::sleep(std::time::Duration::from_millis(20));
-
+    // Create an event source for user input
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for left mouse down".to_string()))?;
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse down".to_string()))?;
 
-    let down_event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create left mouse down event".to_string()))?;
-    down_event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
-    down_event.post(CGEventTapLocation::HID);
+    // First, move the cursor to the target position
+    let point = CGPoint::new(x, y);
+    let mouse_move = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::MouseMoved,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+
+    // Apply modifiers if provided
+    if let Some(flags) = modifiers {
+        mouse_move.set_flags(flags);
+    }
+
+    // Post the mouse move event
+    mouse_move.post(CGEventTapLocation::HID);
+
+    // Wait a short time for the move to register
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Create the mouse down event
+    let mouse_down = CGEvent::new_mouse_event(
+        source,
+        CGEventType::LeftMouseDown,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create mouse down event".to_string()))?;
+
+    // Apply modifiers if provided
+    if let Some(flags) = modifiers {
+        mouse_down.set_flags(flags);
+    }
+
+    // Post the mouse down event
+    mouse_down.post(CGEventTapLocation::HID);
+
+    debug!("Left mouse button down at ({}, {})", x, y);
 
     Ok(())
 }
 
 /// Release the left mouse button at specified coordinates.
-pub(crate) fn left_mouse_up(x: f64, y: f64) -> Result<(), AutomationError> {
-    debug!("Releasing left mouse at ({}, {})", x, y);
+pub(crate) fn left_mouse_up(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Result<(), AutomationError> {
+    debug!("Mouse up at ({}, {}) with modifiers: {:?}", x, y, modifiers);
+
+    // Create an event source for user input
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse up".to_string()))?;
+
+    // Create the point for the current position
     let point = CGPoint::new(x, y);
 
-    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for left mouse up".to_string()))?;
+    // Create the mouse up event
+    let mouse_up = CGEvent::new_mouse_event(
+        source,
+        CGEventType::LeftMouseUp,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| AutomationError::PlatformError("Failed to create mouse up event".to_string()))?;
 
-    let up_event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create left mouse up event".to_string()))?;
-    up_event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
-    up_event.post(CGEventTapLocation::HID);
+    // Apply modifiers if provided
+    if let Some(flags) = modifiers {
+        mouse_up.set_flags(flags);
+    }
+
+    // Post the mouse up event
+    mouse_up.post(CGEventTapLocation::HID);
+
+    debug!("Left mouse button up at ({}, {})", x, y);
 
     Ok(())
 }
@@ -305,38 +356,18 @@ pub(crate) fn left_mouse_up(x: f64, y: f64) -> Result<(), AutomationError> {
 /// Simulate a standard left click (down + up) at specified coordinates.
 /// Optionally apply modifier keys to the click.
 pub(crate) fn left_click(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Result<(), AutomationError> {
-    debug!("Performing left click at ({}, {}) with modifiers: {:?}", x, y, modifiers);
-    let point = CGPoint::new(x, y);
-    mouse_move(x, y)?; // Ensure cursor is at the correct position
-    std::thread::sleep(std::time::Duration::from_millis(20)); // Short pause after move
+    debug!("Left click at ({}, {}) with modifiers: {:?}", x, y, modifiers);
 
-    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-        .map_err(|_| AutomationError::PlatformError("Failed to create event source for left click".to_string()))?;
+    // Use our improved left_mouse_down and left_mouse_up functions
+    left_mouse_down(x, y, modifiers)?;
 
-    // Mouse down with click state 1
-    let down_event = CGEvent::new_mouse_event(source.clone(), CGEventType::LeftMouseDown, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create left mouse down event".to_string()))?;
-    down_event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
+    // Wait a short time between down and up events
+    std::thread::sleep(std::time::Duration::from_millis(30));
 
-    // Apply modifiers if provided
-    if let Some(flags) = modifiers {
-        down_event.set_flags(flags);
-    }
+    left_mouse_up(x, y, modifiers)?;
 
-    down_event.post(CGEventTapLocation::HID);
-    std::thread::sleep(Duration::from_millis(50)); // Pause between down and up
+    debug!("Completed left click at ({}, {})", x, y);
 
-    // Mouse up with click state 1
-    let up_event = CGEvent::new_mouse_event(source, CGEventType::LeftMouseUp, point, CGMouseButton::Left)
-        .map_err(|_| AutomationError::PlatformError("Failed to create left mouse up event".to_string()))?;
-    up_event.set_integer_value_field(core_graphics::event::EventField::MOUSE_EVENT_CLICK_STATE, 1);
-
-    // Apply the same modifiers to the up event
-    if let Some(flags) = modifiers {
-        up_event.set_flags(flags);
-    }
-
-    up_event.post(CGEventTapLocation::HID);
     Ok(())
 }
 
@@ -703,7 +734,8 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     Ok(())
 }
 
-fn get_key_code(key: &str) -> Result<u16, AutomationError> {
+pub(crate) fn get_key_code(key: &str) -> Result<u16, AutomationError> {
+    // First, check our predefined key map for special keys
     let key_map: HashMap<&str, u16> = [
         ("return", KEY_RETURN),
         ("enter", KEY_RETURN),
@@ -717,14 +749,81 @@ fn get_key_code(key: &str) -> Result<u16, AutomationError> {
         ("right", KEY_ARROW_RIGHT),
         ("down", KEY_ARROW_DOWN),
         ("up", KEY_ARROW_UP),
+        // Add more special keys here as needed
     ]
     .iter()
     .cloned()
     .collect();
-    key_map
-        .get(key.to_lowercase().as_str())
-        .copied()
-        .ok_or_else(|| AutomationError::InvalidArgument(format!("Unknown key: {}", key)))
+
+    let key_lower = key.to_lowercase();
+
+    // First check if it's in our predefined map
+    if let Some(&code) = key_map.get(key_lower.as_str()) {
+        return Ok(code);
+    }
+
+    // If not in predefined map, check if it's a single alphanumeric character
+    if key_lower.len() == 1 {
+        let c = key_lower.chars().next().unwrap();
+
+        // Handle alphabetic keys (a-z)
+        if c.is_ascii_alphabetic() {
+            // ASCII values: 'a' is 0, 'b' is 11, etc.
+            // These are standard macOS virtual key codes
+            let vk = match c {
+                'a' => 0,
+                'b' => 11,
+                'c' => 8,
+                'd' => 2,
+                'e' => 14,
+                'f' => 3,
+                'g' => 5,
+                'h' => 4,
+                'i' => 34,
+                'j' => 38,
+                'k' => 40,
+                'l' => 37,
+                'm' => 46,
+                'n' => 45,
+                'o' => 31,
+                'p' => 35,
+                'q' => 12,
+                'r' => 15,
+                's' => 1,
+                't' => 17,
+                'u' => 32,
+                'v' => 9,
+                'w' => 13,
+                'x' => 7,
+                'y' => 16,
+                'z' => 6,
+                _ => return Err(AutomationError::InvalidArgument(format!("Unsupported character: {}", c))),
+            };
+            return Ok(vk);
+        }
+
+        // Handle numeric keys (0-9)
+        if c.is_ascii_digit() {
+            // macOS virtual key codes for digits
+            let vk = match c {
+                '0' => 29,
+                '1' => 18,
+                '2' => 19,
+                '3' => 20,
+                '4' => 21,
+                '5' => 23,
+                '6' => 22,
+                '7' => 26,
+                '8' => 28,
+                '9' => 25,
+                _ => return Err(AutomationError::InvalidArgument(format!("Unsupported digit: {}", c))),
+            };
+            return Ok(vk);
+        }
+    }
+
+    // If we get here, the key wasn't recognized
+    Err(AutomationError::InvalidArgument(format!("Unknown key: {}", key)))
 }
 
 pub(crate) fn parse_key_combination(
@@ -849,14 +948,39 @@ pub(crate) fn scroll(
         }
     };
 
-    let scroll_event = CGEvent::new_scroll_event(source, 0, 1, scroll_y, scroll_x, 0)
+    // First create a move event to position mouse
+    let move_event = CGEvent::new_mouse_event(
+        source.clone(), // Clone here to avoid move
+        CGEventType::MouseMoved,
+        CGPoint::new(center_x, center_y),
+        CGMouseButton::Left
+    ).map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+
+    move_event.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Create a scroll event manually since new_scroll_wheel_event is not available
+    let scroll_event = CGEvent::new(source.clone()) // Clone source again here
         .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
 
+    // Constants for scroll wheel event
+    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
+    const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll mode
+
+    // Set event type to scroll wheel - use transmute instead of from_type_id
+    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
+
+    // Set the line scroll bit
+    scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
+
+    // Set the delta values
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, scroll_y as i64);
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, scroll_x as i64);
+
     scroll_event.post(CGEventTapLocation::HID);
-    debug!(
-        "scrolled {} by {} at element center ({}, {})",
-        direction, amount, center_x, center_y
-    );
+
     Ok(())
 }
 
@@ -959,37 +1083,39 @@ pub(crate) fn set_clipboard_contents(text: &str) -> Result<(), AutomationError> 
 /// Holds down a specified modifier key.
 /// If duration_ms is provided, the key will be released after that duration.
 pub(crate) fn hold_key(key_code: CGKeyCode, flags: CGEventFlags, duration_ms: Option<u64>) -> Result<(), AutomationError> {
-    debug!("Holding key: code={}, flags={:?}, duration={:?}ms", key_code, flags, duration_ms);
-    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_|
-        AutomationError::PlatformError("Failed to create event source for hold_key".to_string())
-    )?;
+    debug!("Holding key code {} with flags {:?} for {:?}ms", key_code, flags, duration_ms);
 
-    // Create keyboard event for key down
+    // Create an event source for user input
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for key hold".to_string()))?;
+
+    // Create the key down event
     let key_down = CGEvent::new_keyboard_event(source.clone(), key_code, true)
-        .map_err(|_| AutomationError::PlatformError("Failed to create key down event for hold_key".to_string()))?;
+        .map_err(|_| AutomationError::PlatformError("Failed to create key down event".to_string()))?;
 
-    // Set the appropriate flags for the modifier key itself
+    // Set modifier flags
     key_down.set_flags(flags);
+
+    // Post the key down event
     key_down.post(CGEventTapLocation::HID);
 
-    // If duration is provided, wait and then release the key
-    if let Some(duration) = duration_ms {
-        let duration = std::time::Duration::from_millis(duration);
+    // Determine the duration to hold the key
+    let hold_duration = duration_ms.unwrap_or(100); // Default to 100ms if not specified
 
-        // Spawn a thread to release the key after the specified duration
-        std::thread::spawn(move || {
-            std::thread::sleep(duration);
+    // Sleep for the specified duration
+    std::thread::sleep(std::time::Duration::from_millis(hold_duration));
 
-            // Create release event
-            if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
-                if let Ok(key_up) = CGEvent::new_keyboard_event(source, key_code, false) {
-                    key_up.set_flags(flags);
-                    key_up.post(CGEventTapLocation::HID);
-                    debug!("Auto-released key after {:?}ms", duration_ms);
-                }
-            }
-        });
-    }
+    // Create the key up event
+    let key_up = CGEvent::new_keyboard_event(source, key_code, false)
+        .map_err(|_| AutomationError::PlatformError("Failed to create key up event".to_string()))?;
+
+    // Set the same modifier flags
+    key_up.set_flags(flags);
+
+    // Post the key up event
+    key_up.post(CGEventTapLocation::HID);
+
+    debug!("Released key code {} after {}ms", key_code, hold_duration);
 
     Ok(())
 }
@@ -1030,5 +1156,302 @@ pub(crate) fn press_key_with_modifier(key_code: CGKeyCode, modifier_flags: CGEve
     thread::sleep(Duration::from_millis(50));
 
     debug!("Key press simulated for key code: {}", key_code);
+    Ok(())
+}
+
+// --- Old/Internal key sequence logic (if needed for reference, keep private) ---
+fn press_key_sequence(keys: &[(CGKeyCode, Option<CGEventFlags>)]) -> Result<(), AutomationError> {
+    // Placeholder implementation or keep the original logic if needed internally
+    debug!("Internal press_key_sequence called (currently placeholder)");
+    // Example: iterate through keys and simulate presses
+    for (key_code, modifier_flags_opt) in keys {
+        let modifier_flags = modifier_flags_opt.unwrap_or_else(CGEventFlags::empty);
+        // Simulate key down
+        // Simulate key up
+        debug!("Simulating press for key: {} with flags: {:?}", key_code, modifier_flags);
+    }
+    Ok(())
+}
+
+// Function to get element frame, required by scroll_element
+fn get_element_frame(element: &AXUIElement) -> Result<(f64, f64, f64, f64), AutomationError> {
+    // Use a simplified approach working with the existing AXUIElement accessors
+    // Check for position and size attributes safely
+
+    // Get position
+    let position_attr = AXAttribute::new(&CFString::new("AXPosition"));
+    let position_cf = match element.attribute(&position_attr) {
+        Ok(cf) => cf,
+        Err(e) => {
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to get position attribute: {:?}", e
+            )));
+        }
+    };
+
+    // Get size
+    let size_attr = AXAttribute::new(&CFString::new("AXSize"));
+    let size_cf = match element.attribute(&size_attr) {
+        Ok(cf) => cf,
+        Err(e) => {
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to get size attribute: {:?}", e
+            )));
+        }
+    };
+
+    // Extract data from position and size using lower-level functions to
+    // avoid the direct casting that was causing problems
+
+    // Parse these values based on debug output format and descriptions
+    // Extract X and Y from position
+    let position_str = format!("{:?}", position_cf);
+    let size_str = format!("{:?}", size_cf);
+
+    // Extract X and Y from position
+    let mut x = 0.0;
+    let mut y = 0.0;
+    // Simple position string parser to extract values from the debug output
+    if position_str.contains("x") && position_str.contains("y") {
+        // Try to extract numeric values from string
+        for part in position_str.split([',', ' ', ':', ')', '(']).collect::<Vec<&str>>() {
+            if let Ok(value) = part.trim().parse::<f64>() {
+                if x == 0.0 {
+                    x = value;
+                } else {
+                    y = value;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Extract Width and Height from size
+    let mut width = 0.0;
+    let mut height = 0.0;
+    // Simple size string parser to extract values from the debug output
+    if size_str.contains("w") && size_str.contains("h") {
+        // Try to extract numeric values from string
+        for part in size_str.split([',', ' ', ':', ')', '(']).collect::<Vec<&str>>() {
+            if let Ok(value) = part.trim().parse::<f64>() {
+                if width == 0.0 {
+                    width = value;
+                } else {
+                    height = value;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Check that we got valid values
+    if width <= 0.0 || height <= 0.0 {
+        return Err(AutomationError::PlatformError(
+            format!("Invalid element dimensions: {}x{}", width, height)
+        ));
+    }
+
+    Ok((x, y, width, height))
+}
+
+pub fn scroll_element(element: &AXUIElement, direction: &str, amount: f64) -> Result<(), AutomationError> {
+    let element_frame = match get_element_frame(element) {
+        Ok(frame) => frame,
+        Err(e) => {
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to get element frame for scrolling: {}", e
+            )))
+        }
+    };
+
+    // Calculate center of element
+    let center_x = element_frame.0 + element_frame.2 / 2.0;
+    let center_y = element_frame.1 + element_frame.3 / 2.0;
+
+    // Create event source
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source for scrolling".to_string())
+    })?;
+
+    // Normalize direction and calculate scroll values
+    let (scroll_x, scroll_y) = match direction.to_lowercase().as_str() {
+        "up" => (0, -(amount as i32)),
+        "down" => (0, amount as i32),
+        "left" => (-(amount as i32), 0),
+        "right" => (amount as i32, 0),
+        _ => {
+            return Err(AutomationError::InvalidArgument(format!(
+                "Invalid scroll direction: {}, must be up, down, left, or right",
+                direction
+            )))
+        }
+    };
+
+    // Create a move event to position mouse first
+    let move_event = CGEvent::new_mouse_event(
+        source.clone(), // Clone here to avoid move
+        CGEventType::MouseMoved,
+        CGPoint::new(center_x, center_y),
+        CGMouseButton::Left
+    ).map_err(|_| AutomationError::PlatformError("Failed to create mouse move event".to_string()))?;
+
+    move_event.post(CGEventTapLocation::HID);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Create a scroll event manually since new_scroll_wheel_event is not available
+    let scroll_event = CGEvent::new(source.clone()).map_err(|_| {
+        AutomationError::PlatformError("Failed to create scroll event".to_string())
+    })?;
+
+    // Constants for scroll wheel event
+    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
+    const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll mode
+
+    // Set event type to scroll wheel using transmute for safety
+    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
+
+    // Set the line scroll bit
+    scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
+
+    // Set the delta values
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, scroll_y as i64);
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, scroll_x as i64);
+
+    scroll_event.post(CGEventTapLocation::HID);
+    debug!(
+        "scrolled {} by {} at element center ({}, {})",
+        direction, amount, center_x, center_y
+    );
+    Ok(())
+}
+
+// Add the updated scroll_with_modifiers function for Claude 3.7 Sonnet
+pub(crate) fn scroll_with_modifiers(
+    x: f64,
+    y: f64,
+    direction: &str,
+    amount: f64,
+    modifiers: Option<CGEventFlags>
+) -> Result<(), AutomationError> {
+    debug!("scrolling {} by {} at ({}, {}) with modifiers: {:?}", direction, amount, x, y, modifiers);
+
+    // Create an event source for user input
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| AutomationError::PlatformError("Failed to create event source for scrolling".to_string()))?;
+
+    // Move the cursor to the target position first
+    let point = CGPoint::new(x, y);
+    let mouse_move = CGEvent::new_mouse_event(
+        source.clone(),
+        CGEventType::MouseMoved,
+        point,
+        CGMouseButton::Left,
+    )
+    .map_err(|_| {
+        AutomationError::PlatformError("Failed to create mouse move event for scrolling".to_string())
+    })?;
+
+    // Apply modifiers if any are specified
+    if let Some(flags) = modifiers {
+        mouse_move.set_flags(flags);
+    }
+
+    // Post the mouse move event
+    mouse_move.post(CGEventTapLocation::HID);
+
+    // Wait a moment for the move to register
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Convert amount to integer to use as scroll wheel units
+    // We'll scale the amount a bit to make the scrolling more noticeable
+    let scroll_units = (amount * 3.0).round() as i32;
+
+    // Determine which axes to use for scrolling based on direction
+    let (wheel_count, line_count) = match direction.to_lowercase().as_str() {
+        "up" => (0, -scroll_units), // Negative for up
+        "down" => (0, scroll_units), // Positive for down
+        "left" => (scroll_units, 0), // Positive for left (wheel axis)
+        "right" => (-scroll_units, 0), // Negative for right (wheel axis)
+        _ => {
+            return Err(AutomationError::InvalidArgument(format!(
+                "Invalid scroll direction: {}. Use 'up', 'down', 'left', or 'right'.",
+                direction
+            )))
+        }
+    };
+
+    // Create a scroll event using the base CGEvent creation
+    let scroll_event = CGEvent::new(source)
+        .map_err(|_| AutomationError::PlatformError("Failed to create scroll event".to_string()))?;
+
+    // Set scroll event fields directly
+    // Constants for scroll wheel event types
+    const SCROLL_WHEEL_EVENT_TYPE: u32 = 22; // kCGEventScrollWheel
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_1: u32 = 11; // Vertical scroll delta (main scroll axis)
+    const SCROLL_WHEEL_EVENT_DELTA_AXIS_2: u32 = 10; // Horizontal scroll delta
+    const SCROLL_WHEEL_EVENT_LINE_SCROLL: i64 = 1 << 0; // Line scroll (as opposed to pixel scroll)
+
+    // Set event type using CGEventType transmute
+    scroll_event.set_type(unsafe { std::mem::transmute(SCROLL_WHEEL_EVENT_TYPE) });
+
+    // Apply modifiers if any are specified
+    if let Some(flags) = modifiers {
+        scroll_event.set_flags(flags);
+    }
+
+    // Set the line scroll bit (field 120 = scroll wheel event options)
+    scroll_event.set_integer_value_field(120, SCROLL_WHEEL_EVENT_LINE_SCROLL);
+
+    // Set the delta values
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_1, line_count as i64);
+    scroll_event.set_integer_value_field(SCROLL_WHEEL_EVENT_DELTA_AXIS_2, wheel_count as i64);
+
+    // Post the scroll event
+    scroll_event.post(CGEventTapLocation::HID);
+
+    debug!("Scrolled {} by {} at ({}, {})", direction, amount, x, y);
+
+    Ok(())
+}
+
+// Add a new function for post_mouse_event that allows holding modifiers during mouse operations
+pub(crate) fn post_mouse_event(
+    event_type: CGEventType,
+    location: CGPoint,
+    button: CGMouseButton,
+    modifiers: Option<CGEventFlags>,
+    click_state: Option<i64>
+) -> Result<(), AutomationError> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+        AutomationError::PlatformError("Failed to create event source".to_string())
+    })?;
+
+    let event = CGEvent::new_mouse_event(source, event_type, location, button).map_err(|_| {
+        AutomationError::PlatformError("Failed to create mouse event".to_string())
+    })?;
+
+    // Apply modifiers if provided
+    if let Some(flags) = modifiers {
+        event.set_flags(flags);
+    }
+
+    // Set click state for double-click/triple-click if provided
+    if let Some(state) = click_state {
+        event.set_integer_value_field(1, state); // Field 1 = click state (1 = single, 2 = double, 3 = triple)
+    }
+
+    event.post(CGEventTapLocation::HID);
+    Ok(())
+}
+
+/// Wait for a specified duration in milliseconds
+pub(crate) fn wait(duration_ms: u64) -> Result<(), AutomationError> {
+    debug!("Waiting for {} ms", duration_ms);
+
+    std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+
+    debug!("Wait completed");
     Ok(())
 }
