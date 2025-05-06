@@ -1,0 +1,204 @@
+\
+<PRD>
+# Overview
+This document outlines the requirements for enhancing DotDot, a Tauri-based AI Computer Use Bot, into a more sophisticated, robust, and intelligent multi-agent system. The goal is to enable DotDot to understand complex user requests, formulate multi-step plans, and execute these plans reliably by interacting with the macOS desktop environment through a combination of visual understanding and structural (Accessibility API) interaction. This enhancement aims to significantly improve DotDot\'s autonomy, task completion capabilities, and overall effectiveness as an AI assistant for computer operations. It is for users who want to automate complex or repetitive tasks on their macOS computer.
+
+# Core Features
+
+1.  **Advanced macOS Interaction Backend:**
+    *   **What it does:** Provides a comprehensive and robust set of tools for interacting with the macOS environment, including window management (get title, list, close, minimize, resize, move), UI element interaction (via Accessibility APIs), keyboard and mouse emulation, screenshot capture, and clipboard access.
+    *   **Why it\'s important:** Forms the fundamental layer for the AI to perceive and act upon the computer\'s state. Completeness and reliability here are critical.
+    *   **How it works:** Implemented in Rust within `src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs`, using native macOS APIs (CoreGraphics, Accessibility, etc.). Tools will return rich `ToolResult` objects including textual output, errors, and base64 encoded screenshots.
+
+2.  **Hierarchical Planning & Orchestration Layer:**
+    *   **What it does:** Introduces a `PlanManager` (or similar) component responsible for taking high-level user goals and decomposing them into a sequence of actionable steps. This layer will manage the lifecycle of a plan and orchestrate different AI agents to execute these steps.
+    *   **Why it\'s important:** Enables DotDot to handle complex, multi-stage tasks that require more than a single action or tool call, improving its problem-solving capabilities.
+    *   **How it works:** The `PlanManager` will use an LLM (Anthropic Claude 3.5 Sonnet) to generate a `Plan` (a list of steps with statuses like "pending", "in-progress", "completed"). It will then iterate through the plan, dispatching each step to an appropriate agent. This is inspired by `OpenManus`\'s `PlanningFlow`.
+
+3.  **Structured Multi-Agent System:**
+    *   **What it does:** Defines a clear agent hierarchy (`BaseAgent` trait -> `ReActAgent` for think-act loop -> `ToolCallAgent` for LLM-driven tool use) and allows for the creation of specialized executor agents.
+    *   **Why it\'s important:** Promotes modularity, maintainability, and allows for different agents to have specialized skills and tools, leading to more effective task execution.
+    *   **How it works:** Agents will be Rust structs/traits. `ToolCallAgent` will use its LLM to select and invoke tools from its dedicated `ToolCollection`.
+
+4.  **Specialized Executor Agents:**
+    *   **What it does:** A suite of concrete agents, each derived from `ToolCallAgent`, equipped with specific toolsets for their domain. Examples:
+        *   `MacOSInteractionAgent`: For direct GUI control using the macOS interaction backend.
+        *   `FileSystemAgent`: For file operations.
+        *   `WebNavigationAgent`: For browser interactions. (Future considerations: deeper specialization for complex form filling, authentication including 2FA, and dynamic content handling, inspired by Skyvern's agent design).
+        *   `InformationRetrievalAgent`: For web searches, document reading.
+        *   `UserInteractionAgent`: For clarifying tasks with the user via the Tauri UI.
+    *   **Why it\'s important:** Allows the `PlanManager` to delegate tasks to the most suitable "expert" agent, improving efficiency and success rates.
+    *   **How it works:** The `PlanManager` will use an LLM (Anthropic Claude 3.5 Sonnet) to generate a `Plan` (a list of steps with statuses like "pending", "in-progress", "completed"). It will then iterate through the plan, dispatching each step to an appropriate agent. This is inspired by `OpenManus`\'s `PlanningFlow`. Consideration should be given to a more explicit Planner-Actor-Validator cycle: The `PlanManager` as Planner, specialized agents as Actors, and a distinct Validator component (or logic within `PlanManager`/`ReActAgent`) to assess step outcomes against goals, providing feedback for re-planning or error correction (similar to Skyvern's 2.0 architecture).
+
+5.  **Hybrid Perception (Visual + Structural):**
+    *   **What it does:** Enables agents, particularly the `MacOSInteractionAgent`, to make decisions based on both visual information (screenshots) and structural information (from Accessibility APIs).
+    *   **Why it\'s important:** Combines the versatility of visual understanding with the robustness of structural interaction, leading to more reliable automation across a wider range of applications.
+    *   **How it works:** The agent\'s "Observe" or "Think" phase will receive both the latest screenshot and relevant accessibility data. Prompts will guide the LLM to utilize both. Consider fallback tools (OCR, image matching) for UIs not supporting accessibility. **When relying on visual fallbacks, the LLM might generate more descriptive, coordinate-based, or OCR-text-based instructions rather than structured tool calls. The `MacOSInteractionAgent` must be capable of interpreting these lower-level instructions. After each action, especially visually-driven ones or those executed via fallback mechanisms, the agent should perform an explicit 'Observe & Validate' step: compare the new visual state (and structural, if available) against the expected outcome implied by the LLM's instruction or the tool's intent. Discrepancies should trigger a re-think cycle within the agent, potentially re-prompting the LLM with the new screenshot and an error/observation message, or escalating to the `PlanManager` if the step goal seems unachievable.**
+
+6.  **Rich Tooling and Feedback:**
+    *   **What it does:** Provides agents with a comprehensive set of well-defined tools that return detailed `ToolResult` objects (output, error, and crucially, screenshots).
+    *   **Why it\'s important:** Effective tools are the hands and eyes of the AI. Rich feedback, especially visual, allows the LLM to understand the outcome of its actions and plan subsequent steps more effectively.
+    *   **How it works:** Tools will be Rust structs implementing a common trait. The macOS interaction tools will leverage the `macos/engine.rs` backend.
+
+7.  **Enhanced Prompt Engineering:**
+    *   **What it does:** Develop detailed and context-aware system prompts for the `PlanManager` (for overall planning) and each specialized agent.
+    *   **Why it\'s important:** Prompts are critical for guiding LLM behavior. Well-crafted prompts will ensure agents understand their capabilities, limitations, and how to best perform their tasks in the macOS environment.
+    *   **How it works:** Prompts will be designed to encourage strategic thinking, effective tool use, and utilization of both visual and structural context.
+
+# User Experience
+*   **User Personas:**
+    *   **Power User/Developer:** Wants to automate complex, repetitive development workflows, custom scripts, or intricate application interactions. Values reliability and detailed control/feedback.
+    *   **Creative Professional:** Seeks to automate tasks in creative software (e.g., batch processing, file organization, simple edits based on templates).
+    *   **Accessibility User:** May use DotDot as an enhanced way to interact with their computer if standard input methods are challenging.
+*   **Key User Flows:**
+    1.  **Task Input:** User provides a high-level goal to DotDot via the Tauri UI (e.g., "Organize all my screenshots from the last month into folders by date," "Draft an email to John about the Q3 report using data from Numbers and Keynote").
+    2.  **Planning Visibility:** DotDot (via `PlanManager`) displays the generated plan (sequence of steps) to the user.
+    3.  **Execution & Feedback:** DotDot executes each step, showing:
+        *   Which agent is working.
+        *   The current action/tool being used.
+        *   Visual feedback (e.g., a mini-view of the desktop or relevant window, updated after actions).
+        *   Textual feedback (agent thoughts, tool outputs).
+    4.  **Clarification/Intervention:** If an agent needs clarification or faces an unrecoverable error, it prompts the user via the UI.
+    5.  **Task Completion:** DotDot notifies the user upon plan completion and provides a summary.
+*   **UI/UX Considerations:**
+    *   Clear visual distinction between agent-generated plans, agent thoughts, tool calls, and tool results.
+    *   Ability for the user to pause/resume/cancel ongoing plans.
+    *   Easy access to logs for troubleshooting.
+    *   Intuitive way to manage and configure DotDot (e.g., API keys, default agent preferences).
+*   **Known Limitations & User Expectations:**
+    *   Clearly communicate areas where the agent might be error-prone (e.g., highly complex GUIs, precise spatial reasoning in dense interfaces, interactions within virtualized environments or across multiple displays if not fully supported).
+    *   Provide users with an estimated cost per interaction or task, if feasible, based on LLM usage.
+
+# Technical Architecture
+*   **System Components:**
+    1.  **Tauri Frontend (Vue/React/etc.):** User interface for input, output, and control.
+    2.  **Tauri Core (Rust):** Handles frontend-backend communication, event management.
+    3.  **AI Orchestration Layer (Rust):**
+        *   `PlanManager`: Decomposes tasks, manages plan execution.
+        *   Agent implementations (`BaseAgent`, `ReActAgent`, `ToolCallAgent`, specialized agents).
+        *   `ToolCollection` and individual Tool structs.
+    4.  **LLM Interaction Module (Rust):** (`llm_interface.rs`) Interface with LLM APIs (e.g., Anthropic Claude, OpenAI GPT, Google Gemini). Should allow for configurable LLM backends.
+    5.  **macOS Interaction Backend (Rust):** (`mcp-server-os-level/src/platforms/macos/engine.rs`) Native macOS control via Accessibility, CoreGraphics, etc. Potentially limited to primary display; this needs investigation and clear documentation if true.
+    6.  **State Management:** For agent memory, plan state.
+    7.  **Workspace Management (Inspired by OpenHands/Daytona):** An internal module to prepare and manage temporary, isolated contexts or directories for agents performing sensitive operations, offering a degree of separation and safety.
+*   **Data Models (Rust structs):**
+    *   `Plan { id, title, steps: Vec<PlanStep> }`
+    *   `PlanStep { description, status, agent_assigned, tool_calls: Vec<ToolCallLog>, results: Vec<ToolResultLog> }`
+    *   `AgentMemory { messages: Vec<Message> }` (where `Message` can be user, assistant, tool_call, tool_result, including images)
+    *   `ToolDescription { name, description, parameters_schema }`
+    *   `ToolResult { output: Option<String>, error: Option<String>, image_base64: Option<String>, system_message: Option<String> }`
+*   **APIs and Integrations:**
+    *   Anthropic Claude API (for planning and agent decision-making).
+    *   Native macOS APIs (via Rust FFI or direct calls).
+*   **Infrastructure Requirements:**
+    *   Runs locally on the user\'s macOS machine.
+    *   Requires internet access for LLM API calls.
+*   **Interruption Mechanisms:**
+    *   Dedicated "Stop" or "Cancel" button in the UI.
+    *   Consider gesture-based interruptions (e.g., dragging cursor rapidly to a screen corner).
+
+# Development Roadmap
+
+*   **Phase 1: Foundational macOS Interaction & Basic Agent Loop**
+    *   **Goal:** Complete and stabilize the macOS interaction backend and implement a single, capable `ToolCallAgent` that can execute a sequence of tool calls based on LLM instructions.
+    *   Implement all `todo` functions in `macos/engine.rs` (window management, input, screenshot, element interaction).
+    *   Ensure tools return rich `ToolResult` (including screenshots).
+    *   Develop a robust `ToolCollection` and initial set of `MacOSInteractionTools`.
+    *   Implement a `BaseAgent` -> `ReActAgent` -> `ToolCallAgent` structure.
+    *   Create a basic `MacOSInteractionAgent` inheriting from `ToolCallAgent`.
+    *   Develop a simple test loop (not full `PlanManager` yet) where a user prompt is given to `MacOSInteractionAgent`, and it uses its LLM to perform a few tool calls.
+    *   Basic UI feedback for agent actions and screenshots.
+    *   More sophisticated UI controls (pause, resume, step-through plan).
+    *   Comprehensive testing and performance optimization, including interactions with multiple displays. Define internal benchmarks or adapt existing ones to systematically evaluate agent performance.
+    *   Refine system prompts for all agents based on testing.
+
+*   **Phase 2: Planning & Orchestration Implementation**
+    *   **Goal:** Introduce the `PlanManager` and the ability to handle multi-step tasks.
+    *   Design and implement the `Plan` and `PlanStep` data structures.
+    *   Implement the `PlanManager` component:
+        *   LLM call to generate plan steps from user request.
+        *   Logic to iterate through plan steps and manage their status.
+        *   Initial logic for dispatching steps to the `MacOSInteractionAgent` from Phase 1.
+    *   Enhance UI to display the plan and current step.
+
+*   **Phase 3: Specialized Agents & Hybrid Perception**
+    *   **Goal:** Introduce more specialized agents and refine the main agent\'s perception.
+    *   Develop other specialized agents (`FileSystemAgent`, basic `WebNavigationAgent`, `UserInteractionAgent`).
+    *   Refine `ToolCollections` for each agent. The `WebNavigationAgent` should aim for robust handling of modern web challenges, considering future support for authentication workflows (e.g., secure credential input, 2FA code handling by user). A potential `DeveloperToolAgent` could be introduced for interacting with version control, build systems, or linters within a sandboxed project context.
+    *   Integrate hybrid perception: `MacOSInteractionAgent` should receive and be prompted to use both screenshots and accessibility data.
+    *   `PlanManager` enhanced to select appropriate specialized agents for different plan steps (if discernible).
+
+*   **Phase 4: Advanced Features & Robustness**
+    *   **Goal:** Improve error handling, user control, and explore advanced capabilities.
+    *   Implement visual fallback tools (OCR, image matching for clicks) for `MacOSInteractionAgent`.
+    *   Advanced error handling and recovery mechanisms within agents and the `PlanManager`. **This includes:**
+        *   **Identifying common failure patterns (e.g., UI element not found via accessibility or visual search, unexpected window/dialog appearance, action had no discernible visual effect, OCR inaccuracies).**
+        *   **Implementing tiered recovery strategies: e.g., re-trying an action, attempting an alternative interaction method (keyboard shortcut vs. click, visual click vs. accessibility click), adjusting visual search parameters, re-prompting the LLM with detailed error context and current screenshot for a revised approach.**
+        *   **Mechanisms for agents to escalate unrecoverable errors to the `PlanManager` for potential re-planning or to the `UserInteractionAgent` for clarification.**
+    *   More sophisticated UI controls (pause, resume, step-through plan).
+    *   Comprehensive testing and performance optimization. Define internal benchmarks or adapt existing ones to systematically evaluate agent performance.
+    *   Refine system prompts for all agents based on testing.
+    *   Explore user-defined custom scripts for agent workspace setup (lifecycle hooks).
+
+# Logical Dependency Chain
+
+1.  **macOS Interaction Backend (`macos/engine.rs` tools):** Absolutely foundational. No agent can act without these. (Phase 1)
+2.  **`ToolResult` and `ToolCollection` Primitives:** Needed for tools to return data and for agents to manage/call them. (Phase 1)
+3.  **Basic Agent Structure (`BaseAgent`, `ReActAgent`, `ToolCallAgent`, `MacOSInteractionAgent`):** Core agent intelligence and tool-using capability. (Phase 1)
+4.  **Simple Execution Loop & UI Feedback:** To test Phase 1 deliverables. (Phase 1)
+5.  **Planning Data Structures (`Plan`, `PlanStep`):** Schema for managing plans. (Phase 2)
+6.  **`PlanManager` (Planning Logic):** LLM call to create plan. (Phase 2)
+7.  **`PlanManager` (Orchestration Logic):** Iterating and dispatching steps to the Phase 1 agent. (Phase 2)
+8.  **UI for Plan Display:** To make Phase 2 usable. (Phase 2)
+9.  **Specialized Agents & Their Tools:** Build upon the core agent structure. (Phase 3)
+10. **Hybrid Perception Integration:** Enhance `MacOSInteractionAgent` and its prompts. (Phase 3)
+11. **Advanced Features (Visual Fallbacks, Error Handling):** Refinements. (Phase 4)
+
+# Risks and Mitigations
+
+*   **Technical Challenges:**
+    *   **Risk:** Complexity of reliably interacting with diverse macOS applications via Accessibility APIs. Some apps may have poor accessibility support.
+    *   **Mitigation:** Thorough testing across common macOS apps. Implement visual fallbacks (OCR, coordinate clicks) for problematic apps. Prioritize support for highly-used applications.
+    *   **Risk:** LLM reliably choosing the correct tool and arguments, especially with a large toolset.
+    *   **Mitigation:** Careful prompt engineering, few-shot examples in prompts, iterative refinement of tool descriptions and schemas. Start with fewer, more critical tools and expand.
+    *   **Risk:** Managing agent state and preventing runaway loops or unintended actions.
+    *   **Mitigation:** Implement `max_steps` limits, robust error handling in `ToolCallAgent` and `PlanManager`. Clear UI for user to pause/cancel, potentially with quick gesture overrides. Detailed logging.
+    *   **Risk:** Agent performing unintended or harmful actions due to LLM misinterpretation when directly interacting with the host OS.
+    *   **Mitigation:** (In addition to existing points) Implement sandboxed execution concepts for high-risk actions. User permissions and confirmations for operations outside strictly controlled agent workspaces.
+    *   **Risk:** Limitations with multi-monitor setups or non-primary display interactions.
+    *   **Mitigation:** Investigate and document behavior with multiple displays early. If full multi-display support is complex, clearly state limitations and guide users to operate on the primary display.
+*   **Figuring out the MVP that we can build upon:**
+    *   **Risk:** Over-scoping Phase 1 leading to delays in visible progress.
+    *   **Mitigation:** Strictly adhere to Phase 1 goals: a functional macOS backend and a single agent that can execute a sequence of LLM-decided tool calls. The `PlanManager` is explicitly Phase 2.
+    *   **Risk:** Over-scoping Phase 3 leading to delays in visible progress.
+    *   **Mitigation:** Strictly adhere to Phase 3 goals: a diverse set of specialized agents and refined perception. The `PlanManager` is explicitly Phase 4.
+*   **Resource Constraints (Development Time):**
+    *   **Risk:** The full vision is ambitious and may take significant time.
+    *   **Mitigation:** Phased approach. Prioritize core functionality. Leverage existing Rust crates where possible. Focus on making each phase deliver demonstrable improvements.
+
+# Appendix
+*   **Research Findings:**
+    *   `OpenManus`: Provides a strong architectural model for planning (`PlanningFlow`), agent structure (`BaseAgent` -> `ReActAgent` -> `ToolCallAgent`), and tool management (`ToolCollection`, `PlanningTool`).
+    *   Anthropic `computer-use-demo`: Demonstrates effective patterns for direct LLM-tool interaction loops, rich system prompting for computer control, and a `ToolResult` structure suitable for visual feedback (screenshots).
+    *   `self-operating-computer` (generic Python project): Highlights the utility of pure visual understanding (screenshots + Vision LLM) and OCR as potential fallbacks or complements to accessibility APIs. Also shows the simplicity of low-level input primitives.
+    *   **`Open-Interface`**:
+        *   Demonstrates a simple, effective core loop: GUI -> Core Logic -> LLM (GPT-4o, Gemini, custom) -> Interpreter -> Executer (keyboard/mouse).
+        *   Highlights user-friendly setup for multiple LLM API keys.
+        *   Emphasizes clear cost estimation and communication of error-prone areas to manage user expectations.
+        *   Suggests specific interruption mechanisms like dragging the cursor to screen corners.
+        *   Notes potential limitations with multi-monitor setups (primary display focus).
+    *   **`Skyvern`**: An open-source AI agent focused on browser automation. Key takeaways include:
+        *   A Planner-Actor-Validator agent architecture for improved robustness and error correction in complex web tasks.
+        *   A "swarm" of specialized agents for different aspects of web interaction (e.g., element identification, navigation, data extraction, authentication).
+        *   Emphasis on resilience to website layout changes through computer vision and LLM-driven interaction rather than solely relying on DOM/XPath.
+        *   Workflow chaining capabilities to combine multiple atomic tasks.
+    *   **`OpenHands (formerly OpenDevin)`**: An open platform for AI agents designed to act as software developers. Key insights include:
+        *   Strong emphasis on using sandboxed environments (e.g., Docker) for safe code execution and command-line interaction by agents.
+        *   The concept of an "Agent-Agnostic Infrastructure Middleware" to manage dynamic, isolated workspaces for agents.
+        *   Focus on generalist agents capable of a wide range of developer tasks.
+        *   Integration of evaluation benchmarks.
+*   **Technical Specifications (Initial Thoughts):**
+    *   Tool schemas will be defined in a way that can be easily translated to JSON for the LLM.
+    *   Communication between Rust backend and Tauri frontend will use Tauri's event system and commands.
+    *   Screenshots will be PNG, base64 encoded.
+</PRD>
