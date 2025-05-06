@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::{env, fs::File, io::Write};
 use std::io::ErrorKind;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use crate::agent::structs::AgentError;
 
 /// Configuration structure for AI providers
@@ -53,6 +53,14 @@ impl Default for ProviderConfig {
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
+                ProviderSettings {
+                    id: "rig".to_string(),
+                    api_key: None, // Rig uses OpenAI's API key by default
+                    model: Some("gpt-4o".to_string()),
+                    max_tokens: Some(4096),
+                    temperature: Some(0.7),
+                    system_prompt: Some("You are an AI assistant helping users with computer tasks.".to_string()),
+                },
             ],
         }
     }
@@ -62,32 +70,28 @@ impl ProviderConfig {
     /// Load configuration from the file system or create default
     pub fn load() -> Result<Self, AgentError> {
         let config_path = Self::get_config_path()?;
-
         match fs::read_to_string(&config_path) {
-            Ok(contents) => {
-                match serde_json::from_str(&contents) {
-                    Ok(config) => {
-                        info!("Loaded provider configuration from {:?}", config_path);
-                        Ok(config)
-                    }
-                    Err(e) => {
-                        error!("Failed to parse config file: {}", e);
-                        info!("Creating default configuration");
-                        let default_config = Self::default();
-                        default_config.save()?;
-                        Ok(default_config)
-                    }
-                }
-            }
+            Ok(contents) => serde_json::from_str(&contents).map_err(|e| {
+                error!("Failed to parse config file: {}. Using default.", e);
+                let default_config = Self::default();
+                // Attempt to save the default config if parsing failed, but don't error out if save fails here.
+                let _ = default_config.save();
+                AgentError::ConfigurationError(format!("Failed to parse config: {}", e))
+            }).or_else(|_parse_err|{
+                 info!("Creating default configuration as parsing failed or to ensure structure.");
+                 let default_config = Self::default();
+                 default_config.save()?;
+                 Ok(default_config)
+            }),
             Err(e) if e.kind() == ErrorKind::NotFound => {
-                info!("Config file not found, creating default");
+                info!("Config file not found at {:?}, creating default.", config_path);
                 let default_config = Self::default();
                 default_config.save()?;
                 Ok(default_config)
             }
             Err(e) => {
-                error!("Failed to read config file: {}", e);
-                Err(AgentError::ConfigurationError(format!("Failed to read config file: {}", e)))
+                error!("Failed to read config file at {:?}: {}. Using in-memory default.", config_path, e);
+                Ok(Self::default()) // Return in-memory default if read fails for other reasons
             }
         }
     }
@@ -121,42 +125,33 @@ impl ProviderConfig {
 
     /// Update provider API key
     pub fn update_api_key(&mut self, provider_id: &str, api_key: String) -> Result<(), AgentError> {
-        for provider in &mut self.providers {
-            if provider.id == provider_id {
-                provider.api_key = Some(api_key);
-                return self.save();
-            }
+        if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
+            provider.api_key = Some(api_key);
+            self.save()
+        } else {
+            Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
         }
-
-        Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
     }
 
     /// Update provider model
     pub fn update_model(&mut self, provider_id: &str, model: String) -> Result<(), AgentError> {
-        for provider in &mut self.providers {
-            if provider.id == provider_id {
-                provider.model = Some(model);
-                return self.save();
-            }
+        if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
+            provider.model = Some(model);
+            self.save()
+        } else {
+            Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
         }
-
-        Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
     }
 
     /// Set active provider
     pub fn set_active_provider(&mut self, provider_id: &str) -> Result<(), AgentError> {
-        // Verify provider exists
         if !self.providers.iter().any(|p| p.id == provider_id) {
             return Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)));
         }
-
         self.active_provider = provider_id.to_string();
-        self.save()?;
-
-        // Also set the environment variable for runtime use
-        env::set_var("AI_PROVIDER", provider_id);
-
-        Ok(())
+        env::set_var("AI_PROVIDER", provider_id); // Also set env var immediately when UI changes it
+        info!("Active provider set to '{}' in config and AI_PROVIDER env var.", provider_id);
+        self.save()
     }
 
     /// Get settings for the active provider
@@ -171,56 +166,95 @@ impl ProviderConfig {
 
     /// Get provider configuration path
     fn get_config_path() -> Result<PathBuf, AgentError> {
-        let home_dir = dirs::home_dir().ok_or_else(|| {
-            AgentError::ConfigurationError("Could not determine home directory".to_string())
-        })?;
-
-        Ok(home_dir.join(".config").join("juno").join("ai_providers.json"))
+        dirs::home_dir()
+            .map(|home| home.join(".config").join("juno").join("ai_providers.json"))
+            .ok_or_else(|| AgentError::ConfigurationError("Could not determine home directory".to_string()))
     }
 }
 
-/// Apply provider settings to environment variables
+/// Apply provider settings to environment variables based on the AI_PROVIDER env var.
 pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
     let config = ProviderConfig::load()?;
 
-    // Set active provider
-    env::set_var("AI_PROVIDER", &config.active_provider);
+    // Determine which provider's settings to apply.
+    // Priority: AI_PROVIDER env var, then config.active_provider as fallback.
+    let provider_id_to_apply = env::var("AI_PROVIDER")
+        .unwrap_or_else(|_| {
+            info!("AI_PROVIDER env var not set, using active_provider from config: {}", &config.active_provider);
+            config.active_provider.clone()
+        });
 
-    // Apply settings for active provider
-    if let Some(provider) = config.get_active_provider_settings() {
-        match provider.id.as_str() {
+    info!("Applying environment settings for provider: {}", provider_id_to_apply);
+
+    if let Some(settings) = config.providers.iter().find(|p| p.id == provider_id_to_apply) {
+        match settings.id.as_str() {
             "anthropic" => {
-                if let Some(api_key) = &provider.api_key {
+                if let Some(api_key) = &settings.api_key {
                     env::set_var("ANTHROPIC_API_KEY", api_key);
                 }
-                if let Some(model) = &provider.model {
+                if let Some(model) = &settings.model {
                     env::set_var("ANTHROPIC_MODEL", model);
                 }
-                if let Some(max_tokens) = provider.max_tokens {
+                if let Some(max_tokens) = settings.max_tokens {
                     env::set_var("ANTHROPIC_MAX_TOKENS", max_tokens.to_string());
                 }
-                if let Some(system_prompt) = &provider.system_prompt {
+                if let Some(system_prompt) = &settings.system_prompt {
                     env::set_var("ANTHROPIC_SYSTEM_PROMPT", system_prompt);
                 }
             },
             "openai" => {
-                if let Some(api_key) = &provider.api_key {
+                if let Some(api_key) = &settings.api_key {
                     env::set_var("OPENAI_API_KEY", api_key);
                 }
-                if let Some(model) = &provider.model {
+                if let Some(model) = &settings.model {
                     env::set_var("OPENAI_MODEL", model);
                 }
-                if let Some(max_tokens) = provider.max_tokens {
+                if let Some(max_tokens) = settings.max_tokens {
                     env::set_var("OPENAI_MAX_TOKENS", max_tokens.to_string());
                 }
-                if let Some(temperature) = provider.temperature {
+                if let Some(temperature) = settings.temperature {
                     env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
+                }
+                if let Some(system_prompt) = &settings.system_prompt {
+                    env::set_var("OPENAI_SYSTEM_PROMPT", system_prompt);
+                }
+            },
+            "rig" => {
+                let mut rig_api_key_set = false;
+                if let Some(api_key) = &settings.api_key {
+                    env::set_var("OPENAI_API_KEY", api_key);
+                    rig_api_key_set = true;
+                    info!("Applied Rig's specific API key for OPENAI_API_KEY.");
+                }
+
+                if !rig_api_key_set {
+                    if let Some(openai_settings) = config.providers.iter().find(|p| p.id == "openai") {
+                        if let Some(api_key) = &openai_settings.api_key {
+                            env::set_var("OPENAI_API_KEY", api_key);
+                            info!("Applied OpenAI provider's API key for Rig's OPENAI_API_KEY.");
+                        }
+                    }
+                }
+
+                if let Some(model) = &settings.model {
+                    env::set_var("OPENAI_MODEL", model);
+                }
+                if let Some(max_tokens) = settings.max_tokens {
+                    env::set_var("OPENAI_MAX_TOKENS", max_tokens.to_string());
+                }
+                if let Some(temperature) = settings.temperature {
+                    env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
+                }
+                if let Some(system_prompt) = &settings.system_prompt {
+                    env::set_var("RIG_SYSTEM_PROMPT", system_prompt);
                 }
             },
             _ => {
-                info!("Unknown provider ID: {}", provider.id);
+                warn!("Attempted to apply settings for an unknown provider ID: {}", settings.id);
             }
         }
+    } else {
+        warn!("Could not find settings for provider: {}. No specific settings applied.", provider_id_to_apply);
     }
 
     Ok(())
