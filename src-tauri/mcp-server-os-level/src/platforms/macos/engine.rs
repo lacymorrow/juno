@@ -1486,9 +1486,33 @@ impl AccessibilityEngine for MacOSEngine {
 
     fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
         debug!("Pressing key: '{}' with modifier: {:?} using CGEvent", key_name, modifier);
-        let key_code = key_name_to_keycode(key_name).ok_or_else(||
-            AutomationError::InvalidArgument(format!("Invalid key name: {}", key_name))
-        )?;
+
+        // Check if key_name contains a modifier already (like "ctrl+n")
+        if key_name.contains('+') {
+            let parts: Vec<&str> = key_name.split('+').collect();
+            if parts.len() == 2 {
+                // Format is "modifier+key"
+                let mod_name = parts[0].trim();
+                let key = parts[1].trim();
+
+                // Get the modifier flags
+                let mod_flags = super::constants::modifier_name_to_flags(mod_name)
+                    .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?;
+
+                // Get the key code
+                let key_code = interaction::get_key_code(key)?;
+
+                // Press the key with the modifier
+                return interaction::press_key_with_modifier(key_code, mod_flags);
+            }
+        }
+
+        // Normal case - separate key and modifier
+        // First try key_name_to_keycode, then fall back to interaction::get_key_code
+        let key_code = match key_name_to_keycode(key_name) {
+            Some(code) => code,
+            None => interaction::get_key_code(key_name)? // Fall back to interaction::get_key_code
+        };
 
         let modifier_flags = if let Some(mod_name) = modifier {
             super::constants::modifier_name_to_flags(mod_name)
