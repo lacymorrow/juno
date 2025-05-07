@@ -392,16 +392,20 @@ pub async fn register_desktop_tools(
 
     let app_handle_clone = app_handle.clone();
     let capture_screenshot_exec = move |_input: Value| {
-        let app_handle = app_handle_clone.clone();
+        let app_handle = app_handle_clone.clone(); // Clone for this specific async move block
          async move {
-             let result = tokio::task::block_in_place(|| {
-                 let rt = tokio::runtime::Handle::current();
-                 rt.block_on(async {
-                     crate::capture_screenshot_command(app_handle)
-                        .await
-                 })
-             }).map_err(|e| format!("Error capturing screenshot: {}", e))?;
-            Ok(json!(result))
+            let block_result: Result<String, String> = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    crate::capture_screenshot_command(app_handle.clone()).await // Clone app_handle for the inner async block
+                })
+            });
+
+            // Handle error from capture_screenshot_command (and map its format if desired)
+            let base64_string: String =
+                block_result.map_err(|e| format!("Error from screenshot command: {}", e))?;
+
+            Ok(Value::String(base64_string)) // Return as Value::String
          }
     };
     provider.register_async_tool(capture_screenshot_def, capture_screenshot_exec).await;
