@@ -1,11 +1,15 @@
 use computer_use_ai_sdk::Desktop;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use std::any::{Any, TypeId};
 use crate::commands::shell::ShellSessions;
-use tokio::sync::watch;
+use tokio::sync::{watch, Mutex as TokioMutex};
 use log;
+use playwright::Playwright; // Import Playwright
+
+// Import the BrowserController for persistent storage
+use crate::agent::tools::browser_controller::BrowserController;
 
 // Define a type alias for the cancellation sender for clarity
 type CancelSender = watch::Sender<bool>;
@@ -20,10 +24,14 @@ pub struct AppState {
     cancel_tx: Arc<CancelSender>, // Store Sender to signal cancellation
     pub cancel_rx: CancelReceiver, // Store Receiver to check for cancellation
     // State for text_editor_undo_edit - Wrapped in Arc
-    pub last_edited_file: Arc<Mutex<Option<PathBuf>>>,
-    pub previous_content: Arc<Mutex<Option<Option<String>>>>,
+    pub last_edited_file: Arc<std::sync::Mutex<Option<PathBuf>>>,
+    pub previous_content: Arc<std::sync::Mutex<Option<Option<String>>>>,
+    // Persistent Playwright driver instance, using TokioMutex
+    playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
+    // Persistent browser controller instance
+    pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
     // Dynamic storage for other state components - Wrapped in Arc
-    state_components: Arc<Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
+    state_components: Arc<std::sync::Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
 }
 
 impl AppState {
@@ -34,9 +42,11 @@ impl AppState {
             shell_sessions: ShellSessions::default(),
             cancel_tx: Arc::new(cancel_tx),
             cancel_rx,
-            last_edited_file: Arc::new(Mutex::new(None)),
-            previous_content: Arc::new(Mutex::new(None)),
-            state_components: Arc::new(Mutex::new(HashMap::new())),
+            last_edited_file: Arc::new(std::sync::Mutex::new(None)),
+            previous_content: Arc::new(std::sync::Mutex::new(None)),
+            playwright_driver: Arc::new(TokioMutex::new(None)),
+            browser_controller: Arc::new(TokioMutex::new(None)),
+            state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -58,6 +68,58 @@ impl AppState {
             log::info!("[AppState] reset_cancel: Sent 'false'. Result: {:?}", send_result.is_ok());
         } else {
             log::info!("[AppState] reset_cancel: No reset needed (already false).");
+        }
+    }
+
+    // Method to get or initialize the Playwright driver
+    async fn get_or_init_playwright_driver(&self) -> Result<Arc<Playwright>, String> {
+        let mut driver_guard = self.playwright_driver.lock().await;
+        if driver_guard.is_none() {
+            log::info!("Initializing Playwright driver instance...");
+            match Playwright::initialize().await {
+                Ok(pw_instance) => {
+                    let arc_pw = Arc::new(pw_instance);
+                    *driver_guard = Some(arc_pw.clone());
+                    log::info!("Playwright driver initialized and stored in AppState.");
+                    Ok(arc_pw)
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to initialize Playwright driver: {}", e);
+                    log::error!("{}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        } else {
+            log::debug!("Reusing existing Playwright driver instance from AppState.");
+            Ok(driver_guard.as_ref().unwrap().clone())
+        }
+    }
+
+    // Method to get or initialize the browser controller
+    pub async fn get_or_init_browser_controller(&self) -> Result<BrowserController, String> {
+        let mut controller_guard = self.browser_controller.lock().await;
+
+        if controller_guard.is_none() {
+            log::info!("Initializing persistent browser controller (was None in AppState)");
+            // Get or initialize the Playwright driver first
+            let playwright_arc = self.get_or_init_playwright_driver().await
+                .map_err(|e| format!("Cannot init BrowserController without Playwright driver: {}", e))?;
+
+            match BrowserController::new(playwright_arc).await {
+                Ok(controller) => {
+                    *controller_guard = Some(controller.clone());
+                    log::info!("BrowserController initialized and stored in AppState.");
+                    Ok(controller)
+                },
+                Err(e) => {
+                    let err_msg = format!("Failed to initialize browser controller: {}", e);
+                    log::error!("{}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        } else {
+            log::debug!("Reusing existing browser controller from AppState.");
+            Ok(controller_guard.as_ref().unwrap().clone())
         }
     }
 

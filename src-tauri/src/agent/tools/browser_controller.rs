@@ -19,7 +19,7 @@ const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
 #[derive(Clone)]
 pub struct BrowserController {
     // Store Playwright components
-    // playwright: Arc<Playwright>, // Keep playwright instance alive
+    _playwright: Arc<Playwright>, // Keep playwright instance alive
     browser: Arc<Browser>,
     context: Arc<BrowserContext>,
     // Store page in mutex for thread safety
@@ -27,10 +27,8 @@ pub struct BrowserController {
 }
 
 impl BrowserController {
-    pub async fn new() -> ControllerResult<Self> {
-        log::info!("Initializing Playwright...");
-        let playwright = Playwright::initialize().await
-            .map_err(|e| AgentError::ToolError(format!("Failed to initialize Playwright: {}", e)))?;
+    pub async fn new(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+        log::info!("BrowserController::new called with Playwright driver instance.");
 
         // --- Find Chromium Executable ---
         let executable_path: Option<PathBuf> = env::var("CHROMIUM_EXECUTABLE_PATH")
@@ -40,14 +38,29 @@ impl BrowserController {
             .or_else(|| {
                 let common_paths = [
                     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                    // Add other potential paths if needed (e.g., Brave, Edge)
-                    // "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-                    // "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                    "/Applications/Chromium.app/Contents/MacOS/Chromium",
                 ];
+
+                // Check each path and log whether it exists
+                for path in &common_paths {
+                    let path_buf = PathBuf::from(path);
+                    if path_buf.exists() {
+                        log::info!("Found browser at: {}", path);
+                    } else {
+                        log::debug!("Browser not found at: {}", path);
+                    }
+                }
+
                 common_paths.iter()
                     .map(PathBuf::from)
                     .find(|p| p.exists())
             });
+
+        // Print system information for debugging
+        log::info!("Operating system: {}", std::env::consts::OS);
+        log::info!("Path environment: {:?}", env::var("PATH").unwrap_or_else(|_| "Not available".to_string()));
 
         let chromium = playwright.chromium();
 
@@ -61,45 +74,203 @@ impl BrowserController {
             // If no path is found, return the specific error
             log::error!("Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH or install Chrome in a standard location.");
             return Err(AgentError::ToolError("Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH env var or ensure Chrome is installed in /Applications.".to_string()));
-            // Note: We could alternatively try launching without the path, but it's better to be explicit
-            // log::warn!("Chromium executable path not explicitly found. Attempting launch without path...");
         }
 
-        let browser = launcher // Use the configured launcher
-            // Try launching non-headless for debugging
-            .headless(false) // Set other options like headless here
-            .launch()
-            .await
-            .map_err(|e| AgentError::ToolError(format!("Failed to launch browser: {}", e)))?;
-        log::info!("Browser launched successfully.");
+        // Configure the launcher with more resilient options - fewer options to reduce potential conflicts
+        // On macOS, minimizing launch args can help with stability
+        let args = vec![
+            "--no-first-run".to_string(),
+            "--no-default-browser-check".to_string(),
+            "--no-sandbox".to_string(),
+        ];
 
-        let context = browser.context_builder().build().await
+        launcher = launcher
+            .headless(false)
+            .args(&args)
+            .timeout(90000.0); // Increase timeout to 90 seconds
+
+        log::info!("Launching browser with 90 second timeout and simplified arguments...");
+
+        let browser = match launcher.launch().await {
+            Ok(browser) => {
+                log::info!("Browser launched successfully.");
+                browser
+            },
+            Err(e) => {
+                // Try one more time with even fewer args
+                log::warn!("First browser launch attempt failed: {}. Trying again with minimal args...", e);
+
+                // Reset launcher with minimal configuration
+                let mut launcher = chromium.launcher();
+                if let Some(path) = &executable_path {
+                    launcher = launcher.executable(path);
+                }
+
+                // Try with absolute minimum arguments
+                launcher = launcher
+                    .headless(false)
+                    .timeout(90000.0);
+
+                log::info!("Retrying browser launch with minimal configuration...");
+                launcher.launch().await
+                    .map_err(|e| AgentError::ToolError(format!("Failed to launch browser (both attempts): {}", e)))?
+            }
+        };
+
+        log::info!("Browser launched successfully. Browser version: {}", match browser.version() {
+            Ok(version) => version,
+            Err(_) => "unknown".to_string(),
+        });
+
+        let context = browser.context_builder()
+            .accept_downloads(true)
+            .build()
+            .await
             .map_err(|e| AgentError::ToolError(format!("Failed to create browser context: {}", e)))?;
         log::info!("Browser context created.");
 
-        let page = Arc::new(Mutex::new(None));
+        // Create a test page to verify everything is working - retry multiple times if needed
+        log::info!("Creating test page to verify browser setup...");
+
+        let test_page = {
+            let max_attempts = 3;
+            let mut last_error = None;
+            let mut test_page = None;
+
+            for attempt in 1..=max_attempts {
+                log::info!("Attempt {} of {} to create initial page", attempt, max_attempts);
+                match context.new_page().await {
+                    Ok(page) => {
+                        test_page = Some(page);
+                        break;
+                    },
+                    Err(e) => {
+                        log::warn!("Failed to create initial page on attempt {}: {}", attempt, e);
+                        last_error = Some(e.to_string());
+                        // Sleep between attempts
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                    }
+                }
+            }
+
+            if test_page.is_none() {
+                return Err(AgentError::ToolError(format!(
+                    "Failed to create initial page after {} attempts. Last error: {}",
+                    max_attempts,
+                    last_error.unwrap_or_else(|| "Unknown error".to_string())
+                )));
+            }
+
+            test_page.unwrap()
+        };
+
+        // Try to navigate to a simple URL to verify browser works
+        log::info!("Testing browser with navigation to about:blank...");
+        match test_page.goto_builder("about:blank").timeout(10000.0).goto().await {
+            Ok(_) => log::info!("Browser test navigation successful."),
+            Err(e) => {
+                log::warn!("Browser test navigation failed: {}", e);
+                // Continue anyway, but log the warning
+            }
+        }
+
+        // Keep the test page open as our initial page
+        let page = Arc::new(Mutex::new(Some(test_page)));
+        log::info!("Browser successfully initialized with test page.");
 
         Ok(BrowserController {
-            // playwright: Arc::new(playwright), // Store to keep it alive
+            _playwright: playwright.clone(), // Store the Arc<Playwright>
             browser: Arc::new(browser),
             context: Arc::new(context),
             page,
         })
     }
 
-    // Helper to get or create a page
+    // Helper to get or create a page, with enhanced error handling and recovery
     async fn ensure_page_exists(&self) -> ControllerResult<()> {
-        let mut page_guard = self.page.lock().await;
-        if page_guard.is_none() {
-            log::info!("No active page found, creating a new one.");
-            let new_page = self.context.new_page().await
-                .map_err(|e| AgentError::ToolError(format!("Failed to create new page: {}", e)))?;
-            *page_guard = Some(new_page);
-            log::info!("New page created successfully.");
-        } else {
-             log::debug!("Existing page found.");
+        let mut retry_context = false;
+
+        // First attempt to work with the current page
+        {
+            let mut page_guard = self.page.lock().await;
+            if page_guard.is_none() {
+                log::info!("No active page found, will create a new one.");
+            } else {
+                // Check if the existing page is still valid
+                if let Some(page) = page_guard.as_ref() {
+                    // Try a simple JavaScript evaluation to check if page is still valid
+                    match page.evaluate::<Option<()>, bool>("() => true", None).await {
+                        Ok(_) => {
+                            log::debug!("Existing page is valid.");
+                            return Ok(());
+                        },
+                        Err(e) => {
+                            log::warn!("Existing page appears invalid: {}. Will create a new page.", e);
+                            // Try to close the old page just in case
+                            if let Err(ce) = page.close(None).await {
+                                log::warn!("Error closing invalid page: {}", ce);
+                            }
+
+                            // Clear the invalid page reference
+                            *page_guard = None;
+                        }
+                    }
+                }
+            }
+        } // Release the mutex guard here
+
+        // At this point we need to create a new page
+        // Multiple retry attempts with increasing recovery actions
+        for attempt in 1..=3 {
+            log::info!("Attempt {} of 3 to create new page", attempt);
+
+            if retry_context && attempt > 1 {
+                // On later attempts, try to recreate the context first
+                log::warn!("Attempting to recreate browser context as a recovery step");
+                match self.browser.context_builder().build().await {
+                    Ok(new_context) => {
+                        // We successfully created a new context, but we can't replace the Arc-wrapped one
+                        // Just log this situation - we'll still try to use the original context
+                        log::info!("Created new context as a test, but continuing with original context");
+                        // Close the test context as we can't use it
+                        if let Err(e) = new_context.close().await {
+                            log::warn!("Failed to close test context: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        log::error!("Failed to recreate browser context: {}", e);
+                        // If we can't even create a context, there may be deeper issues
+                        if attempt == 3 {
+                            return Err(AgentError::ToolError(format!("Browser appears to be in an unrecoverable state: {}", e)));
+                        }
+                    }
+                }
+            }
+
+            // Try to create a new page
+            match self.context.new_page().await {
+                Ok(new_page) => {
+                    let mut page_guard = self.page.lock().await;
+                    *page_guard = Some(new_page);
+                    log::info!("New page created successfully on attempt {}", attempt);
+                    return Ok(());
+                },
+                Err(e) => {
+                    log::warn!("Failed to create page on attempt {}: {}", attempt, e);
+
+                    // On first failure, set flag to try context recreation on next attempt
+                    retry_context = true;
+
+                    // Wait before retry with increasing backoff
+                    let delay = 500 * attempt;
+                    log::info!("Waiting {}ms before next attempt", delay);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                }
+            }
         }
-        Ok(())
+
+        // If we get here, all retries failed
+        Err(AgentError::ToolError("Failed to create new page after multiple attempts. The browser may need to be restarted.".to_string()))
     }
 
     // --- Tool Implementation Methods ---
@@ -569,34 +740,8 @@ impl BrowserController {
 // Implement Drop to ensure cleanup happens if controller goes out of scope unexpectedly
 impl Drop for BrowserController {
     fn drop(&mut self) {
-        // We need an async context to call cleanup properly.
-        // Using block_on is generally discouraged, but might be necessary in Drop
-        // if we can't change the surrounding architecture.
-        // Consider if cleanup needs to be manually called instead.
-        // For now, log a warning if resources might be left dangling.
-
-        // Attempt synchronous cleanup if possible, or log
-        // Note: playwright-rust's close methods are async.
-        // A truly robust cleanup in Drop would require a runtime handle or a different design.
-
-        log::warn!("BrowserController dropped. Ensure cleanup() was called explicitly to release browser resources.");
-
-        // Example using a local tokio runtime (use with caution in drop):
-        // if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        //     rt.block_on(async {
-        //         // Clone necessary Arcs before moving into the async block
-        //         let context_clone = self.context.clone();
-        //         let browser_clone = self.browser.clone();
-        //         let page_guard = self.page.lock().await; // Still need async for lock
-        //         let page_opt = page_guard.as_ref().cloned(); // Clone the Option<Page> if Page is Clone
-
-        //         // Perform async cleanup actions here...
-        //         // Example: Closing context and browser (Page closing needs more care)
-        //          if let Err(e) = context_clone.close().await { log::error!("Error closing context in drop: {}", e); }
-        //          if let Err(e) = browser_clone.close().await { log::error!("Error closing browser in drop: {}", e); }
-        //     });
-        // } else {
-        //     log::error!("Failed to create Tokio runtime in BrowserController drop handler.");
-        // }
+        // No automatic cleanup in Drop.
+        // We'll only clean up explicitly when the app exits.
+        log::debug!("BrowserController dropped, but browser instance is kept alive for reuse.");
     }
 }
