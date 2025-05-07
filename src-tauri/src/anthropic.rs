@@ -1,43 +1,52 @@
+use std::sync::Arc;
+use log::{info, error, warn};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tauri::{State, Manager, Emitter};
+
+use crate::agent::implementations::{
+    agent_runner::DefaultAgentRunner,
+    memory_manager::SimpleMemoryManager,
+    tool_provider::LocalToolProvider,
+};
+use crate::agent::tools::{
+    basic_tools::register_basic_tools,
+    desktop_tools::setup_tools,
+    browser_tools::get_browser_tool_definitions,
+};
+use crate::agent::structs::AgentError;
+use crate::agent::traits::AgentRunnable;
+use crate::agent::providers::factory::BrainFactory;
 use crate::state::AppState;
+
 // use crate::tools::{list_tools, handle_tool_call}; // Removed unused
 // use reqwest::Client; // Removed unused
-use serde::{Deserialize, Serialize};
-use serde_json::{Value}; // Keep Value
 // use image::{GenericImageView, ImageFormat}; // Removed unused
 // use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Removed unused
 // use std::io::Cursor; // Removed unused
-use tracing::{error, info};
-use tauri::State;
-use tauri::{Manager, Emitter}; // Import Manager and Emitter
+// use tauri::{Manager, Emitter}; // Import Manager and Emitter
 // use futures::future; // Removed unused
-use std::sync::Arc;
-use crate::agent::structs::{AgentError};
-use crate::agent::tools::{
-    basic_tools::register_basic_tools,
-    browser_controller::BrowserController,
-    desktop_tools::{setup_tools},
-    browser_tools::get_browser_tool_definitions,
-};
 
 // --- Agent Integration ---
-use crate::agent::{
-    implementations::{
-        // Correct path based on resolved structure
-        memory_manager::SimpleMemoryManager,
-        tool_provider::LocalToolProvider,
-        agent_runner::DefaultAgentRunner,
-        // AnthropicBrain is now selected via the factory
-        // agent_brain::AnthropicBrain, // Remove direct import
-    },
-    traits::AgentRunnable, // Import the trait for the run method
-    // tools::{ // Remove this entire block as it's redundant/incorrect
-    //     basic_tools::register_basic_tools,
-    //     desktop_tools::register_desktop_tools,
-    //     browser_tools::get_browser_tool_definitions,
-    //     browser_controller::BrowserController,
-    // },
-     providers::factory::BrainFactory, // Keep BrainFactory import
-};
+// use crate::agent::{
+//     implementations::{
+//         // Correct path based on resolved structure
+//         memory_manager::SimpleMemoryManager,
+//         tool_provider::LocalToolProvider,
+//         agent_runner::DefaultAgentRunner,
+//         // AnthropicBrain is now selected via the factory
+//         // agent_brain::AnthropicBrain, // Remove direct import
+//     },
+//     traits::AgentRunnable, // Import the trait for the run method
+//     // tools::{ // Remove this entire block as it's redundant/incorrect
+//     //     basic_tools::register_basic_tools,
+//     //     desktop_tools::register_desktop_tools,
+//     //     browser_tools::get_browser_tool_definitions,
+//     //     browser_controller::BrowserController,
+//     // },
+//      providers::factory::BrainFactory, // Keep BrainFactory import
+// };
 
 // --- Agent State ---
 
@@ -127,14 +136,14 @@ pub async fn submit_query(
 
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-    // --- Instantiate Browser Controller ---
-    let browser_controller = match BrowserController::new().await {
+    // --- Use or Initialize Persistent Browser Controller ---
+    let browser_controller = match state.get_or_init_browser_controller().await {
         Ok(controller) => {
-            info!("Browser Controller initialized successfully.");
-            Some(controller) // Store as Option
+            info!("Using persistent Browser Controller.");
+            Some(controller)
         }
         Err(e) => {
-            error!("Failed to initialize Browser Controller: {}. Browser tools will not be available.", e);
+            error!("Failed to get or initialize Browser Controller: {}. Browser tools will not be available.", e);
             // Allow agent to continue without browser tools, just log the error.
             None
         }
@@ -259,21 +268,27 @@ pub async fn submit_query(
 // --- Browser Cleanup Function ---
 
 #[tauri::command]
-pub async fn cleanup_browser(_app_handle: tauri::AppHandle) -> Result<(), String> {
+pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String> {
     log::info!("Cleaning up browser resources...");
 
-    // Simplified cleanup - assuming BrowserController handles its own drop
-    // Or rely on OS to clean up processes on app exit.
-    // The pkill approach might be too aggressive or fail.
+    // Get the app state to access the browser controller
+    let state = app_handle.state::<AppState>();
 
-    // If BrowserController needs explicit cleanup, call it here.
-    // e.g., if state holds Arc<Mutex<BrowserController>>:
-    // let state = app_handle.state::<AppState>();
-    // if let Some(controller) = state.browser_controller.lock().await {
-    //     controller.close().await; // Assuming a close method exists
-    // }
+    // Acquire lock on the browser controller
+    let mut controller_guard = state.browser_controller.lock().await;
 
-    log::info!("Browser cleanup check completed (manual pkill removed).");
+    // If we have a browser controller, clean it up
+    if let Some(controller) = controller_guard.take() {
+        if let Err(e) = controller.cleanup().await {
+            log::error!("Failed to clean up browser controller: {}", e);
+            return Err(format!("Failed to clean up browser: {}", e));
+        }
+        log::info!("Browser controller cleaned up successfully");
+    } else {
+        log::info!("No browser controller to clean up");
+    }
+
+    log::info!("Browser cleanup completed successfully");
     Ok(())
 }
 
