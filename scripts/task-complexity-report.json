@@ -1,7 +1,7 @@
 {
   "meta": {
-    "generatedAt": "2025-05-06T16:05:19.219Z",
-    "tasksAnalyzed": 25,
+    "generatedAt": "2025-05-06T16:18:59.056Z",
+    "tasksAnalyzed": 20,
     "thresholdScore": 5,
     "projectName": "Task Master",
     "usedResearch": true
@@ -12,200 +12,160 @@
       "taskTitle": "Implement Core macOS Window Management Functions",
       "complexityScore": 7,
       "recommendedSubtasks": 6,
-      "expansionPrompt": "Break down the implementation of macOS window management functions into subtasks, including research on CoreGraphics API, function implementation, error handling, screenshot capture, testing, and documentation.",
-      "reasoning": "This task involves implementing 6 distinct functions using the macOS CoreGraphics API, which requires platform-specific knowledge. Each function needs proper error handling and screenshot capture functionality. The complexity comes from working with native macOS APIs and ensuring robust error handling across different window states."
+      "expansionPrompt": "Break down the implementation of core macOS window management functions into subtasks, focusing on each function separately (get_window_title, list_windows, close_window, minimize_window, resize_window, move_window). For each subtask, include research on required macOS APIs, implementation details, error handling, and testing approach.",
+      "reasoning": "This task involves implementing 6 distinct functions using macOS CoreGraphics and Accessibility APIs, which requires deep understanding of macOS-specific APIs. Each function needs proper error handling and must return complex ToolResult objects with screenshots. The implementation will require working with low-level system APIs and handling various edge cases."
     },
     {
       "taskId": 2,
       "taskTitle": "Implement UI Element Interaction via Accessibility APIs",
       "complexityScore": 8,
-      "recommendedSubtasks": 7,
-      "expansionPrompt": "Break down the implementation of macOS Accessibility API interactions into subtasks, including research on AXUIElement API, element search algorithms, attribute handling, interaction methods, error handling, hierarchical element traversal, and testing.",
-      "reasoning": "This task requires deep knowledge of macOS Accessibility APIs, which are complex and not well-documented in Rust. The hierarchical element search adds significant complexity. Error handling is particularly challenging as accessibility information can be inconsistent across applications. The task requires implementing 5 complex functions with robust error handling."
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Divide the implementation of UI element interaction via Accessibility APIs into subtasks, one for each function (get_accessibility_element, get_element_attributes, click_element, set_element_value, get_element_children). Include research on AXUIElement APIs, struct definitions, error handling, and testing with various UI elements.",
+      "reasoning": "This task requires implementing 5 functions using macOS AXUIElement APIs, which are complex and require specialized knowledge. It involves creating custom structs for element criteria and information, handling various UI element types, and ensuring reliable interaction across different applications. The complexity is high due to the unpredictable nature of UI elements and the need for robust error handling."
     },
     {
       "taskId": 3,
       "taskTitle": "Implement Keyboard and Mouse Emulation",
       "complexityScore": 6,
-      "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of keyboard and mouse emulation into subtasks, including research on CoreGraphics CGEvent API, keyboard input methods, mouse movement and click functions, drag operations, timing considerations, and testing across different applications.",
-      "reasoning": "This task involves implementing 6 functions using CoreGraphics CGEvent API. While simpler than accessibility APIs, it still requires careful timing and coordination of events to ensure reliable input simulation. The drag operation is particularly complex as it requires coordinating multiple events in sequence."
+      "recommendedSubtasks": 6,
+      "expansionPrompt": "Break down the keyboard and mouse emulation implementation into subtasks, one for each function (key_press, key_combination, type_text, mouse_move, mouse_click, mouse_drag). For each subtask, include research on CoreGraphics CGEvent functions, implementation details, error handling, and testing approach.",
+      "reasoning": "This task involves implementing 6 functions for input simulation using CoreGraphics CGEvent APIs. While simpler than UI element interaction, it still requires understanding of system-level input events, handling key codes correctly, and ensuring proper mouse coordinate translation. Each function needs to capture screenshots after operations to verify effects."
     },
     {
       "taskId": 4,
       "taskTitle": "Implement Screenshot Capture and Clipboard Access",
       "complexityScore": 5,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the implementation of screenshot capture and clipboard access into subtasks, including research on CoreGraphics for screenshots, NSPasteboard for clipboard, image encoding/decoding, text handling with various encodings, and testing across different applications and content types.",
-      "reasoning": "This task involves implementing 7 functions using CoreGraphics and NSPasteboard APIs. The complexity is moderate as these APIs are relatively well-documented. The main challenges are handling different image formats, encoding/decoding, and ensuring clipboard compatibility with various content types."
+      "recommendedSubtasks": 7,
+      "expansionPrompt": "Divide the screenshot capture and clipboard access implementation into subtasks, one for each function (capture_screen, capture_window, capture_region, get_clipboard_text, set_clipboard_text, get_clipboard_image, set_clipboard_image). Include research on CoreGraphics and NSPasteboard APIs, implementation details, and testing approach.",
+      "reasoning": "This task requires implementing 7 functions using CoreGraphics for screenshots and NSPasteboard for clipboard operations. While these APIs are well-documented, handling different image formats, encoding/decoding, and ensuring proper resource management adds complexity. The clipboard functions need to handle various content types and maintain user clipboard state."
     },
     {
       "taskId": 5,
-      "taskTitle": "Design and Implement ToolResult and ToolCollection Structures",
-      "complexityScore": 4,
-      "recommendedSubtasks": 3,
-      "expansionPrompt": "Break down the design and implementation of core data structures into subtasks, including ToolResult implementation with serialization, Tool trait design with parameter validation, ToolCollection implementation with tool management methods, and comprehensive testing.",
-      "reasoning": "This task involves designing and implementing core data structures that will be used throughout the system. The complexity is moderate as it's primarily focused on Rust data structures and traits rather than platform-specific APIs. The main challenge is ensuring the structures are flexible enough to accommodate various tool types while maintaining type safety."
+      "taskTitle": "Design and Implement ToolResult and ToolCollection Primitives",
+      "complexityScore": 6,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Break down the implementation of ToolResult and ToolCollection primitives into subtasks: 1) Implement ToolResult struct with serialization, 2) Design and implement Tool trait with parameter schema handling, 3) Implement ToolCollection with tool management methods, 4) Create ToolDescription for LLM consumption with serialization support.",
+      "reasoning": "This task involves designing and implementing core data structures that will be used throughout the application. It requires careful API design, proper trait implementation, serialization/deserialization support, and error handling. The complexity comes from ensuring these primitives are flexible enough to support all tool types while maintaining a clean interface."
     },
     {
       "taskId": 6,
-      "taskTitle": "Implement MacOSInteractionTools Using Backend Functions",
-      "complexityScore": 6,
+      "taskTitle": "Implement LLM Interaction Module",
+      "complexityScore": 8,
       "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of MacOSInteractionTools into subtasks, including window operation tools, accessibility interaction tools, input simulation tools, screenshot and clipboard tools, and comprehensive testing across different applications.",
-      "reasoning": "This task involves creating 10 tool implementations that wrap the backend functions from tasks 1-4. The complexity comes from designing clear parameter schemas, handling conversion between JSON and native types, and ensuring proper error handling. Each tool needs to be thoroughly tested with various parameter combinations."
+      "expansionPrompt": "Divide the LLM interaction module implementation into subtasks: 1) Design and implement provider-agnostic interfaces (LLMProvider enum, LLMConfig struct, Message enum), 2) Implement Anthropic Claude API client, 3) Implement OpenAI API client, 4) Implement Google API client, 5) Create the LLMInterface with unified request/response handling.",
+      "reasoning": "This task involves creating a complex module that interacts with multiple external LLM APIs, each with different request/response formats and authentication methods. It requires handling various message types, including tool calls and results, and managing asynchronous API requests. The implementation needs to be provider-agnostic while supporting provider-specific features."
     },
     {
       "taskId": 7,
-      "taskTitle": "Design and Implement Agent Trait Hierarchy",
+      "taskTitle": "Implement Base Agent Structure",
       "complexityScore": 7,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the design and implementation of the agent trait hierarchy into subtasks, including BaseAgent trait design, AgentMemory implementation, ReActAgent trait design with think-act-observe cycle, and ToolCallAgent trait implementation with tool integration.",
-      "reasoning": "This task involves designing a complex trait hierarchy that forms the foundation of the multi-agent system. The complexity comes from designing flexible traits that can accommodate various agent types while enforcing the required behavior. The think-act-observe cycle and tool integration add significant complexity to the design."
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Break down the base agent structure implementation into subtasks: 1) Design and implement BaseAgent trait with core methods, 2) Implement AgentMemory for conversation history management, 3) Create ReActAgent with think-act loop implementation, 4) Implement ToolCallAgent with tool execution capabilities, 5) Design and implement AgentResponse for standardized result handling.",
+      "reasoning": "This task involves designing and implementing the foundational agent architecture that will be used by all specialized agents. It requires creating a flexible trait hierarchy, implementing complex agent behaviors like the ReAct loop, and ensuring proper memory management. The implementation needs to handle asynchronous operations and maintain conversation context."
     },
     {
       "taskId": 8,
-      "taskTitle": "Implement LLM Interface Module",
-      "complexityScore": 7,
-      "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of the LLM interface module into subtasks, including LLMProvider trait design, Anthropic provider implementation, OpenAI provider implementation, configuration system for API keys, and robust error handling with retry mechanisms.",
-      "reasoning": "This task involves creating a flexible interface for multiple LLM providers with different APIs and response formats. The complexity comes from handling various API quirks, implementing robust error handling and retry mechanisms, and ensuring the module can parse tool calls correctly. The configuration system adds additional complexity."
+      "taskTitle": "Implement MacOSInteractionAgent",
+      "complexityScore": 8,
+      "recommendedSubtasks": 7,
+      "expansionPrompt": "Divide the MacOSInteractionAgent implementation into subtasks: 1) Implement WindowListTool, 2) Implement WindowActionTool, 3) Implement ElementFindTool, 4) Implement ElementClickTool, 5) Implement KeyboardInputTool, 6) Implement MouseActionTool, 7) Create the MacOSInteractionAgent with comprehensive system prompt.",
+      "reasoning": "This task requires implementing a specialized agent with multiple tool implementations for macOS interaction. Each tool needs to properly interface with the previously implemented low-level functions. The agent needs a detailed system prompt to guide the LLM in effective GUI interaction. The complexity comes from integrating multiple systems and ensuring robust operation across different applications."
     },
     {
       "taskId": 9,
-      "taskTitle": "Implement MacOSInteractionAgent",
-      "complexityScore": 8,
-      "recommendedSubtasks": 6,
-      "expansionPrompt": "Break down the implementation of MacOSInteractionAgent into subtasks, including agent structure implementation, BaseAgent trait implementation, ReActAgent trait implementation with think-act-observe cycle, ToolCallAgent trait implementation, system prompt design, and comprehensive testing with various macOS applications.",
-      "reasoning": "This task involves implementing a complex agent that uses the tools from task 6 and the trait hierarchy from task 7. The complexity comes from implementing the think-act-observe cycle, handling both visual and structural information, and designing an effective system prompt. The agent needs to be robust to various application types and UI layouts."
+      "taskTitle": "Implement Simple Execution Loop and UI Feedback",
+      "complexityScore": 5,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Break down the execution loop and UI feedback implementation into subtasks: 1) Implement Tauri commands for agent interaction, 2) Create event emission system for agent progress updates, 3) Modify MacOSInteractionAgent to emit progress events, 4) Develop frontend UI components for task input and progress display.",
+      "reasoning": "This task involves creating a basic execution flow between the frontend and backend, with event-based communication for progress updates. While not as complex as the agent implementations, it requires coordinating between Rust backend and JavaScript frontend, handling asynchronous operations, and creating responsive UI components."
     },
     {
       "taskId": 10,
-      "taskTitle": "Develop Basic Execution Loop and UI Feedback",
+      "taskTitle": "Design and Implement Plan and PlanStep Data Structures",
       "complexityScore": 5,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the development of the execution loop and UI feedback into subtasks, including backend execution loop implementation, Tauri command design, event emission system, and frontend UI implementation with real-time updates.",
-      "reasoning": "This task involves creating a basic execution loop and UI feedback system. The complexity is moderate as it primarily involves connecting existing components rather than implementing new functionality. The main challenges are designing effective Tauri commands and implementing real-time updates in the UI."
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "Divide the Plan and PlanStep data structures implementation into subtasks: 1) Implement PlanStep struct with status management, 2) Create StepStatus enum with transition logic, 3) Implement Plan struct with step management methods, 4) Create PlanStatus enum with state machine logic, 5) Implement logging structures for tool usage tracking.",
+      "reasoning": "This task involves designing and implementing data structures for representing multi-step plans and their execution status. While conceptually straightforward, it requires careful state management, proper status transitions, and comprehensive logging. The structures need to support serialization for storage and UI display."
     },
     {
       "taskId": 11,
-      "taskTitle": "Design and Implement Plan and PlanStep Data Structures",
-      "complexityScore": 4,
-      "recommendedSubtasks": 3,
-      "expansionPrompt": "Break down the design and implementation of plan data structures into subtasks, including PlanStep structure implementation, Plan structure implementation with management methods, and serialization/deserialization with validation.",
-      "reasoning": "This task involves designing and implementing data structures for representing multi-step plans. The complexity is moderate as it's primarily focused on Rust data structures rather than platform-specific APIs. The main challenge is designing flexible structures that can represent various plan types while maintaining consistency."
+      "taskTitle": "Implement PlanManager Planning Logic",
+      "complexityScore": 8,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Break down the PlanManager planning logic implementation into subtasks: 1) Design and implement PlanManager struct with agent registration, 2) Create detailed planning system prompt with examples, 3) Implement plan generation logic with LLM interaction, 4) Develop response parsing and Plan structure creation.",
+      "reasoning": "This task involves creating a complex component that uses an LLM to generate multi-step plans from user requests. It requires designing a sophisticated planning prompt, handling LLM interactions, parsing structured responses, and creating Plan objects. The complexity comes from guiding the LLM to produce high-quality, executable plans with appropriate agent assignments."
     },
     {
       "taskId": 12,
-      "taskTitle": "Implement PlanManager for Plan Generation",
-      "complexityScore": 7,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the implementation of PlanManager for plan generation into subtasks, including PlanManager structure implementation, plan generation with LLM prompting, system prompt design for effective planning, and plan validation and refinement.",
-      "reasoning": "This task involves creating a component that uses an LLM to generate multi-step plans. The complexity comes from designing effective prompts that guide the LLM to produce well-structured plans, implementing validation to ensure plan consistency, and handling various user goals. The system prompt design is particularly challenging."
+      "taskTitle": "Implement PlanManager Orchestration Logic",
+      "complexityScore": 9,
+      "recommendedSubtasks": 6,
+      "expansionPrompt": "Divide the PlanManager orchestration logic implementation into subtasks: 1) Implement plan execution flow with step iteration, 2) Create step execution logic with agent dispatching, 3) Implement plan state management (pause/resume/cancel), 4) Develop plan and step status update methods, 5) Create event emission for UI updates, 6) Implement error handling and recovery for failed steps.",
+      "reasoning": "This task involves implementing the core orchestration logic that executes plans by dispatching steps to appropriate agents. It requires complex flow control, state management, error handling, and event emission. The implementation needs to handle dependencies between steps, agent selection, and recovery from failures. This is one of the most complex tasks in the project."
     },
     {
       "taskId": 13,
-      "taskTitle": "Implement PlanManager for Plan Execution",
-      "complexityScore": 8,
+      "taskTitle": "Enhance UI for Plan Display and Control",
+      "complexityScore": 6,
       "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of PlanManager for plan execution into subtasks, including execution loop design, step assignment to agents, error handling and recovery, execution control (pause/resume/cancel), and event emission for progress updates.",
-      "reasoning": "This task involves enhancing the PlanManager to execute generated plans. The complexity comes from coordinating multiple agents, handling step failures and recovery, implementing execution control, and ensuring proper synchronization. The error handling and recovery mechanisms are particularly complex."
+      "expansionPrompt": "Break down the UI enhancement for plan display and control into subtasks: 1) Implement Tauri commands for plan management, 2) Create event listeners in the frontend for plan and step updates, 3) Develop UI components for plan overview and step list, 4) Implement current step details display with results visualization, 5) Create control buttons with appropriate state management.",
+      "reasoning": "This task involves extending the Tauri UI to display plan structure and provide controls for plan management. It requires creating multiple UI components, implementing event listeners, and ensuring responsive updates based on backend events. The complexity comes from creating an intuitive interface for complex plan structures and step dependencies."
     },
     {
       "taskId": 14,
-      "taskTitle": "Enhance UI for Plan Display and Control",
+      "taskTitle": "Implement FileSystemAgent",
       "complexityScore": 6,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the UI enhancement for plan display and control into subtasks, including plan overview component design, step list with status indicators, execution control UI, and plan visualization with dependencies.",
-      "reasoning": "This task involves extending the UI to display and control plan execution. The complexity comes from designing intuitive components for plan visualization, implementing responsive controls, and ensuring real-time updates. The plan visualization with dependencies adds significant complexity."
+      "recommendedSubtasks": 8,
+      "expansionPrompt": "Divide the FileSystemAgent implementation into subtasks, one for each tool (ListDirectoryTool, ReadFileTool, WriteFileTool, CreateDirectoryTool, DeleteFileTool, MoveFileTool, CopyFileTool, FileInfoTool) plus the agent implementation with system prompt.",
+      "reasoning": "This task requires implementing a specialized agent with multiple file system tools. Each tool needs to handle various file operations safely, with proper error handling and permission checks. The agent needs a detailed system prompt to guide the LLM in effective file system operations. The complexity is moderate as file system APIs are well-documented."
     },
     {
       "taskId": 15,
-      "taskTitle": "Implement FileSystemAgent",
-      "complexityScore": 6,
-      "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of FileSystemAgent into subtasks, including file system tool implementation, FileSystemToolCollection creation, agent structure implementation, trait implementations, and security considerations with sandboxing.",
-      "reasoning": "This task involves creating a specialized agent for file system operations. The complexity comes from implementing 8 different file system tools, ensuring proper security checks, and designing an effective system prompt. The security considerations and sandboxing add significant complexity."
+      "taskTitle": "Implement Basic WebNavigationAgent",
+      "complexityScore": 7,
+      "recommendedSubtasks": 9,
+      "expansionPrompt": "Break down the WebNavigationAgent implementation into subtasks: 1) Research and select browser automation approach, 2-8) Implement each tool (OpenUrlTool, GetPageContentTool, ClickElementTool, TypeIntoElementTool, ExtractTextTool, ScrollPageTool, WaitForElementTool), 9) Create the WebNavigationAgent with comprehensive system prompt.",
+      "reasoning": "This task involves implementing a specialized agent for web browser interaction, which requires selecting and implementing a browser automation approach and creating multiple tools for navigation and element interaction. The complexity comes from handling dynamic web content, waiting for elements, and extracting information reliably across different websites."
     },
     {
       "taskId": 16,
-      "taskTitle": "Implement Basic WebNavigationAgent",
-      "complexityScore": 7,
-      "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of WebNavigationAgent into subtasks, including web navigation tool implementation, WebNavigationToolCollection creation, agent structure implementation, trait implementations, and system prompt design for web interaction patterns.",
-      "reasoning": "This task involves creating a specialized agent for web browser interaction. The complexity comes from implementing tools that can handle various website layouts and dynamic content, designing fallback strategies, and creating an effective system prompt. The dynamic nature of web content adds significant complexity."
+      "taskTitle": "Implement UserInteractionAgent",
+      "complexityScore": 6,
+      "recommendedSubtasks": 6,
+      "expansionPrompt": "Divide the UserInteractionAgent implementation into subtasks: 1-5) Implement each tool (AskUserTool, NotifyUserTool, GetUserConfirmationTool, ShowOptionsToUserTool, RequestUserInputTool), 6) Create the UserInteractionAgent with comprehensive system prompt and UI integration.",
+      "reasoning": "This task requires implementing a specialized agent for user interaction, with tools for asking questions, showing notifications, and getting input. It involves creating UI components for each interaction type and integrating them with the Tauri backend. The complexity is moderate as it focuses on user interface interactions rather than system-level operations."
     },
     {
       "taskId": 17,
-      "taskTitle": "Implement UserInteractionAgent",
-      "complexityScore": 5,
+      "taskTitle": "Implement Hybrid Perception for MacOSInteractionAgent",
+      "complexityScore": 7,
       "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the implementation of UserInteractionAgent into subtasks, including user interaction tool implementation, UserInteractionToolCollection creation, agent structure implementation, and system prompt design for effective user communication.",
-      "reasoning": "This task involves creating a specialized agent for user interaction. The complexity is moderate as the tools are relatively straightforward. The main challenges are designing clear user interfaces for each interaction type and creating an effective system prompt that guides the agent to communicate clearly."
+      "expansionPrompt": "Break down the hybrid perception implementation into subtasks: 1) Implement observation collection with screenshots and accessibility data, 2) Create AccessibilityTree and AccessibilityElement structures, 3) Update MacOSInteractionAgent to use hybrid perception, 4) Enhance system prompt with hybrid perception guidance.",
+      "reasoning": "This task involves enhancing the MacOSInteractionAgent to use both visual and structural information for more robust interaction. It requires implementing data structures for accessibility information, collecting both types of data efficiently, and guiding the LLM in using this hybrid approach. The complexity comes from correlating elements between different sources of information."
     },
     {
       "taskId": 18,
-      "taskTitle": "Implement InformationRetrievalAgent",
-      "complexityScore": 7,
-      "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of InformationRetrievalAgent into subtasks, including information retrieval tool implementation, InformationRetrievalToolCollection creation, agent structure implementation, trait implementations, and system prompt design for effective information gathering and synthesis.",
-      "reasoning": "This task involves creating a specialized agent for information retrieval. The complexity comes from implementing diverse tools for web search, document reading, and data extraction, as well as designing an effective system prompt. The information synthesis capabilities add significant complexity."
+      "taskTitle": "Implement Visual Fallback Tools",
+      "complexityScore": 8,
+      "recommendedSubtasks": 4,
+      "expansionPrompt": "Divide the visual fallback tools implementation into subtasks: 1) Implement OCR tools with Tesseract integration, 2) Create image matching tools with template and feature matching, 3) Implement text-based element location combining OCR with positioning, 4) Update MacOSInteractionAgent system prompt with fallback tool guidance.",
+      "reasoning": "This task involves implementing sophisticated computer vision techniques for OCR and image matching to handle applications with limited accessibility support. It requires integrating external libraries like Tesseract, implementing complex image processing algorithms, and creating reliable fallback strategies. The complexity is high due to the inherent challenges in computer vision and OCR accuracy."
     },
     {
       "taskId": 19,
-      "taskTitle": "Enhance MacOSInteractionAgent with Hybrid Perception",
-      "complexityScore": 8,
+      "taskTitle": "Implement Advanced Error Handling and Recovery",
+      "complexityScore": 9,
       "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the enhancement of MacOSInteractionAgent with hybrid perception into subtasks, including think method enhancement with dual data sources, system prompt update for hybrid perception, fallback mechanism implementation, validation after actions, and testing with various application types.",
-      "reasoning": "This task involves enhancing the MacOSInteractionAgent to use both visual and structural information. The complexity comes from integrating two different data sources, implementing intelligent switching between methods, designing fallback mechanisms, and creating an effective system prompt. The validation after actions adds significant complexity."
+      "expansionPrompt": "Break down the advanced error handling implementation into subtasks: 1) Identify and categorize common failure patterns for each agent type, 2) Implement tiered recovery strategies with RecoveryStrategy enum, 3) Enhance ReActAgent with error recovery logic, 4) Implement escalation mechanisms in PlanManager, 5) Create comprehensive tests for error scenarios.",
+      "reasoning": "This task involves implementing sophisticated error detection, recovery strategies, and escalation mechanisms across all agents. It requires identifying common failure patterns, designing recovery strategies for each, and implementing complex recovery logic. The task touches multiple components and requires deep understanding of potential failure modes. This is one of the most complex tasks in the project."
     },
     {
       "taskId": 20,
-      "taskTitle": "Implement Visual Fallback Tools for MacOSInteractionAgent",
-      "complexityScore": 7,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the implementation of visual fallback tools into subtasks, including OCR tool implementation, image matching tool implementation, coordinate-based tool implementation, and system prompt enhancement for fallback tool usage.",
-      "reasoning": "This task involves creating tools that use visual techniques as fallbacks. The complexity comes from implementing reliable OCR and image matching algorithms, designing coordinate-based interaction methods, and integrating these tools with the existing agent. The reliability requirements add significant complexity."
-    },
-    {
-      "taskId": 21,
-      "taskTitle": "Implement Advanced Error Handling and Recovery",
-      "complexityScore": 9,
-      "recommendedSubtasks": 6,
-      "expansionPrompt": "Break down the implementation of advanced error handling into subtasks, including failure pattern identification for each agent type, tiered recovery strategy implementation, ReActAgent trait enhancement, agent-specific error handling implementation, system prompt updates, and comprehensive testing with simulated errors.",
-      "reasoning": "This task involves enhancing all agents with sophisticated error handling. The complexity is very high as it requires identifying failure patterns for each agent type, implementing tiered recovery strategies, and designing context-aware error handling. The comprehensive nature of this task across all agent types adds significant complexity."
-    },
-    {
-      "taskId": 22,
-      "taskTitle": "Implement Workspace Management for Isolated Operations",
-      "complexityScore": 6,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the implementation of workspace management into subtasks, including Workspace structure implementation, WorkspaceManager implementation with CRUD operations, lifecycle hook implementation, and sandbox mechanism design for isolation.",
-      "reasoning": "This task involves creating a workspace management system for isolated operations. The complexity comes from implementing secure isolation, designing effective lifecycle hooks, and integrating with the FileSystemAgent. The security requirements add significant complexity."
-    },
-    {
-      "taskId": 23,
-      "taskTitle": "Implement Advanced UI Controls and Feedback",
-      "complexityScore": 7,
+      "taskTitle": "Implement Comprehensive Testing and Performance Optimization",
+      "complexityScore": 8,
       "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the implementation of advanced UI controls into subtasks, including execution control enhancement, visual feedback improvement, logging and history implementation, system status dashboard, and user preference settings.",
-      "reasoning": "This task involves enhancing the UI with sophisticated controls and feedback. The complexity comes from implementing various visualization techniques, designing intuitive controls, creating a comprehensive logging system, and building a responsive dashboard. The diverse requirements add significant complexity."
-    },
-    {
-      "taskId": 24,
-      "taskTitle": "Implement Interruption Mechanisms",
-      "complexityScore": 6,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the implementation of interruption mechanisms into subtasks, including UI-based interruption controls, gesture-based interruption detection, graceful shutdown procedures, and emergency shutdown implementation.",
-      "reasoning": "This task involves creating robust mechanisms for interrupting agent activities. The complexity comes from implementing reliable detection methods, designing graceful shutdown procedures, and ensuring proper resource cleanup. The requirement for immediate responsiveness adds significant complexity."
-    },
-    {
-      "taskId": 25,
-      "taskTitle": "Comprehensive Testing and Performance Optimization",
-      "complexityScore": 9,
-      "recommendedSubtasks": 5,
-      "expansionPrompt": "Break down the comprehensive testing and optimization into subtasks, including test suite development, benchmark definition and implementation, performance bottleneck identification and optimization, telemetry system implementation, and user acceptance testing.",
-      "reasoning": "This task involves thorough testing and optimization of the entire system. The complexity is very high as it requires comprehensive test coverage, performance profiling, optimization of various components, and user testing. The system-wide scope and diverse optimization targets add significant complexity."
+      "expansionPrompt": "Divide the testing and performance optimization implementation into subtasks: 1) Create unit tests for all core components, 2) Implement integration tests for common workflows, 3) Establish benchmarks for critical operations, 4) Optimize performance bottlenecks, 5) Create test harness for automated testing with reporting.",
+      "reasoning": "This task involves creating a comprehensive test suite, establishing benchmarks, and optimizing performance across the entire application. It requires understanding all components and their interactions, identifying performance bottlenecks, and implementing optimizations. The complexity comes from the breadth of the task and the need to test across different macOS versions and hardware configurations."
     }
   ]
 }

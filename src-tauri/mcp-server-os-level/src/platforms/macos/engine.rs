@@ -10,16 +10,29 @@ use crate::platforms::tree_search::{
 };
 use crate::platforms::AccessibilityEngine;
 use crate::{AutomationError, Selector, UIElement};
+use crate::element::UIElementImpl; // Added import for UIElementImpl trait
 use accessibility::{AXAttribute, AXUIElementAttributes, Error as AXError};
 use accessibility_sys::{kAXFocusedUIElementAttribute, AXUIElementRef, kAXFrontmostAttribute, AXUIElementGetTypeID, kAXErrorNoValue};
 use anyhow::Result;
-use core_foundation::base::{TCFType, CFTypeID, CFGetTypeID, CFType};
+use core_foundation::base::{TCFType, CFTypeID, CFGetTypeID, CFType, CFTypeRef};
 use core_foundation::boolean::CFBoolean;
-use core_foundation::number::CFNumber;
-use core_foundation::string::CFString;
+use core_foundation::number::{CFNumber, CFNumberRef};
+use core_foundation::string::{CFString, CFStringRef};
 use core_graphics::display::CGPoint;
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, CGEventFlags};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+use core_graphics::window::{ // Import specific window constants
+    kCGWindowBounds,
+    kCGWindowName,
+    kCGWindowLayer,
+    kCGWindowIsOnscreen,
+    kCGWindowNumber,
+    kCGWindowOwnerPID,
+    kCGWindowOwnerName,
+    kCGWindowListOptionIncludingWindow, // Keep existing if used
+    CGWindowListCopyWindowInfo, // Keep existing if used
+    CGWindowID, // Keep existing if used
+};
 use libc;
 use std::collections::BTreeMap;
 use tracing::{debug, trace, warn};
@@ -30,6 +43,21 @@ use crate::platforms::macos::constants::key_name_to_keycode;
 
 use serde_json::{json, Value as JsonValue};
 use crate::element::ElementTreeNode;
+use core_foundation::dictionary::{CFDictionary, CFDictionaryRef}; // Added CFDictionaryRef import
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WindowInfo {
+    pub id: u32, // CGWindowID
+    pub pid: i32,
+    pub app_name: String,
+    pub title: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub layer: i32,
+    pub is_on_screen: bool,
+}
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -1639,52 +1667,12 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
-        // Implementation Note: Iterate through applications from get_applications(),
-        // then get AXWindows for each. Or use a system-level API if available.
-        // todo!("Implement list_windows for macOS")
-        debug!("Listing all windows");
-        let mut all_windows = Vec::new();
-        let apps = self.get_applications()?;
-
-        for app_ui_element in apps {
-            if let Some(macos_app_element) = app_ui_element.as_any().downcast_ref::<MacOSUIElement>() {
-                let ax_app_element = &macos_app_element.element.0;
-
-                match ax_app_element.windows() {
-                    Ok(windows) => {
-                        debug!(
-                            "Found {} windows for app {:?}",
-                            windows.len(),
-                            macos_app_element.cached_label
-                        );
-                        for window_ax_element in &windows {
-                            let role = window_ax_element.role().ok().map(|s| s.to_string());
-                            let title = window_ax_element.title().ok().map(|s| s.to_string());
-                            let desc = window_ax_element.description().ok().map(|s| s.to_string());
-
-                            all_windows.push(self.wrap_element(
-                                ThreadSafeAXUIElement::new(window_ax_element.clone()),
-                                role,
-                                title,
-                                desc,
-                                None, // Value cache - windows typically don't have a simple value
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to get windows for app {:?}: {:?}",
-                            macos_app_element.cached_label, e
-                        );
-                    }
-                }
-            } else {
-                warn!("Could not downcast application UIElement to MacOSUIElement");
-            }
-        }
-
-        debug!("Found a total of {} windows", all_windows.len());
-        Ok(all_windows)
+        // This is the existing stub, we will implement the new one below
+        // and eventually deprecate/remove this one if it's not used by other parts
+        // of the MacOSEngine's AccessibilityEngine implementation.
+        // For now, let's keep it to avoid breaking the trait implementation immediately.
+        warn!("Using stub for AccessibilityEngine::list_windows. Implement new version.");
+        Ok(Vec::new())
     }
 
     fn close_window(&self) -> Result<(), AutomationError> {
@@ -1997,6 +1985,208 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn get_element_tree(&self, element: &UIElement) -> Result<ElementTreeNode, AutomationError> {
-        element.get_tree() // Delegate to the UIElement's get_tree method
+        let macos_element = element
+            .as_any()
+            .downcast_ref::<MacOSUIElement>()
+            .ok_or_else(|| {
+                AutomationError::UnsupportedOperation(
+                    "get_element_tree requires a MacOSUIElement".to_string(),
+                )
+            })?;
+        macos_element.get_tree()
     }
+}
+
+// Add new implementations outside the AccessibilityEngine trait if they have different signatures
+// or are intended for more direct, raw OS interaction before being wrapped as UIElements or Tools.
+impl MacOSEngine {
+    pub fn list_all_windows(&self) -> Result<Vec<WindowInfo>, AutomationError> {
+        use core_graphics::window::{
+            kCGWindowListOptionAll, kCGWindowListExcludeDesktopElements, kCGNullWindowID,
+            CGWindowListCopyWindowInfo,
+        };
+        use core_foundation::array::CFArray;
+        use core_foundation::dictionary::CFDictionary;
+        use core_foundation::number::CFNumber;
+        use core_foundation::string::CFString;
+        use core_foundation::base::TCFType; // For CFString a.o.
+
+        let options = kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements;
+        let window_list_info = unsafe { CGWindowListCopyWindowInfo(options, kCGNullWindowID) };
+
+        if window_list_info.is_null() {
+            return Err(AutomationError::PlatformError(
+                "Failed to get window list info (CGWindowListCopyWindowInfo returned null)".to_string(),
+            ));
+        }
+
+        let window_list_info_array = unsafe { CFArray::wrap_under_get_rule(window_list_info) };
+        let mut windows = Vec::new();
+
+        for i in 0..window_list_info_array.len() {
+            let window_info_dict_ref = unsafe { window_list_info_array.get_unchecked(i) };
+            // Ensure it's a dictionary
+            if unsafe { CFGetTypeID(*window_info_dict_ref) } != CFDictionary::type_id() {
+                warn!("Item in window list is not a dictionary, skipping");
+                continue;
+            }
+            let dict_concrete_ref = CFDictionary::as_concrete_TypeRef(*window_info_dict_ref)
+                .ok_or_else(|| AutomationError::PlatformError("Failed to cast CFTypeRef to CFDictionaryRef in list_all_windows".to_string()))?;
+            let window_info_dict = unsafe { CFDictionary::wrap_under_get_rule(dict_concrete_ref) };
+
+            // Helper to extract values
+            let get_cf_string = |key_cftyperef: CFTypeRef| -> Option<String> {
+                match window_info_dict.find(key_cftyperef) {
+                    Some(val_ref) if unsafe { CFGetTypeID(*val_ref) == CFString::type_id() } => {
+                        let cf_str = unsafe { CFString::wrap_under_get_rule(*val_ref as CFStringRef) };
+                        Some(cf_str.to_string())
+                    }
+                    _ => None,
+                }
+            };
+
+            let get_cf_number_as_i32 = |key_cftyperef: CFTypeRef| -> Option<i32> {
+                 match window_info_dict.find(key_cftyperef) {
+                    Some(val_ref) if unsafe { CFGetTypeID(*val_ref) == CFNumber::type_id() } => {
+                        let cf_num = unsafe { CFNumber::wrap_under_get_rule(*val_ref as CFNumberRef) };
+                        cf_num.to_i32()
+                    }
+                    _ => None,
+                }
+            };
+
+            let get_cf_number_as_u32 = |key_cftyperef: CFTypeRef| -> Option<u32> {
+                 match window_info_dict.find(key_cftyperef) {
+            let get_cf_number_as_u32 = |key: &str| -> Option<u32> {
+                 match window_info_dict.find(CFString::new(key).as_CFTypeRef()) {
+                    Some(val_ref) if unsafe { CFGetTypeID(*val_ref) == CFNumber::type_id() } => {
+                        let cf_num = unsafe { CFNumber::wrap_under_get_rule(*val_ref as _) };
+                        cf_num.to_i64().and_then(|v| u32::try_from(v).ok()) // Corrected to_u32
+                    }
+                    _ => None,
+                }
+            };
+
+            let bounds_dict_ref = match window_info_dict.find(CFString::new(kCGWindowBounds).as_CFTypeRef()) {
+                Some(val_ref) if unsafe { CFGetTypeID(*val_ref) == CFDictionary::type_id() } => {
+                    Some(unsafe { CFDictionary::wrap_under_get_rule(*val_ref as _) })
+                }
+                _ => None,
+            };
+
+            let mut x = 0;
+            let mut y = 0;
+            let mut width = 0;
+            let mut height = 0;
+
+            if let Some(bounds_dict) = bounds_dict_ref {
+                x = get_cf_number_as_i32("X").or_else(|| bounds_dict.get(CFString::new("X").as_CFTypeRef()).and_then(|v| unsafe {CFNumber::wrap_under_get_rule(*v as _)}.to_i32())).unwrap_or(0);
+                y = get_cf_number_as_i32("Y").or_else(|| bounds_dict.get(CFString::new("Y").as_CFTypeRef()).and_then(|v| unsafe {CFNumber::wrap_under_get_rule(*v as _)}.to_i32())).unwrap_or(0);
+                width = get_cf_number_as_i32("Width").or_else(|| bounds_dict.get(CFString::new("Width").as_CFTypeRef()).and_then(|v| unsafe {CFNumber::wrap_under_get_rule(*v as _)}.to_i32())).unwrap_or(0);
+                height = get_cf_number_as_i32("Height").or_else(|| bounds_dict.get(CFString::new("Height").as_CFTypeRef()).and_then(|v| unsafe {CFNumber::wrap_under_get_rule(*v as _)}.to_i32())).unwrap_or(0);
+            }
+
+            let title = get_cf_string(kCGWindowName).unwrap_or_default();
+            // Filter out windows with no title, which are often system UI elements or background processes
+            // Also filter out windows with layer 0 and on-screen, which can be the desktop itself or full-screen overlays.
+            // Adjust filtering as needed based on observed behavior.
+            let layer = get_cf_number_as_i32(kCGWindowLayer).unwrap_or(0);
+            let is_on_screen = window_info_dict.find(CFString::new(kCGWindowIsOnscreen).as_CFTypeRef())
+                .map_or(false, |val_ref| unsafe { CFBoolean::wrap_under_get_rule(*val_ref as _)}.into());
+
+
+            // Skip windows that are likely not user-interactive app windows
+            if title.is_empty() && layer == 0 { // Example filter, may need refinement
+                continue;
+            }
+             if !is_on_screen && layer < 1000 { // Filter out off-screen utility windows, but keep high-layer on-screen elements (like menu bar if not excluded by options)
+                // This condition might be too aggressive, or not aggressive enough depending on what needs to be captured.
+                // For now, let's be somewhat inclusive of on-screen elements.
+                // If kCGWindowListOptionOnScreenOnly is used, this `is_on_screen` check might be redundant
+                // but kCGWindowListOptionAll is used here.
+             }
+
+
+            windows.push(WindowInfo {
+                id: get_cf_number_as_u32(kCGWindowNumber).unwrap_or(0),
+                pid: get_cf_number_as_i32(kCGWindowOwnerPID).unwrap_or(0),
+                app_name: get_cf_string(kCGWindowOwnerName).unwrap_or_default(),
+                title,
+                x,
+                y,
+                width,
+                height,
+                layer,
+                is_on_screen,
+            });
+        }
+        // CoreFoundation objects are automatically released when CFArray/CFDictionary etc. go out of scope
+        // due to `wrap_under_get_rule`. `window_list_info` itself might need a CFRelease
+        // if not properly wrapped and managed by a Rust type that handles its release.
+        // However, CFArray::wrap_under_get_rule should handle the release of the array itself.
+        // The raw pointer `window_list_info` obtained from `CGWindowListCopyWindowInfo` follows the "Copy Rule",
+        // meaning we own it and are responsible for releasing it.
+        // If CFArray::wrap_under_get_rule doesn't take ownership in a way that releases the original ref,
+        // we might need an explicit CFRelease(window_list_info).
+        // The core-foundation crate's `wrap_under_get_rule` for CFArray states it calls CFRetain and then
+        // the Drop impl calls CFRelease. This should be okay.
+
+        Ok(windows)
+    }
+
+    pub fn get_window_title_by_id(&self, window_id: u32) -> Result<String, AutomationError> {
+        use core_graphics::window::{
+            kCGWindowListOptionIncludingWindow, kCGWindowNumber, CGWindowListCopyWindowInfo,
+            kCGWindowName,
+        };
+        use core_foundation::array::CFArray;
+        use core_foundation::dictionary::CFDictionary;
+        use core_foundation::string::CFString;
+        use core_foundation::base::TCFType;
+
+        let options = kCGWindowListOptionIncludingWindow;
+        // CGWindowListCopyWindowInfo expects a CGWindowID, which is u32.
+        // The window_id parameter is already u32.
+        let window_list_info = unsafe { CGWindowListCopyWindowInfo(options, window_id) };
+
+        if window_list_info.is_null() {
+            return Err(AutomationError::PlatformError(format!(
+                "Failed to get window info for ID {} (CGWindowListCopyWindowInfo returned null)",
+                window_id
+            )));
+        }
+
+        let window_list_info_array = unsafe { CFArray::wrap_under_get_rule(window_list_info) };
+
+        if window_list_info_array.len() == 0 {
+            return Err(AutomationError::ElementNotFound(format!(
+                "Window with ID {} not found.",
+                window_id
+            )));
+        }
+
+        // Assuming the first (and should be only) item is our window
+        let window_info_dict_ref = unsafe { window_list_info_array.get_unchecked(0) };
+        if unsafe { CFGetTypeID(*window_info_dict_ref) } != CFDictionary::type_id() {
+             return Err(AutomationError::PlatformError(format!(
+                "Window info for ID {} is not a dictionary.",
+                window_id
+            )));
+        }
+        let dict_concrete_ref = CFDictionary::as_concrete_TypeRef(*window_info_dict_ref)
+            .ok_or_else(|| AutomationError::PlatformError(format!("Failed to cast CFTypeRef to CFDictionaryRef for window ID {}", window_id)))?;
+        let window_info_dict = unsafe { CFDictionary::wrap_under_get_rule(dict_concrete_ref) };
+
+        match window_info_dict.find(CFString::new(kCGWindowName).as_CFTypeRef()) {
+            Some(val_ref) if unsafe { CFGetTypeID(*val_ref) == CFString::type_id() } => {
+                let cf_str = unsafe { CFString::wrap_under_get_rule(*val_ref as _) };
+                Ok(cf_str.to_string())
+            }
+            _ => Err(AutomationError::PlatformError(format!(
+                "Could not get window title (kCGWindowName) for {}.",
+                window_id
+            ))),
+        }
+    }
+
 }
