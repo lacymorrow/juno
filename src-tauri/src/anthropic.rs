@@ -1,5 +1,4 @@
-use std::sync::Arc;
-use log::{info, error, warn};
+use log::{info, error};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -136,61 +135,76 @@ pub async fn submit_query(
 
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
-    // --- Use or Initialize Persistent Browser Controller ---
-    let browser_controller = match state.get_or_init_browser_controller().await {
-        Ok(controller) => {
-            info!("Using persistent Browser Controller.");
-            Some(controller)
-        }
-        Err(e) => {
-            error!("Failed to get or initialize Browser Controller: {}. Browser tools will not be available.", e);
-            // Allow agent to continue without browser tools, just log the error.
-            None
-        }
-    };
+    // --- REMOVE EAGER INITIALIZATION OF BROWSER CONTROLLER ---
+    // The BrowserController will be initialized lazily by each tool executor when needed.
+    // let browser_controller_option = match state.get_or_init_browser_controller().await {
+    //     Ok(controller) => {
+    //         info!("Previously, Browser Controller would be initialized here.");
+    //         Some(controller)
+    //     }
+    //     Err(e) => {
+    //         error!("Failed to get or initialize Browser Controller: {}. Browser tools will not be available.", e);
+    //         None
+    //     }
+    // };
 
     // Register basic file/shell tools
     register_basic_tools(&mut tool_provider).await;
     info!("Registered basic tools for the agent.");
 
-    // Setup tools
+    // Setup tools (desktop tools, etc.) - this may include non-browser tools
     setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
 
-    // --- Register Browser Tools (only if controller initialized) ---
-    if let Some(browser_controller) = browser_controller {
-        let browser_definitions = get_browser_tool_definitions();
-        let shared_browser_controller = Arc::new(tokio::sync::Mutex::new(browser_controller)); // Wrap in Arc<Mutex>
+    // --- Register Browser Tools (executors will initialize controller lazily) ---
+    let browser_definitions = get_browser_tool_definitions();
+    for definition in browser_definitions {
+        let tool_name = definition.name.clone(); // This will be moved into the closure
+        // Clone AppHandle to be moved into the async executor closure
+        let app_handle_for_tool_executor = app_handle.clone();
 
-        for definition in browser_definitions {
-            let tool_name = definition.name.clone();
-            let log_tool_name = tool_name.clone();
-            let controller_arc = shared_browser_controller.clone(); // Clone Arc
+        let executor = move |input: Value| {
+            let app_handle_captured = app_handle_for_tool_executor.clone(); // Clone for the async block
+            // The `tool_name` from the outer scope is moved here and owned by the closure.
+            // We can use it directly or clone it if needed for further nested async blocks.
+            let current_tool_name_captured = tool_name.clone(); // Clone the moved tool_name for use in async block
+            async move {
+                // Get AppState from the AppHandle
+                let state_from_handle = app_handle_captured.state::<AppState>();
 
-            let executor = move |input: Value| {
-                let controller_lock = controller_arc.clone(); // Clone Arc again for async block
-                let name = tool_name.clone();
-                async move {
-                    let controller = controller_lock.lock().await; // Lock the Mutex
-                    let result = match name.as_str() {
-                        "browser_navigate" => controller.navigate(&input).await,
-                        "browser_extract_content" => controller.extract_content(&input).await,
-                        "browser_interact" => controller.interact(&input).await,
-                        "browser_get_current_url" => controller.get_current_url(&input).await,
-                        "browser_screenshot" => controller.screenshot(&input).await,
-                        _ => Err(AgentError::ToolNotFound(name)),
-                    };
-                    match result {
-                        Ok(tool_result) => Ok(tool_result.output),
-                        Err(agent_error) => Err(agent_error.to_string()),
+                // LAZILY get or initialize the browser controller INSIDE the tool execution
+                let browser_controller_instance = match state_from_handle.get_or_init_browser_controller().await {
+                    Ok(controller) => controller,
+                    Err(e) => {
+                        let err_msg = format!("Failed to initialize BrowserController for tool {}: {}", current_tool_name_captured, e);
+                        error!("{}", err_msg);
+                        // Propagate as a string error, consistent with existing tool error handling
+                        return Err(err_msg);
                     }
+                };
+
+                // Now use the obtained browser_controller_instance
+                let result = match current_tool_name_captured.as_str() {
+                    "browser_navigate" => browser_controller_instance.navigate(&input).await,
+                    "browser_extract_content" => browser_controller_instance.extract_content(&input).await,
+                    "browser_interact" => browser_controller_instance.interact(&input).await,
+                    "browser_get_current_url" => browser_controller_instance.get_current_url(&input).await,
+                    "browser_screenshot" => browser_controller_instance.screenshot(&input).await,
+                    _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
+                };
+
+                match result {
+                    Ok(tool_result) => Ok(tool_result.output),
+                    // Convert AgentError to String to match the executor's expected error type
+                    Err(agent_error) => Err(agent_error.to_string()),
                 }
-            };
-            tool_provider.register_async_tool(definition, executor).await;
-            info!("Registered browser tool: {}", log_tool_name);
-        }
-    } else {
-        info!("Skipping browser tool registration as controller failed to initialize.");
+            }
+        };
+        tool_provider.register_async_tool(definition.clone(), executor).await; // Clone definition for register_async_tool
+        // Use definition.name directly for logging as tool_name was moved.
+        info!("Registered browser tool (with lazy initialization): {}", definition.name);
     }
+    // No 'else' block needed as we register definitions regardless;
+    // initialization failure is handled within the executor.
 
     // Use the BrainFactory to create the appropriate AI provider brain
     let agent_brain = match BrainFactory::create_brain() { // Keep using BrainFactory
@@ -216,6 +230,7 @@ pub async fn submit_query(
         tool_provider, // This now contains all registered tools
         agent_brain,   // Pass the Box<dyn AgentBrain>
         MAX_ITERATIONS,
+        app_handle.clone(), // Pass AppHandle
     );
     info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
 

@@ -168,8 +168,12 @@ impl AgentBrain for RigBrain {
                     let arguments: Value = serde_json::from_str(arguments_str)
                         .map_err(|e| AgentError::LlmError(format!("Failed to parse tool arguments: {}", e)))?;
 
-                    // Get the thought process if available
-                    let thought = message["content"].as_str().unwrap_or("").to_string();
+                    // If the assistant provided a text response, consider it a thought or intermediate step
+                    // For now, we will treat any text from assistant as part of its thought process
+                    // leading to a tool call or final answer.
+                    let _thought = message["content"].as_str().unwrap_or("").to_string();
+                    // TODO: How to best use this thought? Log it? Add to a specific thought history?
+                    // For now, we assume the main content is the tool_calls if present.
 
                     info!("Agent wants to call tool: {}", tool_name);
 

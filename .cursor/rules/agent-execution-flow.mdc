@@ -5,36 +5,61 @@ alwaysApply: false
 ---
 # Agent Execution Flow
 
-The agent interaction is initiated by the `submit_query` Tauri command in [src-tauri/src/anthropic.rs](mdc:dotdot/src-tauri/src/anthropic.rs).
+The agent interaction is initiated by the `submit_query` Tauri command in [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs).
 
 ## Steps:
 
 1.  **Initialization:**
-    -   `submit_query` instantiates the agent components: `SimpleMemoryManager`, `LocalToolProvider`, `AnthropicBrain`.
-    -   Tools are registered with the `LocalToolProvider` (e.g., via `register_basic_tools`).
-    -   `DefaultAgentRunner` is created, holding the initialized components.
+    -   `submit_query` retrieves the cancellation receiver (`cancel_rx`) from `AppState`.
+    -   It instantiates `SimpleMemoryManager` (from [src-tauri/src/agent/implementations/basic.rs](mdc:src-tauri/src/agent/implementations/basic.rs)).
+    -   It instantiates `LocalToolProvider` (from [src-tauri/src/agent/implementations/basic.rs](mdc:src-tauri/src/agent/implementations/basic.rs)), passing the `app_handle` for event logging.
+    -   Tools are registered with the `LocalToolProvider` (e.g., via `register_basic_tools` from [src-tauri/src/agent/tools/basic_tools.rs](mdc:src-tauri/src/agent/tools/basic_tools.rs) and `register_desktop_tools` from [src-tauri/src/agent/tools/desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs)).
+    -   An `AgentBrain` implementation (e.g., `AnthropicBrain`) is created using `BrainFactory::create_brain()` (from [src-tauri/src/agent/providers/factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)).
+    -   `DefaultAgentRunner` (from [src-tauri/src/agent/implementations/agent_runner.rs](mdc:src-tauri/src/agent/implementations/agent_runner.rs)) is created, holding the memory manager, tool provider, and brain.
 2.  **Run Loop:**
-    -   `agent_runner.run(query)` is called.
-    -   The `DefaultAgentRunner` enters its main loop ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:dotdot/src-tauri/src/agent/implementations/agent_runner.rs)).
-    -   Inside the loop, `runner.step()` is called repeatedly.
+    -   `agent_runner.run(query, cancel_rx)` is called.
+    -   The `DefaultAgentRunner` adds the initial user query to memory.
+    -   It enters its main loop ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:src-tauri/src/agent/implementations/agent_runner.rs)).
+    -   Inside the loop:
+        -   Cancellation is checked via `cancel_rx`.
+        -   The maximum step count is checked.
+        -   `runner.step(cancel_rx)` is called.
 3.  **Agent Step (`step` method):**
+    -   Cancellation is checked.
     -   Gets current messages from `MemoryManager`.
     -   Gets available tools from `ToolProvider`.
-    -   Calls `brain.decide_next_action()` ([AnthropicBrain](mdc:dotdot/src-tauri/src/agent/implementations/agent_brain.rs)) with messages and tools.
-    -   The brain calls the LLM API.
+    -   Cancellation is checked.
+    -   Calls `brain.decide_next_action()` (e.g., [src-tauri/src/agent/providers/anthropic.rs](mdc:src-tauri/src/agent/providers/anthropic.rs) or [src-tauri/src/agent/providers/openai.rs](mdc:src-tauri/src/agent/providers/openai.rs)) with messages and tools.
+    -   The brain calls the appropriate LLM API.
     -   The brain returns an `AgentAction` (e.g., `ExecuteTool`, `Finish`).
-4.  **Action Handling:**
+4.  **Action Handling (within `step`):**
     -   If `ExecuteTool(calls)`:
         -   The runner adds an assistant message with the tool calls to memory.
-        -   It iterates through `calls`, calling `tool_provider.execute_tool()` for each.
-        -   Each tool result (or error) is added as a `Role::Tool` message to memory.
-        -   `step` returns `AgentAction::Think`, causing the loop to continue (calling the brain again with the new tool results).
+        -   It iterates through `calls`:
+            -   Cancellation is checked.
+            -   `tool_provider.execute_tool()` is called.
+            -   Cancellation is checked.
+            -   The tool result (or error) is added as a `Role::Tool` message to memory.
+        -   `step` returns `AgentAction::Think`, causing the main loop to continue.
     -   If `Finish(response)`:
-        -   The runner adds the final assistant response to memory.
-        -   The `run` loop terminates, returning the final response string.
+        -   `step` returns `AgentAction::Finish(response)`.
+    -   If `RespondToUser(response)`:
+        -   `step` returns `AgentAction::RespondToUser(response)`.
     -   If `Error(e)`:
-        -   The `run` loop terminates, returning the error.
-5.  **Result Processing:**
+        -   `step` returns `AgentAction::Error(e)`.
+    -   If `Think`:
+        -   `step` returns `AgentAction::Think`.
+5.  **Action Handling (within `run` loop):**
+    -   If `step` returned `Finish(response)`:
+        -   The `run` loop terminates, returning `Ok(response)`.
+    -   If `step` returned `RespondToUser(response)`:
+        -   The intermediate response is added to memory.
+        -   The loop continues.
+    -   If `step` returned `Error(e)`:
+        -   The `run` loop terminates, returning `Err(e)`.
+    -   If `step` returned `Think` (typically after `ExecuteTool`):
+        -   The loop continues.
+6.  **Result Processing:**
     -   Back in `submit_query`, the `Result<String, AgentError>` from `run` is handled.
     -   TTS is performed on the final text.
     -   A `SubmitQueryResult` is created and emitted to the frontend via the `backend-response` event.

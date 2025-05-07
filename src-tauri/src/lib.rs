@@ -19,7 +19,6 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
-use tracing_subscriber::util::SubscriberInitExt;
 
 // macOS specific imports
 #[cfg(target_os = "macos")]

@@ -22,9 +22,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 // Type for conversation messages
 type ChatMessage = {
-  role: "user" | "assistant" | "system";
+  role:
+    | "user"
+    | "assistant"
+    | "system"
+    | "thinking"
+    | "tool_call_request"
+    | "tool_call_result";
   content: string;
   screenshot_base64?: string; // Optional base64 screenshot data
+  tool_name?: string;
+  tool_args?: any;
+  tool_output?: any;
 };
 
 // Type for the result from submit_query
@@ -98,25 +107,52 @@ function App() {
 
   // Add tool usage event listener to update the conversation with screenshots
   useEffect(() => {
-    const unlisten = listen<any>("tool-usage", (event) => {
-      // Only process screenshot tools
-      if (
-        (event.payload.tool === "capture_screenshot" ||
-          event.payload.tool === "screenshot") &&
-        event.payload.screenshot_base64 &&
-        event.payload.success
-      ) {
-        console.log("Received screenshot from tool usage");
+    const unlisten = listen<any>("agent-event", (event) => {
+      console.log("Received agent-event:", event.payload);
+      const { type, payload } = event.payload;
 
-        // Add system message with the screenshot
-        const screenshotMessage: ChatMessage = {
-          role: "system",
-          content:
-            "The AI captured a screenshot of your screen to help complete your request.",
-          screenshot_base64: event.payload.screenshot_base64,
+      let newMessage: ChatMessage | null = null;
+
+      if (type === "thinking" && payload.content) {
+        newMessage = {
+          role: "thinking",
+          content: payload.content,
         };
+      } else if (
+        type === "tool_call_request" &&
+        payload.tool_name &&
+        payload.tool_args
+      ) {
+        newMessage = {
+          role: "tool_call_request",
+          content: payload.content || `Calling tool: ${payload.tool_name}`,
+          tool_name: payload.tool_name,
+          tool_args: payload.tool_args,
+        };
+      } else if (
+        type === "tool_call_result" &&
+        payload.tool_name &&
+        payload.tool_output
+      ) {
+        newMessage = {
+          role: "tool_call_result",
+          content: payload.content || `Result from ${payload.tool_name}`,
+          tool_name: payload.tool_name,
+          tool_output: payload.tool_output,
+          screenshot_base64: payload.screenshot_base64, // Include screenshot if part of tool result
+        };
+      } else if (type === "screenshot" && payload.screenshot_base64) {
+        // This can also be a specific type of tool_call_result if a screenshot tool was called
+        // Or a general system message if the AI decides to capture one proactively.
+        newMessage = {
+          role: "system", // Or could be 'tool_call_result' if tied to a specific tool action
+          content: payload.content || "The AI captured a screenshot.",
+          screenshot_base64: payload.screenshot_base64,
+        };
+      }
 
-        setConversation((prev) => [...prev, screenshotMessage]);
+      if (newMessage) {
+        setConversation((prev) => [...prev, newMessage!]);
       }
     });
 
@@ -339,7 +375,7 @@ function App() {
             <ResizablePanel defaultSize={75} minSize={30}>
               <div className="flex flex-col h-full p-4">
                 {/* Conversation Area */}
-                <ScrollArea className="flex-grow mb-4 -mr-4 pr-4">
+                <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
                   {conversation.map((msg, index) => (
                     <div
                       key={index}
@@ -354,12 +390,54 @@ function App() {
                             ? "bg-primary text-primary-foreground"
                             : msg.role === "assistant"
                             ? "bg-muted"
-                            : msg.role === "system" && msg.screenshot_base64
+                            : (msg.role === "system" ||
+                                msg.role === "thinking" ||
+                                msg.role === "tool_call_request" ||
+                                msg.role === "tool_call_result") &&
+                              msg.screenshot_base64
                             ? "bg-muted/80 border border-primary/20 p-2"
-                            : "bg-secondary text-secondary-foreground text-xs italic opacity-80"
+                            : msg.role === "thinking"
+                            ? "bg-blue-100 text-blue-800 text-xs italic opacity-90"
+                            : msg.role === "tool_call_request"
+                            ? "bg-purple-100 text-purple-800 text-xs"
+                            : msg.role === "tool_call_result"
+                            ? "bg-green-100 text-green-800 text-xs"
+                            : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
                         )}
                       >
+                        {msg.role === "thinking" && (
+                          <div className="font-semibold mb-1">Thinking...</div>
+                        )}
+                        {msg.role === "tool_call_request" && msg.tool_name && (
+                          <div className="font-semibold mb-1">
+                            Tool Call:{" "}
+                            <code className="font-mono bg-purple-200 px-1 rounded">
+                              {msg.tool_name}
+                            </code>
+                          </div>
+                        )}
+                        {msg.role === "tool_call_result" && msg.tool_name && (
+                          <div className="font-semibold mb-1">
+                            Tool Result:{" "}
+                            <code className="font-mono bg-green-200 px-1 rounded">
+                              {msg.tool_name}
+                            </code>
+                          </div>
+                        )}
                         {msg.content}
+                        {msg.role === "tool_call_request" && msg.tool_args && (
+                          <pre className="mt-1 p-1.5 bg-purple-50 text-xs rounded overflow-x-auto">
+                            Args: {JSON.stringify(msg.tool_args, null, 2)}
+                          </pre>
+                        )}
+                        {msg.role === "tool_call_result" && msg.tool_output && (
+                          <pre className="mt-1 p-1.5 bg-green-50 text-xs rounded overflow-x-auto">
+                            Output:{" "}
+                            {typeof msg.tool_output === "string"
+                              ? msg.tool_output
+                              : JSON.stringify(msg.tool_output, null, 2)}
+                          </pre>
+                        )}
                         {msg.screenshot_base64 && (
                           <div
                             className={cn(
