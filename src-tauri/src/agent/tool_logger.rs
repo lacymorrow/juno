@@ -109,16 +109,35 @@ where
 
     match result {
         Ok(Ok(output)) => {
+            let mut final_screenshot_base64: Option<String> = None;
+            let mut final_tool_output = output.clone(); // Clone original output to potentially modify
+
+            // Check for screenshot tool names
+            if tool_name == "capture_screenshot" || tool_name == "capture_element_screenshot" || tool_name == "browser_screenshot" {
+                if let Some(s_val) = output.as_str() {
+                    final_screenshot_base64 = Some(s_val.to_string());
+                    // Set a generic success message for the main tool_output as the screenshot is now separate
+                    final_tool_output = serde_json::json!({ "status": "success", "message": "Screenshot captured and available in screenshot_base64 field." });
+                } else if let Some(obj) = output.as_object() {
+                    // Handle cases where the output might be an object containing the base64 string, e.g., {"base64": "..."}
+                    // This was seen in the browser_controller.rs screenshot tool
+                    if let Some(b64_val) = obj.get("base64").and_then(|v| v.as_str()) {
+                        final_screenshot_base64 = Some(b64_val.to_string());
+                        final_tool_output = serde_json::json!({ "status": "success", "message": "Screenshot extracted from tool output." });
+                    }
+                }
+            }
+
             // Log tool call success
             log_tool_call_result(
                 app_handle,
                 tool_name,
-                output.clone(), // Clone output for logging
+                final_tool_output, // Use the (potentially modified) tool output
                 true,
                 Some(format!("Tool {} executed successfully.", tool_name)),
-                None, // No separate screenshot here, handled if tool itself provides it
+                final_screenshot_base64, // Pass the extracted screenshot data
             );
-            Ok(output)
+            Ok(output) // Return the original, unmodified output from the tool execution
         }
         Ok(Err(e)) => {
             // Log tool call failure
