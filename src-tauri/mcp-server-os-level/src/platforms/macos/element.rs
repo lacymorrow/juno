@@ -836,7 +836,7 @@ impl UIElementImpl for MacOSUIElement {
 
 #[cfg(test)]
 mod tests {
-    
+
     // We will add tests here later.
 
     // Example placeholder test

@@ -2,7 +2,7 @@ use serde::Serialize;
 use serde_json::{Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use futures::FutureExt;
 
 /// Type for tool usage events sent to the frontend
@@ -86,78 +86,279 @@ where
 }
 
 // Add a function to log async tool execution
-pub async fn log_async_tool_execution<'a, Fut>(
-    app_handle: &tauri::AppHandle,
+pub async fn log_async_tool_execution<F>(
+    app_handle: &AppHandle,
     tool_name: &str,
-    input: serde_json::Value,
-    executor: Fut, // Accept the future directly
-) -> Result<serde_json::Value, String>
+    input: Value,
+    execution_future: F,
+) -> Result<Value, String>
 where
-    Fut: std::future::Future<Output = Result<serde_json::Value, String>> + Send + 'a,
+    F: std::future::Future<Output = Result<Value, String>> + Send,
 {
-    // Emit start event (keep this for potential real-time feedback)
-    if let Err(e) = app_handle.emit("tool-execution-start", (tool_name, &input)) {
-        log::warn!("Failed to emit tool-execution-start event: {}", e);
-    }
+    // Log tool call request
+    log_tool_call_request(
+        app_handle,
+        tool_name,
+        input.clone(), // Clone input for logging
+        Some(format!("Attempting to execute tool: {}", tool_name)),
+    );
 
-    // Execute the future and capture the result
-    let execution_result = std::panic::AssertUnwindSafe(executor).catch_unwind().await;
+    let result = std::panic::AssertUnwindSafe(execution_future)
+        .catch_unwind()
+        .await;
 
-    // --- Add logic to emit tool-usage event ---
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    let (final_result, success, result_payload) = match execution_result {
+    match result {
         Ok(Ok(output)) => {
-            // Emit end event (success)
-            if let Err(e) = app_handle.emit("tool-execution-end", (tool_name, &output)) {
-                log::warn!("Failed to emit tool-execution-end event: {}", e);
-            }
-            (Ok(output.clone()), true, Some(output)) // Return original output for function result, indicate success, provide output for entry
+            // Log tool call success
+            log_tool_call_result(
+                app_handle,
+                tool_name,
+                output.clone(), // Clone output for logging
+                true,
+                Some(format!("Tool {} executed successfully.", tool_name)),
+                None, // No separate screenshot here, handled if tool itself provides it
+            );
+            Ok(output)
         }
-        Ok(Err(error_msg)) => {
-            let error_val = serde_json::json!({ "error": error_msg });
-            // Emit error event
-            if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
-                log::warn!("Failed to emit tool-execution-error event: {}", e);
-            }
-            (Err(error_msg.clone()), false, Some(error_val)) // Return original error, indicate failure, provide error JSON for entry
+        Ok(Err(e)) => {
+            // Log tool call failure
+            log_tool_call_result(
+                app_handle,
+                tool_name,
+                serde_json::json!({ "error": e }), // Log error as JSON
+                false,
+                Some(format!("Tool {} failed: {}", tool_name, e)),
+                None,
+            );
+            Err(e)
         }
         Err(panic_payload) => {
-            let error_msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
-                format!("Tool execution panicked: {}", s)
-            } else if let Some(s) = panic_payload.downcast_ref::<String>() {
-                format!("Tool execution panicked: {}", s)
+            let err_msg = if let Some(s) = panic_payload.downcast_ref::<String>() {
+                format!("Tool {} panicked: {}", tool_name, s)
+            } else if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                format!("Tool {} panicked: {}", tool_name, s)
             } else {
-                "Tool execution panicked with unknown payload".to_string()
+                format!("Tool {} panicked with unknown type.", tool_name)
             };
-            log::error!("Tool '{}' panicked: {}", tool_name, error_msg);
-            let error_val = serde_json::json!({ "error": &error_msg });
-            // Emit error event (panic)
-            if let Err(e) = app_handle.emit("tool-execution-error", (tool_name, &error_val)) {
-                log::warn!("Failed to emit tool-execution-error event after panic: {}", e);
-            }
-             (Err(error_msg), false, Some(error_val)) // Return panic message, indicate failure, provide error JSON for entry
+            error!("{}", err_msg);
+            // Log tool call panic as failure
+            log_tool_call_result(
+                app_handle,
+                tool_name,
+                serde_json::json!({ "panic": err_msg }),
+                false,
+                Some(err_msg.clone()),
+                None,
+            );
+            Err(err_msg)
         }
-    };
-
-    // Construct the ToolUsageEntry
-    let entry = ToolUsageEntry {
-        timestamp,
-        tool: tool_name.to_string(),
-        inputs: input.clone(), // Clone the input
-        result: result_payload, // Use the captured output or error JSON
-        success,
-        screenshot_base64: None, // TODO: Consider adding screenshot logic here if feasible for async
-    };
-
-    // Emit the consolidated "tool-usage" event
-    if let Err(e) = app_handle.emit("tool-usage", entry) {
-        warn!("Failed to emit consolidated tool-usage event: {}", e);
     }
-    // --- End of added logic ---
-
-    final_result // Return the original execution result (Ok or Err)
 }
+
+// NEW: Define the structure for our generic agent event
+#[derive(Clone, Debug, Serialize)]
+struct AgentEvent {
+    #[serde(rename = "type")]
+    event_type: String, // "thinking", "tool_call_request", "tool_call_result", "screenshot"
+    payload: AgentEventPayload,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)] // Allows payload to be one of the variants without a type field in payload itself
+enum AgentEventPayload {
+    Thinking(ThinkingPayload),
+    ToolCallRequest(ToolCallRequestPayload),
+    ToolCallResult(ToolCallResultPayload),
+    Screenshot(ScreenshotPayload),
+    GenericContent(GenericContentPayload),
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ThinkingPayload {
+    content: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ToolCallRequestPayload {
+    tool_name: String,
+    tool_args: Value, // Keep as Value for flexibility
+    content: Option<String>, // Optional descriptive content
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ToolCallResultPayload {
+    tool_name: String,
+    tool_output: Value, // Keep as Value
+    success: bool,
+    content: Option<String>, // Optional descriptive content
+    screenshot_base64: Option<String>, // Optional screenshot from the tool
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ScreenshotPayload {
+    screenshot_base64: String,
+    content: Option<String>, // Optional descriptive content like "AI captured a screenshot"
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GenericContentPayload {
+    content: String,
+}
+
+// Emit an event when a tool is used
+// This function would be called from your tool execution logic
+fn emit_agent_event(app_handle: &AppHandle, event: AgentEvent) {
+    info!("Emitting agent-event: {:?}", event);
+    if let Err(e) = app_handle.emit("agent-event", event) {
+        warn!("Failed to emit agent-event: {}", e);
+    }
+}
+
+// Example usage for emitting a thinking event:
+pub fn log_thinking(app_handle: &AppHandle, thought: &str) {
+    let event = AgentEvent {
+        event_type: "thinking".to_string(),
+        payload: AgentEventPayload::Thinking(ThinkingPayload {
+            content: thought.to_string(),
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// Example usage for emitting a tool call request:
+pub fn log_tool_call_request(app_handle: &AppHandle, tool_name: &str, tool_args: Value, content: Option<String>) {
+    let event = AgentEvent {
+        event_type: "tool_call_request".to_string(),
+        payload: AgentEventPayload::ToolCallRequest(ToolCallRequestPayload {
+            tool_name: tool_name.to_string(),
+            tool_args,
+            content,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// Example usage for emitting a tool call result:
+pub fn log_tool_call_result(
+    app_handle: &AppHandle,
+    tool_name: &str,
+    tool_output: Value,
+    success: bool,
+    content: Option<String>,
+    screenshot_base64: Option<String>,
+) {
+    let event = AgentEvent {
+        event_type: "tool_call_result".to_string(),
+        payload: AgentEventPayload::ToolCallResult(ToolCallResultPayload {
+            tool_name: tool_name.to_string(),
+            tool_output,
+            success,
+            content,
+            screenshot_base64,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// Example usage for emitting a screenshot event (if not part of a tool result):
+pub fn log_screenshot(app_handle: &AppHandle, screenshot_base64: String, content: Option<String>) {
+    let event = AgentEvent {
+        event_type: "screenshot".to_string(),
+        payload: AgentEventPayload::Screenshot(ScreenshotPayload {
+            screenshot_base64,
+            content,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// Function to log a generic content message (can be used by system, or for other status updates)
+pub fn log_generic_content(app_handle: &AppHandle, content_text: &str) {
+    let event = AgentEvent {
+        event_type: "generic_content".to_string(), // Or another specific type if needed
+        payload: AgentEventPayload::GenericContent(GenericContentPayload {
+            content: content_text.to_string(),
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// OLD ToolUsageEntry - We might adapt this or replace its usage
+// #[derive(Clone, Debug, Serialize)]
+// pub struct ToolUsageEntry {
+//     pub tool: String,
+//     pub input: Value,
+//     pub output: Option<Value>,
+//     pub success: bool,
+//     pub error: Option<String>,
+//     pub screenshot_base64: Option<String>, // Field for base64 encoded screenshot
+//     pub timestamp: String,                 // ISO 8601 timestamp
+// }
+
+// Log to a specific window (e.g., a dev tools panel)
+// pub fn log_tool_usage_to_window(window: &Window, entry: &ToolUsageEntry) {
+//     info!(target: "tool_events", "Logging to window: {:?}, Tool: {}, Success: {}", window.label(), entry.tool, entry.success);
+//     // Emit the event to the specific window
+//     if let Err(e) = window.emit("tool-usage", entry) {
+//         warn!("Failed to emit tool-usage event: {}", e);
+//     }
+// }
+
+// Log to all windows or globally via AppHandle
+// pub fn log_tool_usage_global(app_handle: &AppHandle, entry: &ToolUsageEntry) {
+//     info!(target: "tool_events", "Logging globally: Tool: {}, Success: {}", entry.tool, entry.success);
+//     // Emit the event globally. This will reach all listeners.
+//     // If you only want it in the main chat, you might need to target the main window specifically.
+//     // However, for the dev panel, global might be okay, or it could listen to "agent-event" too.
+
+//     // For now, let's assume "tool-usage" is still used by DevToolsPanel or similar.
+//     // If DevToolsPanel is updated to listen to "agent-event", this can also change.
+//     if let Err(e) = app_handle.emit("tool-usage", entry) {
+//         warn!("Failed to emit consolidated tool-usage event: {}", e);
+//     }
+
+//     // Example of how you might adapt to the new system if DevToolsPanel also listens to "agent-event"
+//     // let agent_event = AgentEvent {
+//     //     event_type: if entry.success { "tool_call_result".to_string() } else { "tool_call_error".to_string() }, // Simplified
+//     //     payload: AgentEventPayload::ToolCallResult(ToolCallResultPayload { // Or a specific error payload
+//     //         tool_name: entry.tool.clone(),
+//     //         tool_output: entry.output.clone().unwrap_or(Value::Null),
+//     //         success: entry.success,
+//     //         content: entry.error.clone(), // Or some other content
+//     //         screenshot_base64: entry.screenshot_base64.clone(),
+//     //     })
+//     // };
+//     // emit_agent_event(app_handle, agent_event);
+// }
+
+// This function is called by tools to log their usage.
+// It now needs to decide whether to log to a specific window or globally.
+// For simplicity, let's assume it logs globally using the AppHandle.
+// pub fn log_tool_usage(
+//     app_handle: &AppHandle, // Use AppHandle for global logging
+//     tool_name: &str,
+//     input: &Value,
+//     output: Option<&Value>,
+//     success: bool,
+//     error_message: Option<&str>,
+//     screenshot_base64: Option<String>, // Added screenshot data
+// ) {
+//     let entry = ToolUsageEntry::new(
+//         tool_name.to_string(),
+//         input.clone(),
+//         output.cloned(),
+//         success,
+//         error_message.map(String::from),
+//         screenshot_base64, // Pass screenshot data
+//     );
+
+//     // Log globally
+//     log_tool_usage_global(app_handle, &entry);
+
+//     // If you have a specific dev tools window and want to log there too:
+//     // if let Some(dev_window) = app_handle.get_window("devtools") {
+//     //     log_tool_usage_to_window(&dev_window, &entry);
+//     // } else {
+//     //     warn!("DevTools window not found, cannot log tool usage event to it.");
+//     // }
+// }
