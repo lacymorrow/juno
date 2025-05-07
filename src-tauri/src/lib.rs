@@ -393,7 +393,7 @@ pub fn run() {
 // Unit tests module
 #[cfg(test)]
 mod tests {
-    
+
 
     #[test]
     fn test_focused_element_info_placeholder() {
