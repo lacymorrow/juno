@@ -7,19 +7,23 @@ alwaysApply: false
 
 Configuration for the agent components is necessary for proper operation.
 
-## Anthropic Brain:
+## Provider Configuration ([src-tauri/src/agent/providers/config.rs](mdc:src-tauri/src/agent/providers/config.rs)):
 
--   The `AnthropicBrain` ([src-tauri/src/agent/implementations/agent_brain.rs](mdc:dotdot/src-tauri/src/agent/implementations/agent_brain.rs)) requires an API key for accessing the Anthropic API.
--   The `AnthropicBrain::from_env()` constructor loads the key from the `ANTHROPIC_API_KEY` environment variable. Ensure this variable is set in your environment (e.g., via a `.env` file loaded by `dotenvy` at application startup, or system environment variables).
--   Optional environment variables can override defaults:
-    -   `ANTHROPIC_MODEL`: Sets the specific Claude model (e.g., `claude-3-5-sonnet-20240620`). Defaults to a value specified in `agent_brain.rs`.
-    -   `ANTHROPIC_MAX_TOKENS`: Sets the `max_tokens` parameter for the API call.
-    -   `ANTHROPIC_SYSTEM_PROMPT`: Provides a system prompt string to the LLM.
+- Centralized configuration for different AI providers (Anthropic, OpenAI, etc.) is managed by `ProviderConfig`.
+- This configuration is typically loaded from `~/.config/juno/ai_providers.json`.
+- The `ProviderConfig` stores the active provider ID and a list of `ProviderSettings` for each provider, including API keys (optional), model names, max tokens, etc.
+- The `apply_provider_settings_to_env()` function reads this config and sets relevant environment variables (e.g., `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_MODEL`, `AI_PROVIDER`).
+
+## Brain Creation ([src-tauri/src/agent/providers/factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)):
+
+- The `BrainFactory::create_brain()` function is used to instantiate the appropriate `AgentBrain` implementation.
+- It reads the `AI_PROVIDER` environment variable (set by `apply_provider_settings_to_env`) to determine which brain to create (e.g., `AnthropicBrain` from [src-tauri/src/agent/providers/anthropic.rs](mdc:src-tauri/src/agent/providers/anthropic.rs) or `OpenAIBrain` from [src-tauri/src/agent/providers/openai.rs](mdc:src-tauri/src/agent/providers/openai.rs)).
+- The specific brain implementations (like `AnthropicBrain::from_env()`) read their required configurations (API key, model, etc.) directly from environment variables.
 
 ## Agent Runner:
 
--   The `DefaultAgentRunner` ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:dotdot/src-tauri/src/agent/implementations/agent_runner.rs)) takes a `max_steps` parameter in its constructor (`DefaultAgentRunner::new`). This limits the number of steps (LLM calls, tool executions) the agent can take per `run` cycle. It's configured in [src-tauri/src/anthropic.rs](mdc:dotdot/src-tauri/src/anthropic.rs).
+-   The `DefaultAgentRunner` ([src-tauri/src/agent/implementations/agent_runner.rs](mdc:src-tauri/src/agent/implementations/agent_runner.rs)) takes a `max_steps` parameter in its constructor (`new` or `with_boxed_brain`). This limits the number of steps (LLM calls, tool executions) the agent can take per `run` cycle. It's configured during instantiation in [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs).
 
 ## Tools:
 
--   Specific tools might require their own configuration (e.g., API keys for web search tools, paths for file system tools). This configuration should be handled within the tool's implementation or registration process.
+-   Specific tools might require their own configuration (e.g., browser tools might need WebDriver paths). This configuration should be handled within the tool's implementation or registration process.

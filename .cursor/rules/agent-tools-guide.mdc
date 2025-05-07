@@ -9,24 +9,24 @@ Tools allow the agent to interact with the environment (filesystem, system, web,
 
 ## Defining Tools:
 
--   **Definition:** Each tool requires a `ToolDefinition` struct ([src-tauri/src/agent/structs.rs](mdc:dotdot/dotdot/src-tauri/src/agent/structs.rs)), specifying its `name`, `description` (for the LLM), and `input_schema` (JSON schema for arguments). See `read_file_definition` in [src-tauri/src/agent/tools/basic_tools.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/basic_tools.rs) for an example.
--   **Execution:** Each tool needs a corresponding function that takes a `serde_json::Value` (matching the `input_schema`) and returns a `Result<Value, String>`. The `Ok(Value)` should contain the tool's output, and `Err(String)` indicates an execution error. See `read_file_exec` in [basic_tools.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/basic_tools.rs).
+-   **Definition:** Each tool requires a `ToolDefinition` struct (defined in [src-tauri/src/agent/core.rs](mdc:src-tauri/src/agent/core.rs)), specifying its `name`, `description` (for the LLM), and `input_schema` (JSON schema for arguments). See `read_file_definition` in [src-tauri/src/agent/tools/basic_tools.rs](mdc:src-tauri/src/agent/tools/basic_tools.rs) for an example.
+-   **Execution:** Each tool needs a corresponding async function or closure that takes a `serde_json::Value` (matching the `input_schema`) and returns a `Result<Value, String>`. The `Ok(Value)` should contain the tool's output, and `Err(String)` indicates an execution error. See `read_file_exec` in [src-tauri/src/agent/tools/basic_tools.rs](mdc:src-tauri/src/agent/tools/basic_tools.rs).
 
 ## Implementing Tools:
 
--   Place tool definition and execution logic in modules within [src-tauri/src/agent/tools/](mdc:dotdot/dotdot/src-tauri/src/agent/tools).
+-   Place tool definition and execution logic in modules within [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools).
 -   **SECURITY:** Tools that interact with the filesystem (`read_file`) or run commands (`run_terminal_command`) **must** include robust security measures like path validation, sandboxing, and restricted command execution. The current basic tools have placeholder security comments and are **not safe for production**.
 
 ## Registering Tools:
 
--   Tools are registered with an instance of a `ToolProvider` implementation, typically `LocalToolProvider` ([src-tauri/src/agent/implementations/tool_provider.rs](mdc:dotdot/dotdot/src-tauri/src/agent/implementations/tool_provider.rs)).
--   Use the `provider.register_tool(definition, executor_fn).await` method.
--   Helper functions like `register_basic_tools` ([basic_tools.rs](mdc:dotdot/dotdot/src-tauri/src/agent/tools/basic_tools.rs)) can be created to register groups of tools during agent initialization in [src-tauri/src/anthropic.rs](mdc:dotdot/dotdot/src-tauri/src/anthropic.rs).
+-   Tools are registered with an instance of a `ToolProvider` implementation, typically `LocalToolProvider` (defined in [src-tauri/src/agent/implementations/basic.rs](mdc:src-tauri/src/agent/implementations/basic.rs)).
+-   Use the `provider.register_async_tool(definition, async_executor_fn).await` method.
+-   Helper functions like `register_basic_tools` ([src-tauri/src/agent/tools/basic_tools.rs](mdc:src-tauri/src/agent/tools/basic_tools.rs)) and `register_desktop_tools` ([src-tauri/src/agent/tools/desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs)) register groups of tools during agent initialization in [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs).
 
 ## Tool Usage by Agent:
 
-1.  Available tool definitions are passed to the `AgentBrain` ([AnthropicBrain](mdc:dotdot/dotdot/src-tauri/src/agent/implementations/agent_brain.rs)).
+1.  Available tool definitions are retrieved from the `ToolProvider` and passed to the `AgentBrain` (e.g., [src-tauri/src/agent/providers/anthropic.rs](mdc:src-tauri/src/agent/providers/anthropic.rs)).
 2.  The LLM uses the names and descriptions to decide which tool to use and generates the required input arguments based on the `input_schema`.
 3.  The brain returns an `AgentAction::ExecuteTool(calls)`.
-4.  `DefaultAgentRunner` calls `tool_provider.execute_tool()` with the `ToolCall` data.
-5.  The tool's output (or error) is added to memory and passed back to the brain on the next step.
+4.  `DefaultAgentRunner` calls `tool_provider.execute_tool()` with the `ToolCall` data (defined in [src-tauri/src/agent/core.rs](mdc:src-tauri/src/agent/core.rs)).
+5.  The tool's output (or error) is added to memory as a `Role::Tool` message and passed back to the brain on the next step.

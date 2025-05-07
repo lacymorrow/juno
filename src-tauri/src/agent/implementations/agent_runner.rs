@@ -9,6 +9,8 @@ use crate::agent::structs::{
 use crate::agent::traits::{
     AgentBrain, AgentRunnable, MemoryManager, ToolProvider
 };
+use crate::agent::tool_logger; // Added for logging
+use tauri::AppHandle; // Added for AppHandle
 
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
@@ -23,6 +25,7 @@ where
     brain: Arc<dyn AgentBrain + Send + Sync>, // Use trait object directly
     max_steps: u32,
     current_step: u32,
+    app_handle: Arc<AppHandle>, // Added AppHandle for logging
 }
 
 impl<M, T> DefaultAgentRunner<M, T>
@@ -34,7 +37,8 @@ where
         memory: M,
         tool_provider: T,
         brain: impl AgentBrain + Send + Sync + 'static,
-        max_steps: u32
+        max_steps: u32,
+        app_handle: AppHandle, // Added AppHandle
     ) -> Self {
         log::info!("DefaultAgentRunner::new created. max_steps: {}, current_step: 0 (hardcoded init)", max_steps);
         DefaultAgentRunner {
@@ -44,6 +48,7 @@ where
             brain: Arc::new(brain),
             max_steps,
             current_step: 0,
+            app_handle: Arc::new(app_handle), // Store AppHandle
         }
     }
 
@@ -53,6 +58,7 @@ where
         tool_provider: T,
         brain: Box<dyn AgentBrain + Send + Sync>,
         max_steps: u32,
+        app_handle: AppHandle, // Added AppHandle
     ) -> Self {
         log::info!("DefaultAgentRunner::with_boxed_brain created. max_steps: {}, current_step: 0 (hardcoded init)", max_steps);
         DefaultAgentRunner {
@@ -62,6 +68,7 @@ where
             brain: Arc::from(brain), // Convert Box to Arc
             max_steps,
             current_step: 0,
+            app_handle: Arc::new(app_handle), // Store AppHandle
         }
     }
 
@@ -208,6 +215,9 @@ where
             mem.get_messages().await?
         };
         let tools = self.tool_provider.list_tools().await?;
+
+        // --- Log Thinking Step ---
+        tool_logger::log_thinking(&self.app_handle, "Deciding next action based on current messages and available tools...");
 
         // --- Cancellation Check (Before Brain Action) ---
          if *cancel_rx.borrow() {
