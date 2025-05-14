@@ -59,6 +59,8 @@ tauri-plugin-global-shortcut = "2.2.0"
 playwright = "0.0.20"
 # Add Rig for AI agent capabilities
 rig-core = "0.2.1"
+whisper-rs = "0.11.0"
+hound = "3.5"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

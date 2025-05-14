@@ -3,3 +3,30 @@ description:
 globs:
 alwaysApply: false
 ---
+This rule describes how the agent's internal states, such as thinking processes, tool calls (requests and results), and screenshots, are surfaced to the user within the main chat interface.
+
+**Frontend Implementation (`[src/App.tsx](mdc:src/App.tsx)`)**
+
+*   The main chat UI is rendered by the `App` component in `[src/App.tsx](mdc:src/App.tsx)`.
+*   The `ChatMessage` type defines various roles for messages, including:
+    *   `thinking`: For displaying agent's thought processes.
+    *   `tool_call_request`: When the agent decides to call a tool, showing the tool name and arguments.
+    *   `tool_call_result`: Displays the output or result from a tool execution.
+    *   `system` and `assistant` roles can also display `screenshot_base64` data.
+*   An event listener for `agent-event` is set up in `useEffect`. This listener receives payloads from the backend and updates the conversation state with new `ChatMessage` objects, triggering re-renders to display the information.
+    *   Payloads have a `type` (e.g., "thinking", "tool\_call\_request", "tool\_call\_result", "screenshot") and a `payload` object containing relevant data (`content`, `tool_name`, `tool_args`, `tool_output`, `screenshot_base64`).
+
+**Backend Implementation (Rust - `src-tauri/src/agent/`)**
+
+*   The primary mechanism for sending this information to the frontend is by emitting an `agent-event` using the `AppHandle::emit` method.
+*   **Event Definition and Emission (`[src-tauri/src/agent/tool_logger.rs](mdc:src-tauri/src/agent/tool_logger.rs)`)**:
+    *   The `AgentEvent` struct and its associated `AgentEventPayload` enum (with variants like `ThinkingPayload`, `ToolCallRequestPayload`, `ToolCallResultPayload`, `ScreenshotPayload`) define the structure of the data sent to the frontend.
+    *   Public functions like `log_thinking`, `log_tool_call_request`, and `log_tool_call_result` are provided to construct and emit these events via a helper `emit_agent_event` function.
+*   **Thinking Logs (`[src-tauri/src/agent/implementations/agent_runner.rs](mdc:src-tauri/src/agent/implementations/agent_runner.rs)`)**:
+    *   The `DefaultAgentRunner` now holds an `Arc<AppHandle>`.
+    *   In its `step` method, before the `self.brain.decide_next_action` call, it uses `tool_logger::log_thinking` to emit an event indicating the agent is about to decide its next move.
+*   **Tool Call Logging**:
+    *   The `LocalToolProvider` in `[src-tauri/src/agent/implementations/tool_provider.rs](mdc:src-tauri/src/agent/implementations/tool_provider.rs)` utilizes the `log_async_tool_execution` function from `[src-tauri/src/agent/tool_logger.rs](mdc:src-tauri/src/agent/tool_logger.rs)`.
+    *   `log_async_tool_execution` calls:
+        *   `log_tool_call_request` before the tool's future is executed.
+        *   `log_tool_call_result` after the tool's future completes, including success status and output/error.

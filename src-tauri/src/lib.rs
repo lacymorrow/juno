@@ -40,6 +40,7 @@ pub mod commands;
 pub mod cli;
 pub mod utils;
 pub mod agent;
+pub mod voice_control; // Added for voice control functionality
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
