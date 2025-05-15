@@ -23,10 +23,14 @@ pub async fn stop_dictation_command(app_state: State<'_, AppState>, app_handle: 
         .ok_or_else(|| "VoiceController not found in AppState".to_string())?;
     let mut voice_controller = voice_controller_arc.lock().map_err(|e| format!("Failed to lock VoiceController: {}", e))?;
     match voice_controller.stop_dictation() {
-        Ok(_) => {
-            info!("[Command] Dictation stopped, emitting request_audio_playback_test event.");
-            if let Err(e) = app_handle.emit_to("main", "request_audio_playback_test", ()) {
-                tracing::warn!("[Command] Failed to emit request_audio_playback_test event: {}", e);
+        Ok(actively_stopped) => {
+            if actively_stopped {
+                info!("[Command] Dictation actively stopped, emitting request_audio_playback_test event.");
+                if let Err(e) = app_handle.emit_to("main", "request_audio_playback_test", ()) {
+                    tracing::warn!("[Command] Failed to emit request_audio_playback_test event: {}", e);
+                }
+            } else {
+                info!("[Command] stop_dictation_command called, but no active dictation was stopped (already stopped or no thread).");
             }
             Ok(())
         }
