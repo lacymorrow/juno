@@ -7,6 +7,10 @@ use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
+use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
+use hound; // Ensure hound is imported for writing WAV
+
+const WHISPER_SAMPLE_RATE: u32 = 16000; // Define the constant
 
 // TODO: Define proper error types
 
@@ -27,7 +31,7 @@ pub struct VoiceController {
     // This could be a channel, or emitting a Tauri event.
     // For now, we'll need a way to communicate the transcription out.
     // This will be handled by emitting Tauri events later.
-    last_processed_audio_buffer: Arc<Mutex<Option<Vec<f32>>>>, // New field
+    last_processed_audio_buffer: Arc<Mutex<Option<Vec<f32>>>>, // Stores raw audio at original sample rate
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>, // New field
 }
 
@@ -123,6 +127,16 @@ impl VoiceController {
         }
         info!("[VoiceController] Starting dictation...");
 
+        // Clear the last processed audio buffer for the new session
+        info!("[VoiceController] Clearing previous audio buffer for playback.");
+        if let Ok(mut buffer_guard) = self.last_processed_audio_buffer.lock() {
+            *buffer_guard = None; // Or Some(Vec::new()) if you prefer to always have a Vec
+        } else {
+            // Log or handle error if mutex is poisoned
+            eprintln!("[VoiceController] Failed to lock last_processed_audio_buffer for clearing.");
+            // Depending on requirements, you might want to return an error here
+        }
+
         let host = cpal::default_host();
         let device = host.default_input_device()
             .ok_or("Failed to find a default input device.")?;
@@ -177,6 +191,7 @@ impl VoiceController {
 
         let model_path_for_thread = self.model_path.clone();
         let last_buffer_arc_for_thread = Arc::clone(&self.last_processed_audio_buffer);
+        let actual_rate_for_thread = actual_rate; // Pass actual_rate to the thread
 
         let audio_thread_handle = thread::spawn(move || {
             // Create Whisper context and state within the audio thread
@@ -240,82 +255,284 @@ impl VoiceController {
             }
 
             info!("[AudioThread] Audio stream started.");
+            info!("[AudioThread] Recording at {} Hz, will resample to {} Hz for Whisper.", actual_rate_for_thread, WHISPER_SAMPLE_RATE);
 
-            let mut audio_buffer: Vec<f32> = Vec::new();
-            const TARGET_BUFFER_DURATION_MS: usize = 1500;
-            const SAMPLE_RATE_HZ: usize = 16000;
-            const BUFFER_THRESHOLD_SAMPLES: usize = (SAMPLE_RATE_HZ * TARGET_BUFFER_DURATION_MS) / 1000;
-
-            loop {
-                let mut stop_received = false;
-                match control_rx.try_recv() {
-                    Ok(AudioThreadMessage::Stop) => {
-                        info!("[AudioThread] Stop signal received. Processing remaining audio...");
-                        stop_received = true;
-                    }
-                    Err(TryRecvError::Empty) => {}
-                    Err(TryRecvError::Disconnected) => {
-                        info!("[AudioThread] Control sender disconnected. Stopping stream...");
-                        stop_received = true;
-                    }
-                }
-
-                match audio_data_rx.try_recv() {
-                    Ok(chunk) => {
-                        audio_buffer.extend(chunk);
-                    }
-                    Err(TryRecvError::Empty) => {
-                        if !stop_received {
-                            thread::sleep(Duration::from_millis(50));
-                        }
-                    }
-                     Err(TryRecvError::Disconnected) => {
-                         info!("[AudioThread] Audio data sender disconnected.");
-                         stop_received = true;
-                     }
-                }
-
-                if !audio_buffer.is_empty() && (audio_buffer.len() >= BUFFER_THRESHOLD_SAMPLES || (stop_received && !audio_buffer.is_empty())) {
-                    info!("[AudioThread] Processing audio buffer of size: {} samples.", audio_buffer.len());
-
-                    if let Ok(mut last_buf_opt) = last_buffer_arc_for_thread.lock() {
-                        *last_buf_opt = Some(audio_buffer.clone());
-                    }
-
-                    let params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 5 });
-                    let result = whisper_state.full(params, &audio_buffer[..]);
-                    match result {
-                        Ok(_) => {
-                            let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                            if num_segments > 0 {
-                                let mut transcription_text = String::new();
-                                for i in 0..num_segments {
-                                    if let Ok(segment) = whisper_state.full_get_segment_text(i) {
-                                        transcription_text.push_str(&segment);
-                                    }
-                                }
-                                if !transcription_text.trim().is_empty() {
-                                    info!("Transcription update (in thread): {}", transcription_text);
-                                } else {
-                                    info!("[AudioThread] Transcription resulted in empty text for this chunk.");
-                                }
-                            } else {
-                                info!("[AudioThread] No segments transcribed for this chunk.");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Whisper processing error (in thread): {:?}", e);
-                        }
-                    }
-                    audio_buffer.clear();
-                }
-
-                if stop_received {
-                    break;
+            // Resampler for chunk-wise processing, if needed
+            let mut chunk_resampler: Option<SincFixedIn<f32>> = None;
+            if actual_rate_for_thread != WHISPER_SAMPLE_RATE {
+                let params = SincInterpolationParameters {
+                    sinc_len: 256,
+                    f_cutoff: 0.95,
+                    interpolation: SincInterpolationType::Linear,
+                    oversampling_factor: 256,
+                    window: WindowFunction::BlackmanHarris2,
+                };
+                chunk_resampler = SincFixedIn::new(
+                    WHISPER_SAMPLE_RATE as f64 / actual_rate_for_thread as f64,
+                    2.0, // max_resample_ratio_relative
+                    params,
+                    1024, // chunk_size (max input chunk for SincFixedIn)
+                    1,    // num_channels
+                ).map_err(|e| eprintln!("[AudioThread] Failed to create chunk_resampler: {:?}", e)).ok();
+                if chunk_resampler.is_none() {
+                     eprintln!("[AudioThread] Chunk resampler creation failed. Chunk processing might use raw audio if rates differ.");
                 }
             }
 
-            info!("[AudioThread] Audio thread stopped.");
+            let mut audio_buffer_for_whisper_chunks: Vec<f32> = Vec::new(); // Buffer for raw audio for chunk processing
+            const BUFFER_DURATION_MS: u64 = 5000;
+            let buffer_capacity_samples_for_chunks = (actual_rate_for_thread as u64 * BUFFER_DURATION_MS / 1000) as usize;
+
+
+            // Buffer to store all audio at its original sample rate for the entire session
+            let mut raw_full_session_audio: Vec<f32> = Vec::new();
+
+
+            loop {
+                // Check for control messages (e.g., Stop)
+                match control_rx.try_recv() {
+                    Ok(AudioThreadMessage::Stop) => {
+                        info!("[AudioThread] Stop message received.");
+                        // Process any remaining audio in the `audio_buffer_for_whisper_chunks`
+                        if !audio_buffer_for_whisper_chunks.is_empty() {
+                            raw_full_session_audio.extend_from_slice(&audio_buffer_for_whisper_chunks);
+                            audio_buffer_for_whisper_chunks.clear();
+                            info!("[AudioThread] Appended remaining {} raw samples from chunk buffer to raw_full_session_audio before stop.", raw_full_session_audio.len());
+                        }
+
+                        // Flush the chunk_resampler if it was being used for any partial data
+                        if let Some(ref mut r) = chunk_resampler {
+                            match r.process_partial::<Vec<f32>>(None, None) {
+                                Ok(mut resampled_frames_last_chunk_multichannel) => {
+                                    if !resampled_frames_last_chunk_multichannel.is_empty() {
+                                        let final_chunk_from_resampler_flush = resampled_frames_last_chunk_multichannel.remove(0);
+                                        if !final_chunk_from_resampler_flush.is_empty() {
+                                            // This flushed audio would have been for chunk-wise transcription,
+                                            // but we are about to do a full transcription.
+                                            // We don't add it to raw_full_session_audio as that's for original rate.
+                                            info!("[AudioThread] Chunk resampler flush produced {} samples. These are not added to final raw audio.", final_chunk_from_resampler_flush.len());
+                                        }
+                                    }
+                                },
+                                Err(e) => eprintln!("[AudioThread] Error flushing chunk_resampler: {:?}", e),
+                            }
+                        }
+
+
+                        // Now, `raw_full_session_audio` contains all audio at `actual_rate_for_thread`.
+                        // Store this for playback.
+                        if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
+                            *buffer_guard = Some(raw_full_session_audio.clone());
+                            info!("[AudioThread] Final raw session audio ({} samples at {} Hz) stored for playback.", raw_full_session_audio.len(), actual_rate_for_thread);
+                        } else {
+                            eprintln!("[AudioThread] Failed to lock last_processed_audio_buffer for final raw storage.");
+                        }
+
+                        // --- Prepare audio for transcription (resample if necessary) ---
+                        let audio_for_transcription: Vec<f32>;
+                        if actual_rate_for_thread != WHISPER_SAMPLE_RATE {
+                            if !raw_full_session_audio.is_empty() {
+                                info!("[AudioThread] Resampling full session audio from {} Hz to {} Hz for transcription.", actual_rate_for_thread, WHISPER_SAMPLE_RATE);
+                                let params = SincInterpolationParameters { // Define params for final resampler
+                                    sinc_len: 256,
+                                    f_cutoff: 0.95,
+                                    interpolation: SincInterpolationType::Linear,
+                                    oversampling_factor: 256,
+                                    window: WindowFunction::BlackmanHarris2,
+                                };
+                                let mut final_resampler = SincFixedIn::new(
+                                    WHISPER_SAMPLE_RATE as f64 / actual_rate_for_thread as f64,
+                                    2.0, // max_resample_ratio_relative
+                                    params,
+                                    raw_full_session_audio.len(), // chunk_size should be able to handle the whole audio
+                                    1,    // num_channels
+                                ).expect("Failed to create final_resampler for full session audio");
+
+                                let waves_in = vec![raw_full_session_audio.clone()]; // Clone because raw_full_session_audio is used for playback
+                                match final_resampler.process(&waves_in, None) {
+                                    Ok(mut resampled_waves) => {
+                                        if resampled_waves.is_empty() || resampled_waves[0].is_empty() {
+                                            eprintln!("[AudioThread] Final resampling produced empty audio.");
+                                            audio_for_transcription = Vec::new();
+                                        } else {
+                                            audio_for_transcription = resampled_waves.remove(0);
+                                            info!("[AudioThread] Final resampling complete. {} samples at {} Hz for transcription.", audio_for_transcription.len(), WHISPER_SAMPLE_RATE);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[AudioThread] Error during final resampling: {:?}", e);
+                                        audio_for_transcription = Vec::new();
+                                    }
+                                }
+                            } else {
+                                info!("[AudioThread] Raw full session audio is empty, nothing to resample for transcription.");
+                                audio_for_transcription = Vec::new();
+                            }
+                        } else {
+                            info!("[AudioThread] No resampling needed for transcription, using raw audio ({} Hz).", actual_rate_for_thread);
+                            audio_for_transcription = raw_full_session_audio.clone(); // Clone for transcription
+                        }
+                        // --- End Prepare audio for transcription ---
+
+
+                        // --- Perform Transcription with `audio_for_transcription` ---
+                        if !audio_for_transcription.is_empty() {
+                            info!("[AudioThread] Starting transcription of {} audio samples (at {} Hz).", audio_for_transcription.len(), WHISPER_SAMPLE_RATE);
+
+                            // --- DEBUG: Save `audio_for_transcription` to a WAV file in the project root ---
+                            let debug_wav_path = "../debug_live_audio.wav"; // Changed path
+                            info!("[AudioThread] Attempting to save audio_for_transcription to: {}", debug_wav_path);
+                            let spec = hound::WavSpec {
+                                channels: 1, // Mono
+                                sample_rate: WHISPER_SAMPLE_RATE, // Crucially, this is now 16kHz
+                                bits_per_sample: 32, // For f32 samples
+                                sample_format: hound::SampleFormat::Float,
+                            };
+                            match hound::WavWriter::create(debug_wav_path, spec) {
+                                Ok(mut writer) => {
+                                    for sample in audio_for_transcription.iter() {
+                                        if let Err(e) = writer.write_sample(*sample) {
+                                            eprintln!("[AudioThread] Error writing sample to debug WAV: {:?}", e);
+                                            break;
+                                        }
+                                    }
+                                    if let Err(e) = writer.finalize() {
+                                        eprintln!("[AudioThread] Error finalizing debug WAV: {:?}", e);
+                                    } else {
+                                        info!("[AudioThread] Successfully saved audio_for_transcription to {}", debug_wav_path);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[AudioThread] Failed to create debug WAV file '{}': {:?}", debug_wav_path, e);
+                                }
+                            }
+                            // --- END DEBUG ---
+
+                            let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
+                            params.set_temperature(0.0);
+
+                            match whisper_state.full(params, &audio_for_transcription[..]) {
+                                Ok(_) => {
+                                    let num_segments = whisper_state.full_n_segments().unwrap_or(0);
+                                    let mut transcription_text = String::new();
+                                    for i in 0..num_segments {
+                                        if let Ok(segment) = whisper_state.full_get_segment_text(i) {
+                                            transcription_text.push_str(&segment);
+                                        } else {
+                                            eprintln!("[AudioThread] Failed to get segment {} text.", i);
+                                        }
+                                    }
+                                    info!("[AudioThread] Transcription successful: {}", transcription_text);
+                                    // TODO: Emit Tauri event with transcription_text
+                                    // For example:
+                                    // if let Some(handle) = app_handle_for_thread_option.as_ref() {
+                                    //     handle.emit_all("transcription_result", transcription_text).unwrap_or_else(|e| {
+                                    //         eprintln!("[AudioThread] Failed to emit transcription event: {:?}", e);
+                                    //     });
+                                    // } else {
+                                    //      eprintln!("[AudioThread] AppHandle not available for emitting transcription event.");
+                                    // }
+                                }
+                                Err(e) => {
+                                    eprintln!("[AudioThread] Transcription failed: {:?}", e);
+                                }
+                            }
+                        } else {
+                            info!("[AudioThread] No audio data to transcribe.");
+                        }
+                        // --- End Transcription ---
+
+                        break; // Exit loop
+                    },
+                    Err(TryRecvError::Empty) => {
+                        // No control message, continue processing audio
+                    },
+                    Err(TryRecvError::Disconnected) => {
+                        eprintln!("[AudioThread] Control channel disconnected.");
+                        // Store whatever audio has been collected so far before breaking
+                        if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
+                            *buffer_guard = Some(raw_full_session_audio.clone()); // store raw audio
+                            info!("[AudioThread] Stored {} raw samples for playback due to disconnect.", raw_full_session_audio.len());
+                        } else {
+                            eprintln!("[AudioThread] Failed to lock last_buffer_arc for storing on disconnect.");
+                        }
+                        break; // Exit loop
+                    }
+                }
+
+                // Try to receive audio data, non-blockingly or with a short timeout
+                // to allow the stop message to be processed promptly.
+                match audio_data_rx.recv_timeout(Duration::from_millis(50)) {
+                    Ok(mut data_chunk) => {
+                        // Append to raw_full_session_audio for playback and final transcription base
+                        raw_full_session_audio.append(&mut data_chunk.clone());
+                        // Append to audio_buffer_for_whisper_chunks for periodic chunk processing
+                        audio_buffer_for_whisper_chunks.append(&mut data_chunk);
+
+                        if audio_buffer_for_whisper_chunks.len() >= buffer_capacity_samples_for_chunks {
+                            info!("[AudioThread] Processing audio chunk of {} samples (at {} Hz) for potential interim Whisper output.",
+                                audio_buffer_for_whisper_chunks.len(), actual_rate_for_thread);
+
+                            let audio_to_process_for_chunk: Vec<f32>;
+                            if let Some(ref mut r) = chunk_resampler {
+                                // Resample if chunk_resampler is Some
+                                let waves_in = vec![audio_buffer_for_whisper_chunks.clone()];
+                                match r.process(&waves_in, None) {
+                                    Ok(mut resampled_waves) => {
+                                        if resampled_waves.is_empty() || resampled_waves[0].is_empty() {
+                                            eprintln!("[AudioThread] Resampling (chunk) produced empty audio.");
+                                            audio_to_process_for_chunk = Vec::new();
+                                        } else {
+                                            info!("[AudioThread] Resampled audio (chunk) to {} samples at {} Hz.",
+                                                resampled_waves[0].len(), WHISPER_SAMPLE_RATE);
+                                            audio_to_process_for_chunk = resampled_waves.remove(0);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[AudioThread] Error during resampling (chunk): {:?}", e);
+                                        audio_to_process_for_chunk = Vec::new();
+                                    }
+                                }
+                            } else {
+                                // No chunk_resampler (either rates match or creation failed),
+                                // so if rates differ, this chunk processing might not be ideal for Whisper.
+                                // However, we proceed with raw audio for this chunk if no resampler.
+                                if actual_rate_for_thread != WHISPER_SAMPLE_RATE {
+                                     eprintln!("[AudioThread] Warning: Chunk processing with differing sample rates and no active chunk_resampler. Quality may be affected.");
+                                }
+                                audio_to_process_for_chunk = audio_buffer_for_whisper_chunks.clone();
+                            };
+
+                            if !audio_to_process_for_chunk.is_empty() {
+                                // This is where you'd call whisper_state.full for the chunk if you
+                                // want interim transcription results. For now, it's just logged.
+                                // let params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 5 });
+                                // if let Err(e) = whisper_state.full(params, &audio_to_process_for_chunk[..]) {
+                                //     eprintln!("[AudioThread] Whisper processing error (chunk): {:?}", e);
+                                // } else { ... log transcription ... }
+                                info!("[AudioThread] Chunk ready for interim processing ({} samples at {} Hz). Actual processing skipped for now.",
+                                    audio_to_process_for_chunk.len(),
+                                    if chunk_resampler.is_some() { WHISPER_SAMPLE_RATE } else { actual_rate_for_thread });
+                            }
+                            audio_buffer_for_whisper_chunks.clear();
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        // Timeout is expected, continue to check for stop message
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        eprintln!("[AudioThread] Audio data channel disconnected.");
+                         if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
+                            *buffer_guard = Some(raw_full_session_audio.clone()); // Store raw audio
+                             info!("[AudioThread] Stored {} raw samples for playback due to audio disconnect.", raw_full_session_audio.len());
+                        } else {
+                            eprintln!("[AudioThread] Failed to lock last_buffer_arc for storing on audio disconnect.");
+                        }
+                        break; // Exit loop
+                    }
+                }
+            }
+            info!("[AudioThread] Exiting.");
         });
 
         self.audio_thread = Some((audio_thread_handle, control_tx));
@@ -332,26 +549,36 @@ impl VoiceController {
         }
         info!("[VoiceController] Stopping dictation...");
 
-        // Send stop signal to the audio thread and wait for it to finish
-        if let Some((handle, tx)) = self.audio_thread.take() {
-            if let Err(e) = tx.send(AudioThreadMessage::Stop) {
-                eprintln!("Failed to send stop signal to audio thread: {:?}", e);
+        if let Some((handle, sender)) = self.audio_thread.take() {
+            // Send stop message to the audio thread
+            if sender.send(AudioThreadMessage::Stop).is_err() {
+                eprintln!("[VoiceController] Failed to send stop message to audio thread. It might have already exited.");
+                // Even if sending fails, we should try to join to clean up resources.
             }
-            // Attempt to join the thread, but don't block indefinitely
-            // In a real application, you might want a timeout or more graceful shutdown.
-            let _timeout = Duration::from_secs(2);
-            match handle.join() {
-                Ok(_) => info!("[VoiceController] Audio thread joined successfully."),
-                Err(e) => eprintln!("[VoiceController] Failed to join audio thread: {:?}", e),
+
+            // Wait for the audio thread to finish
+            if handle.join().is_err() {
+                eprintln!("[VoiceController] Audio thread panicked or failed to join.");
+                // Potentially set is_dictating to false here too, or handle error state
+            } else {
+                info!("[VoiceController] Audio thread joined successfully.");
             }
+        } else {
+            info!("[VoiceController] No audio thread found to stop.");
         }
 
         self.is_dictating = false;
+        // The audio for playback is now set by the audio thread itself before it exits.
+        // We can log the size of the buffer here for verification if needed.
+        if let Ok(buffer_guard) = self.last_processed_audio_buffer.lock() {
+            if let Some(audio) = &*buffer_guard {
+                info!("[VoiceController] Dictation stopped. Playback buffer (raw) contains {} samples.", audio.len());
+            } else {
+                info!("[VoiceController] Dictation stopped. Playback buffer (raw) is empty.");
+            }
+        }
 
-        // TODO: Finalize whisper processing for any remaining buffer (handled in thread loop before exit?)
-        // TODO: Emit transcription_finalized event
-
-        info!("[VoiceController] Dictation stopped.");
+        info!("[VoiceController] Dictation stopped successfully.");
         Ok(())
     }
 
@@ -379,17 +606,31 @@ impl VoiceController {
 
     // Method to retrieve the last processed audio buffer and its sample rate
     pub fn get_last_processed_audio_buffer(&self) -> Option<(Vec<f32>, u32)> {
-        let buffer_lock = self.last_processed_audio_buffer.lock().unwrap();
-        let rate_lock = self.actual_recording_sample_rate.lock().unwrap();
-
-        if let (Some(buffer), Some(rate)) = ((*buffer_lock).clone(), *rate_lock) {
-            if !buffer.is_empty() {
-                Some((buffer, rate))
-            } else {
+        let buffer_opt = match self.last_processed_audio_buffer.lock() {
+            Ok(guard) => guard.clone(), // Clone the Option<Vec<f32>>
+            Err(e) => {
+                eprintln!("[VoiceController] Mutex poisoned while getting last processed audio buffer: {:?}", e);
                 None
             }
-        } else {
-            None
+        };
+
+        let sample_rate_opt = match self.actual_recording_sample_rate.lock() {
+            Ok(guard) => *guard, // Copy the Option<u32>
+            Err(e) => {
+                eprintln!("[VoiceController] Mutex poisoned while getting actual recording sample rate: {:?}", e);
+                None
+            }
+        };
+
+        // Log the retrieved buffer and sample rate for debugging.
+        // info!(\"[VoiceController] get_last_processed_audio_buffer: buffer_is_some: {}, sample_rate_is_some: {}\", buffer_opt.is_some(), sample_rate_opt.is_some());
+        // if let (Some(b), Some(r)) = (&buffer_opt, &sample_rate_opt) {
+        //     info!(\"[VoiceController] Buffer length: {}, Sample rate: {}\", b.len(), r);
+        // }
+
+        match (buffer_opt, sample_rate_opt) {
+            (Some(buffer), Some(rate)) => Some((buffer, rate)),
+            _ => None,
         }
     }
 }
