@@ -114,7 +114,7 @@ pub fn run() {
     // --- Initialize VoiceController and add to AppState ---
     // TODO: Make model path configurable (e.g., via .env, config file, or UI setting)
     let model_path_env = std::env::var("VOICE_MODEL_PATH");
-    let model_path = model_path_env.as_deref().unwrap_or("models/ggml-base.en.bin"); // Default path
+    let model_path = model_path_env.as_deref().unwrap_or("models/ggml-base.en.bin"); // Changed back to base model
 
     info!("[Setup] Attempting to initialize VoiceController with model: {}", model_path);
     match VoiceController::new(model_path) {

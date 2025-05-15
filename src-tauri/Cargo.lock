@@ -2929,6 +2929,7 @@ dependencies = [
  "async-trait",
  "axum 0.7.9",
  "base64 0.22.1",
+ "chrono",
  "clap",
  "cocoa 0.25.0",
  "computer-use-ai-sdk",
