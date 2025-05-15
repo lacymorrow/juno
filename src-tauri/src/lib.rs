@@ -7,16 +7,17 @@ use dotenvy::dotenv;
 use std::env;
 use std::sync::Arc;
 use tauri::{
-    Manager, WindowEvent,
-    menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem},
+    Manager, // WindowEvent, // Removed WindowEvent
+    menu::{MenuItemKind}, // Removed Menu, MenuItemBuilder, PredefinedMenuItem
     tray::{TrayIconEvent, MouseButton, MouseButtonState},
-    image::Image,
+    // image::Image, // Removed Image
     AppHandle, // Keep AppHandle
     Emitter, // Import Emitter trait for .emit()
+    Listener, // Added Listener for .listen()
     WebviewWindow, // Keep WebviewWindow
     Wry, // Keep Wry if needed elsewhere, remove if not
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
 
@@ -24,8 +25,8 @@ use tracing::info; // Import the info macro
 #[cfg(target_os = "macos")]
 use {
     cocoa::{
-        appkit::{NSWindow, NSWindowCollectionBehavior},
-        base::{id as cocoa_id, nil, YES, NO, BOOL},
+        appkit::{NSWindow}, // Removed NSWindowCollectionBehavior
+        base::{id as cocoa_id, nil}, // Removed YES, NO, BOOL
         foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
@@ -43,10 +44,27 @@ pub mod agent;
 pub mod voice_control; // Added for voice control functionality
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
+use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, voice_control::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
+// Import VoiceController for the new QA command
+use voice_control::VoiceController;
+
 // Added for selector parsing
+
+// Tauri command for QA testing transcription
+#[tauri::command]
+async fn qa_transcribe_file(model_path: String, audio_path: String) -> Result<String, String> {
+    // It's good practice to run blocking operations on a separate thread
+    // if they might take a while, to avoid blocking the main Tauri async runtime.
+    // For whisper model loading and transcription, this is essential.
+    tokio::task::spawn_blocking(move || {
+        let voice_controller = VoiceController::new(&model_path)?;
+        voice_controller.transcribe_audio_file(&audio_path)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -93,37 +111,79 @@ pub fn run() {
     // Initialize shell state
     commands::shell::init_shell_state(&app_state);
 
+    // --- Initialize VoiceController and add to AppState ---
+    // TODO: Make model path configurable (e.g., via .env, config file, or UI setting)
+    let model_path_env = std::env::var("VOICE_MODEL_PATH");
+    let model_path = model_path_env.as_deref().unwrap_or("models/ggml-base.en.bin"); // Default path
+
+    info!("[Setup] Attempting to initialize VoiceController with model: {}", model_path);
+    match VoiceController::new(model_path) {
+        Ok(voice_controller) => {
+            app_state.insert(Arc::new(std::sync::Mutex::new(voice_controller)));
+            info!("[Setup] VoiceController initialized and added to AppState.");
+        }
+        Err(e) => {
+            tracing::error!("[Setup] Failed to initialize VoiceController: {}. Voice control features will be unavailable.", e);
+            // Consider inserting a placeholder/disabled VoiceController or handling this state in commands
+        }
+    }
+
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| { // Event type inferred or use generic
-            // Log the event state
-            println!("[GlobalShortcut State] {:?}", event.state());
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
+            println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
-            // Define the specific shortcut we're interested in
-            let escape_shortcut = Shortcut::new(None, Code::Escape); // No modifiers for Escape key
+            // Define the specific shortcuts we're interested in
+            let escape_shortcut = Shortcut::new(None, Code::Escape);
+            // TODO: Make the dictation shortcut configurable
+            let dictation_toggle_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
 
-            // Check if the triggered shortcut is the one we defined
-            if shortcut == &escape_shortcut {
-                // Match on the event state
-                match event.state() {
-                    ShortcutState::Pressed => {
-                        println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
-                        // --- Get AppState and trigger cancellation ---
-                        let app_state = app.state::<state::AppState>();
-                        app_state.signal_cancel(); // Use the new method
-                        info!("Agent cancellation signal sent."); // Use info macro
 
-                        // Emit event to frontend to potentially update UI (e.g., show "stopping...")
-                        if let Err(e) = app.emit("agent-stopping", ()) { // Use a different event name
-                            eprintln!("[GlobalShortcut Error] Failed to emit agent-stopping event: {}", e);
-                        }
-                    }
-                    ShortcutState::Released => {
-                        println!("[GlobalShortcut] Escape released.");
-                    }
+            if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
+                println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
+                let app_state_instance = app.state::<state::AppState>();
+                app_state_instance.signal_cancel();
+                info!("[GlobalShortcut] Agent cancellation signal sent via Escape.");
+                if let Err(e) = app.emit("agent-stopping", ()) {
+                    eprintln!("[GlobalShortcut Error] Failed to emit agent-stopping event: {}", e);
                 }
+            } else if shortcut == &dictation_toggle_shortcut && event.state() == ShortcutState::Pressed {
+                info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
+                let app_handle_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let app_state_instance = app_handle_clone.state::<state::AppState>();
+                    if let Some(vc_arc) = app_state_instance.get::<Arc<std::sync::Mutex<VoiceController>>>() {
+                        match vc_arc.lock() {
+                            Ok(mut voice_controller) => {
+                                match voice_controller.toggle_dictation() {
+                                    Ok(is_now_dictating) => {
+                                        info!("[GlobalShortcut] Dictation toggled. New state: {}", if is_now_dictating { "ON" } else { "OFF" });
+                                        if let Err(e) = app_handle_clone.emit("dictation_state_changed", is_now_dictating) {
+                                            tracing::warn!("[GlobalShortcut] Failed to emit dictation_state_changed event: {}", e);
+                                        }
+                                        // If dictation was just turned OFF, request playback
+                                        if !is_now_dictating {
+                                            info!("[GlobalShortcut] Dictation stopped via shortcut, emitting request_audio_playback_test event.");
+                                            if let Err(e) = app_handle_clone.emit_to("main", "request_audio_playback_test", ()) {
+                                                tracing::warn!("[GlobalShortcut] Failed to emit request_audio_playback_test event from shortcut: {}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("[GlobalShortcut] Error toggling dictation: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("[GlobalShortcut] Failed to lock VoiceController: {}", e);
+                            }
+                        }
+                    } else {
+                        tracing::warn!("[GlobalShortcut] VoiceController not found in AppState. Cannot toggle dictation.");
+                    }
+                });
             }
         }).build())
         .manage(app_state) // Manage the AppState
@@ -192,7 +252,15 @@ pub fn run() {
             qa_test_coordinate_transformation,
             qa_test_click_visualization,
             qa_test_select_text,
-            qa_test_scroll
+            qa_test_scroll,
+            qa_transcribe_file, // Add the new QA command here
+            // Voice Control Commands
+            start_dictation_command,
+            stop_dictation_command,
+            toggle_dictation_command,
+            get_dictation_status_command,
+            playback_last_audio_chunk, // Added new command
+            // App Life Cycle
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly
             let window = app.get_webview_window("main").unwrap();
@@ -274,113 +342,37 @@ pub fn run() {
         })
         .setup(|app| {
             let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Register Escape shortcut
+                if let Err(e) = app_handle.global_shortcut().register("Escape") {
+                    eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
+                }
 
-            // --- Register the Global Shortcut ---
-            app_handle
-                .global_shortcut()
-                .register("Escape")
-                .expect("Failed to register Escape shortcut");
-
-            // --- Menu Setup ---
-            let toggle_panel_item = MenuItemBuilder::new("Show Panel")
-                .id("toggle_panel")
-                .build(&app_handle)
-                .expect("Failed to build toggle_panel item");
-            let quit_item = PredefinedMenuItem::quit(&app_handle, Some("Quit Juno"))
-                .expect("Failed to build quit item");
-
-            let menu = Menu::with_items(&app_handle, &[
-                &toggle_panel_item,
-                &quit_item,
-            ]).expect("Failed to create menu");
-
-            let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/tray-Template.png");
-            let icon_bytes = std::fs::read(&icon_path).expect("Failed to read icon file");
-            let icon = Image::new_owned(
-                icon_bytes, // Pass owned Vec<u8>
-                32, // Provide explicit width (adjust if needed)
-                32  // Provide explicit height (adjust if needed)
-            );
-
-            let _tray = tauri::tray::TrayIconBuilder::new()
-                .menu(&menu)
-                .icon(icon)
-                .icon_as_template(true)
-                .tooltip("Juno")
-                .show_menu_on_left_click(false)
-                .build(&app_handle)
-                .expect("Failed to build tray icon");
-
-            let main_window = app.get_webview_window("main")
-               .ok_or_else(|| "Fatal: Main window not found during setup".to_string())?;
-
-            let window_event_handle = app.handle().clone();
-            main_window.on_window_event(move |event| {
-                match event {
-                    WindowEvent::CloseRequested { api, .. } => {
-                        api.prevent_close();
-                        let window = window_event_handle.get_webview_window("main").unwrap();
-                        window.hide().unwrap();
-                        info!("[INFO] Main window hidden via close request."); // Keep info usage
-                    }
-                    _ => {}
+                // Register Dictation Toggle Shortcut
+                let dictation_shortcut_str = if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };
+                if let Err(e) = app_handle.global_shortcut().register(dictation_shortcut_str) {
+                     eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_shortcut_str, e);
                 }
             });
 
-            if let Some(_floating_bar) = app.get_webview_window("floating-bar") {
-                println!("Floating bar window found.");
+            // Listen for audio playback test request
+            if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle_for_listener = app.handle().clone();
+                let _event_id = main_window.listen("request_audio_playback_test", move |_event| {
+                    info!("[Event Listener] Received request_audio_playback_test event.");
+                    let ah_clone = app_handle_for_listener.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let app_state = ah_clone.state::<crate::state::AppState>(); // Ensure crate::state path is correct
+                        match crate::commands::voice_control::playback_last_audio_chunk(app_state).await {
+                            Ok(message) => info!("[Event Listener] playback_last_audio_chunk successful: {}", message),
+                            Err(e) => tracing::error!("[Event Listener] playback_last_audio_chunk error: {}", e),
+                        }
+                    });
+                });
+                // Note: .map_err().unwrap() removed as .listen() returns EventId not Result
             } else {
-                eprintln!("Warning: Floating bar window not found during setup.");
+                tracing::error!("[Setup] Main window not found, cannot listen for request_audio_playback_test event.");
             }
-
-            // --- macOS Specific Setup for Floating Bar --- ///
-            #[cfg(target_os = "macos")]
-            {
-                info!("Applying macOS specific setup...");
-                if let Some(window) = app_handle.get_webview_window("floating-bar") {
-                    info!("Found floating-bar for macOS setup.");
-                    // --- Apply Standard Window Styling ---
-                    match window.ns_window() {
-                        Ok(ns_window_ptr) => {
-                            let ns_window = ns_window_ptr as cocoa_id;
-                            unsafe {
-                                // Keep window floating above others - Use integer value for Floating level
-                                ns_window.setLevel_(5); // kCGFloatingWindowLevelKey is typically 5
-                                // Allow clicks to pass through transparent areas
-                                ns_window.setOpaque_(NO);
-                                ns_window.setHasShadow_(NO); // Optional: remove shadow if desired
-                                // Keep it visible across spaces
-                                ns_window.setCollectionBehavior_(
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
-                                );
-
-                                // Set initial ignore state based on visibility (handled by tray logic, but good initial state)
-                                if !window.is_visible().unwrap_or(false) {
-                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
-                                     info!("macOS Setup: Floating bar initially hidden, ignoring mouse events.");
-                                } else {
-                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-                                     info!("macOS Setup: Floating bar initially visible, accepting mouse events.");
-                                }
-                                info!("macOS standard styling applied to floating-bar.");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Error getting NSWindow for styling floating-bar: {}", e);
-                        }
-                    }
-                     // --- Setup Mouse Tracking ---
-                    macos_tracking::setup_tracking_area(&window, app_handle.clone());
-
-                } else {
-                    eprintln!("Warning: floating-bar window not found during macOS specific setup.");
-                }
-            }
-            // --- End macOS Specific Setup ---
 
             Ok(())
         });

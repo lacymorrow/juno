@@ -1,0 +1,24 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Voice Control and Dictation (Whisper.rs Integration)
+
+This project includes a voice control and dictation feature powered by the `whisper-rs` crate.
+
+## Core Implementation
+
+The primary logic for voice transcription is encapsulated in the `VoiceController` struct within [src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs). This module handles interaction with the `whisper-rs` library, including model loading and audio processing.
+
+Key aspects:
+- `VoiceController::new(model_path)`: Initializes the controller with a path to a Whisper model file.
+- `VoiceController::transcribe_audio_file(audio_path)`: Transcribes a given WAV audio file.
+
+## Tauri Integration
+
+- **QA Command**: A Tauri command `qa_transcribe_file` has been added to [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) to allow testing of the transcription functionality from the frontend. It takes a model path and an audio file path as input and returns the transcribed text.
+- **Dependencies**: The [src-tauri/Cargo.toml](mdc:src-tauri/Cargo.toml) file has been updated to include `whisper-rs` for speech-to-text and `hound` for WAV file processing.
+
+## Future Development
+Real-time microphone input and more sophisticated model management are planned future enhancements for this feature.

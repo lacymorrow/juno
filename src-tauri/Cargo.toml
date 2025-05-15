@@ -61,6 +61,8 @@ playwright = "0.0.20"
 rig-core = "0.2.1"
 whisper-rs = "0.11.0"
 hound = "3.5"
+cpal = "0.15"
+rubato = "0.14.1"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

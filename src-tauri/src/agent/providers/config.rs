@@ -6,6 +6,8 @@ use std::io::ErrorKind;
 use tracing::{info, error, warn};
 use crate::agent::structs::AgentError;
 
+const DEFAULT_SYSTEM_PROMPT: &str = "You are Juno, an AI assistant helping users with computer tasks. You are designed to assist users with a wide range of tasks, including answering questions, providing thoughtful recommendations, offering technical help, and supporting creative work. You are also able to use tools to help you with your tasks.";
+
 /// Configuration structure for AI providers
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {
@@ -59,7 +61,7 @@ impl Default for ProviderConfig {
                     model: Some("gpt-4o".to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
-                    system_prompt: Some("You are an AI assistant helping users with computer tasks.".to_string()),
+                    system_prompt: None,
                 },
             ],
         }
@@ -198,9 +200,8 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(max_tokens) = settings.max_tokens {
                     env::set_var("ANTHROPIC_MAX_TOKENS", max_tokens.to_string());
                 }
-                if let Some(system_prompt) = &settings.system_prompt {
-                    env::set_var("ANTHROPIC_SYSTEM_PROMPT", system_prompt);
-                }
+                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                env::set_var("ANTHROPIC_SYSTEM_PROMPT", prompt_to_set);
             },
             "openai" => {
                 if let Some(api_key) = &settings.api_key {
@@ -215,9 +216,8 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(temperature) = settings.temperature {
                     env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
                 }
-                if let Some(system_prompt) = &settings.system_prompt {
-                    env::set_var("OPENAI_SYSTEM_PROMPT", system_prompt);
-                }
+                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                env::set_var("OPENAI_SYSTEM_PROMPT", prompt_to_set);
             },
             "rig" => {
                 let mut rig_api_key_set = false;
@@ -245,9 +245,8 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(temperature) = settings.temperature {
                     env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
                 }
-                if let Some(system_prompt) = &settings.system_prompt {
-                    env::set_var("RIG_SYSTEM_PROMPT", system_prompt);
-                }
+                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                env::set_var("RIG_SYSTEM_PROMPT", prompt_to_set);
             },
             _ => {
                 warn!("Attempted to apply settings for an unknown provider ID: {}", settings.id);
