@@ -1,0 +1,35 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Audio Playback Diagnostics and CPAL Configuration
+
+This rule covers the `playback_last_audio_chunk` command used for diagnosing audio recording quality and common issues related to `cpal` audio stream configuration, especially for output streams.
+
+## `playback_last_audio_chunk` Command
+
+-   **Purpose**: To play back the most recent audio chunk that was processed by the Whisper model. This helps verify if the audio input is clear, at an appropriate volume, and correctly captured before transcription.
+-   **Location**: Implemented in [`src-tauri/src/commands/voice_control.rs`](mdc:src-tauri/src/commands/voice_control.rs).
+-   **Trigger**: Automatically invoked after dictation stops, via the `request_audio_playback_test` event. See the `Dictation Shortcut and Event Flow` rule for more details.
+-   **Functionality**:
+    1.  Retrieves the last processed audio buffer (a `Vec<f32>`) from `VoiceController::get_last_processed_audio_buffer()`.
+    2.  Uses `cpal` to find the default system output device.
+    3.  Attempts to find a compatible output stream configuration. **Critically, it currently searches for a 16kHz, F32, Mono configuration.**
+    4.  If a compatible configuration is found, it builds and plays the audio stream.
+    5.  The playback logic is basic and designed for a one-shot play of the buffered chunk.
+
+## Common CPAL Configuration Issue: "No supported output config found"
+
+-   A common error when attempting playback is similar to:
+    `ERROR juno_lib: [Event Listener] playback_last_audio_chunk error: No supported output config found for 16kHz, F32, Mono. Available: [SupportedStreamConfigRange { channels: 2, min_sample_rate: SampleRate(44100), max_sample_rate: SampleRate(44100), ... }, ...]`
+-   **Meaning**: This indicates that the default output device (e.g., "MacBook Pro Speakers") does not natively support a 16kHz, F32, Mono stream. The `Available: [...]` part of the message lists the configurations the device *does* support (e.g., stereo, 44.1kHz, 48kHz).
+-   **Troubleshooting/Fixes**:
+    1.  **Modify Playback Logic**: The `playback_last_audio_chunk` command's `cpal` configuration search logic in [`src-tauri/src/commands/voice_control.rs`](mdc:src-tauri/src/commands/voice_control.rs) needs to be made more flexible. Instead of hardcoding a search for 16kHz Mono, it should iterate through the `device.supported_output_configs()` and select one that is available (e.g., the device's default or first compatible stereo F32 config).
+    2.  **Resampling (More Complex)**: If the output audio *must* be 16kHz mono (e.g., for precise comparison with Whisper's input requirements), then the audio data would need to be resampled and potentially downmixed from stereo to mono before playback if the chosen output config is different. Libraries like `rubato` can be used for resampling, but this adds complexity.
+    3.  **For input streams (in `VoiceController::start_dictation`)**: Similar logic applies. Whisper expects 16kHz mono. The `VoiceController` already has fallback logic if a precise 16kHz input config isn't found. If audio quality is still an issue, ensure the chosen input config's actual sample rate is logged and consider implementing resampling on the input path if it's not 16kHz.
+
+## Key Files
+
+-   Playback command: [`src-tauri/src/commands/voice_control.rs`](mdc:src-tauri/src/commands/voice_control.rs)
+-   Audio buffer storage in `VoiceController`: [`src-tauri/src/voice_control.rs`](mdc:src-tauri/src/voice_control.rs)

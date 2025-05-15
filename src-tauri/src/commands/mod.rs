@@ -13,11 +13,13 @@ pub mod providers;
 pub mod shell;
 pub mod text_editor;
 pub mod window;
+pub mod voice_control;
 
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;
 pub use self::mouse::*;
 pub use self::shell::*;
+pub use self::voice_control::*;
 
 
 // Shared helper function for sending notifications from dev tools
