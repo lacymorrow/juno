@@ -293,11 +293,14 @@ impl VoiceController {
                 match control_rx.try_recv() {
                     Ok(AudioThreadMessage::Stop) => {
                         info!("[AudioThread] Stop message received.");
-                        // Process any remaining audio in the `audio_buffer_for_whisper_chunks`
+                        // The `audio_buffer_for_whisper_chunks` might contain a final partial chunk of raw audio.
+                        // This audio is ALREADY present in `raw_full_session_audio` because every chunk from
+                        // `audio_data_rx` is appended to `raw_full_session_audio` directly.
+                        // Therefore, we DO NOT need to append `audio_buffer_for_whisper_chunks` here again.
+                        // Clearing it is fine if it wasn't cleared by chunk processing, but it doesn't need to be added to raw_full_session_audio.
                         if !audio_buffer_for_whisper_chunks.is_empty() {
-                            raw_full_session_audio.extend_from_slice(&audio_buffer_for_whisper_chunks);
+                            info!("[AudioThread] `audio_buffer_for_whisper_chunks` has {} raw samples remaining. These are already in `raw_full_session_audio`. Clearing chunk buffer.", audio_buffer_for_whisper_chunks.len());
                             audio_buffer_for_whisper_chunks.clear();
-                            info!("[AudioThread] Appended remaining {} raw samples from chunk buffer to raw_full_session_audio before stop.", raw_full_session_audio.len());
                         }
 
                         // Flush the chunk_resampler if it was being used for any partial data
@@ -408,7 +411,7 @@ impl VoiceController {
                             }
                             // --- END DEBUG ---
 
-                            let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
+                            let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
                             params.set_temperature(0.0);
 
                             match whisper_state.full(params, &audio_for_transcription[..]) {
@@ -542,10 +545,10 @@ impl VoiceController {
         Ok(())
     }
 
-    pub fn stop_dictation(&mut self) -> Result<(), String> {
+    pub fn stop_dictation(&mut self) -> Result<bool, String> {
         if !self.is_dictating {
             info!("[VoiceController] Dictation not active.");
-            return Ok(());
+            return Ok(false);
         }
         info!("[VoiceController] Stopping dictation...");
 
@@ -553,23 +556,24 @@ impl VoiceController {
             // Send stop message to the audio thread
             if sender.send(AudioThreadMessage::Stop).is_err() {
                 eprintln!("[VoiceController] Failed to send stop message to audio thread. It might have already exited.");
-                // Even if sending fails, we should try to join to clean up resources.
+                // Consider this a partial failure or log appropriately.
+                // For now, we'll continue to attempt join and set state.
             }
 
             // Wait for the audio thread to finish
             if handle.join().is_err() {
                 eprintln!("[VoiceController] Audio thread panicked or failed to join.");
-                // Potentially set is_dictating to false here too, or handle error state
+                // Depending on error handling strategy, could return Err here.
+                // For now, we proceed to set is_dictating to false.
             } else {
                 info!("[VoiceController] Audio thread joined successfully.");
             }
         } else {
-            info!("[VoiceController] No audio thread found to stop.");
+            info!("[VoiceController] No audio thread found to stop (should not happen if is_dictating was true).");
+            // This case might indicate an inconsistent state.
         }
 
         self.is_dictating = false;
-        // The audio for playback is now set by the audio thread itself before it exits.
-        // We can log the size of the buffer here for verification if needed.
         if let Ok(buffer_guard) = self.last_processed_audio_buffer.lock() {
             if let Some(audio) = &*buffer_guard {
                 info!("[VoiceController] Dictation stopped. Playback buffer (raw) contains {} samples.", audio.len());
@@ -579,16 +583,15 @@ impl VoiceController {
         }
 
         info!("[VoiceController] Dictation stopped successfully.");
-        Ok(())
+        Ok(true)
     }
 
     pub fn toggle_dictation(&mut self) -> Result<bool, String> {
         if self.is_dictating {
-            self.stop_dictation()?;
+            self.stop_dictation().map(|_| false)
         } else {
-            self.start_dictation()?;
+            self.start_dictation().map(|_| true)
         }
-        Ok(self.is_dictating)
     }
 
     pub fn is_dictating(&self) -> bool {
