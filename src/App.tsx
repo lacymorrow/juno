@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
 import {
-  BotMessageSquare,
+  DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
   Send,
@@ -161,6 +161,33 @@ function App() {
     };
   }, []);
 
+  // Listen for transcription results from dictation
+  useEffect(() => {
+    const unlisten = listen<string>(
+      "dictation_transcription_result",
+      (event) => {
+        console.log(
+          "Received dictation_transcription_result event:",
+          event.payload
+        );
+        const transcribedText = event.payload;
+        if (transcribedText && transcribedText.trim() !== "") {
+          // Submit the transcribed text as a query to the agent.
+          // The backend-response listener will handle adding both user and assistant messages.
+          submitQuery(transcribedText);
+        } else {
+          console.log(
+            "Received empty or whitespace-only transcription, not submitting."
+          );
+        }
+      }
+    );
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []); // Empty dependency array means this runs once on mount and cleans up on unmount
+
   // Check server status on mount
   useEffect(() => {
     const checkServer = async () => {
@@ -232,9 +259,11 @@ function App() {
 
     // Optimistically add user message? Or wait for event?
     // Let's wait for the event to handle both user and assistant messages consistently.
+    // For dictation, the user message is added by the listener *before* calling submitQuery.
+    // For typed input, it will be handled by the backend-response listener.
     // const userMessage: ChatMessage = { role: "user", content: text };
     // setConversation((prev) => [...prev, userMessage]);
-    setQuery(""); // Clear input immediately
+    setQuery(""); // Clear input immediately IF it was from the manual input field
     setIsProcessing(true); // Set processing state
 
     try {
@@ -328,7 +357,7 @@ function App() {
           {/* Header */}
           <header className="flex justify-between items-center mb-4 flex-shrink-0 border-b pb-2">
             <h1 className="text-xl font-semibold flex items-center gap-2">
-              <BotMessageSquare size={24} /> Juno{" "}
+              <DogIcon size={24} /> Juno{" "}
               <span className="text-xs text-muted-foreground">Operator</span>
             </h1>
             <div className="flex items-center gap-4">

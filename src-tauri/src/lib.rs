@@ -157,7 +157,7 @@ pub fn run() {
                     if let Some(vc_arc) = app_state_instance.get::<Arc<std::sync::Mutex<VoiceController>>>() {
                         match vc_arc.lock() {
                             Ok(mut voice_controller) => {
-                                match voice_controller.toggle_dictation() {
+                                match voice_controller.toggle_dictation(app_handle_clone.clone()) {
                                     Ok(is_now_dictating) => {
                                         info!("[GlobalShortcut] Dictation toggled. New state: {}", if is_now_dictating { "ON" } else { "OFF" });
                                         if let Err(e) = app_handle_clone.emit("dictation_state_changed", is_now_dictating) {
@@ -165,10 +165,7 @@ pub fn run() {
                                         }
                                         // If dictation was just turned OFF, request playback
                                         if !is_now_dictating {
-                                            info!("[GlobalShortcut] Dictation stopped via shortcut, emitting request_audio_playback_test event.");
-                                            if let Err(e) = app_handle_clone.emit_to("main", "request_audio_playback_test", ()) {
-                                                tracing::warn!("[GlobalShortcut] Failed to emit request_audio_playback_test event from shortcut: {}", e);
-                                            }
+                                            info!("[GlobalShortcut] Dictation stopped via shortcut.");
                                         }
                                     }
                                     Err(e) => {
@@ -246,6 +243,13 @@ pub fn run() {
             update_provider_max_tokens,
             update_provider_temperature,
             update_provider_system_prompt,
+            // Voice Control Commands
+            start_dictation_command,
+            stop_dictation_command,
+            toggle_dictation_command,
+            get_dictation_status_command,
+            set_developer_playback_enabled_command,
+            playback_last_audio_chunk,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,
@@ -254,12 +258,6 @@ pub fn run() {
             qa_test_select_text,
             qa_test_scroll,
             qa_transcribe_file, // Add the new QA command here
-            // Voice Control Commands
-            start_dictation_command,
-            stop_dictation_command,
-            toggle_dictation_command,
-            get_dictation_status_command,
-            playback_last_audio_chunk, // Added new command
             // App Life Cycle
         ])
         .on_menu_event(|app, event| { // Attach menu event handler directly

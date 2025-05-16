@@ -1,0 +1,31 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+## Voice Control & Dictation Flow
+
+This application implements voice dictation, allowing users to speak queries that are then transcribed and submitted to the AI agent.
+
+### Core Components:
+- **VoiceController (`src-tauri/src/voice_control.rs`)**:
+    - Manages audio input stream using `cpal`.
+    - Performs speech-to-text transcription using `whisper-rs`.
+    - Handles starting and stopping dictation sessions.
+    - Stores the last recorded audio buffer for developer playback (controlled by a setting in [`src/components/DevToolsPanel.tsx`](mdc:src/components/DevToolsPanel.tsx)).
+    - Emits the transcription result as a Tauri event.
+- **Tauri Commands (`src-tauri/src/commands/voice_control.rs`)**:
+    - Exposes `VoiceController` methods like `start_dictation`, `stop_dictation`, `toggle_dictation` as Tauri commands that can be invoked from the frontend.
+    - These commands require an `AppHandle` to allow the `VoiceController` to emit events.
+- **Global Shortcut (`src-tauri/src/lib.rs`)**:
+    - A global shortcut (Option+D on macOS, Alt+D on other platforms) is registered to toggle dictation using `voice_controller.toggle_dictation()`.
+
+### Event Flow for Dictation:
+1. User activates dictation (e.g., via global shortcut or a UI button if implemented).
+2. The `start_dictation` method in `VoiceController` ([`src-tauri/src/voice_control.rs`](mdc:src-tauri/src/voice_control.rs)) is called, initiating audio recording in a separate thread.
+3. When dictation stops (e.g., user toggles it off), the audio thread finalizes recording, transcribes the audio.
+4. The audio thread uses the `AppHandle` to emit a Tauri event named `"dictation_transcription_result"` with the transcribed text string as its payload.
+5. The frontend ([`src/App.tsx`](mdc:src/App.tsx)) has an event listener for `"dictation_transcription_result"`.
+6. Upon receiving the event, `App.tsx` calls its internal `submitQuery(transcribedText)` function.
+7. The `submitQuery` function in `App.tsx` invokes the `submit_query` Tauri command, sending the text to the backend AI agent for processing.
+8. The subsequent AI response and original user query are then handled by the `"backend-response"` event listener in `App.tsx` to update the chat UI.

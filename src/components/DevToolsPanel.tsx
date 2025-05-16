@@ -21,9 +21,11 @@ import {
   Keyboard,
   Layers, // Added for Window List
   Maximize2,
+  Mic, // Added for Voice Control
   Mouse, // Example icon (replace as needed)
   MousePointerClick, // Added for Wait
-  Move, // Added for Hold/Release
+  Move,
+  PlayCircle, // Added for Hold/Release
   TextSelect, // Added for Get Selected Text
   Timer,
   X,
@@ -69,6 +71,8 @@ type LoadingStates = {
   mouseDoubleClick: boolean; // Added
   mouseDrag: boolean; // Added
   testClickVisualization: boolean; // Added for click visualization testing
+  setDeveloperPlayback: boolean; // Added for voice control setting
+  playbackAudio: boolean; // Added for playing back audio
 };
 
 // Helper type for file listing result (assuming backend sends this structure)
@@ -126,6 +130,8 @@ const initialLoadingStates: LoadingStates = {
   mouseDoubleClick: false,
   mouseDrag: false,
   testClickVisualization: false,
+  setDeveloperPlayback: false,
+  playbackAudio: false,
 };
 
 // Type for result data from QA tests
@@ -229,8 +235,8 @@ const DevToolsPanel: React.FC = () => {
   const [qaClickSeriesResults, setQaClickSeriesResults] = useState<
     ClickQAResult[] | null
   >(null);
-  const [coordinateTestResult, setCoordinateTestResult] =
-    useState<CoordinateTestResult | null>(null);
+  // const [coordinateTestResult, setCoordinateTestResult] =
+  //   useState<CoordinateTestResult | null>(null);
   const [visualizationTestResult, setVisualizationTestResult] =
     useState<VisualizationTestResult | null>(null);
 
@@ -240,9 +246,16 @@ const DevToolsPanel: React.FC = () => {
   const [qaClickY, setQaClickY] = useState<number>(300);
 
   // State for coordinate testing
-  const [coordTestX, setCoordTestX] = useState("");
-  const [coordTestY, setCoordTestY] = useState("");
-  const [coordTestLoading, setCoordTestLoading] = useState(false);
+  const coordTestX = ""; // Removed setCoordTestX
+  const coordTestY = ""; // Removed setCoordTestY
+  // const [toolLog, setToolLog] = useState<ToolUsageEntry[]>([]); // New state for tool logs
+  // const logContainerRef = useRef<HTMLDivElement>(null);
+  // const [coordTestLoading, setCoordTestLoading] = useState(false); // This can stay removed if not used elsewhere
+  const [coordTestResult, setCoordTestResult] = useState<any>(null);
+
+  // Voice Control Settings
+  const [developerPlaybackEnabled, setDeveloperPlaybackEnabled] =
+    useState(false);
 
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
 
@@ -910,8 +923,7 @@ const DevToolsPanel: React.FC = () => {
       return;
     }
 
-    setCoordTestLoading(true);
-    setCoordinateTestResult(null);
+    setCoordTestResult(null);
 
     try {
       const result = await invoke<CoordinateTestResult>(
@@ -919,15 +931,13 @@ const DevToolsPanel: React.FC = () => {
         { x, y }
       );
       console.log("Coordinate Test Result:", result);
-      setCoordinateTestResult(result);
+      setCoordTestResult(result);
     } catch (error) {
       console.error("Coordinate Transformation Test Error:", error);
       // Use toast for error feedback
       toast.error(`Coordinate Test Failed: ${error}`);
       // Optionally set state to show error in UI if needed
       // setCoordinateTestResult({ error: String(error) });
-    } finally {
-      setCoordTestLoading(false);
     }
   };
 
@@ -942,6 +952,50 @@ const DevToolsPanel: React.FC = () => {
     );
     if (result) {
       setVisualizationTestResult(result);
+    }
+  };
+
+  const handleToggleDeveloperPlayback = async () => {
+    const newEnabledState = !developerPlaybackEnabled;
+    try {
+      await invokeCommand(
+        "set_developer_playback_enabled_command",
+        { enabled: newEnabledState },
+        "setDeveloperPlayback"
+      );
+      // If invokeCommand completed (it catches its own errors and toasts them),
+      // we assume the attempt was made. Update frontend state optimistically.
+      setDeveloperPlaybackEnabled(newEnabledState);
+      toast.success(
+        `Developer playback ${newEnabledState ? "enabled" : "disabled"}.`
+      );
+    } catch (e) {
+      // This catch is a safeguard if invokeCommand itself unexpectedly throws an error
+      // (though it's designed to catch internal invoke errors and toast them).
+      console.error(
+        "Critical error during set_developer_playback_enabled_command:",
+        e
+      );
+      toast.error(
+        "Failed to toggle developer playback due to an unexpected error."
+      );
+    }
+  };
+
+  const handlePlaybackLastAudio = async () => {
+    const result = await invokeCommand<string>(
+      "playback_last_audio_chunk",
+      {},
+      "playbackAudio"
+    );
+    if (typeof result === "string") {
+      // The command returns a status string, e.g., "Playback attempt finished." or an error/info message.
+      // invokeCommand will show its own success/error toast based on whether an error was thrown.
+      // We can show the specific message from the command if needed.
+      toast.info(result); // Show the message from the backend command
+    } else if (result === null) {
+      // This case implies an error was caught and toasted by invokeCommand already.
+      // No additional toast needed here unless we want to override or add more info.
     }
   };
 
@@ -1010,6 +1064,52 @@ const DevToolsPanel: React.FC = () => {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Voice Control Settings Section */}
+      <Separator className="my-3" />
+      <h3 className="text-base font-semibold border-b pb-1">
+        Voice Control Settings
+      </h3>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleToggleDeveloperPlayback}
+            disabled={loadingStates.setDeveloperPlayback}
+            variant="outline"
+            title={
+              developerPlaybackEnabled
+                ? "Disable Developer Audio Playback"
+                : "Enable Developer Audio Playback"
+            }
+          >
+            <Mic size={14} className="mr-1" />
+            {loadingStates.setDeveloperPlayback
+              ? "Updating..."
+              : developerPlaybackEnabled
+              ? "Dev Playback ON"
+              : "Dev Playback OFF"}
+          </Button>
+          <Button
+            size="sm"
+            onClick={handlePlaybackLastAudio}
+            disabled={loadingStates.playbackAudio || !developerPlaybackEnabled}
+            variant="outline"
+            title={
+              !developerPlaybackEnabled
+                ? "Enable Dev Playback first"
+                : "Play Last Recorded Audio Chunk"
+            }
+          >
+            <PlayCircle size={14} className="mr-1" />{" "}
+            {/* Using PlayCircle icon */}
+            {loadingStates.playbackAudio ? "Playing..." : "Play Last Recording"}
+          </Button>
+          <span className="text-xs text-muted-foreground flex-1">
+            Enables buffering of recorded audio for playback in dev tools.
+          </span>
+        </div>
       </div>
 
       {/* Existing UI elements */}
@@ -2074,33 +2174,33 @@ const DevToolsPanel: React.FC = () => {
                 {loadingStates.mouseMove ? "Testing..." : "Test Coordinates"}
               </Button>
 
-              {coordinateTestResult && (
+              {coordTestResult && (
                 <div className="mt-2 p-2 bg-muted rounded-md text-xs">
                   <div className="font-semibold">
                     Accuracy:{" "}
-                    {coordinateTestResult.is_accurate ? (
+                    {coordTestResult.is_accurate ? (
                       <span className="text-green-500">Good</span>
                     ) : (
                       <span className="text-yellow-500">Poor</span>
                     )}
                   </div>
                   <div>
-                    Original: ({coordinateTestResult.original.x},{" "}
-                    {coordinateTestResult.original.y})
+                    Original: ({coordTestResult.original.x},{" "}
+                    {coordTestResult.original.y})
                   </div>
                   <div>
                     Screen: (
-                    {coordinateTestResult.transformed_to_screen.x.toFixed(1)},{" "}
-                    {coordinateTestResult.transformed_to_screen.y.toFixed(1)})
+                    {coordTestResult.transformed_to_screen.x.toFixed(1)},{" "}
+                    {coordTestResult.transformed_to_screen.y.toFixed(1)})
                   </div>
                   <div>
                     Back to Scaled: (
-                    {coordinateTestResult.transformed_back.x.toFixed(1)},{" "}
-                    {coordinateTestResult.transformed_back.y.toFixed(1)})
+                    {coordTestResult.transformed_back.x.toFixed(1)},{" "}
+                    {coordTestResult.transformed_back.y.toFixed(1)})
                   </div>
                   <div>
-                    Error: x={coordinateTestResult.error.x.toFixed(2)}, y=
-                    {coordinateTestResult.error.y.toFixed(2)}
+                    Error: x={coordTestResult.error.x.toFixed(2)}, y=
+                    {coordTestResult.error.y.toFixed(2)}
                   </div>
                 </div>
               )}

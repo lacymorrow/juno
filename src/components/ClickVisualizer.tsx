@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
 
 type ClickInfo = {
   x: number;
@@ -80,7 +80,7 @@ const ClickVisualizer = () => {
           }}
         />
       ))}
-      <style jsx>{`
+      <style>{`
         @keyframes click-animation {
           0% {
             opacity: 1;
