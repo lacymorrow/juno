@@ -8,9 +8,9 @@ use std::env;
 use std::sync::Arc;
 use tauri::{
     Manager, // WindowEvent, // Removed WindowEvent
-    menu::{MenuItemKind}, // Removed Menu, MenuItemBuilder, PredefinedMenuItem
-    tray::{TrayIconEvent, MouseButton, MouseButtonState},
-    // image::Image, // Removed Image
+    menu::{MenuItemKind, Menu}, // Removed Menu, MenuItemBuilder, PredefinedMenuItem // Added Menu
+    tray::{TrayIconEvent, MouseButton, MouseButtonState, TrayIconBuilder}, // Ensured TrayIconBuilder
+    image::Image as TauriImage, // Use tauri::image::Image, aliased
     AppHandle, // Keep AppHandle
     Emitter, // Import Emitter trait for .emit()
     Listener, // Added Listener for .listen()
@@ -262,95 +262,141 @@ pub fn run() {
             qa_transcribe_file, // Add the new QA command here
             // App Life Cycle
         ])
-        .on_menu_event(|app, event| { // Attach menu event handler directly
-            let window = app.get_webview_window("main").unwrap();
-            match event.id.as_ref() {
-                "quit" => {
-                    println!("[Menu] Quit requested.");
-                    app.exit(0);
-                }
-                "toggle" => { // Keep toggle for floating bar if needed elsewhere, or remove if only tray controls it
-                    println!("[Menu] Toggle floating bar requested.");
-                    if let Some(window) = app.get_webview_window("floating-bar") {
-                        match window.is_visible() {
-                            Ok(true) => window.hide().unwrap(),
-                            Ok(false) => {
-                                window.show().unwrap();
-                                window.set_focus().unwrap();
-                            },
-                            Err(e) => eprintln!("[Menu Error] checking floating bar visibility: {}", e),
-                        }
-                    } else {
-                         eprintln!("[Menu Error] Floating bar window not found for toggle.");
-                    }
-                }
-                "toggle_panel" => {
-                    println!("[Menu] Toggle panel requested.");
-                    let main_window_visible = window.is_visible().unwrap_or(false);
-                    if main_window_visible {
-                        window.hide().unwrap();
-                        if let Some(MenuItemKind::MenuItem(item)) = app.menu().unwrap().get("toggle_panel") {
-                            item.set_text("Show Panel").unwrap();
-                        }
-                    } else {
-                        window.show().unwrap();
-                        window.set_focus().unwrap();
-                         if let Some(MenuItemKind::MenuItem(item)) = app.menu().unwrap().get("toggle_panel") {
-                            item.set_text("Hide Panel").unwrap();
-                        }
-                    }
-                }
-                _ => {
-                     println!("[Menu] Unhandled event: {:?}", event.id);
-                }
-            }
-        })
-        .on_tray_icon_event(|tray, event| { // Attach tray event handler directly
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                println!("[Tray] Left click detected.");
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("floating-bar") {
-                    match window.is_visible() {
-                        Ok(true) => {
-                            window.hide().unwrap();
-                            // Make the window ignore mouse events when hidden
-                            if let Err(e) = window.set_ignore_cursor_events(true) {
-                                eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                            }
-                            println!("[Tray] Floating bar hidden and ignoring clicks.");
-                        },
-                        Ok(false) => {
-                            // Make the window accept mouse events again when shown
-                            if let Err(e) = window.set_ignore_cursor_events(false) {
-                                eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                            }
-                            window.show().unwrap();
-                            window.set_focus().unwrap();
-                            println!("[Tray] Floating bar shown, focused, and accepting clicks.");
-                        },
-                        Err(e) => eprintln!("[Tray Error] checking floating bar visibility: {}", e),
-                    }
-                } else {
-                     eprintln!("[Tray Error] Floating bar window not found on left click.");
-                }
-            }
-        })
         .setup(|app| {
             let app_handle = app.handle().clone();
+
+            // --- Setup Tray Icon ---
+            let tray_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // Load the icon
+                let icon_path = tray_app_handle.path().resolve("icons/32x32.png", tauri::path::BaseDirectory::Resource).unwrap_or_else(|_| {
+                    eprintln!("[Tray Setup Error] Failed to resolve icon path. Using a placeholder or default mechanism if available.");
+                    std::path::PathBuf::from("icons/32x32.png")
+                });
+
+                let loaded_tauri_icon = match image::open(&icon_path) { // Use the `image` crate to open
+                    Ok(dynamic_image) => {
+                        let width = dynamic_image.width();
+                        let height = dynamic_image.height();
+                        let rgba_image = dynamic_image.to_rgba8();
+                        let bytes = rgba_image.into_raw();
+                        // Assuming TauriImage::new returns TauriImage directly (or panics on error)
+                        // based on `-> Self` in its signature from earlier compiler messages.
+                        // Use new_owned to move the bytes and avoid lifetime issues.
+                        let img = TauriImage::new_owned(bytes, width, height);
+                        Some(img)
+                    },
+                    Err(e) => {
+                        eprintln!("[Tray Setup Error] Failed to load image from path {:?} using 'image' crate: {}", icon_path, e);
+                        None
+                    }
+                };
+
+                // Create a simple menu
+                let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, "quit", "Quit Juno", true, None::<&str>).unwrap());
+                let toggle_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, "toggle_floating_bar", "Toggle Floating Bar", true, None::<&str>).unwrap());
+                let tray_menu = Menu::with_items(&tray_app_handle, &[
+                    &quit_item,
+                    &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
+                    &toggle_item,
+                ]).map_err(|e| eprintln!("[Tray Setup Error] Failed to create tray menu: {}", e)).ok();
+
+
+                let mut tray_builder = TrayIconBuilder::new()
+                    .on_menu_event(move |app_handle, event| {
+                        match event.id().as_ref() {
+                            "quit" => {
+                                println!("[Tray Menu] Quit requested.");
+                                app_handle.exit(0);
+                            }
+                            "toggle_floating_bar" => {
+                                println!("[Tray Menu] Toggle floating bar requested.");
+                                if let Some(window) = app_handle.get_webview_window("floating-bar") {
+                                    match window.is_visible() {
+                                        Ok(true) => {
+                                            let _ = window.hide();
+                                            if let Err(e) = window.set_ignore_cursor_events(true) {
+                                                eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
+                                            }
+                                        }
+                                        Ok(false) => {
+                                            if let Err(e) = window.set_ignore_cursor_events(false) {
+                                                eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
+                                            }
+                                            let _ = window.show();
+                                            let _ = window.set_focus();
+                                        }
+                                        Err(e) => eprintln!("[Tray Menu Error] Checking floating bar visibility: {}", e),
+                                    }
+                                } else {
+                                    eprintln!("[Tray Menu Error] Floating bar window not found for toggle.");
+                                }
+                            }
+                            _ => {
+                                println!("[Tray Menu] Unhandled event: {:?}", event.id());
+                            }
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            println!("[Tray Icon] Left click detected.");
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("floating-bar") {
+                                match window.is_visible() {
+                                    Ok(true) => {
+                                        window.hide().unwrap();
+                                        if let Err(e) = window.set_ignore_cursor_events(true) {
+                                            eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
+                                        }
+                                        println!("[Tray Icon] Floating bar hidden and ignoring clicks.");
+                                    },
+                                    Ok(false) => {
+                                        if let Err(e) = window.set_ignore_cursor_events(false) {
+                                            eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
+                                        }
+                                        window.show().unwrap();
+                                        window.set_focus().unwrap();
+                                        println!("[Tray Icon] Floating bar shown, focused, and accepting clicks.");
+                                    },
+                                    Err(e) => eprintln!("[Tray Icon Error] checking floating bar visibility: {}", e),
+                                }
+                            } else {
+                                 eprintln!("[Tray Icon Error] Floating bar window not found on left click.");
+                            }
+                        }
+                    });
+
+                if let Some(icon_image) = loaded_tauri_icon {
+                    tray_builder = tray_builder.icon(icon_image);
+                }
+
+                if let Some(menu) = tray_menu {
+                    tray_builder = tray_builder.menu(&menu);
+                }
+
+                match tray_builder.build(&tray_app_handle) {
+                    Ok(_) => println!("[Tray Setup] Tray icon configured successfully."),
+                    Err(e) => eprintln!("[Tray Setup Error] Failed to build tray icon: {}", e),
+                }
+            });
+            // --- End of Tray Icon Setup ---
+
+
+            let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {
                 // Register Escape shortcut
-                if let Err(e) = app_handle.global_shortcut().register("Escape") {
+                if let Err(e) = app_handle_shortcuts.global_shortcut().register("Escape") {
                     eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
                 }
 
                 // Register Dictation Toggle Shortcut
                 let dictation_shortcut_str = if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };
-                if let Err(e) = app_handle.global_shortcut().register(dictation_shortcut_str) {
+                if let Err(e) = app_handle_shortcuts.global_shortcut().register(dictation_shortcut_str) {
                      eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_shortcut_str, e);
                 }
             });

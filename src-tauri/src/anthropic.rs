@@ -128,6 +128,10 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
+    // Reset any existing cancellation signal before starting a new query
+    state.reset_cancel();
+    info!("Agent cancellation signal reset at the beginning of submit_query.");
+
     let cancel_rx = state.cancel_rx.clone();
 
     // --- Instantiate Agent Components ---
@@ -305,12 +309,16 @@ pub async fn submit_query(
     };
 
     let payload = BackendResponsePayload { query: query.clone(), response: final_response_payload };
-    if let Some(window) = app_handle.get_webview_window("main") { // Changed from get_window to get_webview_window
+    if let Some(window) = app_handle.get_webview_window("main") {
         window.emit("backend-response", payload)
             .map_err(|e| format!("Emit failed: {}", e))?;
         info!("Final response emitted to frontend.");
     } else {
-        error!("Main window not found, cannot emit final response.");
+        let open_windows: Vec<String> = app_handle.webview_windows().values().map(|w| w.label().to_string()).collect();
+        error!(
+            "Main window with label 'main' not found, cannot emit final response. Currently open window labels: {:?}",
+            open_windows
+        );
     }
 
     Ok(())

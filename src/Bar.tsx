@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { PhysicalSize, Window } from "@tauri-apps/api/window";
-import { Check, Send } from "lucide-react";
+import { emit, listen } from "@tauri-apps/api/event";
+import { LogicalSize, Window } from "@tauri-apps/api/window";
+import { Check, Mic, Send } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import tauriConfig from "../src-tauri/tauri.conf.json";
 import { cn } from "./lib/utils";
@@ -24,7 +24,8 @@ type BarState =
   | "shrinking"
   | "loading"
   | "finishing"
-  | "success";
+  | "success"
+  | "listening";
 
 export function FloatingBar() {
   const [barState, setBarState] = useState<BarState>("default");
@@ -51,7 +52,7 @@ export function FloatingBar() {
           case "default":
             // Smaller window size for collapsed bar (from tauri.conf.json)
             await appWindow?.setSize(
-              new PhysicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
+              new LogicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
             );
             break;
           case "shrinking":
@@ -62,7 +63,12 @@ export function FloatingBar() {
           case "success":
             // Larger window size for expanded bar
             await appWindow?.setSize(
-              new PhysicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
+              new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
+            );
+            break;
+          case "listening":
+            await appWindow?.setSize(
+              new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
             );
             break;
         }
@@ -95,54 +101,28 @@ export function FloatingBar() {
     const query = inputValue.trim();
     if (!query) return;
 
-    // Store the submitted value to display during transitions
-    setLastSubmittedValue(query);
-    setInputValue(""); // Clear input immediately
-    // inputRef.current?.blur(); // REMOVED: Let disabled prop and state changes handle focus/interactivity
+    // Emit events to trigger the standardized loading sequence.
+    // The listeners in this component will handle the UI changes.
+    try {
+      // Announce that a query is about to be submitted.
+      await emit("will-submit-query", { query });
+      console.log(
+        "FloatingBar: Emitted will-submit-query, invoking backend for:",
+        query
+      );
 
-    // First show a brief success state
-    setBarState("success");
-
-    // After success animation, start shrinking animation
-    transitionTimeoutRef.current = setTimeout(() => {
-      setBarState("shrinking");
-
-      // After shrinking animation, show loader and call backend
-      transitionTimeoutRef.current = setTimeout(async () => {
-        setBarState("loading");
-        console.log("Calling backend with query:", query);
-
-        try {
-          // **** Start backend call ****
-          // Invoke the command. We no longer need the direct result here.
-          await invoke("submit_query", { query: query });
-          console.log("Backend call invoked successfully");
-          // **** Backend call finished ****
-
-          // Transition to finishing after backend call *invocation* succeeds
-          // The actual result processing happens in App.tsx via event listener
-          setBarState("finishing");
-          transitionTimeoutRef.current = setTimeout(() => {
-            setBarState("input"); // Go back to input state
-            // Ensure input is focused after state change
-            requestAnimationFrame(() => {
-              if (inputRef.current) inputRef.current.focus();
-            });
-          }, 300); // Finishing duration
-        } catch (error) {
-          console.error("Error submitting query:", error);
-          // Handle error: go back to default after a brief finishing state
-          setBarState("finishing"); // Use finishing state visually
-          transitionTimeoutRef.current = setTimeout(() => {
-            setBarState("input"); // Go back to input state even on error
-            // Ensure input is focused after state change
-            requestAnimationFrame(() => {
-              if (inputRef.current) inputRef.current.focus();
-            });
-          }, 300);
-        }
-      }, 300); // Shrinking duration
-    }, 600); // Success state duration
+      // **** Start backend call ****
+      await invoke("submit_query", { query: query });
+      console.log(
+        "FloatingBar: Backend call invoked successfully, emitting did-submit-query (success)"
+      );
+      // **** Backend call finished ****
+      await emit("did-submit-query", { success: true });
+    } catch (error) {
+      console.error("FloatingBar: Error submitting query:", error);
+      console.log("FloatingBar: Emitting did-submit-query (failure)");
+      await emit("did-submit-query", { success: false });
+    }
   };
 
   const handleInputBlur = () => {
@@ -184,6 +164,117 @@ export function FloatingBar() {
         clearTimeout(transitionTimeoutRef.current);
     };
   }, []);
+
+  // Effect to listen for query submission lifecycle events
+  useEffect(() => {
+    let unlistenWillSubmit: (() => void) | undefined;
+    let unlistenDidSubmit: (() => void) | undefined;
+
+    const setupSubmitListeners = async () => {
+      unlistenWillSubmit = await listen<{ query: string }>(
+        "will-submit-query",
+        (event) => {
+          console.log("FloatingBar Event: will-submit-query", event.payload);
+          const { query } = event.payload;
+          setLastSubmittedValue(query);
+          setInputValue(""); // Clear input field
+
+          if (transitionTimeoutRef.current)
+            clearTimeout(transitionTimeoutRef.current);
+          setBarState("success");
+          transitionTimeoutRef.current = setTimeout(() => {
+            setBarState("shrinking");
+            transitionTimeoutRef.current = setTimeout(() => {
+              setBarState("loading");
+            }, 300); // Shrinking duration
+          }, 600); // Success state duration
+        }
+      );
+
+      unlistenDidSubmit = await listen<{ success: boolean }>(
+        "did-submit-query",
+        (event) => {
+          console.log(
+            "FloatingBar Event: did-submit-query",
+            event.payload,
+            "current state:",
+            barState
+          );
+          // Only transition if we are currently in the 'loading' state
+          if (barState === "loading") {
+            if (transitionTimeoutRef.current)
+              clearTimeout(transitionTimeoutRef.current);
+            setBarState("finishing");
+            transitionTimeoutRef.current = setTimeout(() => {
+              setBarState("input");
+              requestAnimationFrame(() => {
+                if (inputRef.current) inputRef.current.focus();
+              });
+            }, 300); // Finishing duration
+          }
+        }
+      );
+    };
+
+    setupSubmitListeners();
+    return () => {
+      unlistenWillSubmit?.();
+      unlistenDidSubmit?.();
+    };
+  }, [barState, inputRef]); // barState needed for the conditional in unlistenDidSubmit
+
+  // Effect to listen for dictation lifecycle events
+  useEffect(() => {
+    let unlistenDictationStarted: (() => void) | undefined;
+    let unlistenDictationFinished: (() => void) | undefined;
+
+    const setupDictationListeners = async () => {
+      unlistenDictationStarted = await listen<null>(
+        "app-dictation-started",
+        () => {
+          console.log("FloatingBar Event: app-dictation-started");
+          if (transitionTimeoutRef.current)
+            clearTimeout(transitionTimeoutRef.current);
+          setInputValue(""); // Clear any input text
+          setBarState("listening");
+        }
+      );
+
+      unlistenDictationFinished = await listen<{
+        query: string | null;
+        error?: string;
+      }>("app-dictation-finished", (event) => {
+        console.log("FloatingBar Event: app-dictation-finished", event.payload);
+        if (barState === "listening") {
+          // Only act if we were in 'listening' state
+          if (transitionTimeoutRef.current)
+            clearTimeout(transitionTimeoutRef.current);
+          if (event.payload.query) {
+            // A query was successfully dictated.
+            // Transition to 'input' state. The dictation handler should then
+            // emit 'will-submit-query' which will trigger the processing flow.
+            setBarState("input");
+            requestAnimationFrame(() => {
+              // Briefly focus input, though it might be quickly replaced by 'success' state
+              if (inputRef.current) inputRef.current.focus();
+            });
+          } else {
+            // No query from dictation (e.g., cancelled, error). Revert to default.
+            setBarState("shrinking");
+            transitionTimeoutRef.current = setTimeout(() => {
+              setBarState("default");
+            }, 300); // Shrinking duration
+          }
+        }
+      });
+    };
+
+    setupDictationListeners();
+    return () => {
+      unlistenDictationStarted?.();
+      unlistenDictationFinished?.();
+    };
+  }, [barState, inputRef]); // barState needed for conditional, inputRef for focus attempt
 
   // Effect to listen for custom window hover events from backend
   useEffect(() => {
@@ -316,6 +407,8 @@ export function FloatingBar() {
         return "h-[20px] w-[60px] px-2";
       case "finishing":
         return "h-[20px] w-[60px] px-2";
+      case "listening":
+        return "h-[40px] w-[240px] px-3";
       default:
         return "h-[20px] w-[60px] px-2";
     }
@@ -442,6 +535,14 @@ export function FloatingBar() {
           {barState === "loading" && (
             <div className="w-full h-full flex items-center justify-center overflow-hidden">
               <div className="loading-bar-thin"></div>
+            </div>
+          )}
+
+          {/* Listening State Content */}
+          {barState === "listening" && (
+            <div className="w-full h-full flex items-center justify-center overflow-hidden animate-pulse">
+              <Mic size={16} className="mr-2 text-white/70" />
+              <span className="text-sm text-white/80">Listening...</span>
             </div>
           )}
         </div>
