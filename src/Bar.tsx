@@ -325,7 +325,7 @@ export function FloatingBar() {
     <div
       data-window-hovered={isWindowHovered}
       className={cn(
-        "w-screen h-screen flex items-start justify-start p-1"
+        "w-screen h-screen flex items-start justify-start"
         // barState !== "input" && "cursor-pointer"
       )}
       onClick={(e) => {

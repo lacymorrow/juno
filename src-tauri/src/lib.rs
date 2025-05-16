@@ -191,6 +191,8 @@ pub fn run() {
             submit_query,
             anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
+            tts::set_tts_provider_command, // Added for TTS provider selection
+            tts::get_tts_provider_command, // Added for TTS provider selection
             capture_screenshot_command,
             dev_get_focused_element_info,
             capture_element_screenshot_command,

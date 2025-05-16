@@ -253,7 +253,18 @@ function App() {
   // OR that the main input also triggers the event flow.
   // If `submit_query` backend now ONLY emits, this function needs adjustment.
   const submitQuery = async (text: string) => {
+    console.log(
+      "[submitQuery called] Text:",
+      text,
+      "Trimmed empty?",
+      !text.trim(),
+      "isProcessing:",
+      isProcessing,
+      "serverStatus:",
+      serverStatus
+    );
     if (!text.trim() || isProcessing || serverStatus !== "connected") {
+      console.log("[submitQuery] Returning early due to conditions.");
       return;
     }
 
