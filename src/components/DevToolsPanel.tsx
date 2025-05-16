@@ -73,6 +73,7 @@ type LoadingStates = {
   testClickVisualization: boolean; // Added for click visualization testing
   setDeveloperPlayback: boolean; // Added for voice control setting
   playbackAudio: boolean; // Added for playing back audio
+  setTtsProvider: boolean; // Added for TTS Provider selection
 };
 
 // Helper type for file listing result (assuming backend sends this structure)
@@ -132,6 +133,7 @@ const initialLoadingStates: LoadingStates = {
   testClickVisualization: false,
   setDeveloperPlayback: false,
   playbackAudio: false,
+  setTtsProvider: false, // Added
 };
 
 // Type for result data from QA tests
@@ -260,6 +262,7 @@ const DevToolsPanel: React.FC = () => {
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
 
   const [toolHistory, setToolHistory] = useState<ToolUsageEntry[]>([]);
+  const [selectedTtsProvider, setSelectedTtsProvider] = useState<string>("off"); // Added, default to "off"
 
   // Cleanup timeout on component unmount
   useEffect(() => {
@@ -276,6 +279,17 @@ const DevToolsPanel: React.FC = () => {
       console.log("Tool usage event received:", event.payload);
       setToolHistory((prev) => [event.payload, ...prev]);
     });
+
+    // Fetch initial TTS provider state
+    invokeCommand<string>("get_tts_provider_command", {}, undefined).then(
+      (provider) => {
+        if (typeof provider === "string" && provider) {
+          setSelectedTtsProvider(provider);
+        } else {
+          setSelectedTtsProvider("off"); // Default if not set or empty
+        }
+      }
+    );
 
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
@@ -999,6 +1013,27 @@ const DevToolsPanel: React.FC = () => {
     }
   };
 
+  const handleSetTtsProvider = async (newProvider: string) => {
+    try {
+      await invokeCommand(
+        "set_tts_provider_command",
+        { provider: newProvider },
+        "setTtsProvider"
+      );
+      setSelectedTtsProvider(newProvider);
+      toast.success(
+        `AI Response TTS provider set to: ${
+          newProvider === "off"
+            ? "Off"
+            : newProvider.charAt(0).toUpperCase() + newProvider.slice(1)
+        }.`
+      );
+    } catch (e) {
+      console.error("Critical error during set_tts_provider_command:", e);
+      toast.error("Failed to set AI Response TTS provider.");
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Tool History Section */}
@@ -1109,6 +1144,28 @@ const DevToolsPanel: React.FC = () => {
           <span className="text-xs text-muted-foreground flex-1">
             Enables buffering of recorded audio for playback in dev tools.
           </span>
+        </div>
+        {/* AI Response TTS Toggle */}
+        <div className="flex items-center gap-2 pt-2">
+          <Label htmlFor="tts-provider-select" className="text-sm">
+            AI TTS:
+          </Label>
+          <select
+            id="tts-provider-select"
+            value={selectedTtsProvider}
+            onChange={(e) => handleSetTtsProvider(e.target.value)}
+            disabled={loadingStates.setTtsProvider}
+            className="h-8 text-xs border rounded-md px-2 py-1 bg-background text-foreground focus:ring-ring focus:border-ring flex-1"
+            title="Select TTS provider for AI responses"
+          >
+            <option value="off">Off</option>
+            <option value="system">System</option>
+            <option value="elevenlabs">ElevenLabs</option>
+            <option value="replicate">Replicate</option>
+          </select>
+          {loadingStates.setTtsProvider && (
+            <span className="text-xs">Updating...</span>
+          )}
         </div>
       </div>
 
