@@ -1,4 +1,4 @@
-use tauri::{State, AppHandle, Emitter};
+use tauri::{State, AppHandle};
 use crate::state::AppState;
 use crate::voice_control::VoiceController;
 use tracing::info;
@@ -8,16 +8,16 @@ use rubato::{Resampler, FastFixedIn, PolynomialDegree};
 use cpal::{SampleRate, SampleFormat, SupportedStreamConfigRange, StreamError};
 
 #[tauri::command]
-pub async fn start_dictation_command(app_state: State<'_, AppState>) -> Result<(), String> {
+pub async fn start_dictation_command(app_state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
     info!("[Command] start_dictation_command called");
     let voice_controller_arc = app_state.get::<Arc<std::sync::Mutex<VoiceController>>>()
         .ok_or_else(|| "VoiceController not found in AppState".to_string())?;
     let mut voice_controller = voice_controller_arc.lock().map_err(|e| format!("Failed to lock VoiceController: {}", e))?;
-    voice_controller.start_dictation()
+    voice_controller.start_dictation(app_handle)
 }
 
 #[tauri::command]
-pub async fn stop_dictation_command(app_state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
+pub async fn stop_dictation_command(app_state: State<'_, AppState>, _app_handle: AppHandle) -> Result<(), String> {
     info!("[Command] stop_dictation_command called");
     let voice_controller_arc = app_state.get::<Arc<std::sync::Mutex<VoiceController>>>()
         .ok_or_else(|| "VoiceController not found in AppState".to_string())?;
@@ -25,10 +25,7 @@ pub async fn stop_dictation_command(app_state: State<'_, AppState>, app_handle: 
     match voice_controller.stop_dictation() {
         Ok(actively_stopped) => {
             if actively_stopped {
-                info!("[Command] Dictation actively stopped, emitting request_audio_playback_test event.");
-                if let Err(e) = app_handle.emit_to("main", "request_audio_playback_test", ()) {
-                    tracing::warn!("[Command] Failed to emit request_audio_playback_test event: {}", e);
-                }
+                info!("[Command] Dictation actively stopped.");
             } else {
                 info!("[Command] stop_dictation_command called, but no active dictation was stopped (already stopped or no thread).");
             }
@@ -39,12 +36,12 @@ pub async fn stop_dictation_command(app_state: State<'_, AppState>, app_handle: 
 }
 
 #[tauri::command]
-pub async fn toggle_dictation_command(app_state: State<'_, AppState>) -> Result<bool, String> {
+pub async fn toggle_dictation_command(app_state: State<'_, AppState>, app_handle: AppHandle) -> Result<bool, String> {
     info!("[Command] toggle_dictation_command called");
     let voice_controller_arc = app_state.get::<Arc<std::sync::Mutex<VoiceController>>>()
         .ok_or_else(|| "VoiceController not found in AppState".to_string())?;
     let mut voice_controller = voice_controller_arc.lock().map_err(|e| format!("Failed to lock VoiceController: {}", e))?;
-    voice_controller.toggle_dictation()
+    voice_controller.toggle_dictation(app_handle)
 }
 
 #[tauri::command]
@@ -54,6 +51,16 @@ pub async fn get_dictation_status_command(app_state: State<'_, AppState>) -> Res
         .ok_or_else(|| "VoiceController not found in AppState".to_string())?;
     let voice_controller = voice_controller_arc.lock().map_err(|e| format!("Failed to lock VoiceController: {}", e))?;
     Ok(voice_controller.is_dictating())
+}
+
+#[tauri::command]
+pub async fn set_developer_playback_enabled_command(app_state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    info!("[Command] set_developer_playback_enabled_command called with: {}", enabled);
+    let voice_controller_arc = app_state.get::<Arc<std::sync::Mutex<VoiceController>>>()
+        .ok_or_else(|| "VoiceController not found in AppState".to_string())?;
+    let mut voice_controller = voice_controller_arc.lock().map_err(|e| format!("Failed to lock VoiceController: {}", e))?;
+    voice_controller.set_developer_playback_enabled(enabled);
+    Ok(())
 }
 
 #[tauri::command]

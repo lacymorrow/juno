@@ -9,6 +9,8 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use hound; // Ensure hound is imported for writing WAV
+use tauri::AppHandle;
+use tauri::Emitter; // Added Emitter trait for .emit()
 
 const WHISPER_SAMPLE_RATE: u32 = 16000; // Define the constant
 
@@ -33,6 +35,7 @@ pub struct VoiceController {
     // This will be handled by emitting Tauri events later.
     last_processed_audio_buffer: Arc<Mutex<Option<Vec<f32>>>>, // Stores raw audio at original sample rate
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>, // New field
+    developer_playback_enabled: bool, // New field for developer setting
 }
 
 impl VoiceController {
@@ -56,6 +59,7 @@ impl VoiceController {
             audio_thread: None,
             last_processed_audio_buffer: Arc::new(Mutex::new(None)), // Initialize new field
             actual_recording_sample_rate: Arc::new(Mutex::new(None)), // Initialize new field
+            developer_playback_enabled: false, // Initialize new field
             // current_transcription will be managed differently, likely by emitting events
         })
     }
@@ -120,7 +124,7 @@ impl VoiceController {
 
     // --- Dictation Methods ---
 
-    pub fn start_dictation(&mut self) -> Result<(), String> {
+    pub fn start_dictation(&mut self, app_handle: AppHandle) -> Result<(), String> {
         if self.is_dictating {
             info!("[VoiceController] Dictation already active.");
             return Ok(());
@@ -128,7 +132,8 @@ impl VoiceController {
         info!("[VoiceController] Starting dictation...");
 
         // Clear the last processed audio buffer for the new session
-        info!("[VoiceController] Clearing previous audio buffer for playback.");
+        // This will only be populated if developer_playback_enabled is true
+        info!("[VoiceController] Clearing previous audio buffer (will be populated for playback if dev setting is on).");
         if let Ok(mut buffer_guard) = self.last_processed_audio_buffer.lock() {
             *buffer_guard = None; // Or Some(Vec::new()) if you prefer to always have a Vec
         } else {
@@ -192,6 +197,8 @@ impl VoiceController {
         let model_path_for_thread = self.model_path.clone();
         let last_buffer_arc_for_thread = Arc::clone(&self.last_processed_audio_buffer);
         let actual_rate_for_thread = actual_rate; // Pass actual_rate to the thread
+        let developer_playback_enabled_for_thread = self.developer_playback_enabled; // Pass the flag to the thread
+        let app_handle_for_thread = app_handle.clone(); // Clone AppHandle for the thread
 
         let audio_thread_handle = thread::spawn(move || {
             // Create Whisper context and state within the audio thread
@@ -324,11 +331,15 @@ impl VoiceController {
 
                         // Now, `raw_full_session_audio` contains all audio at `actual_rate_for_thread`.
                         // Store this for playback.
-                        if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
-                            *buffer_guard = Some(raw_full_session_audio.clone());
-                            info!("[AudioThread] Final raw session audio ({} samples at {} Hz) stored for playback.", raw_full_session_audio.len(), actual_rate_for_thread);
+                        if developer_playback_enabled_for_thread {
+                            if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
+                                *buffer_guard = Some(raw_full_session_audio.clone());
+                                info!("[AudioThread] Final raw session audio ({} samples at {} Hz) stored for playback (dev setting enabled).", raw_full_session_audio.len(), actual_rate_for_thread);
+                            } else {
+                                eprintln!("[AudioThread] Failed to lock last_processed_audio_buffer for final raw storage.");
+                            }
                         } else {
-                            eprintln!("[AudioThread] Failed to lock last_processed_audio_buffer for final raw storage.");
+                            info!("[AudioThread] Developer playback is disabled. Raw session audio not stored in playback buffer.");
                         }
 
                         // --- Prepare audio for transcription (resample if necessary) ---
@@ -411,7 +422,7 @@ impl VoiceController {
                             }
                             // --- END DEBUG ---
 
-                            let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
+                            let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
                             params.set_temperature(0.0);
 
                             match whisper_state.full(params, &audio_for_transcription[..]) {
@@ -426,15 +437,16 @@ impl VoiceController {
                                         }
                                     }
                                     info!("[AudioThread] Transcription successful: {}", transcription_text);
-                                    // TODO: Emit Tauri event with transcription_text
-                                    // For example:
-                                    // if let Some(handle) = app_handle_for_thread_option.as_ref() {
-                                    //     handle.emit_all("transcription_result", transcription_text).unwrap_or_else(|e| {
-                                    //         eprintln!("[AudioThread] Failed to emit transcription event: {:?}", e);
-                                    //     });
-                                    // } else {
-                                    //      eprintln!("[AudioThread] AppHandle not available for emitting transcription event.");
-                                    // }
+                                    // Emit Tauri event with transcription_text
+                                    if !transcription_text.is_empty() {
+                                        if let Err(e) = app_handle_for_thread.emit("dictation_transcription_result", &transcription_text) {
+                                            eprintln!("[AudioThread] Failed to emit dictation_transcription_result event: {:?}", e);
+                                        } else {
+                                            info!("[AudioThread] Emitted dictation_transcription_result event with transcription: {}", transcription_text);
+                                        }
+                                    } else {
+                                        info!("[AudioThread] Transcription was empty, not emitting event.");
+                                    }
                                 }
                                 Err(e) => {
                                     eprintln!("[AudioThread] Transcription failed: {:?}", e);
@@ -453,11 +465,13 @@ impl VoiceController {
                     Err(TryRecvError::Disconnected) => {
                         eprintln!("[AudioThread] Control channel disconnected.");
                         // Store whatever audio has been collected so far before breaking
-                        if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
-                            *buffer_guard = Some(raw_full_session_audio.clone()); // store raw audio
-                            info!("[AudioThread] Stored {} raw samples for playback due to disconnect.", raw_full_session_audio.len());
-                        } else {
-                            eprintln!("[AudioThread] Failed to lock last_buffer_arc for storing on disconnect.");
+                        if developer_playback_enabled_for_thread {
+                            if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
+                                *buffer_guard = Some(raw_full_session_audio.clone()); // store raw audio
+                                info!("[AudioThread] Stored {} raw samples for playback due to disconnect (dev setting enabled).", raw_full_session_audio.len());
+                            } else {
+                                eprintln!("[AudioThread] Failed to lock last_buffer_arc for storing on disconnect.");
+                            }
                         }
                         break; // Exit loop
                     }
@@ -525,11 +539,13 @@ impl VoiceController {
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                         eprintln!("[AudioThread] Audio data channel disconnected.");
-                         if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
-                            *buffer_guard = Some(raw_full_session_audio.clone()); // Store raw audio
-                             info!("[AudioThread] Stored {} raw samples for playback due to audio disconnect.", raw_full_session_audio.len());
-                        } else {
-                            eprintln!("[AudioThread] Failed to lock last_buffer_arc for storing on audio disconnect.");
+                         if developer_playback_enabled_for_thread {
+                             if let Ok(mut buffer_guard) = last_buffer_arc_for_thread.lock() {
+                                *buffer_guard = Some(raw_full_session_audio.clone()); // Store raw audio
+                                 info!("[AudioThread] Stored {} raw samples for playback due to audio disconnect (dev setting enabled).", raw_full_session_audio.len());
+                            } else {
+                                eprintln!("[AudioThread] Failed to lock last_buffer_arc for storing on audio disconnect.");
+                            }
                         }
                         break; // Exit loop
                     }
@@ -578,7 +594,7 @@ impl VoiceController {
             if let Some(audio) = &*buffer_guard {
                 info!("[VoiceController] Dictation stopped. Playback buffer (raw) contains {} samples.", audio.len());
             } else {
-                info!("[VoiceController] Dictation stopped. Playback buffer (raw) is empty.");
+                info!("[VoiceController] Dictation stopped. Playback buffer (raw) is empty or not populated (dev setting might be off).");
             }
         }
 
@@ -586,16 +602,22 @@ impl VoiceController {
         Ok(true)
     }
 
-    pub fn toggle_dictation(&mut self) -> Result<bool, String> {
+    pub fn toggle_dictation(&mut self, app_handle: AppHandle) -> Result<bool, String> {
         if self.is_dictating {
             self.stop_dictation().map(|_| false)
         } else {
-            self.start_dictation().map(|_| true)
+            self.start_dictation(app_handle).map(|_| true)
         }
     }
 
     pub fn is_dictating(&self) -> bool {
         self.is_dictating
+    }
+
+    // Method to enable/disable developer playback buffering
+    pub fn set_developer_playback_enabled(&mut self, enabled: bool) {
+        self.developer_playback_enabled = enabled;
+        info!("[VoiceController] Developer playback buffering set to: {}", enabled);
     }
 
     // Method to retrieve the current transcription (this will likely be removed or changed
@@ -645,6 +667,7 @@ mod tests {
     use std::io::Write;
     use tempfile::Builder;
     use std::path::Path;
+    use tauri::test::mock_app; // Required for creating a mock AppHandle
 
     // Helper to create a dummy WAV file for testing (very basic)
     fn create_dummy_wav(path: &Path, duration_ms: u32, sample_rate: u32, channels: u16, bits_per_sample: u16) -> std::io::Result<()> {
@@ -702,6 +725,8 @@ mod tests {
      // Add a basic test for dictation toggle
      #[test]
      fn test_dictation_toggle() {
+        let mock_app = mock_app(); // Create a mock app
+        let app_handle = mock_app.handle(); // Get a handle
          let model_dir = Builder::new().prefix("whisper_model").tempdir().unwrap();
          let model_path = model_dir.path().join("dummy_model.bin");
          File::create(&model_path).unwrap().write_all(&[0u8; 10]).unwrap();
@@ -710,10 +735,12 @@ mod tests {
 
          assert!(!controller.is_dictating());
 
-         controller.toggle_dictation().unwrap();
+         // Pass the app_handle to toggle_dictation
+         controller.toggle_dictation(app_handle.clone()).unwrap();
          assert!(controller.is_dictating());
 
-         controller.toggle_dictation().unwrap();
+         // Pass the app_handle again
+         controller.toggle_dictation(app_handle.clone()).unwrap();
          assert!(!controller.is_dictating());
      }
 
