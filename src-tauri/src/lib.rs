@@ -123,7 +123,7 @@ pub fn run() {
     // --- Initialize VoiceController and add to AppState ---
     // TODO: Make model path configurable (e.g., via .env, config file, or UI setting)
     let model_path_env = std::env::var("VOICE_MODEL_PATH");
-    let model_path = model_path_env.as_deref().unwrap_or("models/ggml-tiny.en.bin"); // Changed back to base model
+    let model_path = model_path_env.as_deref().unwrap_or(constants::paths::DEFAULT_MODEL_PATH);
 
     info!("[Setup] Attempting to initialize VoiceController with model: {}", model_path);
     match VoiceController::new(model_path) {
@@ -155,8 +155,8 @@ pub fn run() {
                 let app_state_instance = app.state::<state::AppState>();
                 app_state_instance.signal_cancel();
                 info!("[GlobalShortcut] Agent cancellation signal sent via Escape.");
-                if let Err(e) = app.emit("agent-stopping", ()) {
-                    eprintln!("[GlobalShortcut Error] Failed to emit agent-stopping event: {}", e);
+                if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
+                    eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
                 }
             } else if shortcut == &dictation_toggle_shortcut && event.state() == ShortcutState::Pressed {
                 info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
@@ -169,8 +169,8 @@ pub fn run() {
                                 match voice_controller.toggle_dictation(app_handle_clone.clone()) {
                                     Ok(is_now_dictating) => {
                                         info!("[GlobalShortcut] Dictation toggled. New state: {}", if is_now_dictating { "ON" } else { "OFF" });
-                                        if let Err(e) = app_handle_clone.emit("dictation_state_changed", is_now_dictating) {
-                                            tracing::warn!("[GlobalShortcut] Failed to emit dictation_state_changed event: {}", e);
+                                        if let Err(e) = app_handle_clone.emit(constants::events::DICTATION_STATE_CHANGED, is_now_dictating) {
+                                            tracing::warn!("[GlobalShortcut] Failed to emit {} event: {}", constants::events::DICTATION_STATE_CHANGED, e);
                                         }
                                         // If dictation was just turned OFF, request playback
                                         if !is_now_dictating {
@@ -302,8 +302,8 @@ pub fn run() {
                 };
 
                 // Create a simple menu
-                let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, "quit", "Quit Juno", true, None::<&str>).unwrap());
-                let toggle_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, "toggle_floating_bar", "Toggle Floating Bar", true, None::<&str>).unwrap());
+                let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).unwrap());
+                let toggle_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::TOGGLE_FLOATING_BAR, "Toggle Floating Bar", true, None::<&str>).unwrap());
                 let tray_menu = Menu::with_items(&tray_app_handle, &[
                     &quit_item,
                     &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
@@ -314,13 +314,13 @@ pub fn run() {
                 let mut tray_builder = TrayIconBuilder::new()
                     .on_menu_event(move |app_handle, event| {
                         match event.id().as_ref() {
-                            "quit" => {
+                            constants::tray_menu_ids::QUIT => {
                                 println!("[Tray Menu] Quit requested.");
                                 app_handle.exit(0);
                             }
-                            "toggle_floating_bar" => {
+                            constants::tray_menu_ids::TOGGLE_FLOATING_BAR => {
                                 println!("[Tray Menu] Toggle floating bar requested.");
-                                if let Some(window) = app_handle.get_webview_window("floating-bar") {
+                                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
                                     match window.is_visible() {
                                         Ok(true) => {
                                             let _ = window.hide();
@@ -355,7 +355,7 @@ pub fn run() {
                         {
                             println!("[Tray Icon] Left click detected.");
                             let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("floating-bar") {
+                            if let Some(window) = app.get_webview_window(constants::window_labels::FLOATING_BAR) {
                                 match window.is_visible() {
                                     Ok(true) => {
                                         window.hide().unwrap();
@@ -396,10 +396,10 @@ pub fn run() {
             // --- End of Tray Icon Setup ---
 
             // --- Setup Floating Bar State Listener ---
-            if let Some(floating_bar_window) = app.get_webview_window("floating-bar") {
+            if let Some(floating_bar_window) = app.get_webview_window(constants::window_labels::FLOATING_BAR) {
                 let app_handle_for_listener = app.handle().clone(); // Clone AppHandle for the listener
-                floating_bar_window.listen("bar-state-changed", move |event| {
-                    info!("[Event: bar-state-changed] Received raw: {:?}", event.payload());
+                floating_bar_window.listen(constants::events::BAR_STATE_CHANGED, move |event| {
+                    info!("[Event: {}] Received raw: {:?}", constants::events::BAR_STATE_CHANGED, event.payload());
                     let payload_str = event.payload(); // Assuming this is &str as per compiler error
                     match serde_json::from_str::<BarStateChangeEventPayload>(payload_str) {
                         Ok(parsed_payload) => {
@@ -415,18 +415,18 @@ pub fn run() {
                                     info!("[AppState Update] bar_ui_state updated to: {}", new_state_str);
                                 }
                                 Err(e) => {
-                                    tracing::error!("[Event: bar-state-changed] Failed to lock AppState.bar_ui_state: {}", e);
+                                    tracing::error!("[Event: {}] Failed to lock AppState.bar_ui_state: {}", constants::events::BAR_STATE_CHANGED, e);
                                 }
                             }
                         }
                         Err(e) => {
-                            tracing::error!("[Event: bar-state-changed] Failed to parse payload into BarStateChangeEventPayload: {}. Payload: {}", e, payload_str);
+                            tracing::error!("[Event: {}] Failed to parse payload into BarStateChangeEventPayload: {}. Payload: {}", constants::events::BAR_STATE_CHANGED, e, payload_str);
                         }
                     }
                 });
-                info!("[Setup] Listener for 'bar-state-changed' event attached to floating-bar window.");
+                info!("[Setup] Listener for '{}' event attached to floating-bar window.", constants::events::BAR_STATE_CHANGED);
             } else {
-                tracing::error!("[Setup] Floating-bar window not found, cannot listen for bar-state-changed event.");
+                tracing::error!("[Setup] Floating-bar window not found, cannot listen for {} event.", constants::events::BAR_STATE_CHANGED);
             }
 
             // --- End of Floating Bar State Listener Setup ---
@@ -446,10 +446,10 @@ pub fn run() {
             });
 
             // Listen for audio playback test request
-            if let Some(main_window) = app.get_webview_window("main") {
+            if let Some(main_window) = app.get_webview_window(constants::window_labels::MAIN) {
                 let app_handle_for_listener = app.handle().clone();
-                let _event_id = main_window.listen("request_audio_playback_test", move |_event| {
-                    info!("[Event Listener] Received request_audio_playback_test event.");
+                let _event_id = main_window.listen(constants::events::REQUEST_AUDIO_PLAYBACK_TEST, move |_event| {
+                    info!("[Event Listener] Received {} event.", constants::events::REQUEST_AUDIO_PLAYBACK_TEST);
                     let ah_clone = app_handle_for_listener.clone();
                     tauri::async_runtime::spawn(async move {
                         let app_state = ah_clone.state::<crate::state::AppState>(); // Ensure crate::state path is correct
@@ -461,7 +461,7 @@ pub fn run() {
                 });
                 // Note: .map_err().unwrap() removed as .listen() returns EventId not Result
             } else {
-                tracing::error!("[Setup] Main window not found, cannot listen for request_audio_playback_test event.");
+                tracing::error!("[Setup] Main window not found, cannot listen for {} event.", constants::events::REQUEST_AUDIO_PLAYBACK_TEST);
             }
 
             Ok(())
@@ -503,7 +503,7 @@ mod macos_tracking {
     extern "C" fn mouse_entered(_this: &Object, _cmd: Sel, _event: cocoa_id) {
         info!("[Tracking Delegate] Mouse Entered");
         if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-             if let Some(window) = handle.get_webview_window("floating-bar") {
+             if let Some(window) = handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
                 let _ = window.emit("mouse-entered-window", ()); // Emit specific event
                  info!("[Tracking Delegate] Emitted mouse-entered-window");
              } else {
@@ -515,7 +515,7 @@ mod macos_tracking {
     extern "C" fn mouse_exited(_this: &Object, _cmd: Sel, _event: cocoa_id) {
          info!("[Tracking Delegate] Mouse Exited");
          if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-             if let Some(window) = handle.get_webview_window("floating-bar") {
+             if let Some(window) = handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
                 let _ = window.emit("mouse-left-window", ()); // Emit specific event
                  info!("[Tracking Delegate] Emitted mouse-left-window");
              } else {

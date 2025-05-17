@@ -32,6 +32,6 @@ pub mod tray_menu_ids {
 }
 
 pub mod paths {
-    pub const DEFAULT_MODEL_PATH: &str = "models/ggml-base.en.bin";
+    pub const DEFAULT_MODEL_PATH: &str = "models/ggml-tiny.en.bin";
     pub const DEBUG_AUDIO_WAV_PATH: &str = "../debug_live_audio.wav"; // Relative to src-tauri/src or project root?
 }
