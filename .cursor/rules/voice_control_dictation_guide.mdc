@@ -27,7 +27,7 @@ This document outlines the implementation of voice control and dictation feature
 
 3.  **Tauri Commands and Global Shortcut (`[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)`)**:
     *   **Initialization**:
-        *   `VoiceController` is instantiated during app startup in the `run()` function. The path to the Whisper model is sourced from the `VOICE_MODEL_PATH` environment variable or defaults to `"models/ggml-base.en.bin"`.
+        *   `VoiceController` is instantiated during app startup in the `run()` function. The path to the Whisper model is sourced from the `VOICE_MODEL_PATH` environment variable or defaults to `"models/ggml-tiny.en.bin"`.
     *   **Tauri Commands**:
         *   `start_dictation_command`: Calls `voice_controller.start_dictation()`.
         *   `stop_dictation_command`: Calls `voice_controller.stop_dictation()`.
