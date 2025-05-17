@@ -131,6 +131,15 @@ impl VoiceController {
         }
         info!("[VoiceController] Starting dictation...");
 
+        // Emit app-dictation-started event
+        if let Err(e) = app_handle.emit("app-dictation-started", ()) {
+            tracing::warn!("[VoiceController] Failed to emit app-dictation-started event: {}", e);
+            // Optionally, decide if this failure should prevent dictation from starting
+            // return Err(format!("Failed to emit app-dictation-started: {}", e));
+        } else {
+            info!("[VoiceController] Emitted app-dictation-started event.");
+        }
+
         // Clear the last processed audio buffer for the new session
         // This will only be populated if developer_playback_enabled is true
         info!("[VoiceController] Clearing previous audio buffer (will be populated for playback if dev setting is on).");
@@ -202,6 +211,7 @@ impl VoiceController {
 
         let audio_thread_handle = thread::spawn(move || {
             // Create Whisper context and state within the audio thread
+            info!("[AudioThread] Thread started. Initializing Whisper context and state."); // Added log
             let whisper_context_thread = match WhisperContext::new_with_params(&model_path_for_thread, WhisperContextParameters::default()) {
                  Ok(ctx) => ctx,
                  Err(e) => {
@@ -287,13 +297,12 @@ impl VoiceController {
             }
 
             let mut audio_buffer_for_whisper_chunks: Vec<f32> = Vec::new(); // Buffer for raw audio for chunk processing
-            const BUFFER_DURATION_MS: u64 = 5000;
-            let buffer_capacity_samples_for_chunks = (actual_rate_for_thread as u64 * BUFFER_DURATION_MS / 1000) as usize;
-
+            const BUFFER_DURATION_MS: u64 = 5000; // This is for the *final* transcription, not partials yet
+            const PARTIAL_BUFFER_DURATION_MS: u64 = 1500; // Let's try 1.5 seconds for partials
+            let partial_buffer_capacity_samples = (actual_rate_for_thread as u64 * PARTIAL_BUFFER_DURATION_MS / 1000) as usize;
 
             // Buffer to store all audio at its original sample rate for the entire session
             let mut raw_full_session_audio: Vec<f32> = Vec::new();
-
 
             loop {
                 // Check for control messages (e.g., Stop)
@@ -306,9 +315,64 @@ impl VoiceController {
                         // Therefore, we DO NOT need to append `audio_buffer_for_whisper_chunks` here again.
                         // Clearing it is fine if it wasn't cleared by chunk processing, but it doesn't need to be added to raw_full_session_audio.
                         if !audio_buffer_for_whisper_chunks.is_empty() {
-                            info!("[AudioThread] `audio_buffer_for_whisper_chunks` has {} raw samples remaining. These are already in `raw_full_session_audio`. Clearing chunk buffer.", audio_buffer_for_whisper_chunks.len());
-                            audio_buffer_for_whisper_chunks.clear();
+                            info!("[AudioThread] `audio_buffer_for_whisper_chunks` has {} raw samples remaining from partial processing. These are already in `raw_full_session_audio`. Clearing chunk buffer for final transcription.", audio_buffer_for_whisper_chunks.len());
+                            // We will transcribe this remaining bit before the full one if needed, or just rely on full.
+                            // For now, let's ensure it's cleared before full transcription.
+                           // audio_buffer_for_whisper_chunks.clear(); // Clearing might be premature if we want to process it
                         }
+
+                        // --- Process any remaining audio in audio_buffer_for_whisper_chunks for a last partial result ---
+                        if !audio_buffer_for_whisper_chunks.is_empty() {
+                            info!("[AudioThread] Processing final remaining chunk of {} samples for partial result before full transcription.", audio_buffer_for_whisper_chunks.len());
+                            let audio_to_transcribe_partial_final = if actual_rate_for_thread != WHISPER_SAMPLE_RATE {
+                                if let Some(ref mut r) = chunk_resampler {
+                                    match r.process(&[audio_buffer_for_whisper_chunks.clone()], None) { // Clone because it's used again or cleared
+                                        Ok(mut resampled) if !resampled.is_empty() => resampled.remove(0),
+                                        _ => {
+                                            eprintln!("[AudioThread] Final partial resampling failed or produced empty. Using raw.");
+                                            audio_buffer_for_whisper_chunks.clone() // Fallback, though rate is wrong
+                                        }
+                                    }
+                                } else {
+                                    audio_buffer_for_whisper_chunks.clone() // No resampler, use raw (rate might be wrong)
+                                }
+                            } else {
+                                audio_buffer_for_whisper_chunks.clone()
+                            };
+
+                            if !audio_to_transcribe_partial_final.is_empty() {
+                                let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
+                                params.set_n_threads(4); // Example, adjust as needed
+                                // params.set_no_context(true); // Important for streaming if context isn't managed across chunks
+                                params.set_print_special(false);
+                                params.set_print_progress(false);
+                                params.set_print_realtime(false);
+                                params.set_print_timestamps(false);
+                                // For partial results, we might want to suppress "end of text" tokens if the library allows.
+                                // Or handle them on the frontend.
+
+                                match whisper_state.full(params, &audio_to_transcribe_partial_final[..]) {
+                                    Ok(_) => {
+                                        let num_segments = whisper_state.full_n_segments().unwrap_or(0);
+                                        let mut partial_text = String::new();
+                                        for i in 0..num_segments {
+                                            if let Ok(segment) = whisper_state.full_get_segment_text(i) {
+                                                partial_text.push_str(&segment);
+                                            }
+                                        }
+                                        if !partial_text.is_empty() {
+                                            info!("[AudioThread] Emitting final app-dictation-partial-result: {}", partial_text);
+                                            if let Err(e) = app_handle_for_thread.emit("app-dictation-partial-result", serde_json::json!({ "partial": partial_text })) {
+                                                eprintln!("[AudioThread] Error emitting final app-dictation-partial-result: {:?}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => eprintln!("[AudioThread] Error transcribing final partial chunk: {:?}", e),
+                                }
+                            }
+                            audio_buffer_for_whisper_chunks.clear(); // Clear after processing
+                        }
+                         // --- End process remaining audio ---
 
                         // Flush the chunk_resampler if it was being used for any partial data
                         if let Some(ref mut r) = chunk_resampler {
@@ -327,7 +391,6 @@ impl VoiceController {
                                 Err(e) => eprintln!("[AudioThread] Error flushing chunk_resampler: {:?}", e),
                             }
                         }
-
 
                         // Now, `raw_full_session_audio` contains all audio at `actual_rate_for_thread`.
                         // Store this for playback.
@@ -388,10 +451,9 @@ impl VoiceController {
                         }
                         // --- End Prepare audio for transcription ---
 
-
                         // --- Perform Transcription with `audio_for_transcription` ---
                         if !audio_for_transcription.is_empty() {
-                            info!("[AudioThread] Starting transcription of {} audio samples (at {} Hz).", audio_for_transcription.len(), WHISPER_SAMPLE_RATE);
+                            info!("[AudioThread] Starting FINAL transcription of {} audio samples (at {} Hz).", audio_for_transcription.len(), WHISPER_SAMPLE_RATE);
 
                             // --- DEBUG: Save `audio_for_transcription` to a WAV file in the project root ---
                             let debug_wav_path = "../debug_live_audio.wav"; // Changed path
@@ -424,6 +486,10 @@ impl VoiceController {
 
                             let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
                             params.set_temperature(0.0);
+                            // Ensure whisper_state is reset or managed if it was used for partials.
+                            // For now, we assume it's okay for a final full transcription if partials were minimal.
+                            // If partials heavily used whisper_state, it might need re-creation or reset.
+                            // whisper_state = whisper_context_thread.create_state().expect("Failed to recreate state for final transcription");
 
                             match whisper_state.full(params, &audio_for_transcription[..]) {
                                 Ok(_) => {
@@ -433,34 +499,49 @@ impl VoiceController {
                                         if let Ok(segment) = whisper_state.full_get_segment_text(i) {
                                             transcription_text.push_str(&segment);
                                         } else {
-                                            eprintln!("[AudioThread] Failed to get segment {} text.", i);
+                                            eprintln!("[AudioThread] Failed to get segment {} text for final transcription.", i);
                                         }
                                     }
-                                    info!("[AudioThread] Transcription successful: {}", transcription_text);
+                                    info!("[AudioThread] FINAL Transcription successful: {}", transcription_text);
                                     // Emit Tauri event with transcription_text
                                     if !transcription_text.is_empty() {
-                                        if let Err(e) = app_handle_for_thread.emit("dictation_transcription_result", &transcription_text) {
-                                            eprintln!("[AudioThread] Failed to emit dictation_transcription_result event: {:?}", e);
+                                        // This is the FINAL result, not a partial.
+                                        // The frontend expects `app-dictation-finished` with a query.
+                                        // And Bar.tsx listens for "app-dictation-finished"
+                                        // Payload: { query: string | null; error?: string; }
+                                        if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": transcription_text, "error": null })) {
+                                            eprintln!("[AudioThread] Failed to emit app-dictation-finished event: {:?}", e);
                                         } else {
-                                            info!("[AudioThread] Emitted dictation_transcription_result event with transcription: {}", transcription_text);
+                                            info!("[AudioThread] Emitted app-dictation-finished event with transcription: {}", transcription_text);
                                         }
                                     } else {
-                                        info!("[AudioThread] Transcription was empty, not emitting event.");
+                                        info!("[AudioThread] FINAL Transcription was empty, emitting app-dictation-finished with null query.");
+                                         if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": null, "error": "Empty transcription" })) {
+                                            eprintln!("[AudioThread] Failed to emit app-dictation-finished (empty) event: {:?}", e);
+                                        }
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("[AudioThread] Transcription failed: {:?}", e);
+                                    eprintln!("[AudioThread] FINAL Transcription failed: {:?}", e);
+                                    // Emit app-dictation-finished with an error
+                                    let error_message = format!("Transcription failed: {:?}", e);
+                                     if let Err(e_emit) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": null, "error": error_message })) {
+                                        eprintln!("[AudioThread] Failed to emit app-dictation-finished (error) event: {:?}", e_emit);
+                                    }
                                 }
                             }
                         } else {
-                            info!("[AudioThread] No audio data to transcribe.");
+                            info!("[AudioThread] FINAL audio_for_transcription is empty. Emitting app-dictation-finished with null query.");
+                            if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": null, "error": "No audio to transcribe" })) {
+                                eprintln!("[AudioThread] Failed to emit app-dictation-finished (empty) event: {:?}", e);
+                            }
                         }
-                        // --- End Transcription ---
+                        // --- End Perform Transcription ---
 
                         break; // Exit loop
                     },
                     Err(TryRecvError::Empty) => {
-                        // No control message, continue processing audio
+                        // No control messages, continue audio processing
                     },
                     Err(TryRecvError::Disconnected) => {
                         eprintln!("[AudioThread] Control channel disconnected.");
@@ -486,41 +567,40 @@ impl VoiceController {
                         // Append to audio_buffer_for_whisper_chunks for periodic chunk processing
                         audio_buffer_for_whisper_chunks.append(&mut data_chunk);
 
-                        if audio_buffer_for_whisper_chunks.len() >= buffer_capacity_samples_for_chunks {
-                            info!("[AudioThread] Processing audio chunk of {} samples (at {} Hz) for potential interim Whisper output.",
-                                audio_buffer_for_whisper_chunks.len(), actual_rate_for_thread);
+                        if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
+                            info!("[AudioThread] Partial buffer full ({} samples). Processing for partial transcription.", audio_buffer_for_whisper_chunks.len());
 
-                            let audio_to_process_for_chunk: Vec<f32>;
-                            if let Some(ref mut r) = chunk_resampler {
-                                // Resample if chunk_resampler is Some
-                                let waves_in = vec![audio_buffer_for_whisper_chunks.clone()];
-                                match r.process(&waves_in, None) {
-                                    Ok(mut resampled_waves) => {
-                                        if resampled_waves.is_empty() || resampled_waves[0].is_empty() {
-                                            eprintln!("[AudioThread] Resampling (chunk) produced empty audio.");
-                                            audio_to_process_for_chunk = Vec::new();
-                                        } else {
-                                            info!("[AudioThread] Resampled audio (chunk) to {} samples at {} Hz.",
-                                                resampled_waves[0].len(), WHISPER_SAMPLE_RATE);
-                                            audio_to_process_for_chunk = resampled_waves.remove(0);
+                            // 1. Resample if necessary (this is the audio_buffer_for_whisper_chunks, which is at actual_rate_for_thread)
+                            let audio_to_transcribe_partial: Vec<f32>; // Declaration
+                            if actual_rate_for_thread != WHISPER_SAMPLE_RATE {
+                                if let Some(ref mut r) = chunk_resampler {
+                                    // Process the current chunk.
+                                    // The resampler might have internal state, so we pass the whole buffer.
+                                    // It should return only the resampled data corresponding to this input.
+                                    match r.process(&[audio_buffer_for_whisper_chunks.clone()], None) { // Clone because it's cleared later
+                                        Ok(mut resampled_frames_multichannel) => {
+                                            if !resampled_frames_multichannel.is_empty() {
+                                                audio_to_transcribe_partial = resampled_frames_multichannel.remove(0); // ASSIGN HERE
+                                            } else {
+                                                eprintln!("[AudioThread] Partial resampling produced empty output.");
+                                                audio_to_transcribe_partial = Vec::new();
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!("[AudioThread] Error during partial resampling: {:?}. Using raw (potentially wrong rate).", e);
+                                            audio_to_transcribe_partial = audio_buffer_for_whisper_chunks.clone(); // Fallback
                                         }
                                     }
-                                    Err(e) => {
-                                        eprintln!("[AudioThread] Error during resampling (chunk): {:?}", e);
-                                        audio_to_process_for_chunk = Vec::new();
-                                    }
+                                } else {
+                                     eprintln!("[AudioThread] Chunk resampler not available, using raw for partial (rate {} vs {}).", actual_rate_for_thread, WHISPER_SAMPLE_RATE);
+                                    audio_to_transcribe_partial = audio_buffer_for_whisper_chunks.clone(); // No resampler, use raw (rate might be wrong)
                                 }
                             } else {
-                                // No chunk_resampler (either rates match or creation failed),
-                                // so if rates differ, this chunk processing might not be ideal for Whisper.
-                                // However, we proceed with raw audio for this chunk if no resampler.
-                                if actual_rate_for_thread != WHISPER_SAMPLE_RATE {
-                                     eprintln!("[AudioThread] Warning: Chunk processing with differing sample rates and no active chunk_resampler. Quality may be affected.");
-                                }
-                                audio_to_process_for_chunk = audio_buffer_for_whisper_chunks.clone();
-                            };
+                                audio_to_transcribe_partial = audio_buffer_for_whisper_chunks.clone(); // Already at correct sample rate
+                            }
 
-                            if !audio_to_process_for_chunk.is_empty() {
+                            // 2. Transcribe the (potentially resampled) chunk
+                            if !audio_to_transcribe_partial.is_empty() {
                                 // This is where you'd call whisper_state.full for the chunk if you
                                 // want interim transcription results. For now, it's just logged.
                                 // let params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 5 });
@@ -528,7 +608,7 @@ impl VoiceController {
                                 //     eprintln!("[AudioThread] Whisper processing error (chunk): {:?}", e);
                                 // } else { ... log transcription ... }
                                 info!("[AudioThread] Chunk ready for interim processing ({} samples at {} Hz). Actual processing skipped for now.",
-                                    audio_to_process_for_chunk.len(),
+                                    audio_to_transcribe_partial.len(),
                                     if chunk_resampler.is_some() { WHISPER_SAMPLE_RATE } else { actual_rate_for_thread });
                             }
                             audio_buffer_for_whisper_chunks.clear();
@@ -557,7 +637,7 @@ impl VoiceController {
         self.audio_thread = Some((audio_thread_handle, control_tx));
         self.is_dictating = true;
 
-        info!("[VoiceController] Dictation started.");
+        info!("[VoiceController] Dictation started successfully. Audio thread launched.");
         Ok(())
     }
 
