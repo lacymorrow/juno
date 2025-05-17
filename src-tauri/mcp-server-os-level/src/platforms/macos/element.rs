@@ -817,7 +817,7 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn get_tree(&self) -> Result<ElementTreeNode, AutomationError> {
-        let attributes = self.attributes();
+        let all_attrs = self.get_all_attributes()?;
         let children = self.children().unwrap_or_default();
         let child_nodes = children
             .into_iter()
@@ -825,10 +825,7 @@ impl UIElementImpl for MacOSUIElement {
             .collect();
 
         Ok(ElementTreeNode {
-            role: attributes.role,
-            label: attributes.label,
-            description: attributes.description,
-            bounds: self.bounds().ok(), // Get bounds, ignore errors for the tree
+            attributes: all_attrs,
             children: child_nodes,
         })
     }
