@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Emitter};
 use tracing::{info, warn, error};
 use futures::FutureExt;
+use crate::constants;
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -245,9 +246,9 @@ struct GenericContentPayload {
 // Emit an event when a tool is used
 // This function would be called from your tool execution logic
 fn emit_agent_event(app_handle: &AppHandle, event: AgentEvent) {
-    info!("Emitting agent-event: {:?}", event);
-    if let Err(e) = app_handle.emit("agent-event", event) {
-        warn!("Failed to emit agent-event: {}", e);
+    info!("Emitting {}: {:?}", constants::events::AGENT_EVENT, event);
+    if let Err(e) = app_handle.emit(constants::events::AGENT_EVENT, event) {
+        warn!("Failed to emit {}: {}", constants::events::AGENT_EVENT, e);
     }
 }
 
