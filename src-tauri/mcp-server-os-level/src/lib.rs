@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc};
 use std::str::FromStr;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use serde_json::{json, from_value};
 use std::fs;
 use std::process::Command;
@@ -32,14 +32,6 @@ pub use element::{ElementTreeNode, UIElement, UIElementAttributes};
 pub use errors::AutomationError;
 pub use locator::Locator;
 pub use selector::Selector;
-
-// Log Entry Struct
-#[derive(Serialize, Deserialize, Clone)]
-pub struct LogEntry {
-    timestamp: u64,
-    pub level: String,
-    pub message: String,
-}
 
 // --- Tool Definition Structures (for Anthropic) ---
 
@@ -68,6 +60,7 @@ pub struct ToolDefinition {
 // --- End Tool Definition Structures ---
 
 // Define a new struct to hold click result information - move to module level
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ClickResult {
     pub method: String,
     pub coordinates: Option<(f64, f64)>,
@@ -75,54 +68,51 @@ pub struct ClickResult {
 }
 
 /// The main entry point for UI automation
+#[derive(Clone)] // Added from HEAD
 pub struct Desktop {
     engine: Arc<dyn platforms::AccessibilityEngine + Send + Sync>,
-    log_buffer: Arc<Mutex<Vec<LogEntry>>>,
-    max_logs: usize,
+    #[allow(dead_code)] // Added from HEAD
+    use_background_apps: bool,
+    #[allow(dead_code)] // Added from HEAD
+    activate_app: bool,
 }
 
 impl Desktop {
     /// Create a new instance with the default platform-specific implementation
     pub fn new(use_background_apps: bool, activate_app: bool) -> Result<Self, AutomationError> {
-        let boxed_engine = platforms::create_engine(use_background_apps, activate_app)?;
-        let engine = Arc::from(boxed_engine);
-        Ok(Self {
-            engine,
-            log_buffer: Arc::new(Mutex::new(Vec::new())),
-            max_logs: 1000,
-        })
-    }
+        info!("Attempting to initialize desktop engine...");
+        let engine_result = if cfg!(target_os = "macos") {
+            info!("Initializing macOS engine with use_background_apps: {}, activate_app: {}", use_background_apps, activate_app);
+            platforms::macos::MacOSEngine::new(use_background_apps, activate_app)
+                .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
+        } else if cfg!(target_os = "windows") {
+            warn!("Windows platform is not fully supported yet, attempting initialization.");
+            // This would be the place for windows::WindowsEngine::new if available
+            Err(AutomationError::UnsupportedPlatform("Windows desktop automation is not yet fully implemented.".to_string()))
+        } else if cfg!(target_os = "linux") {
+            warn!("Linux platform is not fully supported yet, attempting initialization.");
+            Err(AutomationError::UnsupportedPlatform("Linux desktop automation is not yet fully implemented.".to_string()))
+        } else {
+            error!("Unsupported platform for desktop engine initialization.");
+            Err(AutomationError::UnsupportedPlatform(
+                "Desktop engine initialization failed: Unsupported operating system".to_string(),
+            ))
+        };
 
-    // Internal log function
-    pub fn log(&self, level: &str, message: String) {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        let mut buffer = self.log_buffer.lock().unwrap();
-        buffer.push(LogEntry {
-            timestamp,
-            level: level.to_string(),
-            message,
-        });
-
-        // Trim old logs if buffer exceeds max size
-        if buffer.len() > self.max_logs {
-            let excess = buffer.len() - self.max_logs;
-            buffer.drain(0..excess);
+        match engine_result {
+            Ok(engine) => {
+                info!("Desktop engine initialized successfully.");
+                Ok(Self {
+                    engine,
+                    use_background_apps,
+                    activate_app,
+                })
+            }
+            Err(e) => {
+                error!("Failed to initialize desktop engine: {}", e);
+                Err(e)
+            }
         }
-    }
-
-    /// Get log entries from the buffer
-    pub fn get_logs(&self) -> Vec<LogEntry> {
-        self.log_buffer.lock().unwrap().clone()
-    }
-
-    /// Clear the log buffer
-    pub fn clear_logs(&self) {
-        self.log_buffer.lock().unwrap().clear();
-        self.log("info", "Log buffer cleared.".to_string());
     }
 
     /// Get the root UI element representing the entire desktop
@@ -158,6 +148,106 @@ impl Desktop {
     /// Open a URL in a specified browser (or default browser if None)
     pub fn open_url(&self, url: &str, browser: Option<&str>) -> Result<UIElement, AutomationError> {
         self.engine.open_url(url, browser)
+    }
+
+    /// Wait for a specified duration
+    pub fn wait(&self, duration_ms: u64) -> Result<(), AutomationError> {
+        self.engine.wait(duration_ms)
+    }
+
+    /// Get clipboard content
+    pub fn get_clipboard_content(&self) -> Result<String, AutomationError> {
+        self.engine.get_clipboard_content()
+    }
+
+    /// Set clipboard content
+    pub fn set_clipboard_content(&self, content: &str) -> Result<(), AutomationError> {
+        self.engine.set_clipboard_content(content)
+    }
+
+    /// Type text into a UI element
+    pub fn type_text(&self, text: &str) -> Result<(), AutomationError> {
+        self.engine.type_text(text)
+    }
+
+    /// Press a key
+    pub fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.press_key(key_name, modifier)
+    }
+
+    /// Hold a key
+    pub fn hold_key(&self, key: &str, duration_ms: Option<u64>) -> Result<(), AutomationError> {
+        self.engine.hold_key(key, duration_ms)
+    }
+
+    /// Release a key
+    pub fn release_key(&self, key: &str) -> Result<(), AutomationError> {
+        self.engine.release_key(key)
+    }
+
+    /// Left click
+    pub fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.left_click(x, y, modifiers)
+    }
+
+    /// Right click
+    pub fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.right_click(x, y, modifiers)
+    }
+
+    /// Middle click
+    pub fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.middle_click(x, y, modifiers)
+    }
+
+    /// Double click
+    pub fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.double_click(x, y, modifiers)
+    }
+
+    /// Triple click
+    pub fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
+        self.engine.triple_click(x, y, modifiers)
+    }
+
+    /// Mouse move
+    pub fn mouse_move(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.mouse_move(x, y)
+    }
+
+    /// Left mouse down
+    pub fn left_mouse_down(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.left_mouse_down(x, y)
+    }
+
+    /// Left mouse up
+    pub fn left_mouse_up(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        self.engine.left_mouse_up(x, y)
+    }
+
+    /// Left click drag
+    pub fn left_click_drag(&self, start_x: f64, start_y: f64, end_x: f64, end_y: f64) -> Result<(), AutomationError> {
+        self.engine.left_click_drag(start_x, start_y, end_x, end_y)
+    }
+
+    /// Cursor position
+    pub fn cursor_position(&self) -> Result<(f64, f64), AutomationError> {
+        self.engine.cursor_position()
+    }
+
+    /// Scroll at position
+    pub fn scroll_at_position(&self, x: f64, y: f64, direction: &str, amount: f64) -> Result<(), AutomationError> {
+        self.engine.scroll_at_position(x, y, direction, amount)
+    }
+
+    /// Scroll at current position
+    pub fn scroll_at_current_position(&self, direction: &str, amount: f64) -> Result<(), AutomationError> {
+        self.engine.scroll_at_current_position(direction, amount)
+    }
+
+    /// List windows
+    pub fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
+        self.engine.list_windows()
     }
 
     /// List available tools for the LLM
@@ -264,7 +354,7 @@ impl Desktop {
                     required: vec!["selector".to_string()],
                 },
             },
-            ToolDefinition {
+             ToolDefinition {
                 name: "scroll_element".to_string(),
                 description: "Scrolls a UI element specified by a selector.".to_string(),
                 input_schema: ToolInputSchema {
@@ -278,7 +368,7 @@ impl Desktop {
                             type_: "string".to_string(),
                             description: "The direction to scroll ('up', 'down', 'left', 'right').".to_string(),
                         }),
-                        ("amount".to_string(), ToolParameter {
+                         ("amount".to_string(), ToolParameter {
                             type_: "number".to_string(),
                             description: "The amount/distance to scroll (platform interpretation varies).".to_string(),
                         }),
@@ -307,7 +397,7 @@ impl Desktop {
                 self.open_url(url, browser)?;
                 Ok(serde_json::json!({"status": "success", "message": format!("URL '{}' opened.", url)}))
             }
-            "get_focused_element_info" => {
+             "get_focused_element_info" => {
                 let element = self.focused_element()?;
                 let attributes = element.attributes();
                 // Convert attributes to JSON value
@@ -324,14 +414,14 @@ impl Desktop {
                 if let Some(element) = element_option {
                     let attributes = element.attributes();
                     let result_json = serde_json::to_value(attributes)
-                        .map_err(|e| AutomationError::Internal(format!("Failed to serialize element attributes: {}", e)))?;
-                    Ok(serde_json::json!({
+                         .map_err(|e| AutomationError::Internal(format!("Failed to serialize element attributes: {}", e)))?;
+                     Ok(serde_json::json!({
                         "status": "success",
                         "element_found": true,
                         "attributes": result_json
-                    }))
+                     }))
                 } else {
-                    Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
+                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
                 }
             }
             "click" => {
@@ -348,44 +438,44 @@ impl Desktop {
                         "coordinates": click_result.coordinates
                     }))
                 } else {
-                    Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
+                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
                 }
             }
-            "type_text" => {
-                let selector_str = args.get("selector")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
-                let text_to_type = args.get("text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'text' argument".to_string()))?;
+             "type_text" => {
+                 let selector_str = args.get("selector")
+                     .and_then(|v| v.as_str())
+                     .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
+                 let text_to_type = args.get("text")
+                     .and_then(|v| v.as_str())
+                     .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'text' argument".to_string()))?;
                 let selector: Selector = selector_str.into();
-                let element_option = self.locator(selector).first()?;
-                if let Some(element) = element_option {
-                    element.type_text(text_to_type)?;
-                    Ok(serde_json::json!({
-                        "status": "success",
-                        "message": format!("Typed text into element matching selector '{}'", selector_str)
-                    }))
-                } else {
-                    Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
-                }
-            }
-            "get_element_attributes" => {
-                let selector_str = args.get("selector")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
-                let selector: Selector = selector_str.into();
-                let element_option = self.locator(selector).first()?;
-                if let Some(element) = element_option {
-                    let attributes = element.attributes();
-                    let result_json = serde_json::to_value(attributes)
-                        .map_err(|e| AutomationError::Internal(format!("Failed to serialize element attributes: {}", e)))?;
-                    Ok(result_json)
-                } else {
-                    Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
-                }
-            }
-            "scroll_element" => {
+                 let element_option = self.locator(selector).first()?;
+                 if let Some(element) = element_option {
+                     element.type_text(text_to_type)?;
+                     Ok(serde_json::json!({
+                         "status": "success",
+                         "message": format!("Typed text into element matching selector '{}'", selector_str)
+                     }))
+                 } else {
+                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
+                 }
+             }
+             "get_element_attributes" => {
+                  let selector_str = args.get("selector")
+                      .and_then(|v| v.as_str())
+                      .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
+                  let selector: Selector = selector_str.into();
+                  let element_option = self.locator(selector).first()?;
+                   if let Some(element) = element_option {
+                      let attributes = element.attributes();
+                      let result_json = serde_json::to_value(attributes)
+                          .map_err(|e| AutomationError::Internal(format!("Failed to serialize element attributes: {}", e)))?;
+                      Ok(result_json)
+                  } else {
+                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
+                  }
+              }
+             "scroll_element" => {
                 let selector_str = args.get("selector")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| AutomationError::InvalidArgument("Missing or invalid 'selector' argument".to_string()))?;
@@ -405,7 +495,7 @@ impl Desktop {
                     }))
                 } else {
                     Err(AutomationError::ElementNotFound(format!("Element not found for selector: {}", selector_str)))
-                }
+            }
             }
             _ => Err(AutomationError::UnsupportedOperation(format!("Tool '{}' not recognized.", name))),
         }
