@@ -20,6 +20,7 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
+use serde::Deserialize; // Added for deserializing payload struct
 
 // macOS specific imports
 #[cfg(target_os = "macos")]
@@ -64,6 +65,13 @@ async fn qa_transcribe_file(model_path: String, audio_path: String) -> Result<St
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
+}
+
+// Define a struct for the expected payload of bar-state-changed event
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct BarStateChangeEventPayload {
+    new_state: String,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -386,6 +394,41 @@ pub fn run() {
             });
             // --- End of Tray Icon Setup ---
 
+            // --- Setup Floating Bar State Listener ---
+            if let Some(floating_bar_window) = app.get_webview_window("floating-bar") {
+                let app_handle_for_listener = app.handle().clone(); // Clone AppHandle for the listener
+                floating_bar_window.listen("bar-state-changed", move |event| {
+                    info!("[Event: bar-state-changed] Received raw: {:?}", event.payload());
+                    let payload_str = event.payload(); // Assuming this is &str as per compiler error
+                    match serde_json::from_str::<BarStateChangeEventPayload>(payload_str) {
+                        Ok(parsed_payload) => {
+                            let new_state_str = &parsed_payload.new_state;
+                            // Get AppState from the AppHandle inside the closure
+                            let app_state = app_handle_for_listener.state::<state::AppState>();
+                            // Clone the Arc for the bar_ui_state to extend its lifetime
+                            let bar_ui_state_arc = app_state.bar_ui_state.clone();
+                            let lock_result = bar_ui_state_arc.lock(); // Assign lock result to a variable
+                            match lock_result { // Match on the result
+                                Ok(mut bar_state_guard) => {
+                                    *bar_state_guard = new_state_str.to_string();
+                                    info!("[AppState Update] bar_ui_state updated to: {}", new_state_str);
+                                }
+                                Err(e) => {
+                                    tracing::error!("[Event: bar-state-changed] Failed to lock AppState.bar_ui_state: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("[Event: bar-state-changed] Failed to parse payload into BarStateChangeEventPayload: {}. Payload: {}", e, payload_str);
+                        }
+                    }
+                });
+                info!("[Setup] Listener for 'bar-state-changed' event attached to floating-bar window.");
+            } else {
+                tracing::error!("[Setup] Floating-bar window not found, cannot listen for bar-state-changed event.");
+            }
+
+            // --- End of Floating Bar State Listener Setup ---
 
             let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {

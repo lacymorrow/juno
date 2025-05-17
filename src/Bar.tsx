@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { LogicalSize, Window } from "@tauri-apps/api/window";
-import { Check, Mic, Send } from "lucide-react";
+import { Check, Mic, Send, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import tauriConfig from "../src-tauri/tauri.conf.json";
 import { cn } from "./lib/utils";
@@ -25,12 +25,18 @@ type BarState =
   | "loading"
   | "finishing"
   | "success"
-  | "listening";
+  | "listening"
+  | "error"
+  | "transcribing"
+  | "speaking";
 
 export function FloatingBar() {
   const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
+  const [currentError, setCurrentError] = useState<string | null>(null);
+  const [transcriptionText, setTranscriptionText] = useState<string>("");
+  const [spokenText, setSpokenText] = useState<string>("");
   const inputRef = useRef<HTMLInputElement>(null);
   const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
@@ -61,12 +67,11 @@ export function FloatingBar() {
           case "expanding":
           case "input":
           case "success":
-            // Larger window size for expanded bar
-            await appWindow?.setSize(
-              new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
-            );
-            break;
           case "listening":
+          case "error":
+          case "transcribing":
+          case "speaking":
+            // Larger window size for expanded bar
             await appWindow?.setSize(
               new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
             );
@@ -178,6 +183,7 @@ export function FloatingBar() {
           const { query } = event.payload;
           setLastSubmittedValue(query);
           setInputValue(""); // Clear input field
+          setCurrentError(null); // Clear any previous error
 
           if (transitionTimeoutRef.current)
             clearTimeout(transitionTimeoutRef.current);
@@ -191,7 +197,7 @@ export function FloatingBar() {
         }
       );
 
-      unlistenDidSubmit = await listen<{ success: boolean }>(
+      unlistenDidSubmit = await listen<{ success: boolean; error?: string }>(
         "did-submit-query",
         (event) => {
           console.log(
@@ -200,17 +206,34 @@ export function FloatingBar() {
             "current state:",
             barState
           );
-          // Only transition if we are currently in the 'loading' state
           if (barState === "loading") {
             if (transitionTimeoutRef.current)
               clearTimeout(transitionTimeoutRef.current);
-            setBarState("finishing");
-            transitionTimeoutRef.current = setTimeout(() => {
-              setBarState("input");
-              requestAnimationFrame(() => {
-                if (inputRef.current) inputRef.current.focus();
-              });
-            }, 300); // Finishing duration
+
+            if (event.payload.success) {
+              setBarState("finishing");
+              transitionTimeoutRef.current = setTimeout(() => {
+                setBarState("input");
+                requestAnimationFrame(() => {
+                  if (inputRef.current) inputRef.current.focus();
+                });
+              }, 300); // Finishing duration
+            } else {
+              // Error handling
+              setCurrentError(
+                event.payload.error ||
+                  `Failed: ${lastSubmittedValue}` ||
+                  "An unexpected error occurred."
+              );
+              setBarState("error");
+              transitionTimeoutRef.current = setTimeout(() => {
+                setBarState("input");
+                setCurrentError(null); // Clear error after timeout
+                requestAnimationFrame(() => {
+                  if (inputRef.current) inputRef.current.focus();
+                });
+              }, 3000); // Error state duration
+            }
           }
         }
       );
@@ -227,6 +250,7 @@ export function FloatingBar() {
   useEffect(() => {
     let unlistenDictationStarted: (() => void) | undefined;
     let unlistenDictationFinished: (() => void) | undefined;
+    let unlistenDictationPartialResult: (() => void) | undefined; // Listener for partial results
 
     const setupDictationListeners = async () => {
       unlistenDictationStarted = await listen<null>(
@@ -236,7 +260,23 @@ export function FloatingBar() {
           if (transitionTimeoutRef.current)
             clearTimeout(transitionTimeoutRef.current);
           setInputValue(""); // Clear any input text
+          setTranscriptionText(""); // Clear previous transcription
           setBarState("listening");
+        }
+      );
+
+      // Listen for partial dictation results
+      unlistenDictationPartialResult = await listen<{ partial: string }>(
+        "app-dictation-partial-result",
+        (event) => {
+          console.log(
+            "FloatingBar Event: app-dictation-partial-result",
+            event.payload
+          );
+          if (barState === "listening" || barState === "transcribing") {
+            setTranscriptionText(event.payload.partial);
+            setBarState("transcribing"); // Ensure state is transcribing when we have partials
+          }
         }
       );
 
@@ -245,17 +285,21 @@ export function FloatingBar() {
         error?: string;
       }>("app-dictation-finished", (event) => {
         console.log("FloatingBar Event: app-dictation-finished", event.payload);
-        if (barState === "listening") {
-          // Only act if we were in 'listening' state
+        setTranscriptionText(""); // Clear transcription on finish
+
+        if (barState === "listening" || barState === "transcribing") {
+          // Only act if we were in a dictation state
           if (transitionTimeoutRef.current)
             clearTimeout(transitionTimeoutRef.current);
           if (event.payload.query) {
             // A query was successfully dictated.
-            // Transition to 'input' state. The dictation handler should then
-            // emit 'will-submit-query' which will trigger the processing flow.
+            // Transition to 'input' state. The dictation handler (elsewhere)
+            // should then emit 'will-submit-query' which will trigger the processing flow.
             setBarState("input");
+            // The actual inputValue will be set by the global dictation handler that emits will-submit-query
+            // For now, we can pre-fill it, but the will-submit-query will overwrite it if dictation handler sets it differently.
+            // setInputValue(event.payload.query); // Optional: pre-fill input for immediate visibility
             requestAnimationFrame(() => {
-              // Briefly focus input, though it might be quickly replaced by 'success' state
               if (inputRef.current) inputRef.current.focus();
             });
           } else {
@@ -273,8 +317,52 @@ export function FloatingBar() {
     return () => {
       unlistenDictationStarted?.();
       unlistenDictationFinished?.();
+      unlistenDictationPartialResult?.(); // Cleanup partial result listener
     };
   }, [barState, inputRef]); // barState needed for conditional, inputRef for focus attempt
+
+  // Effect to listen for TTS lifecycle events
+  useEffect(() => {
+    let unlistenTtsStarted: (() => void) | undefined;
+    let unlistenTtsFinished: (() => void) | undefined;
+
+    const setupTtsListeners = async () => {
+      unlistenTtsStarted = await listen<{ text: string }>(
+        "app-tts-started",
+        (event) => {
+          console.log("FloatingBar Event: app-tts-started", event.payload);
+          if (transitionTimeoutRef.current) {
+            clearTimeout(transitionTimeoutRef.current);
+          }
+          setSpokenText(event.payload.text);
+          setBarState("speaking");
+        }
+      );
+
+      unlistenTtsFinished = await listen<null>("app-tts-finished", () => {
+        console.log("FloatingBar Event: app-tts-finished");
+        // Transition back to input or default. Input is likely more common.
+        setBarState("input");
+        setSpokenText("");
+        requestAnimationFrame(() => {
+          if (inputRef.current) inputRef.current.focus();
+        });
+      });
+    };
+
+    setupTtsListeners();
+
+    return () => {
+      unlistenTtsStarted?.();
+      unlistenTtsFinished?.();
+    };
+  }, [inputRef]); // inputRef for focusing
+
+  // Effect to emit bar state changes
+  useEffect(() => {
+    console.log("FloatingBar: Emitting bar-state-changed", barState);
+    emit("bar-state-changed", { newState: barState }).catch(console.error);
+  }, [barState]);
 
   // Effect to listen for custom window hover events from backend
   useEffect(() => {
@@ -404,10 +492,16 @@ export function FloatingBar() {
       case "shrinking":
         return "h-[20px] w-[60px] px-2";
       case "loading":
-        return "h-[20px] w-[60px] px-2";
+        return "h-[40px] w-[240px] px-3";
       case "finishing":
         return "h-[20px] w-[60px] px-2";
       case "listening":
+        return "h-[40px] w-[240px] px-3";
+      case "error":
+        return "h-[40px] w-[240px] px-3";
+      case "transcribing":
+        return "h-[40px] w-[240px] px-3";
+      case "speaking":
         return "h-[40px] w-[240px] px-3";
       default:
         return "h-[20px] w-[60px] px-2";
@@ -438,6 +532,7 @@ export function FloatingBar() {
             flex items-center justify-center bg-black/90 backdrop-blur-md text-white
             rounded-full shadow-lg border border-white/20 overflow-hidden
             transition-all duration-300 ease-in-out
+            [will-change:width,height]
             ${getBarStyles()}
             ${barState === "default" ? "cursor-pointer" : ""}
             `,
@@ -533,7 +628,10 @@ export function FloatingBar() {
 
           {/* Loading State Content */}
           {barState === "loading" && (
-            <div className="w-full h-full flex items-center justify-center overflow-hidden">
+            <div className="w-full h-full flex flex-col items-center justify-center overflow-hidden px-2">
+              <span className="text-xs text-white/70 truncate w-full text-center pb-1">
+                {lastSubmittedValue}
+              </span>
               <div className="loading-bar-thin"></div>
             </div>
           )}
@@ -543,6 +641,41 @@ export function FloatingBar() {
             <div className="w-full h-full flex items-center justify-center overflow-hidden animate-pulse">
               <Mic size={16} className="mr-2 text-white/70" />
               <span className="text-sm text-white/80">Listening...</span>
+            </div>
+          )}
+
+          {/* Transcribing State Content */}
+          {barState === "transcribing" && (
+            <div className="w-full h-full flex items-center justify-start overflow-hidden px-3">
+              <Mic size={16} className="mr-2 text-blue-400 flex-shrink-0" />
+              <span className="text-sm text-white/90 truncate">
+                {transcriptionText || "Transcribing..."}
+              </span>
+            </div>
+          )}
+
+          {/* Speaking State Content */}
+          {barState === "speaking" && (
+            <div className="w-full h-full flex items-center justify-start overflow-hidden px-3">
+              <Volume2
+                size={16}
+                className="mr-2 text-purple-400 flex-shrink-0"
+              />
+              <span className="text-sm text-white/90 truncate">
+                {spokenText || "Speaking..."}
+              </span>
+            </div>
+          )}
+
+          {/* Error State Content */}
+          {barState === "error" && (
+            <div className="flex items-center justify-between w-full h-full">
+              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap pl-2 text-sm text-red-400 font-medium">
+                {currentError || "Error processing"}
+              </span>
+              <div className="flex items-center justify-center h-6 w-6 rounded-full bg-red-500">
+                <X size={12} className="text-black" />
+              </div>
             </div>
           )}
         </div>
