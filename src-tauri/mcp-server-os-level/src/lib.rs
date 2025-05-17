@@ -9,11 +9,7 @@ use serde_json;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc};
-use std::str::FromStr;
 use tracing::{error, info, warn};
-use serde_json::{json, from_value};
-use std::fs;
-use std::process::Command;
 
 // Make element module public
 pub mod element;
