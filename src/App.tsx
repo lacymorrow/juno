@@ -163,21 +163,34 @@ function App() {
 
   // Listen for transcription results from dictation
   useEffect(() => {
-    const unlisten = listen<string>(
-      "dictation_transcription_result",
+    const unlisten = listen<{ query?: string | null; error?: string | null }>( // Define the expected payload structure
+      "app-dictation-finished",
       (event) => {
-        console.log(
-          "Received dictation_transcription_result event:",
-          event.payload
-        );
-        const transcribedText = event.payload;
+        // Listen for "app-dictation-finished"
+        console.log("Received app-dictation-finished event:", event.payload);
+        const transcribedText = event.payload?.query; // Extract text from payload.query
+        const error = event.payload?.error;
+
+        if (error) {
+          console.error("Dictation error:", error);
+          // Optionally, display this error to the user in the chat or via a notification
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `Dictation failed: ${error}`,
+            },
+          ]);
+          return; // Stop further processing if there was an error
+        }
+
         if (transcribedText && transcribedText.trim() !== "") {
           // Submit the transcribed text as a query to the agent.
           // The backend-response listener will handle adding both user and assistant messages.
           submitQuery(transcribedText, true); // Pass true: this is from dictation
         } else {
           console.log(
-            "Received empty or whitespace-only transcription, not submitting."
+            "Received empty, whitespace-only, or null transcription, not submitting."
           );
         }
       }
@@ -186,7 +199,7 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, []); // Empty dependency array means this runs once on mount and cleans up on unmount
+  }, []);
 
   // Check server status on mount
   useEffect(() => {
