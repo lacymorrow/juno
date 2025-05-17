@@ -23,15 +23,15 @@ To run a transcription test from the command line:
 
 ```bash
 # Example assuming you are in the project root and building/running with cargo
-cargo run --manifest-path src-tauri/Cargo.toml -- --transcribe-model-path ./models/ggml-base.en.bin --transcribe-audio-path ./path/to/your/test_audio.wav
+cargo run --manifest-path src-tauri/Cargo.toml -- --transcribe-model-path ./models/ggml-tiny.en.bin --transcribe-audio-path ./path/to/your/test_audio.wav
 
 # Or, if running a pre-built executable:
-# ./target/debug/your-app-name --transcribe-model-path ./models/ggml-base.en.bin --transcribe-audio-path ./path/to/your/test_audio.wav
+# ./target/debug/your-app-name --transcribe-model-path ./models/ggml-tiny.en.bin --transcribe-audio-path ./path/to/your/test_audio.wav
 ```
 
 **Key Points:**
 
-*   Replace `./models/ggml-base.en.bin` with the actual path to your Whisper model file. Standard practice is to keep models in a `models/` directory at the root of the project or `src-tauri`.
+*   Replace `./models/ggml-tiny.en.bin` with the actual path to your Whisper model file. Standard practice is to keep models in a `models/` directory at the root of the project or `src-tauri`.
 *   Replace `./path/to/your/test_audio.wav` with the actual path to your sample WAV audio file (16kHz, mono PCM format is recommended).
 *   The application will output the transcription result to the console or an error if the process fails.
 *   This CLI command will execute the test and then the application will exit. It does not launch the full Tauri GUI.
