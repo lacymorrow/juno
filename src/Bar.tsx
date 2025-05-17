@@ -41,10 +41,18 @@ export function FloatingBar() {
   const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const isPreparingToDrag = useRef(false); // Added: Flag for drag operation
+  const [isAnimatingSize, setIsAnimatingSize] = useState(false); // For conditional backdrop-blur
 
   // For debugging - log state changes
   useEffect(() => {
     console.log("Bar state changed to:", barState);
+    if (barState === "expanding" || barState === "shrinking") {
+      setIsAnimatingSize(true);
+    } else {
+      // Set to false when not in a direct size-changing animation state
+      // This allows blur to be active in stable states like 'input', 'default', 'loading' etc.
+      setIsAnimatingSize(false);
+    }
   }, [barState]);
 
   // Window resize effect
@@ -529,13 +537,14 @@ export function FloatingBar() {
           data-tauri-drag-region
           className={cn(
             `
-            flex items-center justify-center bg-black/90 backdrop-blur-md text-white
+            flex items-center justify-center bg-black/90 text-white
             rounded-full shadow-lg border border-white/20 overflow-hidden
             transition-all duration-300 ease-in-out
             [will-change:width,height]
             ${getBarStyles()}
             ${barState === "default" ? "cursor-pointer" : ""}
             `,
+            !isAnimatingSize && "backdrop-blur-md", // Conditionally apply backdrop-blur
             // Add slight size increase on hover only when in default state
             barState === "default" && isWindowHovered && "scale-105"
           )}
