@@ -3,6 +3,7 @@ description:
 globs:
 alwaysApply: false
 ---
+<<<<<<< HEAD
 This document outlines the general structure of this Tauri v2 project and how its React frontend and Rust backend components interact, particularly concerning the chat functionality.
 
 **Core Structure:**
@@ -37,3 +38,5 @@ Communication between the React frontend and the Rust backend is achieved throug
 
 *   **Frontend State:** React's `useState` and `useCallback` are used for managing UI state within components like `[src/App.tsx](mdc:src/App.tsx)` (e.g., current query, conversation history, server status).
 *   **Backend State:** Tauri's state management (`State<'_, AppState>`) is used to share data across commands and within the Rust application. The `AppState` struct is defined in `[src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)` and managed by Tauri.
+=======
+>>>>>>> main

@@ -149,7 +149,6 @@ pub fn run() {
             // TODO: Make the dictation shortcut configurable
             let dictation_toggle_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
 
-
             if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
                 println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
                 let app_state_instance = app.state::<state::AppState>();
@@ -269,7 +268,6 @@ pub fn run() {
             qa_test_select_text,
             qa_test_scroll,
             qa_transcribe_file, // Add the new QA command here
-            // App Life Cycle
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -309,7 +307,6 @@ pub fn run() {
                     &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
                     &toggle_item,
                 ]).map_err(|e| eprintln!("[Tray Setup Error] Failed to create tray menu: {}", e)).ok();
-
 
                 let mut tray_builder = TrayIconBuilder::new()
                     .on_menu_event(move |app_handle, event| {

@@ -128,10 +128,6 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
-    // Reset any existing cancellation signal before starting a new query
-    state.reset_cancel();
-    info!("Agent cancellation signal reset at the beginning of submit_query.");
-
     let cancel_rx = state.cancel_rx.clone();
 
     // --- Instantiate Agent Components ---
@@ -241,84 +237,44 @@ pub async fn submit_query(
     info!("Starting agent run...");
     let agent_result = agent_runner.run(query.clone(), cancel_rx).await;
 
-    // It's important to get a fresh read of tts_provider state here,
-    // as it might have been changed by the user during the agent's run.
-    let current_tts_provider = match state.tts_provider.lock() {
-        Ok(guard) => guard.clone(), // Clone the String value from the guard
-        Err(poisoned) => {
-            error!("Failed to lock tts_provider due to poisoning: {}. Defaulting to 'off'.", poisoned);
-            "off".to_string() // Default to "off" if mutex is poisoned
-        }
-    };
-    info!("TTS provider at end of agent run: {}", current_tts_provider);
-
     state.reset_cancel();
     info!("Agent cancellation signal reset.");
 
     // --- Process Agent Result ---
-    let mut final_response_text = String::new();
-    let agent_final_state_str: String;
-
-    match agent_result {
-        Ok(message) => {
-            final_response_text = message;
-            agent_final_state_str = "Finished".to_string();
+    let final_response = match agent_result {
+        Ok(message) => SubmitQueryResult {
+            text: message,
+            audio_base64: None, // Add TTS later if needed
+            agent_state: "Finished".to_string(),
+            screenshot_base64: None, // Capture screenshot if needed
         },
         Err(e) => {
-            let err_msg = format!("Agent run failed: {}", e);
-            error!("{}", err_msg);
-            final_response_text = err_msg; // Send error as text
-            agent_final_state_str = "Failed".to_string();
+            error!("Agent run failed: {}", e);
+            // Map AgentError to a user-friendly state/message
+            let (state_str, msg) = match e {
+                AgentError::Terminated => ("Cancelled".to_string(), "Agent execution was cancelled.".to_string()),
+                AgentError::MaxStepsReached => ("Failed".to_string(), "Agent reached maximum steps.".to_string()),
+                _ => ("Failed".to_string(), format!("Agent error: {}", e)),
+            };
+            SubmitQueryResult {
+                text: msg,
+                audio_base64: None,
+                agent_state: state_str,
+                screenshot_base64: None,
+            }
         }
     };
 
-    let mut audio_b64: Option<String> = None;
-    if current_tts_provider.to_lowercase() != "off" && !final_response_text.is_empty() && agent_final_state_str == "Finished" {
-        info!("TTS provider '{}' is active and agent finished successfully, attempting to generate audio for: '{}'", current_tts_provider, final_response_text.chars().take(50).collect::<String>());
-        // submit_query already has `state: State<'_, AppState>` which invoke_tts needs.
-        match crate::tts::invoke_tts(final_response_text.clone(), state).await {
-            Ok(b64_str) => {
-                if b64_str == "TTS_DISABLED_BY_SETTING" {
-                    info!("TTS generation was skipped by setting (this might happen if provider was 'off' despite earlier check, or if invoke_tts internally decided to disable).");
-                } else if b64_str.is_empty() {
-                    info!("TTS returned empty audio string.");
-                } else {
-                    audio_b64 = Some(b64_str);
-                    info!("TTS audio generated successfully.");
-                }
-            }
-            Err(e) => {
-                error!("TTS generation failed: {}", e);
-                // Optionally, communicate this failure to the frontend if desired,
-                // but for now, we just log it and send no audio.
-            }
-        }
-    } else if current_tts_provider.to_lowercase() == "off" {
-        info!("TTS is set to 'off', skipping audio generation.");
-    } else if final_response_text.is_empty() {
-        info!("Final response text is empty, skipping TTS.");
-    } else if agent_final_state_str != "Finished" {
-        info!("Agent did not finish successfully (state: {}), skipping TTS for error message.", agent_final_state_str);
-    }
+    info!("Agent run complete. Final state: {}", final_response.agent_state);
 
-    let final_response_payload = SubmitQueryResult {
-        text: final_response_text,
-        audio_base64: audio_b64,
-        agent_state: agent_final_state_str,
-        screenshot_base64: None, // Placeholder for screenshot
-    };
-
-    let payload = BackendResponsePayload { query: query.clone(), response: final_response_payload };
-    if let Some(window) = app_handle.get_webview_window("main") {
+    // --- Emit Final Response --- //
+    let payload = BackendResponsePayload { query, response: final_response };
+    if let Some(window) = app_handle.get_window("main") {
         window.emit("backend-response", payload)
             .map_err(|e| format!("Emit failed: {}", e))?;
         info!("Final response emitted to frontend.");
     } else {
-        let open_windows: Vec<String> = app_handle.webview_windows().values().map(|w| w.label().to_string()).collect();
-        error!(
-            "Main window with label 'main' not found, cannot emit final response. Currently open window labels: {:?}",
-            open_windows
-        );
+        error!("Main window not found, cannot emit final response.");
     }
 
     Ok(())

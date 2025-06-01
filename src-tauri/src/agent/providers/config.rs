@@ -19,7 +19,6 @@ Assume what you can, be as easy as possible. Don't ask for file names or where t
 
 After saving, open the file using the default application registered on the user's macOS for that file type. For example, a '.txt' file would typically open in TextEdit.
 Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail.";
-
 /// Configuration structure for AI providers
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {

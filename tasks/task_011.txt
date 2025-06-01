@@ -1,0 +1,59 @@
+# Task ID: 11
+# Title: Implement Basic WebNavigationAgent
+# Status: pending
+# Dependencies: 3, 4, 5
+# Priority: medium
+# Description: Create a specialized agent for web browser interactions.
+# Details:
+1. Implement web navigation tools that leverage the MacOSInteractionAgent's capabilities:
+```rust
+struct OpenBrowserTool { engine: Arc<MacOSEngine> }
+struct NavigateToURLTool { engine: Arc<MacOSEngine> }
+struct ClickLinkTool { engine: Arc<MacOSEngine> }
+struct FillFormTool { engine: Arc<MacOSEngine> }
+struct SubmitFormTool { engine: Arc<MacOSEngine> }
+struct ExtractTextTool { engine: Arc<MacOSEngine> }
+struct ScrollPageTool { engine: Arc<MacOSEngine> }
+
+// Implement Tool trait for each
+```
+
+2. Create a function to build a ToolCollection for web navigation:
+```rust
+fn create_web_navigation_tool_collection(engine: Arc<MacOSEngine>) -> ToolCollection {
+    let mut tools = ToolCollection::new();
+    tools.add_tool(Box::new(OpenBrowserTool::new(engine.clone())));
+    // Add all other tools
+    tools
+}
+```
+
+3. Implement the `WebNavigationAgent` struct:
+```rust
+struct WebNavigationAgent {
+    tool_call_agent: ToolCallAgent,
+    engine: Arc<MacOSEngine>
+}
+
+impl BaseAgent for WebNavigationAgent {
+    // Implementation by delegating to tool_call_agent
+}
+
+impl WebNavigationAgent {
+    fn new(name: String, llm_interface: Box<dyn LLMInterface>, engine: Arc<MacOSEngine>, max_steps: usize) -> Self {
+        let tools = create_web_navigation_tool_collection(engine.clone());
+        Self {
+            tool_call_agent: ToolCallAgent::new(name, llm_interface, tools, max_steps),
+            engine
+        }
+    }
+    
+    fn get_current_screenshot(&self) -> Result<String, Error> { ... }
+    fn get_page_content(&self) -> Result<String, Error> { ... }
+}
+```
+
+4. Create a detailed system prompt for the WebNavigationAgent that explains how to use the tools effectively and how to interpret web page content.
+
+# Test Strategy:
+Test each web navigation tool individually. Create integration tests for the WebNavigationAgent with tasks like opening a browser, navigating to a URL, filling out a form, etc. Test with various websites to ensure compatibility. Document any limitations discovered during testing, especially regarding dynamic content and JavaScript-heavy sites.

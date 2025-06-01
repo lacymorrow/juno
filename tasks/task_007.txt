@@ -1,0 +1,82 @@
+# Task ID: 7
+# Title: Design and Implement Plan and PlanStep Data Structures
+# Status: pending
+# Dependencies: 3
+# Priority: medium
+# Description: Create the data structures needed for the PlanManager to manage multi-step plans.
+# Details:
+1. Define the `PlanStep` struct:
+```rust
+struct PlanStep {
+    id: usize,
+    description: String,
+    status: PlanStepStatus,
+    agent_assigned: Option<String>,
+    tool_calls: Vec<ToolCallLog>,
+    results: Vec<ToolResultLog>
+}
+
+enum PlanStepStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed(String)
+}
+
+struct ToolCallLog {
+    timestamp: DateTime<Utc>,
+    tool_name: String,
+    arguments: serde_json::Value
+}
+
+struct ToolResultLog {
+    timestamp: DateTime<Utc>,
+    output: Option<String>,
+    error: Option<String>,
+    screenshot_path: Option<String>
+}
+```
+
+2. Define the `Plan` struct:
+```rust
+struct Plan {
+    id: Uuid,
+    title: String,
+    description: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    status: PlanStatus,
+    steps: Vec<PlanStep>
+}
+
+enum PlanStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed(String),
+    Cancelled
+}
+
+impl Plan {
+    fn new(title: String, description: String, steps: Vec<PlanStep>) -> Self { ... }
+    fn get_current_step(&self) -> Option<&PlanStep> { ... }
+    fn update_step_status(&mut self, step_id: usize, status: PlanStepStatus) { ... }
+    fn add_tool_call_to_step(&mut self, step_id: usize, tool_call: ToolCallLog) { ... }
+    fn add_tool_result_to_step(&mut self, step_id: usize, tool_result: ToolResultLog) { ... }
+    fn is_complete(&self) -> bool { ... }
+}
+```
+
+3. Implement serialization/deserialization for these structures using serde:
+```rust
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct Plan { ... }
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PlanStep { ... }
+
+// etc.
+```
+
+# Test Strategy:
+Write unit tests for all struct methods. Test serialization/deserialization. Test plan status transitions and step management. Ensure thread safety if these structures will be accessed from multiple threads.
