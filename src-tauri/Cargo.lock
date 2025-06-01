@@ -2933,6 +2933,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
+ "tauri-plugin-voice-transcription",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -5712,6 +5713,24 @@ dependencies = [
  "url",
  "windows 0.60.0",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-voice-transcription"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "cpal",
+ "hound",
+ "rubato",
+ "serde",
+ "serde_json",
+ "tauri",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "whisper-rs",
 ]
 
 [[package]]

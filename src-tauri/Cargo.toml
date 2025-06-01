@@ -65,6 +65,8 @@ hound = "3.5"
 cpal = "0.15"
 rubato = "0.14.1"
 chrono = "0.4"
+# Voice transcription plugin
+tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription" }
 # logging = { path = "../logging" } # Commented out due to path issue and no current usages
 # rabDab = { path = "../rabDab" }   # Commented out due to path issue and no current usages
 

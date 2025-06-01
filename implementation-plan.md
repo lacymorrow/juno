@@ -1,126 +1,203 @@
-# Implementation Plan for Anthropic Computer Use Tools
+# Juno Implementation Plan
 
-This plan tracks the implementation status of tools required by the Anthropic computer use specification (`computer_20250124` schema) and outlines the next steps for achieving full compliance and functionality within the `dotdot` Tauri application.
+## Project Overview
+Juno is a Voice Controlled Computer Use Agent designed to automate computer interactions through voice commands.
 
-## 1. Target Tool Specification (Based on Anthropic Docs)
+## Phase 1: Core Architecture Setup
 
-The core tools and their actions required by the Anthropic `computer_20250124` specification are:
+### Task 1.1: Project Initialization ✅ DONE
+Created Tauri v2 project structure with React frontend and established basic window management.
 
-**1.1. `computer` Tool:**
+### Task 1.2: Voice Transcription Engine ✅ DONE
+- Implemented Whisper integration for voice-to-text
+- Set up audio capture and real-time transcription
+- Created voice control module with start/stop functionality
+- Integrated with macOS audio APIs
 
-*   **Keyboard:**
-    *   `key`: Press a key or key combination (potentially global).
-    *   `hold_key`: Hold down a key or key combination (requires duration).
-    *   `type`: Type text into the focused element.
-*   **Mouse:**
-    *   `cursor_position`: Get current cursor coordinates.
-    *   `mouse_move`: Move cursor to specified coordinates.
-    *   `left_mouse_down`/`up`: Press/release left mouse button at coordinates.
-    *   `left_click`: Perform a left click at coordinates (allows modifier keys).
-    *   `left_click_drag`: Drag with the left mouse button held down.
-    *   `right_click`: Perform a right click at coordinates (allows modifier keys).
-    *   `middle_click`: Perform a middle click at coordinates (allows modifier keys).
-    *   `double_click`: Perform a double click at coordinates (allows modifier keys).
-    *   `triple_click`: Perform a triple click at coordinates (allows modifier keys).
-    *   `scroll`: Scroll the window/element at specified coordinates (allows modifier keys).
-*   **Other:**
-    *   `wait`: Pause execution for a specified duration.
-    *   `screenshot`: Capture a screenshot of the entire screen or a specific window/element.
-    *   *Implicit: Clipboard Get/Set (Needed for practical automation)*
-    *   *Implicit: Window Management (Needed for practical automation)*
-    *   *Implicit: UI Element Interaction (Find, Get Attributes - Needed for reliable automation)*
+### Task 1.3: Voice Transcription Plugin Integration ✅ DONE
+- Extracted voice transcription functionality into a reusable Tauri plugin (tauri-plugin-voice-transcription)
+- Created comprehensive plugin API with TypeScript bindings (tauri-plugin-voice-transcription-api)
+- Integrated the plugin into the main Juno app, replacing the embedded voice control implementation
+- Maintained backward compatibility by rebroadcasting plugin events (dictation-started, partial-result, dictation-finished) as app events
+- Added global shortcut handler (Alt+D) that emits toggle-dictation-request event for frontend handling
+- Fixed missing import of `toggleDictation` function in App.tsx from the plugin API package
 
-**1.2. `text_editor` Tool:**
+### Task 1.4: Anthropic Claude Integration ✅ DONE
+- Created Anthropic service module with Claude API integration
+- Implemented streaming responses and proper error handling
+- Set up message formatting for computer use capabilities
+- Added browser automation with Playwright integration
 
-*   `view`: Read the content of a file.
-*   `create`: Create a new file with specified content.
-*   `str_replace`: Find and replace text within a file.
-*   `insert`: Insert text at a specific line number in a file.
-*   `undo_edit`: Undo the last modification made by the `text_editor` tool.
+### Task 1.5: TTS (Text-to-Speech) Engine ✅ DONE
+- Implemented modular TTS system with provider abstraction
+- Added system TTS provider using macOS `say` command
+- Integrated ElevenLabs API provider with voice selection
+- Added Replicate provider for alternative TTS options
+- Created unified interface for seamless provider switching
 
-**1.3. `bash` Tool:**
+### Task 1.6: Computer Use Tools ✅ DONE
+- **Screenshot Tool**: Captures full screen or specific regions
+- **Click Tool**: Simulates mouse clicks at coordinates
+- **Type Tool**: Types text with proper keyboard simulation
+- **Scroll Tool**: Scrolls windows and elements
+- **Key Tool**: Simulates keyboard shortcuts and key presses
+- **Cursor Position Tool**: Gets current mouse position
+- **Window Management**: List, focus, and manipulate windows
+- **Application Control**: Open/close applications
+- **Clipboard Operations**: Read/write clipboard content
+- **File Operations**: Basic file read/write capabilities
+- All tools integrated with coordinate transformation for accurate interactions
 
-*   `command`: Execute a shell command (requires timeout handling).
-*   `restart`: Restart the shell process (if stateful).
+### Task 1.7: Provider System Implementation ✅ DONE
+- Created flexible provider system for AI model selection
+- Implemented Anthropic provider with Claude 3.5 Sonnet
+- Added Ollama provider for local model support
+- Integrated xAI provider with Grok models
+- Implemented OpenRouter provider for multiple model access
+- Created settings management with API key storage
+- Added provider configuration UI in DevToolsPanel
 
-**1.4. `BrowserUseTool` (Inspired by Manus/Common Use Cases - *Future Consideration*):**
+### Task 1.8: MCP (Message Control Protocol) Server Setup
+- Set up two MCP servers:
+  1. **MCP OS-Level Server** (Port 3000): Handles system-level operations for Anthropic's computer use
+  2. **Screen Capture MCP Server** (Port 5173): Provides screenshot capabilities
 
-*   **Goal:** Provide dedicated, robust browser automation beyond generic desktop actions.
-*   **Potential Actions:** Navigate, find elements (CSS/XPath), click, type, scrape content, manage cookies/state.
-*   **Requirement:** Requires a dedicated browser driver (e.g., WebDriver, Playwright bindings, `headless_chrome`).
+### Task 1.9: Agent Mode Implementation
+- Implement continuous agent operation mode
+- Add task planning and execution capabilities
+- Create feedback loop for multi-step operations
+- Add context retention between commands
 
-## 2. Implementation Status & Completed Steps
+## Phase 2: User Interface Development
 
-*   **Initial Setup & Analysis:** Completed.
-*   **`wait` Tool:**
-    *   Implemented in SDK and exposed as `dev_wait` Tauri command. **[Done]**
-*   **Mouse Actions:**
-    *   `cursor_position`, `mouse_move`, `left_mouse_down`, `left_mouse_up`, `left_click`, `right_click`, `middle_click`, `double_click`, `triple_click`, `left_click_drag` implemented in SDK.
-    *   Exposed via corresponding `dev_...` Tauri commands. **[Done]**
-    *   `scroll_at_position` implemented in SDK, exposed as `dev_scroll_window`. **[Done]**
-*   **Keyboard Actions:**
-    *   `press_key` (element-focused), `type_text` implemented in SDK and exposed as `dev_press_key`, `dev_type_text`. **[Done]**
-    *   `hold_key`, `release_key` implemented in SDK and exposed as `dev_hold_key`, `dev_release_key`. **[Done]**
-    *   Global text typing exposed via `dev_global_type_text`. **[Done]**
-*   **Screenshot Actions:**
-    *   Implemented `capture_screenshot` (full screen) and `capture_element_screenshot` in SDK.
-    *   Exposed via `capture_screenshot_command`, `capture_element_screenshot_command` Tauri commands. **[Done]**
-*   **Clipboard Actions:**
-    *   Implemented `get_clipboard_content`, `set_clipboard_content` in SDK.
-    *   Exposed via `dev_get_clipboard`, `dev_set_clipboard` Tauri commands. **[Done]**
-*   **Window Management Actions:**
-    *   Implemented `get_window_title`, `list_windows`, `close_window`, `maximize_window`, `minimize_window`, `resize_window`, `move_window` in SDK.
-    *   Exposed via `dev_get_window_info`, `dev_get_window_list`, `dev_focus_window` (and potentially others implicitly used). **[Done]**
-*   **UI Element Actions:**
-    *   Implemented `find_element`, `get_tree`, `get_all_attributes`, `is_enabled`, `is_focused` in SDK.
-    *   Exposed via `dev_find_element_by_selector`, `dev_get_focused_element_info`, `dev_get_ui_tree` Tauri commands. **[Done]**
-    *   Implemented basic `Selector::Chain` and `Selector::Path` for `find_element`. **[Done]**
-*   **`text_editor` Tool Actions:**
-    *   Backend logic for `view`, `create`, `str_replace`, `insert` using `std::fs` implemented. **[Done]**
-    *   Backend logic for `undo_edit` using `AppState` implemented. **[Done]**
-    *   Exposed all actions via `dev_text_editor_view`, `dev_text_editor_create`, `dev_text_editor_str_replace`, `dev_text_editor_insert`, `dev_text_editor_undo_edit` Tauri commands. **[Done]**
-*   **`bash` Tool Actions:**
-    *   Backend logic for `command` using `std::process::Command` with timeout implemented. **[Done]**
-    *   Exposed via `dev_bash_command` Tauri command. **[Done]**
+### Task 2.1: Floating Command Bar ✅ DONE
+- Implemented expanding/collapsing floating bar with animations
+- Added click-through functionality when collapsed
+- Integrated voice input indicator with real-time feedback
+- Added visual states for listening, processing, and speaking
+- Implemented drag functionality and window management
 
-## 3. Current Status & Remaining Gaps
+### Task 2.2: Settings Window
+- Design and implement settings UI
+- Add voice model selection
+- Configure TTS preferences
+- Manage API keys securely
+- Theme and appearance options
 
-*   **Overall:** Most core functionality specified by Anthropic for `computer`, `text_editor`, and `bash` tools is implemented at the SDK level and exposed via `dev_...` Tauri commands.
-*   **Tool Formalization:** While commands exist, they are not yet integrated into a formal `Tool` trait/struct and registry system managed by a central agent (See `agent-roadmap.md`). This is primarily an architectural gap, but affects how tools are presented to and used by the agent.
-*   **`computer` Tool Gaps (vs. Anthropic Spec):**
-    *   **`hold_key` Duration:** `dev_hold_key` lacks the `duration` parameter specified by Anthropic; it currently holds indefinitely until `dev_release_key` is called.
-    *   **Modifier Keys for Clicks/Scroll:** The `dev_left_click`, `dev_right_click`, `dev_middle_click`, `dev_double_click`, `dev_triple_click`, and `dev_scroll_window` commands do *not* currently accept modifier keys (Shift, Ctrl, Alt, Meta) as described in the Anthropic spec (e.g., via a `mod` parameter or similar).
-    *   **`key` vs. `press_key`:** Anthropic's `key` tool implies a potentially *global* key press/combination, whereas `dev_press_key` acts on the *currently focused element*. A dedicated `dev_global_press_key` command might be needed for true parity. `dev_global_type_text` covers typing strings globally.
-*   **`bash` Tool Gaps:**
-    *   **`restart` Action:** The ability to restart the bash process (relevant for stateful sessions) is not implemented in the SDK or the `dev_bash_command` handler.
-*   **`BrowserUseTool` Gap:**
-    *   **Complete Gap:** No dedicated browser automation tool exists. Current `dev_...` commands provide generic desktop actions which *can* interact with browsers but lack browser-specific context (DOM structure, sessions, dedicated scraping).
-*   **Other Gaps:**
-    *   `cargo check` warnings: Some warnings related to unused code may exist.
-    *   Error Handling: Error reporting from tools/commands could be refined for better user feedback and agent recovery.
-    *   Testing: Lack of comprehensive automated tests for the Tauri command layer and tool logic.
+### Task 2.3: System Tray Integration ✅ DONE
+- Added system tray icon with menu
+- Implemented quick access to main functions
+- Added toggle for floating bar visibility
+- Created quit application option
 
-## 4. Next Steps (Tool Implementation Focus)
+### Task 2.4: Chat Interface ✅ DONE
+- Created main window with conversation display
+- Implemented message rendering with role-based styling
+- Added screenshot display in conversation
+- Integrated tool usage visualization
+- Added thinking process display
+- Created resizable developer panel
 
-1.  **Address `cargo check` Warnings:** *(Low Priority)*
-    *   Add `#[allow(...)]` annotations or remove unused code as appropriate. Ensure `cargo check` passes cleanly.
-2.  **Refine Error Handling:** *(Medium Priority)*
-    *   Review error return types and messages from SDK functions and Tauri commands.
-    *   Ensure errors are propagated clearly and provide sufficient context for the agent/user.
-3.  **Add Tests:** *(Medium Priority)*
-    *   Implement unit and integration tests for the Tauri command handlers (`commands.rs`) and underlying tool logic (e.g., file system operations, process execution).
-4.  **Address `computer` Tool Gaps:** *(High Priority for Anthropic Compliance)*
-    *   **`hold_key` Duration:** Modify `dev_hold_key` (and underlying SDK function) to accept an optional duration. **[Done]**
-    *   **Modifier Keys:** Update SDK click/scroll functions and corresponding `dev_...` commands to accept and handle modifier key parameters. **[Done for left_click; Remaining click functions support the parameter but implementation is pending]**
-    *   **Global `key`:** Evaluate the need for and potentially implement a `dev_global_press_key` command for global hotkey simulation distinct from element-focused input.
-5.  **Implement `bash.restart`:** *(Low Priority unless required)*
-    *   Investigate requirements and feasibility of managing and restarting a persistent shell process if needed.
-6.  **Develop `BrowserUseTool`:** *(Medium/High Priority for Web Automation Use Cases)*
-    *   Research and select a Rust browser automation library.
-    *   Implement core browser actions (navigate, find, click, type, scrape).
-    *   Design and expose as a new set of `dev_browser_...` Tauri commands or a dedicated tool structure.
-7.  **(Ongoing) Tool Formalization:** *(See `agent-roadmap.md`)*
-    *   Refactor existing `dev_...` command logic to conform to a `Tool` trait as the agent architecture evolves.
+## Phase 3: Advanced Features
+
+### Task 3.1: Context Awareness
+- Implement screen content analysis
+- Add application context detection
+- Create smart command suggestions
+- Improve command interpretation
+
+### Task 3.2: Macro Recording
+- Add ability to record action sequences
+- Create macro playback system
+- Implement macro editing interface
+- Add conditional logic support
+
+### Task 3.3: Plugin System
+- Design plugin architecture
+- Create plugin API
+- Implement plugin loader
+- Add example plugins
+
+### Task 3.4: Multi-Monitor Support
+- Detect multiple displays
+- Add monitor selection in tools
+- Coordinate transformation for different screens
+- Window movement across monitors
+
+## Phase 4: Testing and Optimization
+
+### Task 4.1: Comprehensive Testing ✅ DONE
+- Created extensive unit tests for tools
+- Implemented integration tests for commands
+- Added QA test commands for voice transcription
+- Created test scripts for TTS providers
+- Implemented automated test runner
+
+### Task 4.2: Performance Optimization
+- Optimize Whisper model loading
+- Implement audio processing improvements
+- Add response caching
+- Reduce memory footprint
+
+### Task 4.3: Error Handling ✅ DONE
+- Implemented comprehensive error handling
+- Added graceful degradation
+- Created error reporting system
+- Added retry mechanisms for API calls
+
+### Task 4.4: Documentation
+- Write user guide
+- Create API documentation
+- Add inline code documentation
+- Create video tutorials
+
+## Phase 5: Deployment
+
+### Task 5.1: Build Pipeline
+- Set up GitHub Actions
+- Configure code signing
+- Create release automation
+- Add update mechanism
+
+### Task 5.2: Distribution
+- Prepare macOS app bundle
+- Set up auto-updater
+- Create installer
+- Submit to distribution platforms
+
+### Task 5.3: User Feedback
+- Implement analytics (privacy-respecting)
+- Add crash reporting
+- Create feedback mechanism
+- Set up user support system
+
+## Current Status
+- Phase 1: 88% Complete (Task 1.8 remaining)
+- Phase 2: 75% Complete (Task 2.2 remaining)
+- Phase 3: 0% Complete
+- Phase 4: 50% Complete
+- Phase 5: 0% Complete
+
+## Next Steps
+1. Implement MCP server setup (Task 1.8)
+2. Create settings window UI (Task 2.2)
+3. Begin Phase 3 advanced features
+4. Continue performance optimization
+
+## Technical Decisions Made
+1. **Tauri v2**: Chosen for native performance and security
+2. **Whisper**: Selected for offline voice transcription
+3. **Anthropic Claude**: Primary AI model for computer use
+4. **Playwright**: Browser automation for web interactions
+5. **React + TypeScript**: Frontend framework for UI
+6. **Rust**: Backend language for system interactions
+7. **Voice Transcription Plugin**: Modular architecture for reusability
+
+## Known Limitations
+1. Currently macOS only (Windows/Linux support planned)
+2. Requires local Whisper model download
+3. Some tools require accessibility permissions
+4. Browser automation requires separate browser instance
 
 ---
 *This plan will be updated as steps are completed.* 
