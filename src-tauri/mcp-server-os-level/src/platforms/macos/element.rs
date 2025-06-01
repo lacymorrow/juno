@@ -825,10 +825,7 @@ impl UIElementImpl for MacOSUIElement {
             .collect();
 
         Ok(ElementTreeNode {
-            role: attributes.role,
-            label: attributes.label,
-            description: attributes.description,
-            bounds: self.bounds().ok(), // Get bounds, ignore errors for the tree
+            attributes,
             children: child_nodes,
         })
     }

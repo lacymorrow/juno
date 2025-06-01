@@ -21,6 +21,14 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub(crate) tts_text: Option<String>,
 
+    /// Optional: Path to the Whisper model for transcription test
+    #[arg(long, requires = "transcribe_audio_path")]
+    pub(crate) transcribe_model_path: Option<String>,
+
+    /// Optional: Path to the WAV audio file for transcription test
+    #[arg(long)]
+    pub(crate) transcribe_audio_path: Option<String>,
+
     // Add other test flags here, e.g.:
     // #[arg(long)]
     // pub(crate) test_list_apps: bool,
@@ -47,6 +55,8 @@ mod tests {
         assert_eq!(cli.tts_text, Some("Hello world".to_string()));
         assert!(!cli.test_focused_element_ns);
         assert!(!cli.check_accessibility);
+        assert!(cli.transcribe_model_path.is_none());
+        assert!(cli.transcribe_audio_path.is_none());
     }
 
     #[test]
@@ -72,5 +82,7 @@ mod tests {
         let cli = Cli::parse_from(args);
         assert!(cli.tts_provider.is_none());
         assert!(cli.tts_text.is_none());
+        assert!(cli.transcribe_model_path.is_none());
+        assert!(cli.transcribe_audio_path.is_none());
     }
 }

@@ -18,7 +18,7 @@ struct WindowInfo {
 
 // Helper function moved here as it's only used by window commands
 fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Option<UIElement>, String> {
-    match state.desktop.engine().list_windows() {
+    match state.desktop.list_windows() {
         Ok(windows) => {
             for window in windows {
                 if let Some(id) = window.id() {
@@ -111,7 +111,7 @@ pub(crate) async fn dev_get_window_list(
 ) -> Result<String, String> {
     println!("[DEV_TOOL] Attempting to get window list...");
 
-    match state.desktop.engine().list_windows() {
+    match state.desktop.list_windows() {
         Ok(windows) => {
             println!("[DEV_TOOL] dev_get_window_list succeeded. Found {} windows.", windows.len());
             // Use a for loop for clearer error handling
@@ -162,7 +162,7 @@ pub(crate) async fn dev_get_window_info(
 ) -> Result<String, String> {
     println!("[DEV_TOOL] Getting info for window ID: {}", window_id);
 
-    match state.desktop.engine().list_windows() {
+    match state.desktop.list_windows() {
         Ok(windows) => {
             println!("[DEV_TOOL] Found {} windows to search.", windows.len());
             for window in windows {

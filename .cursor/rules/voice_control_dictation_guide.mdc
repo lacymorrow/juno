@@ -1,0 +1,65 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Voice Control and Dictation System
+
+This document outlines the implementation of voice control and dictation features within the Tauri application, focusing on global shortcut integration and state management.
+
+## Core Components
+
+1.  **`VoiceController` (`[src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs)`)**:
+    *   Manages the `WhisperContext` for speech-to-text.
+    *   Holds a boolean state `is_dictating` to track whether dictation is active.
+    *   Provides methods:
+        *   `new(model_path_str: &str)`: Initializes the controller with a Whisper model.
+        *   `transcribe_audio_file(audio_path_str: &str)`: Transcribes a given WAV audio file (existing functionality).
+        *   `start_dictation()`: Sets `is_dictating` to true and logs the action. (Placeholder for real-time audio capture).
+        *   `stop_dictation()`: Sets `is_dictating` to false and logs the action. (Placeholder for stopping audio capture).
+        *   `toggle_dictation()`: Switches the dictation state and returns the new state (`bool`).
+        *   `is_dictating()`: Returns the current dictation state (`bool`).
+
+2.  **Application State (`[src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)`)**:
+    *   `AppState` uses a dynamic `state_components` HashMap to store various parts of the application state.
+    *   The `VoiceController` is initialized in `[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)` and an `Arc<Mutex<VoiceController>>` is inserted into `AppState` using `app_state.insert()`.
+    *   Commands and shortcut handlers retrieve the `VoiceController` using `app_state.get::<Arc<std::sync::Mutex<VoiceController>>>()`.
+
+3.  **Tauri Commands and Global Shortcut (`[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)`)**:
+    *   **Initialization**:
+        *   `VoiceController` is instantiated during app startup in the `run()` function. The path to the Whisper model is sourced from the `VOICE_MODEL_PATH` environment variable or defaults to `"models/ggml-tiny.en.bin"`.
+    *   **Tauri Commands**:
+        *   `start_dictation_command`: Calls `voice_controller.start_dictation()`.
+        *   `stop_dictation_command`: Calls `voice_controller.stop_dictation()`.
+        *   `toggle_dictation_command`: Calls `voice_controller.toggle_dictation()` and returns the new state.
+        *   `get_dictation_status_command`: Calls `voice_controller.is_dictating()` and returns the current state.
+        *   These commands are registered in `tauri::generate_handler!`.
+    *   **Global Shortcut**:
+        *   A global shortcut (Option+D on macOS, Alt+D on other platforms) is registered using the `tauri-plugin-global-shortcut` plugin.
+        *   The shortcut string is defined as `if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };`.
+        *   The actual `Shortcut` object for comparison in the handler is created with `Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD)`.
+        *   The shortcut registration occurs in the `.setup()` method of the Tauri app builder: `app_handle.global_shortcut().register(shortcut_string)`.
+        *   The handler logic is defined in `.plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(...))`.
+        *   When triggered, the handler:
+            *   Retrieves the `VoiceController` from `AppState`.
+            *   Calls `voice_controller.toggle_dictation()`.
+            *   Emits a `dictation_state_changed` event to the frontend with the new boolean dictation state.
+    *   **QA Transcription Command**: `qa_transcribe_file` remains for testing file-based transcription.
+
+## Workflow for Dictation Toggle via Global Shortcut
+
+1.  User presses the registered global shortcut (e.g., Option+D).
+2.  The `tauri_plugin_global_shortcut` handler in `[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)` is invoked.
+3.  The handler identifies the shortcut.
+4.  It asynchronously accesses `AppState` to get the `VoiceController`.
+5.  It calls `voice_controller.toggle_dictation()`.
+6.  The `VoiceController` updates its `is_dictating` state.
+7.  The handler emits a `dictation_state_changed` Tauri event with the new state (`true` or `false`).
+8.  Frontend components can listen for this event to update the UI accordingly.
+
+## Future Enhancements
+*   Implementation of real-time audio capture from the microphone (e.g., using the `cpal` crate).
+*   Feeding live audio data to `whisper-rs` for continuous transcription.
+*   Managing a dedicated `WhisperState` within `VoiceController` for the duration of an active dictation session.
+*   Configuration options for the voice model path and global shortcut key combination through the UI or a configuration file.
+*   Handling potential errors during audio capture or transcription more gracefully.

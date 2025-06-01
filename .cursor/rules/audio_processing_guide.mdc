@@ -1,0 +1,44 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Audio Processing and Dictation Guide
+
+This guide outlines the core components and flow for audio processing and dictation within the application.
+
+## Key Files
+
+*   **Voice Logic Core**: `[src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs)`
+    *   Contains the `VoiceController` struct, which manages dictation state, audio recording, resampling, and transcription using the Whisper model.
+*   **Tauri Commands**: `[src-tauri/src/commands/voice_control.rs](mdc:src-tauri/src/commands/voice_control.rs)`
+    *   Defines the Tauri commands (e.g., `start_dictation_command`, `stop_dictation_command`, `playback_last_audio_chunk`) that interface between the frontend and the `VoiceController`.
+
+## Audio Processing Flow
+
+1.  **Recording**: Audio is captured from the default input device. The actual recording sample rate is determined and stored.
+2.  **Raw Audio Collection**: All incoming audio data is collected into `raw_full_session_audio` within the audio processing thread in `VoiceController`. This buffer stores audio at its original sample rate.
+3.  **Playback Buffer**: Upon stopping dictation, `raw_full_session_audio` is cloned into `last_processed_audio_buffer` (accessible via `VoiceController::get_last_processed_audio_buffer()`) and is used for the `playback_last_audio_chunk` command. Playback handles its own resampling to match the output device if necessary.
+4.  **Resampling for Transcription**: For transcription, the `raw_full_session_audio` is resampled to `WHISPER_SAMPLE_RATE` (typically 16000 Hz) into a temporary `audio_for_transcription` buffer within the audio processing thread.
+5.  **Transcription**: The `audio_for_transcription` (at 16kHz) is then passed to the Whisper model for transcription.
+    *   Transcription strategy (e.g., Greedy, BeamSearch) is set via `FullParams` when calling `whisper_state.full()`.
+
+## Important Constants and Buffers
+
+*   `WHISPER_SAMPLE_RATE`: Defined in `[src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs)`, usually 16000 Hz. Audio *must* be at this rate for correct Whisper transcription.
+*   `raw_full_session_audio` (in audio thread): Stores the entire session's audio at the original recording sample rate.
+*   `last_processed_audio_buffer` (in `VoiceController`): Holds a copy of `raw_full_session_audio` for playback purposes, retaining the original sample rate.
+*   `audio_for_transcription` (in audio thread): Holds the audio resampled to `WHISPER_SAMPLE_RATE`, used for the final transcription.
+
+## Debugging
+
+*   **Debug WAV File**: `[debug_live_audio.wav](mdc:debug_live_audio.wav)`
+    *   This file is saved in the project root (e.g., `../debug_live_audio.wav` relative to `src-tauri/src`).
+    *   It contains the audio that was passed to the Whisper model for the final transcription (i.e., after resampling to `WHISPER_SAMPLE_RATE`).
+    *   Check this file to verify if audio issues (like repetitions or incorrect speed) are present *before* transcription.
+    *   Placing this file outside `src-tauri` prevents the development server from unwanted restarts.
+*   **Log Messages**: Pay attention to log messages from `[VoiceController]` and `[AudioThread]` for insights into sample rates, buffer sizes, and resampling steps.
+
+## Event-Driven Playback
+
+*   The `stop_dictation_command` in `[src-tauri/src/commands/voice_control.rs](mdc:src-tauri/src/commands/voice_control.rs)` emits a `request_audio_playback_test` event *only if* an active dictation session was actually stopped. This event triggers the frontend to call `playback_last_audio_chunk`.

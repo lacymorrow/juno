@@ -3,3 +3,40 @@ description:
 globs:
 alwaysApply: false
 ---
+<<<<<<< HEAD
+This document outlines the general structure of this Tauri v2 project and how its React frontend and Rust backend components interact, particularly concerning the chat functionality.
+
+**Core Structure:**
+
+*   **Tauri v2 Application:** The project is built using Tauri, allowing for a web-technology-based frontend with a Rust backend.
+*   **Frontend (`src/`)**: Contains the React application code.
+    *   `[src/App.tsx](mdc:src/App.tsx)`: The main React component that renders the primary user interface, including the chat window, input fields, and status indicators.
+    *   Other UI components are typically found in `[src/components/](mdc:src/components/)`.
+*   **Backend (`src-tauri/`)**: Contains the Rust application logic.
+    *   `[src-tauri/src/main.rs](mdc:src-tauri/src/main.rs)`: The entry point for the Rust binary, typically just runs the lib.
+    *   `[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)`: The main Rust library file where the Tauri application is configured and built. It sets up plugins, event handlers, tray icons, menus, and the main application state.
+    *   `[src-tauri/src/commands/](mdc:src-tauri/src/commands/)`: Contains Rust functions exposed to the frontend as Tauri commands.
+    *   `[src-tauri/src/agent/](mdc:src-tauri/src/agent/)`: Houses the core AI agent logic, including interaction with LLMs, tool definitions, and execution orchestration.
+
+**Frontend-Backend Communication:**
+
+Communication between the React frontend and the Rust backend is achieved through Tauri's APIs:
+
+1.  **Commands (Frontend to Backend):**
+    *   The frontend uses `await invoke("command_name", { args })` to call Rust functions.
+    *   Example: Submitting a user query is handled by `invoke("submit_query", { query: text })` in `[src/App.tsx](mdc:src/App.tsx)`. This calls the `submit_query` function in `[src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs)`.
+    *   Rust functions intended to be called from the frontend are decorated with `#[tauri::command]` and registered in the `.invoke_handler()` during Tauri app setup in `[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)`.
+
+2.  **Events (Backend to Frontend):**
+    *   The backend can emit events to the frontend using `AppHandle::emit("event-name", payload)` or `Window::emit("event-name", payload)`.
+    *   The frontend listens for these events using `await listen("event-name", (event) => { ... })`.
+    *   Examples in `[src/App.tsx](mdc:src/App.tsx)`:
+        *   Listening for `"backend-response"`: This event signals the final response from the agent after processing a query. The payload includes the agent's text response and other metadata.
+        *   Listening for `"agent-event"`: This event provides real-time updates from the agent, such as thinking steps, tool call requests, tool call results, and captured screenshots. See the "Agent Event Display in Chat" rule for more details on its payload.
+
+**State Management:**
+
+*   **Frontend State:** React's `useState` and `useCallback` are used for managing UI state within components like `[src/App.tsx](mdc:src/App.tsx)` (e.g., current query, conversation history, server status).
+*   **Backend State:** Tauri's state management (`State<'_, AppState>`) is used to share data across commands and within the Rust application. The `AppState` struct is defined in `[src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)` and managed by Tauri.
+=======
+>>>>>>> main

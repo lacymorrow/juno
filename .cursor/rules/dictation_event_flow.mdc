@@ -1,0 +1,57 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Dictation Event Flow and Bar State Synchronization
+
+This document outlines how dictation events are handled in the application, how they affect the `FloatingBar` UI state, and the key components involved.
+
+## Frontend: Bar State Management (`[src/Bar.tsx](mdc:src/Bar.tsx)`)
+
+The `FloatingBar` component in `[src/Bar.tsx](mdc:src/Bar.tsx)` manages its visual state (`barState`) based on events received from the backend. For dictation, it specifically listens for:
+
+1.  **`app-dictation-started`**:
+    *   Received when the backend successfully initiates the dictation process.
+    *   Causes `barState` to change to `"listening"`.
+    *   The UI displays a "Listening..." message and a pulsing microphone icon.
+
+2.  **`app-dictation-partial-result`**:
+    *   Payload: `{ partial: "transcribed text chunk" }`
+    *   Received periodically from the backend as the user speaks and audio is transcribed in chunks.
+    *   Causes `barState` to change to `"transcribing"`.
+    *   The UI displays the incoming `transcriptionText` and changes the microphone icon (e.g., to blue).
+
+3.  **`app-dictation-finished`**:
+    *   Payload: `{ query: "full transcribed text" | null, error?: "error message" }`
+    *   Received when the dictation session ends (either by user action, silence, or an error).
+    *   If a `query` is present, `barState` transitions to `"input"` (allowing the user to edit/submit).
+    *   If an `error` is present or `query` is null, `barState` may transition to `"error"` or back to `"default"` via `"shrinking"`.
+
+The `Bar.tsx` component ensures that whenever its internal `barState` changes (due to these dictation events or other interactions), it emits a `bar-state-changed` event with the payload `{ newState: "currentBarStateString" }`. This event is handled by the Rust backend as described in the `bar_state_sync.mdc` rule.
+
+## Backend: Event Emission (`[src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs)`)
+
+The `VoiceController` in `[src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs)` is responsible for managing the audio input, transcription, and emitting the dictation-related events to the frontend.
+
+1.  **`app-dictation-started` Emission**:
+    *   Emitted from the `start_dictation` method as soon as the necessary setup for audio capture is complete and before the audio processing thread begins intensive work. This signals to the frontend that the application is now actively listening.
+
+2.  **`app-dictation-partial-result` Emission**:
+    *   Emitted from within the dedicated audio processing thread spawned by `start_dictation`.
+    *   Audio is collected in chunks (e.g., every 1.5 seconds).
+    *   Each chunk is transcribed, and the resulting text is emitted as the `partial` field in the event's payload. This allows the UI to update with transcribed text in near real-time.
+    *   The `whisper_state` within the audio thread is used for these transcriptions. Care is taken if this state is cumulative or reset for each chunk.
+
+3.  **`app-dictation-finished` Emission**:
+    *   Emitted when the `stop_dictation` method is called (or if the audio processing loop terminates due to an error or completion).
+    *   The audio processing thread performs a final transcription of any remaining audio.
+    *   The full transcribed text is sent as the `query` in the event payload. If an error occurred, the `error` field is populated.
+
+## Key Files:
+
+-   `[src/Bar.tsx](mdc:src/Bar.tsx)`: Manages frontend UI states for dictation (`listening`, `transcribing`) and listens for backend dictation events. Emits `bar-state-changed`.
+-   `[src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs)`: Manages audio input, calls the Whisper transcription model, and emits `app-dictation-started`, `app-dictation-partial-result`, and `app-dictation-finished` events to the frontend.
+-   `[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)`: (Related via `bar_state_sync.mdc`) Listens for `bar-state-changed` from `Bar.tsx` to keep `AppState` updated.
+
+This flow ensures that the UI reflects the current status of the dictation process, providing feedback to the user as they speak and as their speech is transcribed.

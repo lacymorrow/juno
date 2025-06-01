@@ -23,6 +23,7 @@ pub(crate) struct ReplicateRequest {
 #[derive(Deserialize, Debug)]
 pub(crate) struct ReplicateInitialResponse {
     id: String,
+    #[serde(rename = "status")] // Map JSON field "status" to this Rust field
     _status: String,
     urls: ReplicateUrls,
 }
@@ -106,10 +107,22 @@ pub async fn invoke_replicate_tts(
         return Err(err_msg);
     }
 
-    let initial_data = match initial_res.json::<ReplicateInitialResponse>().await {
+    // Read the response body as text first for logging and more robust parsing
+    let initial_response_text = match initial_res.text().await {
+        Ok(text) => text,
+        Err(e) => {
+            let err_msg = format!("Failed to read Replicate initial response body as text: {}", e);
+            error!("{}", err_msg);
+            return Err(err_msg);
+        }
+    };
+
+    info!("Received Replicate initial response body: {}", initial_response_text);
+
+    let initial_data = match serde_json::from_str::<ReplicateInitialResponse>(&initial_response_text) {
         Ok(data) => data,
         Err(e) => {
-            let err_msg = format!("Failed to parse Replicate initial response: {}", e);
+            let err_msg = format!("Failed to parse Replicate initial response from text: {}. Body: {}", e, initial_response_text);
             error!("{}", err_msg);
             return Err(err_msg);
         }

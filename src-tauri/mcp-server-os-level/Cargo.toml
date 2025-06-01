@@ -27,8 +27,7 @@ tower-http = { version = "0.4.0", features = ["cors", "trace"] }
 
 # Common dependencies that might be needed based on original code
 log = "0.4.22"
-# macos-accessibility-client = { version = "0.1.1", path = "../../macos-accessibility-client" } # Temporarily comment out path
-macos-accessibility-client = "0.0.1" # Use version found on crates.io
+macos-accessibility-client = "0.0.1"
 
 # macOS specific dependencies (moved here from [features])
 accessibility = "0.2.0"
