@@ -1,0 +1,113 @@
+# Task ID: 8
+# Title: Implement PlanManager Component
+# Status: pending
+# Dependencies: 4, 7
+# Priority: medium
+# Description: Create the PlanManager component responsible for generating plans from user goals and orchestrating their execution.
+# Details:
+1. Define the `PlanManager` struct:
+```rust
+struct PlanManager {
+    llm_interface: Box<dyn LLMInterface>,
+    agents: HashMap<String, Box<dyn BaseAgent>>,
+    current_plan: Option<Plan>,
+    plan_history: Vec<Plan>
+}
+
+impl PlanManager {
+    fn new(llm_interface: Box<dyn LLMInterface>) -> Self { ... }
+    
+    fn register_agent(&mut self, agent: Box<dyn BaseAgent>) { ... }
+    
+    fn generate_plan(&mut self, user_goal: &str) -> Result<Plan, Error> {
+        // Use LLM to generate a plan
+        let system_prompt = "You are a planning assistant...";
+        let plan_json = self.llm_interface.generate_json_response::<PlanGeneration>(
+            &[Message::User { content: user_goal.to_string() }],
+            system_prompt
+        )?;
+        
+        // Convert to Plan struct
+        let steps = plan_json.steps.into_iter().enumerate().map(|(i, step)| {
+            PlanStep {
+                id: i + 1,
+                description: step.description,
+                status: PlanStepStatus::Pending,
+                agent_assigned: step.agent_type,
+                tool_calls: Vec::new(),
+                results: Vec::new()
+            }
+        }).collect();
+        
+        let plan = Plan::new(
+            plan_json.title,
+            plan_json.description,
+            steps
+        );
+        
+        self.current_plan = Some(plan.clone());
+        Ok(plan)
+    }
+    
+    fn execute_current_plan(&mut self) -> Result<Plan, Error> {
+        let mut plan = self.current_plan.clone().ok_or(Error::NoPlan)?;
+        plan.status = PlanStatus::InProgress;
+        
+        for step in &mut plan.steps {
+            step.status = PlanStepStatus::InProgress;
+            
+            // Determine which agent to use
+            let agent_name = step.agent_assigned.clone().unwrap_or_else(|| {
+                // Default to MacOSInteractionAgent if none specified
+                "MacOSInteractionAgent".to_string()
+            });
+            
+            let agent = self.agents.get_mut(&agent_name).ok_or(Error::AgentNotFound)?;
+            
+            // Execute the step
+            match agent.execute_task(&step.description) {
+                Ok(_) => step.status = PlanStepStatus::Completed,
+                Err(e) => step.status = PlanStepStatus::Failed(e.to_string())
+            }
+            
+            if matches!(step.status, PlanStepStatus::Failed(_)) {
+                plan.status = PlanStatus::Failed(format!("Step {} failed", step.id));
+                break;
+            }
+        }
+        
+        if plan.is_complete() {
+            plan.status = PlanStatus::Completed;
+        }
+        
+        self.current_plan = Some(plan.clone());
+        self.plan_history.push(plan.clone());
+        
+        Ok(plan)
+    }
+    
+    fn get_current_plan(&self) -> Option<&Plan> { ... }
+    fn cancel_current_plan(&mut self) { ... }
+}
+```
+
+2. Define the JSON structure expected from the LLM for plan generation:
+```rust
+#[derive(Deserialize)]
+struct PlanGeneration {
+    title: String,
+    description: String,
+    steps: Vec<PlanGenerationStep>
+}
+
+#[derive(Deserialize)]
+struct PlanGenerationStep {
+    description: String,
+    agent_type: Option<String>
+}
+```
+
+3. Create a detailed system prompt for plan generation that explains the available agent types and their capabilities.
+
+# Test Strategy:
+Write unit tests for plan generation with mock LLM responses. Test plan execution with mock agents. Test error handling for failed steps. Test plan cancellation. Create integration tests that combine plan generation and execution with real agents for simple tasks.

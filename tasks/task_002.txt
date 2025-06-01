@@ -1,0 +1,50 @@
+# Task ID: 2
+# Title: Design and Implement ToolResult and ToolCollection Primitives
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Create the foundational data structures for tool management and result handling that will be used by all agents in the system.
+# Details:
+1. Implement the `ToolResult` struct with the following fields:
+```rust
+struct ToolResult {
+    output: Option<String>,
+    error: Option<String>,
+    image_base64: Option<String>,
+    system_message: Option<String>
+}
+```
+
+2. Implement the `ToolDescription` struct:
+```rust
+struct ToolDescription {
+    name: String,
+    description: String,
+    parameters_schema: serde_json::Value
+}
+```
+
+3. Create a `Tool` trait that tools must implement:
+```rust
+trait Tool {
+    fn get_description(&self) -> ToolDescription;
+    fn execute(&self, params: serde_json::Value) -> Result<ToolResult, Error>;
+}
+```
+
+4. Implement the `ToolCollection` struct to manage a set of tools:
+```rust
+struct ToolCollection {
+    tools: HashMap<String, Box<dyn Tool>>
+}
+
+impl ToolCollection {
+    fn new() -> Self { ... }
+    fn add_tool(&mut self, tool: Box<dyn Tool>) { ... }
+    fn get_tool(&self, name: &str) -> Option<&Box<dyn Tool>> { ... }
+    fn get_all_descriptions(&self) -> Vec<ToolDescription> { ... }
+}
+```
+
+# Test Strategy:
+Write unit tests for each component. Test serialization/deserialization of ToolDescription and ToolResult. Create mock tools to verify ToolCollection functionality. Ensure thread safety if these primitives will be accessed from multiple threads.

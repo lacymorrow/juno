@@ -1,0 +1,64 @@
+# Task ID: 5
+# Title: Implement MacOSInteractionAgent
+# Status: pending
+# Dependencies: 1, 2, 3, 4
+# Priority: high
+# Description: Create the specialized MacOSInteractionAgent that inherits from ToolCallAgent and is equipped with macOS-specific tools.
+# Details:
+1. Implement macOS-specific tools that wrap the functions from the macOS interaction backend:
+```rust
+struct GetWindowTitleTool { engine: Arc<MacOSEngine> }
+struct ListWindowsTool { engine: Arc<MacOSEngine> }
+struct CloseWindowTool { engine: Arc<MacOSEngine> }
+struct MinimizeWindowTool { engine: Arc<MacOSEngine> }
+struct ResizeWindowTool { engine: Arc<MacOSEngine> }
+struct MoveWindowTool { engine: Arc<MacOSEngine> }
+struct ClickElementTool { engine: Arc<MacOSEngine> }
+struct TypeTextTool { engine: Arc<MacOSEngine> }
+struct PressKeyTool { engine: Arc<MacOSEngine> }
+struct TakeScreenshotTool { engine: Arc<MacOSEngine> }
+struct GetClipboardTool { engine: Arc<MacOSEngine> }
+struct SetClipboardTool { engine: Arc<MacOSEngine> }
+
+// Implement Tool trait for each
+```
+
+2. Create a function to build a ToolCollection for macOS interaction:
+```rust
+fn create_macos_tool_collection(engine: Arc<MacOSEngine>) -> ToolCollection {
+    let mut tools = ToolCollection::new();
+    tools.add_tool(Box::new(GetWindowTitleTool::new(engine.clone())));
+    // Add all other tools
+    tools
+}
+```
+
+3. Implement the `MacOSInteractionAgent` struct:
+```rust
+struct MacOSInteractionAgent {
+    tool_call_agent: ToolCallAgent,
+    engine: Arc<MacOSEngine>
+}
+
+impl BaseAgent for MacOSInteractionAgent {
+    // Implementation by delegating to tool_call_agent
+}
+
+impl MacOSInteractionAgent {
+    fn new(name: String, llm_interface: Box<dyn LLMInterface>, engine: Arc<MacOSEngine>, max_steps: usize) -> Self {
+        let tools = create_macos_tool_collection(engine.clone());
+        Self {
+            tool_call_agent: ToolCallAgent::new(name, llm_interface, tools, max_steps),
+            engine
+        }
+    }
+    
+    fn get_current_screenshot(&self) -> Result<String, Error> { ... }
+    fn get_accessibility_tree(&self) -> Result<String, Error> { ... }
+}
+```
+
+4. Create a detailed system prompt for the MacOSInteractionAgent that explains how to use the tools effectively and how to interpret screenshots and accessibility data.
+
+# Test Strategy:
+Test each tool individually with the macOS engine. Create integration tests for the MacOSInteractionAgent with simple tasks like opening an application, clicking a button, etc. Test the agent's ability to use both visual information (screenshots) and structural information (accessibility data). Document any limitations discovered during testing.
