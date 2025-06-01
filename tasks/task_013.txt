@@ -1,0 +1,51 @@
+# Task ID: 13
+# Title: Implement InformationRetrievalAgent
+# Status: pending
+# Dependencies: 3, 4
+# Priority: low
+# Description: Create a specialized agent for web searches and document reading.
+# Details:
+1. Implement information retrieval tools:
+```rust
+struct WebSearchTool;
+struct ReadWebPageTool;
+struct ExtractInformationTool;
+struct SummarizeTextTool;
+
+// Implement Tool trait for each
+```
+
+2. Create a function to build a ToolCollection for information retrieval:
+```rust
+fn create_information_retrieval_tool_collection() -> ToolCollection {
+    let mut tools = ToolCollection::new();
+    tools.add_tool(Box::new(WebSearchTool::new()));
+    // Add all other tools
+    tools
+}
+```
+
+3. Implement the `InformationRetrievalAgent` struct:
+```rust
+struct InformationRetrievalAgent {
+    tool_call_agent: ToolCallAgent
+}
+
+impl BaseAgent for InformationRetrievalAgent {
+    // Implementation by delegating to tool_call_agent
+}
+
+impl InformationRetrievalAgent {
+    fn new(name: String, llm_interface: Box<dyn LLMInterface>, max_steps: usize) -> Self {
+        let tools = create_information_retrieval_tool_collection();
+        Self {
+            tool_call_agent: ToolCallAgent::new(name, llm_interface, tools, max_steps)
+        }
+    }
+}
+```
+
+4. Create a detailed system prompt for the InformationRetrievalAgent that explains how to use the tools effectively and how to extract relevant information.
+
+# Test Strategy:
+Test each information retrieval tool individually. Create integration tests for the InformationRetrievalAgent with tasks like searching for information, reading web pages, etc. Test with various search queries and web pages. Test error handling for network issues and parsing errors.

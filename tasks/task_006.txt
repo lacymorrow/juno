@@ -1,0 +1,66 @@
+# Task ID: 6
+# Title: Implement Simple Execution Loop and UI Feedback
+# Status: pending
+# Dependencies: 5
+# Priority: medium
+# Description: Create a basic execution loop that allows a user to input a task, have it processed by the MacOSInteractionAgent, and see the results in the Tauri UI.
+# Details:
+1. Create Tauri commands for interacting with the agent:
+```rust
+#[tauri::command]
+async fn execute_task(task: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let mut agent = state.macos_agent.lock().await;
+    agent.execute_task(&task).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_latest_screenshot(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let agent = state.macos_agent.lock().await;
+    agent.get_current_screenshot().map_err(|e| e.to_string())
+}
+```
+
+2. Create an `AppState` struct to hold the agent:
+```rust
+struct AppState {
+    macos_agent: Mutex<MacOSInteractionAgent>
+}
+```
+
+3. Initialize the app state in the main function:
+```rust
+fn main() {
+    let engine = Arc::new(MacOSEngine::new());
+    let llm_config = LLMConfig::from_env().expect("Failed to load LLM config");
+    let llm_interface = create_llm_interface(&llm_config);
+    let agent = MacOSInteractionAgent::new(
+        "MacOSInteractionAgent".to_string(),
+        llm_interface,
+        engine,
+        10 // max_steps
+    );
+    
+    let app_state = AppState {
+        macos_agent: Mutex::new(agent)
+    };
+    
+    tauri::Builder::default()
+        .manage(app_state)
+        .invoke_handler(tauri::generate_handler![
+            execute_task,
+            get_latest_screenshot
+        ])
+        .run(tauri::generate_context!())
+        .expect("Error while running Tauri application");
+}
+```
+
+4. Create a simple UI in the frontend (Vue/React) with:
+   - A text input for the user to enter a task
+   - A button to submit the task
+   - An area to display the agent's thoughts and actions
+   - An area to display the latest screenshot
+   - A stop button to interrupt the agent
+
+# Test Strategy:
+Test the Tauri commands with simple tasks. Verify that the UI correctly displays the agent's thoughts, actions, and screenshots. Test the stop functionality to ensure it properly interrupts the agent. Test with various task complexities to ensure the UI remains responsive.
