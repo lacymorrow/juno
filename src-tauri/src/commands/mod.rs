@@ -21,7 +21,6 @@ pub use self::mouse::*;
 pub use self::shell::*;
 pub use self::voice_control::*;
 
-
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::
 pub(crate) fn send_dev_tool_notification(app: &tauri::AppHandle, title: &str, body: &str) -> Result<(), String> {
