@@ -42,31 +42,13 @@ pub mod commands;
 pub mod cli;
 pub mod utils;
 pub mod agent;
-pub mod voice_control; // Added for voice control functionality
 pub mod constants;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, voice_control::*};
+use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
-// Import VoiceController for the new QA command
-use voice_control::VoiceController;
-
 // Added for selector parsing
-
-// Tauri command for QA testing transcription
-#[tauri::command]
-async fn qa_transcribe_file(model_path: String, audio_path: String) -> Result<String, String> {
-    // It's good practice to run blocking operations on a separate thread
-    // if they might take a while, to avoid blocking the main Tauri async runtime.
-    // For whisper model loading and transcription, this is essential.
-    tokio::task::spawn_blocking(move || {
-        let voice_controller = VoiceController::new(&model_path)?;
-        voice_controller.transcribe_audio_file(&audio_path)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-}
 
 // Define a struct for the expected payload of bar-state-changed event
 #[derive(Deserialize, Debug)]
@@ -120,27 +102,11 @@ pub fn run() {
     // Initialize shell state
     commands::shell::init_shell_state(&app_state);
 
-    // --- Initialize VoiceController and add to AppState ---
-    // TODO: Make model path configurable (e.g., via .env, config file, or UI setting)
-    let model_path_env = std::env::var("VOICE_MODEL_PATH");
-    let model_path = model_path_env.as_deref().unwrap_or(constants::paths::DEFAULT_MODEL_PATH);
-
-    info!("[Setup] Attempting to initialize VoiceController with model: {}", model_path);
-    match VoiceController::new(model_path) {
-        Ok(voice_controller) => {
-            app_state.insert(Arc::new(std::sync::Mutex::new(voice_controller)));
-            info!("[Setup] VoiceController initialized and added to AppState.");
-        }
-        Err(e) => {
-            tracing::error!("[Setup] Failed to initialize VoiceController: {}. Voice control features will be unavailable.", e);
-            // Consider inserting a placeholder/disabled VoiceController or handling this state in commands
-        }
-    }
-
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
             println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
@@ -160,36 +126,10 @@ pub fn run() {
                 }
             } else if shortcut == &dictation_toggle_shortcut && event.state() == ShortcutState::Pressed {
                 info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
-                let app_handle_clone = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app_state_instance = app_handle_clone.state::<state::AppState>();
-                    if let Some(vc_arc) = app_state_instance.get::<Arc<std::sync::Mutex<VoiceController>>>() {
-                        match vc_arc.lock() {
-                            Ok(mut voice_controller) => {
-                                match voice_controller.toggle_dictation(app_handle_clone.clone()) {
-                                    Ok(is_now_dictating) => {
-                                        info!("[GlobalShortcut] Dictation toggled. New state: {}", if is_now_dictating { "ON" } else { "OFF" });
-                                        if let Err(e) = app_handle_clone.emit(constants::events::DICTATION_STATE_CHANGED, is_now_dictating) {
-                                            tracing::warn!("[GlobalShortcut] Failed to emit {} event: {}", constants::events::DICTATION_STATE_CHANGED, e);
-                                        }
-                                        // If dictation was just turned OFF, request playback
-                                        if !is_now_dictating {
-                                            info!("[GlobalShortcut] Dictation stopped via shortcut.");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("[GlobalShortcut] Error toggling dictation: {}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("[GlobalShortcut] Failed to lock VoiceController: {}", e);
-                            }
-                        }
-                    } else {
-                        tracing::warn!("[GlobalShortcut] VoiceController not found in AppState. Cannot toggle dictation.");
-                    }
-                });
+                // Emit an event for the frontend to handle
+                if let Err(e) = app.emit("toggle-dictation-request", ()) {
+                    tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
+                }
             }
         }).build())
         .manage(app_state) // Manage the AppState
@@ -254,13 +194,6 @@ pub fn run() {
             update_provider_max_tokens,
             update_provider_temperature,
             update_provider_system_prompt,
-            // Voice Control Commands
-            start_dictation_command,
-            stop_dictation_command,
-            toggle_dictation_command,
-            get_dictation_status_command,
-            set_developer_playback_enabled_command,
-            playback_last_audio_chunk,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,
@@ -268,7 +201,6 @@ pub fn run() {
             qa_test_click_visualization,
             qa_test_select_text,
             qa_test_scroll,
-            qa_transcribe_file, // Add the new QA command here
             // App Life Cycle
         ])
         .setup(|app| {
@@ -445,24 +377,35 @@ pub fn run() {
                 }
             });
 
-            // Listen for audio playback test request
-            if let Some(main_window) = app.get_webview_window(constants::window_labels::MAIN) {
-                let app_handle_for_listener = app.handle().clone();
-                let _event_id = main_window.listen(constants::events::REQUEST_AUDIO_PLAYBACK_TEST, move |_event| {
-                    info!("[Event Listener] Received {} event.", constants::events::REQUEST_AUDIO_PLAYBACK_TEST);
-                    let ah_clone = app_handle_for_listener.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let app_state = ah_clone.state::<crate::state::AppState>(); // Ensure crate::state path is correct
-                        match crate::commands::voice_control::playback_last_audio_chunk(app_state).await {
-                            Ok(message) => info!("[Event Listener] playback_last_audio_chunk successful: {}", message),
-                            Err(e) => tracing::error!("[Event Listener] playback_last_audio_chunk error: {}", e),
-                        }
-                    });
-                });
-                // Note: .map_err().unwrap() removed as .listen() returns EventId not Result
-            } else {
-                tracing::error!("[Setup] Main window not found, cannot listen for {} event.", constants::events::REQUEST_AUDIO_PLAYBACK_TEST);
-            }
+            // Listen for transcription finished events from the plugin
+            let app_handle_for_listener = app.handle().clone();
+            app.listen("plugin:voice-transcription:dictation-finished", move |event| {
+                info!("[Event] Received plugin:voice-transcription:dictation-finished event: {:?}", event.payload());
+                // Rebroadcast the event as app-dictation-finished for backward compatibility
+                if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
+                    tracing::error!("[Event] Failed to rebroadcast dictation-finished event: {}", e);
+                }
+            });
+
+            // Listen for partial result events from the plugin
+            let app_handle_for_listener = app.handle().clone();
+            app.listen("plugin:voice-transcription:partial-result", move |event| {
+                info!("[Event] Received plugin:voice-transcription:partial-result event: {:?}", event.payload());
+                // Rebroadcast the event as app-dictation-partial-result for backward compatibility
+                if let Err(e) = app_handle_for_listener.emit("app-dictation-partial-result", event.payload()) {
+                    tracing::error!("[Event] Failed to rebroadcast partial-result event: {}", e);
+                }
+            });
+
+            // Listen for dictation started events from the plugin
+            let app_handle_for_listener = app.handle().clone();
+            app.listen("plugin:voice-transcription:dictation-started", move |event| {
+                info!("[Event] Received plugin:voice-transcription:dictation-started event");
+                // Rebroadcast the event as app-dictation-started for backward compatibility
+                if let Err(e) = app_handle_for_listener.emit("app-dictation-started", event.payload()) {
+                    tracing::error!("[Event] Failed to rebroadcast dictation-started event: {}", e);
+                }
+            });
 
             Ok(())
         });

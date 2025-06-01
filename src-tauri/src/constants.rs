@@ -12,6 +12,7 @@ pub mod events {
     pub const AGENT_TOOL_CALL: &str = "agent-tool-call";
     pub const AGENT_THOUGHT_PROCESS: &str = "agent-thought-process";
     pub const AGENT_STOPPING: &str = "agent-stopping";
+    pub const AGENT_STATUS_UPDATE: &str = "agent-status-update";
 
     // Window/UI events
     pub const BAR_STATE_CHANGED: &str = "bar-state-changed";
@@ -28,10 +29,10 @@ pub mod window_labels {
 
 pub mod tray_menu_ids {
     pub const QUIT: &str = "quit";
-    pub const TOGGLE_FLOATING_BAR: &str = "toggle_floating_bar";
+    pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";
 }
 
-pub mod paths {
-    pub const DEFAULT_MODEL_PATH: &str = "models/ggml-tiny.en.bin";
-    pub const DEBUG_AUDIO_WAV_PATH: &str = "../debug_live_audio.wav"; // Relative to src-tauri/src or project root?
+pub mod timeouts {
+    pub const STANDARD_TIMEOUT_MS: u64 = 10000;
+    pub const BROWSER_TIMEOUT_MS: u64 = 30000;
 }
