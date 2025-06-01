@@ -7,25 +7,27 @@ use dotenvy::dotenv;
 use std::env;
 use std::sync::Arc;
 use tauri::{
-    Manager, WindowEvent,
-    menu::{Menu, MenuItemBuilder, MenuItemKind, PredefinedMenuItem},
-    tray::{TrayIconEvent, MouseButton, MouseButtonState},
-    image::Image,
+    Manager, // WindowEvent, // Removed WindowEvent
+    menu::{MenuItemKind, Menu}, // Removed Menu, MenuItemBuilder, PredefinedMenuItem // Added Menu
+    tray::{TrayIconEvent, MouseButton, MouseButtonState, TrayIconBuilder}, // Ensured TrayIconBuilder
+    image::Image as TauriImage, // Use tauri::image::Image, aliased
     AppHandle, // Keep AppHandle
     Emitter, // Import Emitter trait for .emit()
+    Listener, // Added Listener for .listen()
     WebviewWindow, // Keep WebviewWindow
     Wry, // Keep Wry if needed elsewhere, remove if not
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState}; // Use ShortcutState, remove ShortcutEvent
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::info; // Import the info macro
+use serde::Deserialize; // Added for deserializing payload struct
 
 // macOS specific imports
 #[cfg(target_os = "macos")]
 use {
     cocoa::{
-        appkit::{NSWindow, NSWindowCollectionBehavior},
-        base::{id as cocoa_id, nil, YES, NO, BOOL},
+        appkit::{NSWindow}, // Removed NSWindowCollectionBehavior
+        base::{id as cocoa_id, nil}, // Removed YES, NO, BOOL
         foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
@@ -40,12 +42,38 @@ pub mod commands;
 pub mod cli;
 pub mod utils;
 pub mod agent;
+pub mod voice_control; // Added for voice control functionality
+pub mod constants;
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
+use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, voice_control::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
+// Import VoiceController for the new QA command
+use voice_control::VoiceController;
+
 // Added for selector parsing
+
+// Tauri command for QA testing transcription
+#[tauri::command]
+async fn qa_transcribe_file(model_path: String, audio_path: String) -> Result<String, String> {
+    // It's good practice to run blocking operations on a separate thread
+    // if they might take a while, to avoid blocking the main Tauri async runtime.
+    // For whisper model loading and transcription, this is essential.
+    tokio::task::spawn_blocking(move || {
+        let voice_controller = VoiceController::new(&model_path)?;
+        voice_controller.transcribe_audio_file(&audio_path)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+// Define a struct for the expected payload of bar-state-changed event
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct BarStateChangeEventPayload {
+    new_state: String,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -92,37 +120,75 @@ pub fn run() {
     // Initialize shell state
     commands::shell::init_shell_state(&app_state);
 
+    // --- Initialize VoiceController and add to AppState ---
+    // TODO: Make model path configurable (e.g., via .env, config file, or UI setting)
+    let model_path_env = std::env::var("VOICE_MODEL_PATH");
+    let model_path = model_path_env.as_deref().unwrap_or(constants::paths::DEFAULT_MODEL_PATH);
+
+    info!("[Setup] Attempting to initialize VoiceController with model: {}", model_path);
+    match VoiceController::new(model_path) {
+        Ok(voice_controller) => {
+            app_state.insert(Arc::new(std::sync::Mutex::new(voice_controller)));
+            info!("[Setup] VoiceController initialized and added to AppState.");
+        }
+        Err(e) => {
+            tracing::error!("[Setup] Failed to initialize VoiceController: {}. Voice control features will be unavailable.", e);
+            // Consider inserting a placeholder/disabled VoiceController or handling this state in commands
+        }
+    }
+
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| { // Event type inferred or use generic
-            // Log the event state
-            println!("[GlobalShortcut State] {:?}", event.state());
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
+            println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
-            // Define the specific shortcut we're interested in
-            let escape_shortcut = Shortcut::new(None, Code::Escape); // No modifiers for Escape key
+            // Define the specific shortcuts we're interested in
+            let escape_shortcut = Shortcut::new(None, Code::Escape);
+            // TODO: Make the dictation shortcut configurable
+            let dictation_toggle_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
 
-            // Check if the triggered shortcut is the one we defined
-            if shortcut == &escape_shortcut {
-                // Match on the event state
-                match event.state() {
-                    ShortcutState::Pressed => {
-                        println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
-                        // --- Get AppState and trigger cancellation ---
-                        let app_state = app.state::<state::AppState>();
-                        app_state.signal_cancel(); // Use the new method
-                        info!("Agent cancellation signal sent."); // Use info macro
-
-                        // Emit event to frontend to potentially update UI (e.g., show "stopping...")
-                        if let Err(e) = app.emit("agent-stopping", ()) { // Use a different event name
-                            eprintln!("[GlobalShortcut Error] Failed to emit agent-stopping event: {}", e);
-                        }
-                    }
-                    ShortcutState::Released => {
-                        println!("[GlobalShortcut] Escape released.");
-                    }
+            if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
+                println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
+                let app_state_instance = app.state::<state::AppState>();
+                app_state_instance.signal_cancel();
+                info!("[GlobalShortcut] Agent cancellation signal sent via Escape.");
+                if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
+                    eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
                 }
+            } else if shortcut == &dictation_toggle_shortcut && event.state() == ShortcutState::Pressed {
+                info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
+                let app_handle_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let app_state_instance = app_handle_clone.state::<state::AppState>();
+                    if let Some(vc_arc) = app_state_instance.get::<Arc<std::sync::Mutex<VoiceController>>>() {
+                        match vc_arc.lock() {
+                            Ok(mut voice_controller) => {
+                                match voice_controller.toggle_dictation(app_handle_clone.clone()) {
+                                    Ok(is_now_dictating) => {
+                                        info!("[GlobalShortcut] Dictation toggled. New state: {}", if is_now_dictating { "ON" } else { "OFF" });
+                                        if let Err(e) = app_handle_clone.emit(constants::events::DICTATION_STATE_CHANGED, is_now_dictating) {
+                                            tracing::warn!("[GlobalShortcut] Failed to emit {} event: {}", constants::events::DICTATION_STATE_CHANGED, e);
+                                        }
+                                        // If dictation was just turned OFF, request playback
+                                        if !is_now_dictating {
+                                            info!("[GlobalShortcut] Dictation stopped via shortcut.");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("[GlobalShortcut] Error toggling dictation: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("[GlobalShortcut] Failed to lock VoiceController: {}", e);
+                            }
+                        }
+                    } else {
+                        tracing::warn!("[GlobalShortcut] VoiceController not found in AppState. Cannot toggle dictation.");
+                    }
+                });
             }
         }).build())
         .manage(app_state) // Manage the AppState
@@ -133,6 +199,8 @@ pub fn run() {
             submit_query,
             anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
+            tts::set_tts_provider_command, // Added for TTS provider selection
+            tts::get_tts_provider_command, // Added for TTS provider selection
             capture_screenshot_command,
             dev_get_focused_element_info,
             capture_element_screenshot_command,
@@ -185,201 +253,213 @@ pub fn run() {
             update_provider_max_tokens,
             update_provider_temperature,
             update_provider_system_prompt,
+            // Voice Control Commands
+            start_dictation_command,
+            stop_dictation_command,
+            toggle_dictation_command,
+            get_dictation_status_command,
+            set_developer_playback_enabled_command,
+            playback_last_audio_chunk,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,
             qa_test_coordinate_transformation,
             qa_test_click_visualization,
             qa_test_select_text,
-            qa_test_scroll
+            qa_test_scroll,
+            qa_transcribe_file, // Add the new QA command here
         ])
-        .on_menu_event(|app, event| { // Attach menu event handler directly
-            let window = app.get_webview_window("main").unwrap();
-            match event.id.as_ref() {
-                "quit" => {
-                    println!("[Menu] Quit requested.");
-                    app.exit(0);
-                }
-                "toggle" => { // Keep toggle for floating bar if needed elsewhere, or remove if only tray controls it
-                    println!("[Menu] Toggle floating bar requested.");
-                    if let Some(window) = app.get_webview_window("floating-bar") {
-                        match window.is_visible() {
-                            Ok(true) => window.hide().unwrap(),
-                            Ok(false) => {
-                                window.show().unwrap();
-                                window.set_focus().unwrap();
-                            },
-                            Err(e) => eprintln!("[Menu Error] checking floating bar visibility: {}", e),
-                        }
-                    } else {
-                         eprintln!("[Menu Error] Floating bar window not found for toggle.");
-                    }
-                }
-                "toggle_panel" => {
-                    println!("[Menu] Toggle panel requested.");
-                    let main_window_visible = window.is_visible().unwrap_or(false);
-                    if main_window_visible {
-                        window.hide().unwrap();
-                        if let Some(MenuItemKind::MenuItem(item)) = app.menu().unwrap().get("toggle_panel") {
-                            item.set_text("Show Panel").unwrap();
-                        }
-                    } else {
-                        window.show().unwrap();
-                        window.set_focus().unwrap();
-                         if let Some(MenuItemKind::MenuItem(item)) = app.menu().unwrap().get("toggle_panel") {
-                            item.set_text("Hide Panel").unwrap();
-                        }
-                    }
-                }
-                _ => {
-                     println!("[Menu] Unhandled event: {:?}", event.id);
-                }
-            }
-        })
-        .on_tray_icon_event(|tray, event| { // Attach tray event handler directly
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                println!("[Tray] Left click detected.");
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("floating-bar") {
-                    match window.is_visible() {
-                        Ok(true) => {
-                            window.hide().unwrap();
-                            // Make the window ignore mouse events when hidden
-                            if let Err(e) = window.set_ignore_cursor_events(true) {
-                                eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                            }
-                            println!("[Tray] Floating bar hidden and ignoring clicks.");
-                        },
-                        Ok(false) => {
-                            // Make the window accept mouse events again when shown
-                            if let Err(e) = window.set_ignore_cursor_events(false) {
-                                eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                            }
-                            window.show().unwrap();
-                            window.set_focus().unwrap();
-                            println!("[Tray] Floating bar shown, focused, and accepting clicks.");
-                        },
-                        Err(e) => eprintln!("[Tray Error] checking floating bar visibility: {}", e),
-                    }
-                } else {
-                     eprintln!("[Tray Error] Floating bar window not found on left click.");
-                }
-            }
-        })
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // --- Register the Global Shortcut ---
-            app_handle
-                .global_shortcut()
-                .register("Escape")
-                .expect("Failed to register Escape shortcut");
+            // --- Setup Tray Icon ---
+            let tray_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // Load the icon
+                let icon_path = tray_app_handle.path().resolve("icons/32x32.png", tauri::path::BaseDirectory::Resource).unwrap_or_else(|_| {
+                    eprintln!("[Tray Setup Error] Failed to resolve icon path. Using a placeholder or default mechanism if available.");
+                    std::path::PathBuf::from("icons/32x32.png")
+                });
 
-            // --- Menu Setup ---
-            let toggle_panel_item = MenuItemBuilder::new("Show Panel")
-                .id("toggle_panel")
-                .build(&app_handle)
-                .expect("Failed to build toggle_panel item");
-            let quit_item = PredefinedMenuItem::quit(&app_handle, Some("Quit Juno"))
-                .expect("Failed to build quit item");
-
-            let menu = Menu::with_items(&app_handle, &[
-                &toggle_panel_item,
-                &quit_item,
-            ]).expect("Failed to create menu");
-
-            let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/assets/tray-Template.png");
-            let icon_bytes = std::fs::read(&icon_path).expect("Failed to read icon file");
-            let icon = Image::new_owned(
-                icon_bytes, // Pass owned Vec<u8>
-                32, // Provide explicit width (adjust if needed)
-                32  // Provide explicit height (adjust if needed)
-            );
-
-            let _tray = tauri::tray::TrayIconBuilder::new()
-                .menu(&menu)
-                .icon(icon)
-                .icon_as_template(true)
-                .tooltip("Juno")
-                .show_menu_on_left_click(false)
-                .build(&app_handle)
-                .expect("Failed to build tray icon");
-
-            let main_window = app.get_webview_window("main")
-               .ok_or_else(|| "Fatal: Main window not found during setup".to_string())?;
-
-            let window_event_handle = app.handle().clone();
-            main_window.on_window_event(move |event| {
-                match event {
-                    WindowEvent::CloseRequested { api, .. } => {
-                        api.prevent_close();
-                        let window = window_event_handle.get_webview_window("main").unwrap();
-                        window.hide().unwrap();
-                        info!("[INFO] Main window hidden via close request."); // Keep info usage
+                let loaded_tauri_icon = match image::open(&icon_path) { // Use the `image` crate to open
+                    Ok(dynamic_image) => {
+                        let width = dynamic_image.width();
+                        let height = dynamic_image.height();
+                        let rgba_image = dynamic_image.to_rgba8();
+                        let bytes = rgba_image.into_raw();
+                        // Assuming TauriImage::new returns TauriImage directly (or panics on error)
+                        // based on `-> Self` in its signature from earlier compiler messages.
+                        // Use new_owned to move the bytes and avoid lifetime issues.
+                        let img = TauriImage::new_owned(bytes, width, height);
+                        Some(img)
+                    },
+                    Err(e) => {
+                        eprintln!("[Tray Setup Error] Failed to load image from path {:?} using 'image' crate: {}", icon_path, e);
+                        None
                     }
-                    _ => {}
+                };
+
+                // Create a simple menu
+                let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).unwrap());
+                let toggle_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::TOGGLE_FLOATING_BAR, "Toggle Floating Bar", true, None::<&str>).unwrap());
+                let tray_menu = Menu::with_items(&tray_app_handle, &[
+                    &quit_item,
+                    &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
+                    &toggle_item,
+                ]).map_err(|e| eprintln!("[Tray Setup Error] Failed to create tray menu: {}", e)).ok();
+
+                let mut tray_builder = TrayIconBuilder::new()
+                    .on_menu_event(move |app_handle, event| {
+                        match event.id().as_ref() {
+                            constants::tray_menu_ids::QUIT => {
+                                println!("[Tray Menu] Quit requested.");
+                                app_handle.exit(0);
+                            }
+                            constants::tray_menu_ids::TOGGLE_FLOATING_BAR => {
+                                println!("[Tray Menu] Toggle floating bar requested.");
+                                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
+                                    match window.is_visible() {
+                                        Ok(true) => {
+                                            let _ = window.hide();
+                                            if let Err(e) = window.set_ignore_cursor_events(true) {
+                                                eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
+                                            }
+                                        }
+                                        Ok(false) => {
+                                            if let Err(e) = window.set_ignore_cursor_events(false) {
+                                                eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
+                                            }
+                                            let _ = window.show();
+                                            let _ = window.set_focus();
+                                        }
+                                        Err(e) => eprintln!("[Tray Menu Error] Checking floating bar visibility: {}", e),
+                                    }
+                                } else {
+                                    eprintln!("[Tray Menu Error] Floating bar window not found for toggle.");
+                                }
+                            }
+                            _ => {
+                                println!("[Tray Menu] Unhandled event: {:?}", event.id());
+                            }
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            println!("[Tray Icon] Left click detected.");
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window(constants::window_labels::FLOATING_BAR) {
+                                match window.is_visible() {
+                                    Ok(true) => {
+                                        window.hide().unwrap();
+                                        if let Err(e) = window.set_ignore_cursor_events(true) {
+                                            eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
+                                        }
+                                        println!("[Tray Icon] Floating bar hidden and ignoring clicks.");
+                                    },
+                                    Ok(false) => {
+                                        if let Err(e) = window.set_ignore_cursor_events(false) {
+                                            eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
+                                        }
+                                        window.show().unwrap();
+                                        window.set_focus().unwrap();
+                                        println!("[Tray Icon] Floating bar shown, focused, and accepting clicks.");
+                                    },
+                                    Err(e) => eprintln!("[Tray Icon Error] checking floating bar visibility: {}", e),
+                                }
+                            } else {
+                                 eprintln!("[Tray Icon Error] Floating bar window not found on left click.");
+                            }
+                        }
+                    });
+
+                if let Some(icon_image) = loaded_tauri_icon {
+                    tray_builder = tray_builder.icon(icon_image);
+                }
+
+                if let Some(menu) = tray_menu {
+                    tray_builder = tray_builder.menu(&menu);
+                }
+
+                match tray_builder.build(&tray_app_handle) {
+                    Ok(_) => println!("[Tray Setup] Tray icon configured successfully."),
+                    Err(e) => eprintln!("[Tray Setup Error] Failed to build tray icon: {}", e),
                 }
             });
+            // --- End of Tray Icon Setup ---
 
-            if let Some(_floating_bar) = app.get_webview_window("floating-bar") {
-                println!("Floating bar window found.");
-            } else {
-                eprintln!("Warning: Floating bar window not found during setup.");
-            }
-
-            // --- macOS Specific Setup for Floating Bar --- ///
-            #[cfg(target_os = "macos")]
-            {
-                info!("Applying macOS specific setup...");
-                if let Some(window) = app_handle.get_webview_window("floating-bar") {
-                    info!("Found floating-bar for macOS setup.");
-                    // --- Apply Standard Window Styling ---
-                    match window.ns_window() {
-                        Ok(ns_window_ptr) => {
-                            let ns_window = ns_window_ptr as cocoa_id;
-                            unsafe {
-                                // Keep window floating above others - Use integer value for Floating level
-                                ns_window.setLevel_(5); // kCGFloatingWindowLevelKey is typically 5
-                                // Allow clicks to pass through transparent areas
-                                ns_window.setOpaque_(NO);
-                                ns_window.setHasShadow_(NO); // Optional: remove shadow if desired
-                                // Keep it visible across spaces
-                                ns_window.setCollectionBehavior_(
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
-                                );
-
-                                // Set initial ignore state based on visibility (handled by tray logic, but good initial state)
-                                if !window.is_visible().unwrap_or(false) {
-                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
-                                     info!("macOS Setup: Floating bar initially hidden, ignoring mouse events.");
-                                } else {
-                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-                                     info!("macOS Setup: Floating bar initially visible, accepting mouse events.");
+            // --- Setup Floating Bar State Listener ---
+            if let Some(floating_bar_window) = app.get_webview_window(constants::window_labels::FLOATING_BAR) {
+                let app_handle_for_listener = app.handle().clone(); // Clone AppHandle for the listener
+                floating_bar_window.listen(constants::events::BAR_STATE_CHANGED, move |event| {
+                    info!("[Event: {}] Received raw: {:?}", constants::events::BAR_STATE_CHANGED, event.payload());
+                    let payload_str = event.payload(); // Assuming this is &str as per compiler error
+                    match serde_json::from_str::<BarStateChangeEventPayload>(payload_str) {
+                        Ok(parsed_payload) => {
+                            let new_state_str = &parsed_payload.new_state;
+                            // Get AppState from the AppHandle inside the closure
+                            let app_state = app_handle_for_listener.state::<state::AppState>();
+                            // Clone the Arc for the bar_ui_state to extend its lifetime
+                            let bar_ui_state_arc = app_state.bar_ui_state.clone();
+                            let lock_result = bar_ui_state_arc.lock(); // Assign lock result to a variable
+                            match lock_result { // Match on the result
+                                Ok(mut bar_state_guard) => {
+                                    *bar_state_guard = new_state_str.to_string();
+                                    info!("[AppState Update] bar_ui_state updated to: {}", new_state_str);
                                 }
-                                info!("macOS standard styling applied to floating-bar.");
+                                Err(e) => {
+                                    tracing::error!("[Event: {}] Failed to lock AppState.bar_ui_state: {}", constants::events::BAR_STATE_CHANGED, e);
+                                }
                             }
                         }
                         Err(e) => {
-                            eprintln!("Error getting NSWindow for styling floating-bar: {}", e);
+                            tracing::error!("[Event: {}] Failed to parse payload into BarStateChangeEventPayload: {}. Payload: {}", constants::events::BAR_STATE_CHANGED, e, payload_str);
                         }
                     }
-                     // --- Setup Mouse Tracking ---
-                    macos_tracking::setup_tracking_area(&window, app_handle.clone());
-
-                } else {
-                    eprintln!("Warning: floating-bar window not found during macOS specific setup.");
-                }
+                });
+                info!("[Setup] Listener for '{}' event attached to floating-bar window.", constants::events::BAR_STATE_CHANGED);
+            } else {
+                tracing::error!("[Setup] Floating-bar window not found, cannot listen for {} event.", constants::events::BAR_STATE_CHANGED);
             }
-            // --- End macOS Specific Setup ---
+
+            // --- End of Floating Bar State Listener Setup ---
+
+            let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
+            tauri::async_runtime::spawn(async move {
+                // Register Escape shortcut
+                if let Err(e) = app_handle_shortcuts.global_shortcut().register("Escape") {
+                    eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
+                }
+
+                // Register Dictation Toggle Shortcut
+                let dictation_shortcut_str = if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };
+                if let Err(e) = app_handle_shortcuts.global_shortcut().register(dictation_shortcut_str) {
+                     eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_shortcut_str, e);
+                }
+            });
+
+            // Listen for audio playback test request
+            if let Some(main_window) = app.get_webview_window(constants::window_labels::MAIN) {
+                let app_handle_for_listener = app.handle().clone();
+                let _event_id = main_window.listen(constants::events::REQUEST_AUDIO_PLAYBACK_TEST, move |_event| {
+                    info!("[Event Listener] Received {} event.", constants::events::REQUEST_AUDIO_PLAYBACK_TEST);
+                    let ah_clone = app_handle_for_listener.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let app_state = ah_clone.state::<crate::state::AppState>(); // Ensure crate::state path is correct
+                        match crate::commands::voice_control::playback_last_audio_chunk(app_state).await {
+                            Ok(message) => info!("[Event Listener] playback_last_audio_chunk successful: {}", message),
+                            Err(e) => tracing::error!("[Event Listener] playback_last_audio_chunk error: {}", e),
+                        }
+                    });
+                });
+                // Note: .map_err().unwrap() removed as .listen() returns EventId not Result
+            } else {
+                tracing::error!("[Setup] Main window not found, cannot listen for {} event.", constants::events::REQUEST_AUDIO_PLAYBACK_TEST);
+            }
 
             Ok(())
         });
@@ -420,7 +500,7 @@ mod macos_tracking {
     extern "C" fn mouse_entered(_this: &Object, _cmd: Sel, _event: cocoa_id) {
         info!("[Tracking Delegate] Mouse Entered");
         if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-             if let Some(window) = handle.get_webview_window("floating-bar") {
+             if let Some(window) = handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
                 let _ = window.emit("mouse-entered-window", ()); // Emit specific event
                  info!("[Tracking Delegate] Emitted mouse-entered-window");
              } else {
@@ -432,7 +512,7 @@ mod macos_tracking {
     extern "C" fn mouse_exited(_this: &Object, _cmd: Sel, _event: cocoa_id) {
          info!("[Tracking Delegate] Mouse Exited");
          if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-             if let Some(window) = handle.get_webview_window("floating-bar") {
+             if let Some(window) = handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
                 let _ = window.emit("mouse-left-window", ()); // Emit specific event
                  info!("[Tracking Delegate] Emitted mouse-left-window");
              } else {

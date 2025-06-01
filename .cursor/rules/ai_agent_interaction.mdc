@@ -1,0 +1,36 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+## AI Agent Interaction & Event Handling
+
+User queries, whether typed or dictated, are processed by a backend AI agent. The frontend ([`src/App.tsx`](mdc:src/App.tsx)) orchestrates this interaction and updates the UI based on events from the backend.
+
+### Query Submission:
+- **Typed Queries**: Entered into the input field in `App.tsx`. On submission, the `submitQuery` function in `App.tsx` is called.
+- **Dictated Queries**: After transcription by `VoiceController` ([`src-tauri/src/voice_control.rs`](mdc:src-tauri/src/voice_control.rs)), a `"dictation_transcription_result"` event is emitted. The listener in `App.tsx` for this event calls `submitQuery`.
+- **`submitQuery` in `App.tsx`**: This function invokes the Tauri command `submit_query` (defined in [`src-tauri/src/anthropic.rs`](mdc:src-tauri/src/anthropic.rs) and re-exported in [`src-tauri/src/lib.rs`](mdc:src-tauri/src/lib.rs)), passing the user's text.
+
+### Backend Event Handling in `App.tsx`:
+`App.tsx` listens for several key events from the backend to update the conversation UI:
+
+- **`"backend-response"`**:
+    - This is the primary event for receiving the AI agent's final response to a query.
+    - The payload includes the original user query and the AI's response text, and potentially audio or screenshot data.
+    - A debounced handler (`handleBackendResponseDebounced`) processes this event to add both the user's message and the assistant's message (with any associated media) to the conversation history.
+
+- **`"agent-event"`**:
+    - This event provides real-time updates on the AI agent's internal state and tool usage.
+    - **Payload types include**:
+        - `"thinking"`: Indicates the agent is processing.
+        - `"tool_call_request"`: Shows which tool the agent is about to use and its arguments.
+        - `"tool_call_result"`: Displays the output from a tool call, potentially including a screenshot.
+        - `"screenshot"`: Indicates a screenshot was captured, often as part of a tool result or a proactive capture by the AI.
+    - These events are used to add specific types of messages to the conversation log, providing visibility into the agent's operations.
+
+- **`"dictation_transcription_result"`**: (Covered in `voice_control_flow.mdc`)
+    - Triggers the submission of transcribed text as a query.
+
+### Global Shortcut for Agent Control:
+- **Escape Key**: A global shortcut (registered in [`src-tauri/src/lib.rs`](mdc:src-tauri/src/lib.rs)) signals the AI agent to stop its current processing. It emits an `"agent-stopping"` event.

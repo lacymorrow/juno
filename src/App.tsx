@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
 import {
-  BotMessageSquare,
+  DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
   Send,
@@ -161,6 +161,46 @@ function App() {
     };
   }, []);
 
+  // Listen for transcription results from dictation
+  useEffect(() => {
+    const unlisten = listen<{ query?: string | null; error?: string | null }>( // Define the expected payload structure
+      "app-dictation-finished",
+      (event) => {
+        // Listen for "app-dictation-finished"
+        console.log("Received app-dictation-finished event:", event.payload);
+        const transcribedText = event.payload?.query; // Extract text from payload.query
+        const error = event.payload?.error;
+
+        if (error) {
+          console.error("Dictation error:", error);
+          // Optionally, display this error to the user in the chat or via a notification
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `Dictation failed: ${error}`,
+            },
+          ]);
+          return; // Stop further processing if there was an error
+        }
+
+        if (transcribedText && transcribedText.trim() !== "") {
+          // Submit the transcribed text as a query to the agent.
+          // The backend-response listener will handle adding both user and assistant messages.
+          submitQuery(transcribedText, true); // Pass true: this is from dictation
+        } else {
+          console.log(
+            "Received empty, whitespace-only, or null transcription, not submitting."
+          );
+        }
+      }
+    );
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Check server status on mount
   useEffect(() => {
     const checkServer = async () => {
@@ -225,24 +265,70 @@ function App() {
   // For now, we assume it might still be used by the main input,
   // OR that the main input also triggers the event flow.
   // If `submit_query` backend now ONLY emits, this function needs adjustment.
-  const submitQuery = async (text: string) => {
-    if (!text.trim() || isProcessing || serverStatus !== "connected") {
+  const submitQuery = async (
+    text: string,
+    isFromDictation: boolean = false
+  ) => {
+    console.log(
+      "[submitQuery called] Text:",
+      text,
+      "Trimmed empty?",
+      !text.trim(),
+      "isProcessing:",
+      isProcessing,
+      "serverStatus:",
+      serverStatus,
+      "isFromDictation:",
+      isFromDictation
+    );
+
+    // Common check for empty text
+    if (!text.trim()) {
+      console.log("[submitQuery] Returning early due to empty text.");
       return;
     }
 
-    // Optimistically add user message? Or wait for event?
-    // Let's wait for the event to handle both user and assistant messages consistently.
-    // const userMessage: ChatMessage = { role: "user", content: text };
-    // setConversation((prev) => [...prev, userMessage]);
-    setQuery(""); // Clear input immediately
+    // Server status check - only enforced if NOT from dictation
+    if (!isFromDictation && serverStatus !== "connected") {
+      console.log(
+        "[submitQuery] Returning early: server not connected (and not from dictation)."
+      );
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content:
+            "Cannot submit query: Server is not connected. Please wait or check connection.",
+        },
+      ]);
+      return;
+    }
+    // For dictated queries, we proceed even if serverStatus is not "connected".
+    // The `invoke` call will likely fail and be caught below, providing user feedback.
+
+    // isProcessing check - only enforced if NOT from dictation
+    if (!isFromDictation && isProcessing) {
+      console.log(
+        "[submitQuery] Returning early: query already in progress (and not from dictation)."
+      );
+      return;
+    }
+    // For dictated queries, we proceed even if isProcessing is true.
+
+    // If we reach here for dictation:
+    // - text is not empty.
+    // - serverStatus check was skipped (or passed if not dictation).
+    // - isProcessing check was skipped (or passed if not dictation).
+
+    setQuery(""); // Clear input immediately IF it was from the manual input field
     setIsProcessing(true); // Set processing state
 
     try {
       // Invoke the backend command. We assume it triggers the "backend-response" event.
-      // The direct return value might be empty or just a confirmation now.
       await invoke("submit_query", { query: text });
       console.log("submit_query invoked for:", text);
       // Response handling is now done via the event listener.
+      // isProcessing will be set to false by the backend-response event handler.
     } catch (error) {
       const errorMessage: ChatMessage = {
         role: "system",
@@ -328,7 +414,7 @@ function App() {
           {/* Header */}
           <header className="flex justify-between items-center mb-4 flex-shrink-0 border-b pb-2">
             <h1 className="text-xl font-semibold flex items-center gap-2">
-              <BotMessageSquare size={24} /> Juno{" "}
+              <DogIcon size={24} /> Juno{" "}
               <span className="text-xs text-muted-foreground">Operator</span>
             </h1>
             <div className="flex items-center gap-4">

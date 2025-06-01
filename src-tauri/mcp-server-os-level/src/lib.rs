@@ -258,6 +258,11 @@ impl Desktop {
         self.engine.scroll_at_current_position(direction, amount)
     }
 
+    /// List all windows
+    pub fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
+        self.engine.list_windows()
+    }
+
     /// Press a single key with an optional modifier
     pub fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
         self.engine.press_key(key_name, modifier)

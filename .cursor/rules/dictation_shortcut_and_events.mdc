@@ -1,0 +1,42 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Dictation Shortcut and Event Flow
+
+This rule describes how the global dictation shortcut, Tauri events, and commands work together to control dictation and trigger diagnostic audio playback.
+
+## Global Shortcut
+
+-   A global shortcut (Option+D on macOS, Alt+D on other platforms) is registered in [`src-tauri/src/lib.rs`](mdc:src-tauri/src/lib.rs) using `tauri-plugin-global-shortcut`.
+-   When pressed, the shortcut handler in `lib.rs`:
+    1.  Retrieves the `VoiceController` from `AppState`.
+    2.  Calls `voice_controller.toggle_dictation()`.
+    3.  Emits a `dictation_state_changed` event to the frontend with the new boolean dictation state (`true` for ON, `false` for OFF).
+    4.  **If dictation is turned OFF by the shortcut**, it also emits a `request_audio_playback_test` event to the main window.
+
+## `stop_dictation_command`
+
+-   The `stop_dictation_command` in [`src-tauri/src/commands/voice_control.rs`](mdc:src-tauri/src/commands/voice_control.rs) can be called directly (e.g., from the frontend or other parts of the backend).
+-   When this command successfully stops dictation:
+    1.  It calls `voice_controller.stop_dictation()`.
+    2.  It also emits a `request_audio_playback_test` event to the main window.
+
+## `request_audio_playback_test` Event
+
+-   This event signals that dictation has just finished and a diagnostic playback of the last recorded audio chunk is desired.
+-   An event listener is set up in the `.setup()` hook in [`src-tauri/src/lib.rs`](mdc:src-tauri/src/lib.rs) for the main window.
+-   When the main window receives the `request_audio_playback_test` event, the listener:
+    1.  Retrieves `AppState` using the `AppHandle`.
+    2.  Directly calls the async function `crate::commands::voice_control::playback_last_audio_chunk(app_state).await`.
+
+## Purpose of this Flow
+
+This event-driven flow ensures that regardless of how dictation is stopped (via global shortcut or direct command call), an attempt is made to play back the last recorded audio segment for quick quality checking.
+
+## Key Files
+
+-   Global shortcut registration and event listener: [`src-tauri/src/lib.rs`](mdc:src-tauri/src/lib.rs)
+-   Tauri command for stopping dictation: [`src-tauri/src/commands/voice_control.rs`](mdc:src-tauri/src/commands/voice_control.rs) (specifically `stop_dictation_command`)
+-   Tauri command for playback: [`src-tauri/src/commands/voice_control.rs`](mdc:src-tauri/src/commands/voice_control.rs) (specifically `playback_last_audio_chunk`)

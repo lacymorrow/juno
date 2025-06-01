@@ -12,6 +12,7 @@ edition = "2021"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "juno_lib"
+path = "src/lib.rs"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -59,6 +60,13 @@ tauri-plugin-global-shortcut = "2.2.0"
 playwright = "0.0.20"
 # Add Rig for AI agent capabilities
 rig-core = "0.2.1"
+whisper-rs = "0.11.0"
+hound = "3.5"
+cpal = "0.15"
+rubato = "0.14.1"
+chrono = "0.4"
+# logging = { path = "../logging" } # Commented out due to path issue and no current usages
+# rabDab = { path = "../rabDab" }   # Commented out due to path issue and no current usages
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

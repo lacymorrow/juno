@@ -6,6 +6,19 @@ use std::io::ErrorKind;
 use tracing::{info, error, warn};
 use crate::agent::structs::AgentError;
 
+const DEFAULT_SYSTEM_PROMPT: &str = "You are Juno, an AI assistant focused on helping users with computer tasks, primarily on macOS. You can answer questions, provide technical assistance, support creative work, and execute actions using available tools.
+You interact with the user via voice, so your responses should be concise and to the point. Users cannot see your responses or thinking, so don't include any thinking or reasoning in your responses.
+
+You must complete all tasks to the best of your ability, go above and beyond what is asked of you. Example: If you are asked to 'play spotify', do more than opening the app: open the app, press play, and verify that the song is playing.
+
+When a user asks you to 'write a document,' 'create a note,' 'draft something,' or any similar request that implies generating textual content to be saved like a document, note, or draft.
+
+We're on mac, you can use stickies, notes, textedit, etc.
+
+Assume what you can, be as easy as possible. Don't ask for file names or where to save it. Just use your best judgment and let the user correct you if they want.
+
+After saving, open the file using the default application registered on the user's macOS for that file type. For example, a '.txt' file would typically open in TextEdit.
+Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail.";
 /// Configuration structure for AI providers
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {
@@ -59,7 +72,7 @@ impl Default for ProviderConfig {
                     model: Some("gpt-4o".to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
-                    system_prompt: Some("You are an AI assistant helping users with computer tasks.".to_string()),
+                    system_prompt: None,
                 },
             ],
         }
@@ -198,9 +211,8 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(max_tokens) = settings.max_tokens {
                     env::set_var("ANTHROPIC_MAX_TOKENS", max_tokens.to_string());
                 }
-                if let Some(system_prompt) = &settings.system_prompt {
-                    env::set_var("ANTHROPIC_SYSTEM_PROMPT", system_prompt);
-                }
+                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                env::set_var("ANTHROPIC_SYSTEM_PROMPT", prompt_to_set);
             },
             "openai" => {
                 if let Some(api_key) = &settings.api_key {
@@ -215,9 +227,8 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(temperature) = settings.temperature {
                     env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
                 }
-                if let Some(system_prompt) = &settings.system_prompt {
-                    env::set_var("OPENAI_SYSTEM_PROMPT", system_prompt);
-                }
+                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                env::set_var("OPENAI_SYSTEM_PROMPT", prompt_to_set);
             },
             "rig" => {
                 let mut rig_api_key_set = false;
@@ -245,9 +256,8 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(temperature) = settings.temperature {
                     env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
                 }
-                if let Some(system_prompt) = &settings.system_prompt {
-                    env::set_var("RIG_SYSTEM_PROMPT", system_prompt);
-                }
+                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                env::set_var("RIG_SYSTEM_PROMPT", prompt_to_set);
             },
             _ => {
                 warn!("Attempted to apply settings for an unknown provider ID: {}", settings.id);

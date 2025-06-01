@@ -1,0 +1,35 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# System Prompt Configuration and Standardization
+
+This document outlines how system prompts for various AI providers are managed, ensuring consistency and allowing for provider-specific overrides.
+
+## Global Default System Prompt
+
+A global default system prompt is defined as a constant `DEFAULT_SYSTEM_PROMPT` within [`src-tauri/src/agent/providers/config.rs`](mdc:src-tauri/src/agent/providers/config.rs). This prompt is used as a fallback if a specific provider does not have its own system prompt configured.
+
+The current default is: "You are Juno, an AI assistant helping users with computer tasks. You are designed to assist users with a wide range of tasks, including answering questions, providing thoughtful recommendations, offering technical help, and supporting creative work. You are also able to use tools to help you with your tasks."
+
+## Provider Configuration
+
+The `ProviderConfig` struct, also in [`src-tauri/src/agent/providers/config.rs`](mdc:src-tauri/src/agent/providers/config.rs), manages settings for each AI provider. In its default state, the `system_prompt` field for each provider (e.g., Anthropic, OpenAI, Rig) is initialized to `None`.
+
+## Applying Settings to Environment
+
+The function `apply_provider_settings_to_env` in [`src-tauri/src/agent/providers/config.rs`](mdc:src-tauri/src/agent/providers/config.rs) is responsible for translating the loaded configuration into environment variables.
+- It checks the `system_prompt` for the active provider.
+- If the provider's `system_prompt` is `None` or an empty string in the configuration, it uses the global `DEFAULT_SYSTEM_PROMPT`.
+- It then sets the appropriate environment variable for the provider (e.g., `ANTHROPIC_SYSTEM_PROMPT`, `OPENAI_SYSTEM_PROMPT`, `RIG_SYSTEM_PROMPT`).
+
+## Consumption by AI Brains
+
+The individual "Brain" implementations for each provider (e.g., `AnthropicBrain` in [`src-tauri/src/agent/providers/anthropic.rs`](mdc:src-tauri/src/agent/providers/anthropic.rs), `RigBrain` in [`src-tauri/src/agent/providers/rig.rs`](mdc:src-tauri/src/agent/providers/rig.rs)) load their system prompts by reading these environment variables. Because `apply_provider_settings_to_env` ensures these variables are always set (either with a specific prompt or the default), the brains will always have a system prompt available.
+
+## Dynamic Updates
+
+The system prompt for a specific provider can be updated at runtime using the Tauri command `update_provider_system_prompt` located in [`src-tauri/src/commands/providers.rs`](mdc:src-tauri/src/commands/providers.rs). This command modifies the provider's `system_prompt` setting in the configuration file, which will then be reflected when `apply_provider_settings_to_env` is next called (typically at application startup or when the active provider changes).
+
+This setup ensures that all providers have a sensible default system prompt while still allowing for customization per provider, either through the configuration file or via application commands.
