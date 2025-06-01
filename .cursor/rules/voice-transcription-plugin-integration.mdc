@@ -1,0 +1,66 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Voice Transcription Plugin Integration
+
+## Overview
+The voice transcription functionality has been successfully extracted from Juno into a reusable Tauri plugin (`tauri-plugin-voice-transcription`). The integration maintains backward compatibility while providing a modular architecture.
+
+## Plugin Architecture
+
+### Plugin Structure
+- **Location**: [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription)
+- **Main Module**: [tauri-plugin-voice-transcription/src/lib.rs](mdc:tauri-plugin-voice-transcription/src/lib.rs)
+- **Controller**: [tauri-plugin-voice-transcription/src/controller.rs](mdc:tauri-plugin-voice-transcription/src/controller.rs)
+- **Commands**: [tauri-plugin-voice-transcription/src/commands.rs](mdc:tauri-plugin-voice-transcription/src/commands.rs)
+
+### Integration Points
+
+1. **Cargo.toml Integration**
+   - Added in [src-tauri/Cargo.toml](mdc:src-tauri/Cargo.toml)
+   - Uses local path dependency: `tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription" }`
+
+2. **Main Application Setup**
+   - Modified [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)
+   - Plugin initialization: `.plugin(tauri_plugin_voice_transcription::init())`
+   - Event rebroadcasting for backward compatibility
+
+3. **Frontend Integration**
+   - API package: `tauri-plugin-voice-transcription-api`
+   - Used in [src/App.tsx](mdc:src/App.tsx) via `toggleDictation()` function
+
+## Event Flow
+
+### Dictation Toggle Flow
+1. **Global Shortcut (Alt+D)** → Emits `toggle-dictation-request`
+2. **Frontend Handler** ([src/App.tsx](mdc:src/App.tsx)) → Listens for event and calls `toggleDictation()`
+3. **Plugin Execution** → Processes voice input
+4. **Event Broadcasting** → Plugin events rebroadcast as app events
+
+### Event Mapping (Backward Compatibility)
+- `plugin:voice-transcription:dictation-started` → `app-dictation-started`
+- `plugin:voice-transcription:dictation-finished` → `app-dictation-finished`
+- `plugin:voice-transcription:dictation-partial-result` → `app-dictation-partial-result`
+- `plugin:voice-transcription:dictation-error` → `app-dictation-error`
+
+## Key Components Removed
+- [src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs) - Deleted
+- [src-tauri/src/commands/voice_control.rs](mdc:src-tauri/src/commands/voice_control.rs) - Deleted
+- Voice control module exports from [src-tauri/src/commands/mod.rs](mdc:src-tauri/src/commands/mod.rs)
+- Transcription CLI arguments from [src-tauri/src/cli.rs](mdc:src-tauri/src/cli.rs)
+
+## UI Components Using Voice Events
+- [src/components/ui/kibo-ui/Bar.tsx](mdc:src/components/ui/kibo-ui/Bar.tsx) - Listens for dictation events
+- [src/App.tsx](mdc:src/App.tsx) - Handles toggle-dictation-request
+
+## Configuration
+- Model paths and configurations now handled within the plugin
+- Plugin maintains its own state management
+- No need for external model path constants in main app
+
+## Testing
+- Plugin includes example app for standalone testing
+- Integration tests in main app verify event flow
+- Voice transcription functionality fully operational post-integration
