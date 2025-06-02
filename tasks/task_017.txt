@@ -1,0 +1,131 @@
+# Task ID: 17
+# Title: Implement Workspace Management Module
+# Status: pending
+# Dependencies: 10
+# Priority: low
+# Description: Create a module for preparing and managing temporary, isolated contexts or directories for agents performing sensitive operations.
+# Details:
+1. Define the `Workspace` struct:
+```rust
+struct Workspace {
+    id: Uuid,
+    path: PathBuf,
+    created_at: DateTime<Utc>,
+    metadata: HashMap<String, String>
+}
+
+impl Workspace {
+    fn new() -> Result<Self, Error> {
+        // Create a temporary directory
+        let id = Uuid::new_v4();
+        let path = std::env::temp_dir().join(format!("dotdot_workspace_{}", id));
+        std::fs::create_dir_all(&path)?;
+        
+        Ok(Self {
+            id,
+            path,
+            created_at: Utc::now(),
+            metadata: HashMap::new()
+        })
+    }
+    
+    fn add_file(&mut self, name: &str, content: &[u8]) -> Result<PathBuf, Error> {
+        let file_path = self.path.join(name);
+        std::fs::write(&file_path, content)?;
+        Ok(file_path)
+    }
+    
+    fn get_file_path(&self, name: &str) -> PathBuf {
+        self.path.join(name)
+    }
+    
+    fn list_files(&self) -> Result<Vec<PathBuf>, Error> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&self.path)? {
+            let entry = entry?;
+            files.push(entry.path());
+        }
+        Ok(files)
+    }
+    
+    fn cleanup(&self) -> Result<(), Error> {
+        std::fs::remove_dir_all(&self.path)?;
+        Ok(())
+    }
+}
+```
+
+2. Implement the `WorkspaceManager` struct:
+```rust
+struct WorkspaceManager {
+    workspaces: HashMap<Uuid, Workspace>
+}
+
+impl WorkspaceManager {
+    fn new() -> Self {
+        Self {
+            workspaces: HashMap::new()
+        }
+    }
+    
+    fn create_workspace(&mut self) -> Result<Uuid, Error> {
+        let workspace = Workspace::new()?;
+        let id = workspace.id;
+        self.workspaces.insert(id, workspace);
+        Ok(id)
+    }
+    
+    fn get_workspace(&self, id: Uuid) -> Option<&Workspace> {
+        self.workspaces.get(&id)
+    }
+    
+    fn get_workspace_mut(&mut self, id: Uuid) -> Option<&mut Workspace> {
+        self.workspaces.get_mut(&id)
+    }
+    
+    fn delete_workspace(&mut self, id: Uuid) -> Result<(), Error> {
+        if let Some(workspace) = self.workspaces.remove(&id) {
+            workspace.cleanup()?;
+        }
+        Ok(())
+    }
+    
+    fn cleanup_all(&mut self) -> Result<(), Error> {
+        let ids: Vec<Uuid> = self.workspaces.keys().cloned().collect();
+        for id in ids {
+            self.delete_workspace(id)?;
+        }
+        Ok(())
+    }
+}
+```
+
+3. Add the WorkspaceManager to the AppState:
+```rust
+struct AppState {
+    // ... existing fields ...
+    workspace_manager: Mutex<WorkspaceManager>
+}
+```
+
+4. Create Tauri commands for workspace management:
+```rust
+#[tauri::command]
+async fn create_workspace(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let mut manager = state.workspace_manager.lock().await;
+    manager.create_workspace()
+        .map(|id| id.to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_workspace(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let uuid = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let mut manager = state.workspace_manager.lock().await;
+    manager.delete_workspace(uuid)
+        .map_err(|e| e.to_string())
+}
+```
+
+# Test Strategy:
+Test workspace creation, file operations, and cleanup. Verify that workspaces are properly isolated. Test concurrent access to workspaces. Test error handling for file operations. Ensure that workspaces are properly cleaned up when no longer needed.

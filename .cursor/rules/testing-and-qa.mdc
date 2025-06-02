@@ -1,0 +1,190 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Testing and QA Guidelines
+
+## QA Command Suite
+
+The project includes comprehensive QA commands defined in [package.json](mdc:package.json) for testing various system components.
+
+### Voice and Audio Testing
+
+```bash
+# Test Whisper voice recognition
+bun run qa:whisper
+# Command: tauri dev --config src-tauri/tauri.qa.conf.json -- qa whisper
+
+# Test file transcription capabilities
+bun run qa:transcribe
+# Command: tauri dev --config src-tauri/tauri.qa.conf.json -- qa transcribe-file
+```
+
+**What These Test**:
+- Whisper model loading and initialization
+- Audio input processing pipeline
+- Speech-to-text accuracy
+- File-based transcription workflows
+
+### Automation Testing
+
+```bash
+# Test desktop automation tools
+bun run qa:tools
+# Command: tauri dev --config src-tauri/tauri.qa.conf.json -- qa tools
+
+# Test browser automation
+bun run qa:browser
+# Command: tauri dev --config src-tauri/tauri.qa.conf.json -- qa browser
+
+# Test screenshot capabilities
+bun run qa:screenshots
+# Command: tauri dev --config src-tauri/tauri.qa.conf.json -- qa screenshots
+```
+
+**What These Test**:
+- Mouse and keyboard automation
+- Window management functions
+- Web browser control and interaction
+- Screen capture and image processing
+- UI element detection and manipulation
+
+### Comprehensive Testing
+
+```bash
+# Run all QA tests in sequence
+bun run qa:full
+# Command: tauri dev --config src-tauri/tauri.qa.conf.json -- qa full
+```
+
+## Manual Testing Procedures
+
+### Voice Control Testing
+1. **Permission Check**: Verify microphone access is granted
+2. **Model Loading**: Confirm Whisper model loads without errors
+3. **Audio Quality**: Test with various audio conditions (quiet, noisy, different speakers)
+4. **Transcription Accuracy**: Validate speech-to-text quality
+5. **Real-time Processing**: Check for audio lag or buffer issues
+
+### Desktop Automation Testing
+1. **Accessibility Permissions**: Ensure macOS accessibility access is enabled
+2. **Basic Actions**: Test mouse movement, clicking, keyboard input
+3. **Window Management**: Verify window manipulation (resize, move, minimize)
+4. **Application Control**: Test launching and controlling applications
+5. **Error Handling**: Verify graceful failure when permissions denied
+
+### Agent System Testing
+1. **Tool Execution**: Verify all tool categories work correctly
+2. **Error Recovery**: Test behavior when tools fail or timeout
+3. **Cancellation**: Confirm agent operations can be cancelled cleanly
+4. **Memory Management**: Check conversation history handling
+5. **Multi-step Tasks**: Test complex multi-tool workflows
+
+### Security Testing
+1. **Path Validation**: Test file operations with various path inputs
+2. **Command Injection**: Verify command execution is secure
+3. **Permission Boundaries**: Test behavior with minimal permissions
+4. **API Key Protection**: Ensure credentials aren't logged or exposed
+5. **User Input Sanitization**: Validate handling of malicious inputs
+
+## Automated Testing Strategy
+
+### Unit Testing
+- **Rust Components**: Use `cargo test` for individual module testing
+- **TypeScript/React**: Standard Jest/Vitest testing for frontend
+- **Integration Points**: Test Tauri command interfaces
+
+### Integration Testing
+- **Voice Pipeline**: End-to-end audio processing tests
+- **Automation Flows**: Multi-step desktop automation scenarios
+- **AI Provider Integration**: Mock and real API testing
+
+### Performance Testing
+- **Voice Latency**: Measure speech recognition response times
+- **Automation Speed**: Benchmark desktop automation operations
+- **Memory Usage**: Monitor memory consumption during long sessions
+- **CPU Usage**: Profile performance impact of various operations
+
+## QA Configuration
+
+### Test Environment Setup
+The QA commands use a special configuration: `src-tauri/tauri.qa.conf.json`
+
+**Key Differences from Development**:
+- May have different permission requirements
+- Specific test data paths
+- Debug logging enabled
+- Mock services for reproducible testing
+
+### Environment Variables for Testing
+```bash
+# Voice model path for testing
+VOICE_MODEL_PATH=/path/to/test/model
+
+# Test API keys (use test/sandbox keys when available)
+ANTHROPIC_API_KEY=test_key_...
+OPENAI_API_KEY=test_key_...
+
+# Debug settings
+RUST_LOG=debug
+WHISPER_DEBUG=true
+```
+
+## Continuous Integration
+
+### Pre-commit Checks
+```bash
+# Rust compilation check
+cargo check --manifest-path src-tauri/Cargo.toml
+
+# Frontend type checking
+bun run type-check
+
+# Security linting
+cargo clippy -- -D warnings
+```
+
+### CI Pipeline Testing
+1. **Build Verification**: Ensure project builds on clean environment
+2. **Unit Test Execution**: Run all automated unit tests
+3. **Basic QA Tests**: Run QA commands that don't require special permissions
+4. **Security Scanning**: Check for dependency vulnerabilities
+
+## Testing Best Practices
+
+### Test Data Management
+- Use deterministic test data for reproducible results
+- Clean up temporary files after tests
+- Avoid testing with production API keys
+- Use mock services when possible
+
+### Error Scenario Testing
+- Test with no network connectivity
+- Test with insufficient permissions
+- Test with corrupted or missing model files
+- Test with invalid user inputs
+
+### Cross-platform Considerations
+- Primary testing on macOS (current focus)
+- Consider Windows/Linux compatibility
+- Test accessibility API differences
+- Validate platform-specific features
+
+## Debugging QA Issues
+
+### Common Voice Testing Issues
+- **Model not found**: Check `VOICE_MODEL_PATH` configuration
+- **Permission denied**: Verify microphone access in System Preferences
+- **Poor transcription**: Test audio quality and model compatibility
+
+### Common Automation Issues
+- **Accessibility denied**: Enable in System Preferences → Security & Privacy
+- **Element not found**: UI structure may have changed
+- **Timing issues**: Add appropriate waits for UI updates
+
+### Logging and Diagnostics
+- Enable debug logging: `RUST_LOG=debug`
+- Check console output during QA runs
+- Review generated log files for error details
+- Use QA screenshots command to capture visual state

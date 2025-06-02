@@ -280,36 +280,7 @@ where
                     match tool_result {
                         Ok(result) => {
                             let mut mem = self.memory.lock().await;
-
-                            // Determine actual success from the tool's output
-                            let internal_success = result.output.as_object()
-                                .and_then(|obj| obj.get("success"))
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false); // Default to false if "success" field is not present/boolean
-
-                            if internal_success {
-                                log::debug!(
-                                    "Tool {} (ID: {}) executed and reported success.",
-                                    tool_call.name,
-                                    tool_call.id
-                                );
-                            } else {
-                                let error_details = result.output.as_object()
-                                    .and_then(|obj| obj.get("stderr").or_else(|| obj.get("error")))
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.trim().to_string())
-                                    .unwrap_or_else(|| {
-                                        serde_json::to_string(&result.output)
-                                            .unwrap_or_else(|_| "No specific error detail and output is not serializable.".to_string())
-                                    });
-                                log::debug!(
-                                    "Tool {} (ID: {}) executed but reported failure. Details: {}",
-                                    tool_call.name,
-                                    tool_call.id,
-                                    error_details
-                                );
-                            }
-
+                            log::debug!("Tool {} finished successfully.", tool_call.name);
                             mem.add_message(Message {
                                 role: Role::Tool,
                                 // Prefer JSON string if possible, fallback to debug representation
@@ -327,7 +298,7 @@ where
                         Err(e) => {
                             // If a tool fails, add an error message to memory
                             // and let the brain decide the next step.
-                            log::error!("Tool {} (ID: {}) execution framework failed: {}", tool_call.name, tool_call.id, e);
+                            log::error!("Tool {} failed: {}", tool_call.name, e);
                             let mut mem = self.memory.lock().await;
                              // Store the error message as the tool's content
                             mem.add_message(Message {

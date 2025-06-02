@@ -817,7 +817,7 @@ impl UIElementImpl for MacOSUIElement {
     }
 
     fn get_tree(&self) -> Result<ElementTreeNode, AutomationError> {
-        let all_attrs = self.get_all_attributes()?;
+        let attributes = self.attributes();
         let children = self.children().unwrap_or_default();
         let child_nodes = children
             .into_iter()
@@ -825,7 +825,7 @@ impl UIElementImpl for MacOSUIElement {
             .collect();
 
         Ok(ElementTreeNode {
-            attributes: all_attrs,
+            attributes,
             children: child_nodes,
         })
     }

@@ -13,7 +13,7 @@ use crate::{AutomationError, Selector, UIElement};
 use accessibility::{AXAttribute, AXUIElementAttributes, Error as AXError};
 use accessibility_sys::{kAXFocusedUIElementAttribute, AXUIElementRef, kAXFrontmostAttribute, AXUIElementGetTypeID, kAXErrorNoValue};
 use anyhow::Result;
-use core_foundation::base::{TCFType, CFTypeID, CFGetTypeID, CFType, CFTypeRef};
+use core_foundation::base::{TCFType, CFTypeID, CFGetTypeID, CFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
@@ -26,9 +26,7 @@ use tracing::{debug, trace, warn};
 // Re-add interaction module for non-mouse actions
 use crate::platforms::macos::interaction::{self};
 // Import keycode mapping function
-use crate::platforms::macos::constants::{key_name_to_keycode, K_AXVALUE_CGSIZE_TYPE, K_AXVALUE_CGPOINT_TYPE};
-// Import FFI functions
-use crate::platforms::macos::ffi;
+use crate::platforms::macos::constants::key_name_to_keycode;
 
 use serde_json::{json, Value as JsonValue};
 use crate::element::ElementTreeNode;
@@ -1596,7 +1594,7 @@ impl AccessibilityEngine for MacOSEngine {
     fn get_window_title(&self) -> Result<String, AutomationError> {
         // Implementation Note: Get focused element, check if it's a window, get AXTitle.
         // Need robust error handling if no focus or not a window.
-        // todo!("Implement get_window_title for macOS")
+
         debug!("Getting window title");
 
         let focused_element = self.get_focused_element()?;
@@ -1643,6 +1641,7 @@ impl AccessibilityEngine for MacOSEngine {
     fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
         // Implementation Note: Iterate through applications from get_applications(),
         // then get AXWindows for each. Or use a system-level API if available.
+
         debug!("Listing all windows");
         let mut all_windows = Vec::new();
         let apps = self.get_applications()?;
@@ -1692,6 +1691,7 @@ impl AccessibilityEngine for MacOSEngine {
         // Implementation Note: Get focused element, check if it's a window,
         // find the close button (AXCloseButton) and click it.
         // Alternatively, use AXPerformAction kAXPressAction on the close button.
+
         debug!("Attempting to close the focused window");
 
         let focused_element = self.get_focused_element()?;
@@ -1821,6 +1821,7 @@ impl AccessibilityEngine for MacOSEngine {
         // Implementation Note: Get focused element, check if window,
         // find minimize button (AXMinimizeButton) and click it.
         // Or set AXMinimized attribute to true.
+
         debug!("Attempting to minimize the focused window");
 
         let focused_element = self.get_focused_element()?;
@@ -1868,6 +1869,9 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn resize_window(&self, width: f64, height: f64) -> Result<(), AutomationError> {
+        // Implementation Note: Get focused element, check if window,
+        // set AXSize attribute.
+
         debug!("Attempting to resize the focused window to width={}, height={}", width, height);
 
         let focused_element = self.get_focused_element()?;
@@ -1875,6 +1879,7 @@ impl AccessibilityEngine for MacOSEngine {
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_window = &macos_element.element.0;
 
+            // 1. Verify it's a window
             let role = ax_window.role().map_or(String::new(), |r| r.to_string());
             if role != "AXWindow" {
                 warn!(
@@ -1886,35 +1891,41 @@ impl AccessibilityEngine for MacOSEngine {
                 ));
             }
 
+            // 2. Create CGSize and AXValue
+            let size_attr = AXAttribute::new(&CFString::new("AXSize"));
             let mut cg_size = core_graphics::geometry::CGSize::new(width, height);
             let size_ptr = &mut cg_size as *mut _ as *const std::ffi::c_void;
 
-            let value_ref = unsafe { ffi::AXValueCreate(K_AXVALUE_CGSIZE_TYPE, size_ptr) };
-
-            if value_ref.is_null() {
-                warn!("Failed to create AXValueRef for CGSize");
-                return Err(AutomationError::PlatformError(
-                    "Failed to create AXValue for resize operation".to_string(),
-                ));
-            }
-
-            // AXValueCreate follows the Create Rule, so we own value_ref.
-            // CFType::wrap_under_create_rule will take ownership and release on drop.
-            let ax_value_cf_type = unsafe { CFType::wrap_under_create_rule(value_ref as CFTypeRef) };
-
-            let size_attr = AXAttribute::new(&CFString::new(accessibility_sys::kAXSizeAttribute));
-
-            match ax_window.set_attribute(&size_attr, ax_value_cf_type) {
-                Ok(_) => {
-                    debug!("Successfully set AXSize attribute");
-                    Ok(())
+            unsafe {
+                // Use AXValueCreate from ffi or accessibility_sys if available
+                // Assuming K_AXVALUE_CGSIZE_TYPE is defined similarly to K_AXVALUE_CGPOINT_TYPE
+                let value_ref = super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGSIZE_TYPE, size_ptr);
+                if value_ref.is_null() {
+                    warn!("Failed to create AXValueRef for CGSize");
+                    return Err(AutomationError::PlatformError(
+                        "Could not create AXValue for size".to_string(),
+                    ));
                 }
-                Err(e) => {
-                    warn!("Failed to set AXSize attribute: {:?}", e);
-                    Err(AutomationError::PlatformError(format!(
-                        "Failed to set the size attribute: {:?}",
-                        e
-                    )))
+
+                // 3. Set the AXSize attribute
+                // Need to wrap value_ref appropriately for set_attribute
+                // TCFType::wrap_under_create_rule might work if AXValueRef is a CFTypeRef
+                let value_to_set = CFType::wrap_under_create_rule(value_ref);
+
+                match ax_window.set_attribute(&size_attr, value_to_set) {
+                    Ok(_) => {
+                        debug!("Successfully set AXSize attribute");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("Failed to set AXSize attribute: {:?}", e);
+                        Err(AutomationError::PlatformError(format!(
+                            "Failed to set the size attribute: {:?}",
+                            e
+                        )))
+                    }
+                    // Ensure the created CFTypeRef (AXValueRef) is released if wrap_under_create_rule doesn't handle it
+                    // However, CFType wrapper should manage the retain count.
                 }
             }
         } else {
@@ -1926,6 +1937,9 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn move_window(&self, x: f64, y: f64) -> Result<(), AutomationError> {
+        // Implementation Note: Get focused element, check if window,
+        // set AXPosition attribute.
+
         debug!("Attempting to move the focused window to x={}, y={}", x, y);
 
         let focused_element = self.get_focused_element()?;
@@ -1933,6 +1947,7 @@ impl AccessibilityEngine for MacOSEngine {
         if let Some(macos_element) = focused_element.as_any().downcast_ref::<MacOSUIElement>() {
             let ax_window = &macos_element.element.0;
 
+            // 1. Verify it's a window
             let role = ax_window.role().map_or(String::new(), |r| r.to_string());
             if role != "AXWindow" {
                 warn!("Focused element is not a window (role: {}), cannot move.", role);
@@ -1941,36 +1956,36 @@ impl AccessibilityEngine for MacOSEngine {
                 ));
             }
 
-            let cg_point = core_graphics::geometry::CGPoint::new(x, y);
+            // 2. Create CGPoint and AXValue
+            let position_attr = AXAttribute::new(&CFString::new("AXPosition"));
+            let mut cg_point = core_graphics::geometry::CGPoint::new(x, y);
+            let point_ptr = &mut cg_point as *mut _ as *const std::ffi::c_void;
 
-            let point_ptr = &cg_point as *const _ as *const std::ffi::c_void;
-
-            let value_ref = unsafe { ffi::AXValueCreate(K_AXVALUE_CGPOINT_TYPE, point_ptr) };
-
-            if value_ref.is_null() {
-                warn!("Failed to create AXValueRef for CGPoint");
-                return Err(AutomationError::PlatformError(
-                    "Failed to create AXValue for move operation".to_string(),
-                ));
-            }
-
-            // AXValueCreate follows the Create Rule, so we own value_ref.
-            // CFType::wrap_under_create_rule will take ownership and release on drop.
-            let ax_value_cf_type = unsafe { CFType::wrap_under_create_rule(value_ref as CFTypeRef) };
-
-            let position_attr = AXAttribute::new(&CFString::new(accessibility_sys::kAXPositionAttribute));
-
-            match ax_window.set_attribute(&position_attr, ax_value_cf_type) {
-                Ok(_) => {
-                    debug!("Successfully set AXPosition attribute");
-                    Ok(())
+            unsafe {
+                let value_ref =
+                    super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGPOINT_TYPE, point_ptr);
+                if value_ref.is_null() {
+                    warn!("Failed to create AXValueRef for CGPoint");
+                    return Err(AutomationError::PlatformError(
+                        "Could not create AXValue for position".to_string(),
+                    ));
                 }
-                Err(e) => {
-                    warn!("Failed to set AXPosition attribute: {:?}", e);
-                    Err(AutomationError::PlatformError(format!(
-                        "Failed to set the position attribute: {:?}",
-                        e
-                    )))
+
+                // 3. Set the AXPosition attribute
+                let value_to_set = CFType::wrap_under_create_rule(value_ref);
+
+                match ax_window.set_attribute(&position_attr, value_to_set) {
+                    Ok(_) => {
+                        debug!("Successfully set AXPosition attribute");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        warn!("Failed to set AXPosition attribute: {:?}", e);
+                        Err(AutomationError::PlatformError(format!(
+                            "Failed to set the position attribute: {:?}",
+                            e
+                        )))
+                    }
                 }
             }
         } else {

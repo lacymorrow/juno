@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Emitter};
 use tracing::{info, warn, error};
 use futures::FutureExt;
-use crate::constants;
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -129,31 +128,13 @@ where
                 }
             }
 
-            // Determine success based on the tool's output if available
-            let execution_success = output.as_object()
-                .and_then(|obj| obj.get("success"))
-                .and_then(|val| val.as_bool())
-                .unwrap_or(true); // Default to true if "success" field is not present or not a bool
-
-            let content_message = if execution_success {
-                format!("Tool {} executed successfully.", tool_name)
-            } else {
-                // Try to get an error message from the tool output if it failed
-                let error_detail = output.as_object()
-                    .and_then(|obj| obj.get("error").or_else(|| obj.get("stderr")))
-                    .and_then(|val| val.as_str())
-                    .map(|s| format!(": {}", s.trim().replace("\n", " "))) // also replace newlines for cleaner log
-                    .unwrap_or_default();
-                format!("Tool {} reported failure{}", tool_name, error_detail)
-            };
-
-            // Log tool call result
+            // Log tool call success
             log_tool_call_result(
                 app_handle,
                 tool_name,
                 final_tool_output, // Use the (potentially modified) tool output
-                execution_success, // Use the determined success status
-                Some(content_message),
+                true,
+                Some(format!("Tool {} executed successfully.", tool_name)),
                 final_screenshot_base64, // Pass the extracted screenshot data
             );
             Ok(output) // Return the original, unmodified output from the tool execution
@@ -246,9 +227,9 @@ struct GenericContentPayload {
 // Emit an event when a tool is used
 // This function would be called from your tool execution logic
 fn emit_agent_event(app_handle: &AppHandle, event: AgentEvent) {
-    info!("Emitting {}: {:?}", constants::events::AGENT_EVENT, event);
-    if let Err(e) = app_handle.emit(constants::events::AGENT_EVENT, event) {
-        warn!("Failed to emit {}: {}", constants::events::AGENT_EVENT, e);
+    info!("Emitting agent-event: {:?}", event);
+    if let Err(e) = app_handle.emit("agent-event", event) {
+        warn!("Failed to emit agent-event: {}", e);
     }
 }
 
