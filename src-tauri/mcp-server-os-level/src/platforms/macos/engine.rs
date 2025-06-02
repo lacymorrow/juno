@@ -1594,7 +1594,7 @@ impl AccessibilityEngine for MacOSEngine {
     fn get_window_title(&self) -> Result<String, AutomationError> {
         // Implementation Note: Get focused element, check if it's a window, get AXTitle.
         // Need robust error handling if no focus or not a window.
-        // todo!("Implement get_window_title for macOS")
+
         debug!("Getting window title");
 
         let focused_element = self.get_focused_element()?;
@@ -1641,7 +1641,7 @@ impl AccessibilityEngine for MacOSEngine {
     fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
         // Implementation Note: Iterate through applications from get_applications(),
         // then get AXWindows for each. Or use a system-level API if available.
-        // todo!("Implement list_windows for macOS")
+
         debug!("Listing all windows");
         let mut all_windows = Vec::new();
         let apps = self.get_applications()?;
@@ -1691,7 +1691,7 @@ impl AccessibilityEngine for MacOSEngine {
         // Implementation Note: Get focused element, check if it's a window,
         // find the close button (AXCloseButton) and click it.
         // Alternatively, use AXPerformAction kAXPressAction on the close button.
-        // todo!("Implement close_window for macOS")
+
         debug!("Attempting to close the focused window");
 
         let focused_element = self.get_focused_element()?;
@@ -1821,7 +1821,7 @@ impl AccessibilityEngine for MacOSEngine {
         // Implementation Note: Get focused element, check if window,
         // find minimize button (AXMinimizeButton) and click it.
         // Or set AXMinimized attribute to true.
-        // todo!("Implement minimize_window for macOS")
+
         debug!("Attempting to minimize the focused window");
 
         let focused_element = self.get_focused_element()?;
@@ -1871,7 +1871,7 @@ impl AccessibilityEngine for MacOSEngine {
     fn resize_window(&self, width: f64, height: f64) -> Result<(), AutomationError> {
         // Implementation Note: Get focused element, check if window,
         // set AXSize attribute.
-        // todo!("Implement resize_window for macOS")
+
         debug!("Attempting to resize the focused window to width={}, height={}", width, height);
 
         let focused_element = self.get_focused_element()?;
@@ -1939,7 +1939,7 @@ impl AccessibilityEngine for MacOSEngine {
     fn move_window(&self, x: f64, y: f64) -> Result<(), AutomationError> {
         // Implementation Note: Get focused element, check if window,
         // set AXPosition attribute.
-        // todo!("Implement move_window for macOS")
+
         debug!("Attempting to move the focused window to x={}, y={}", x, y);
 
         let focused_element = self.get_focused_element()?;
