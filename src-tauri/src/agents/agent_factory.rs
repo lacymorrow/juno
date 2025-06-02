@@ -129,6 +129,7 @@ impl AgentRegistry {
 /// Factory for creating and managing specialized agents
 pub struct AgentFactory {
     registry: Arc<AgentRegistry>,
+    app_handle: Option<tauri::AppHandle>,
 }
 
 impl AgentFactory {
@@ -136,7 +137,21 @@ impl AgentFactory {
     pub fn new() -> Self {
         Self {
             registry: Arc::new(AgentRegistry::new()),
+            app_handle: None,
         }
+    }
+
+    /// Create a new agent factory with app handle
+    pub fn with_app_handle(app_handle: tauri::AppHandle) -> Self {
+        Self {
+            registry: Arc::new(AgentRegistry::new()),
+            app_handle: Some(app_handle),
+        }
+    }
+
+    /// Set the app handle for creating agents that need it
+    pub fn set_app_handle(&mut self, app_handle: tauri::AppHandle) {
+        self.app_handle = Some(app_handle);
     }
 
     /// Get the agent registry
@@ -145,19 +160,33 @@ impl AgentFactory {
     }
 
     /// Initialize the factory with default agents
-    /// This will be implemented as agents are created
     pub async fn initialize_default_agents(&self) -> Result<(), AgentError> {
-        // TODO: Create and register default agents when they're implemented
-        //
-        // let browser_agent = Arc::new(BrowserAgent::new()?);
-        // self.registry.register_agent(browser_agent).await?;
-        //
-        // let desktop_agent = Arc::new(DesktopAgent::new()?);
-        // self.registry.register_agent(desktop_agent).await?;
-        //
-        // let system_agent = Arc::new(SystemAgent::new()?);
-        // self.registry.register_agent(system_agent).await?;
+        // Create and register default agents
+        // Browser agent needs app_handle
+        if let Some(ref app_handle) = self.app_handle {
+            let browser_agent = Arc::new(super::browser_agent::BrowserAgent::new(app_handle.clone())?);
+            self.registry.register_agent(browser_agent).await?;
+        } else {
+            tracing::warn!("Cannot initialize BrowserAgent: no app_handle provided");
+        }
 
+        // Desktop agent needs app_handle
+        if let Some(ref app_handle) = self.app_handle {
+            let desktop_agent = Arc::new(super::desktop_agent::DesktopAgent::new(app_handle.clone())?);
+            self.registry.register_agent(desktop_agent).await?;
+        } else {
+            tracing::warn!("Cannot initialize DesktopAgent: no app_handle provided");
+        }
+
+        // System agent needs app_handle
+        if let Some(ref app_handle) = self.app_handle {
+            let system_agent = Arc::new(super::system_agent::SystemAgent::new(app_handle.clone())?);
+            self.registry.register_agent(system_agent).await?;
+        } else {
+            tracing::warn!("Cannot initialize SystemAgent: no app_handle provided");
+        }
+
+        tracing::info!("Initialized all available specialized agents");
         Ok(())
     }
 
@@ -174,6 +203,16 @@ impl AgentFactory {
     /// Get status of all agents
     pub async fn get_system_status(&self) -> Vec<AgentStatus> {
         self.registry.get_all_agent_status().await
+    }
+
+    /// Create an orchestrator with this factory's registry
+    pub fn create_orchestrator(&self) -> super::orchestrator::Orchestrator {
+        super::orchestrator::Orchestrator::new(self.registry.clone())
+    }
+
+    /// Create an orchestrator with custom configuration
+    pub fn create_orchestrator_with_config(&self, config: super::orchestrator::OrchestratorConfig) -> super::orchestrator::Orchestrator {
+        super::orchestrator::Orchestrator::with_config(self.registry.clone(), config)
     }
 }
 
