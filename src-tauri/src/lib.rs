@@ -377,33 +377,64 @@ pub fn run() {
                 }
             });
 
-            // Listen for transcription finished events from the plugin
+            // Listen for dictation started events from the plugin
             let app_handle_for_listener = app.handle().clone();
-            app.listen("plugin:voice-transcription:dictation-finished", move |event| {
-                info!("[Event] Received plugin:voice-transcription:dictation-finished event: {:?}", event.payload());
-                // Rebroadcast the event as app-dictation-finished for backward compatibility
-                if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
-                    tracing::error!("[Event] Failed to rebroadcast dictation-finished event: {}", e);
+            app.listen("voice-transcription:dictation-started", move |event| {
+                info!("[Event] Received voice-transcription:dictation-started event");
+                // Rebroadcast the event as app-dictation-started for backward compatibility
+                if let Err(e) = app_handle_for_listener.emit("app-dictation-started", event.payload()) {
+                    tracing::error!("[Event] Failed to rebroadcast dictation-started event: {}", e);
                 }
             });
 
             // Listen for partial result events from the plugin
             let app_handle_for_listener = app.handle().clone();
-            app.listen("plugin:voice-transcription:partial-result", move |event| {
-                info!("[Event] Received plugin:voice-transcription:partial-result event: {:?}", event.payload());
+            app.listen("voice-transcription:partial-result", move |event| {
+                info!("[Event] Received voice-transcription:partial-result event: {:?}", event.payload());
                 // Rebroadcast the event as app-dictation-partial-result for backward compatibility
                 if let Err(e) = app_handle_for_listener.emit("app-dictation-partial-result", event.payload()) {
                     tracing::error!("[Event] Failed to rebroadcast partial-result event: {}", e);
                 }
             });
 
-            // Listen for dictation started events from the plugin
+            // Listen for final result events from the plugin
             let app_handle_for_listener = app.handle().clone();
-            app.listen("plugin:voice-transcription:dictation-started", move |event| {
-                info!("[Event] Received plugin:voice-transcription:dictation-started event");
-                // Rebroadcast the event as app-dictation-started for backward compatibility
-                if let Err(e) = app_handle_for_listener.emit("app-dictation-started", event.payload()) {
-                    tracing::error!("[Event] Failed to rebroadcast dictation-started event: {}", e);
+            app.listen("voice-transcription:final-result", move |event| {
+                info!("[Event] Received voice-transcription:final-result event: {:?}", event.payload());
+
+                // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
+                let payload_str = event.payload();
+                match serde_json::from_str::<serde_json::Value>(payload_str) {
+                    Ok(mut payload_json) => {
+                        if let Some(text_value) = payload_json.get("text") {
+                            // Transform { "text": "..." } to { "query": "..." }
+                            let transformed_payload = serde_json::json!({
+                                "query": text_value
+                            });
+                            if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", transformed_payload) {
+                                tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
+                            }
+                        } else {
+                            tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
+                        // Fallback: emit with original payload
+                        if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
+                            tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
+                        }
+                    }
+                }
+            });
+
+            // Listen for dictation stopped events from the plugin
+            let app_handle_for_listener = app.handle().clone();
+            app.listen("voice-transcription:dictation-stopped", move |event| {
+                info!("[Event] Received voice-transcription:dictation-stopped event");
+                // Rebroadcast the event as app-dictation-stopped for backward compatibility
+                if let Err(e) = app_handle_for_listener.emit("app-dictation-stopped", event.payload()) {
+                    tracing::error!("[Event] Failed to rebroadcast dictation-stopped event: {}", e);
                 }
             });
 
