@@ -3,3 +3,273 @@ description:
 globs:
 alwaysApply: false
 ---
+# Specialized Technical Guides
+
+## Screenshot and Coordinate Handling
+
+### Coordinate System Management
+The application handles coordinate transformations between different screen coordinate systems, particularly important for multi-monitor setups and high-DPI displays.
+
+#### Key Considerations
+- **Screen Coordinates**: Absolute coordinates across all displays
+- **Window Coordinates**: Relative to specific application windows
+- **DPI Scaling**: Handle high-resolution displays properly
+- **Multi-Monitor**: Coordinate translation across displays
+
+#### Implementation Pattern
+```rust
+// Convert screen coordinates to window-relative coordinates
+fn screen_to_window_coords(screen_x: i32, screen_y: i32, window_bounds: Rect) -> (i32, i32) {
+    let window_x = screen_x - window_bounds.x;
+    let window_y = screen_y - window_bounds.y;
+    (window_x, window_y)
+}
+```
+
+#### Screenshot Handling
+- Capture full screen or specific regions
+- Handle coordinate mapping for click operations
+- Account for DPI scaling in coordinate calculations
+- Provide visual feedback for coordinate selection
+
+## System Prompt Configuration
+
+### AI Agent System Prompts
+The system prompt configuration defines how the AI agent behaves and interprets user requests.
+
+#### Core System Prompt Structure
+```
+You are an AI assistant with computer use capabilities. You can:
+1. Control the mouse and keyboard
+2. Take screenshots and analyze screen content
+3. Navigate applications and websites
+4. Manage files and system operations
+
+Always:
+- Confirm destructive operations before executing
+- Provide clear feedback on actions taken
+- Handle errors gracefully with helpful explanations
+- Respect user privacy and system security
+```
+
+#### Configuration Management
+- **Provider-Specific**: Different prompts for Anthropic vs OpenAI
+- **Context-Aware**: Adjust prompts based on current application context
+- **User Customization**: Allow users to modify system behavior
+- **Safety Guidelines**: Built-in safety constraints and limitations
+
+#### Prompt Templates
+```rust
+pub struct SystemPromptConfig {
+    pub base_prompt: String,
+    pub safety_guidelines: Vec<String>,
+    pub capability_descriptions: Vec<String>,
+    pub context_awareness: bool,
+}
+```
+
+## Audio Playback and Diagnostics
+
+### Audio System Architecture
+The audio system handles both input (voice transcription) and output (TTS playback) with comprehensive diagnostics.
+
+#### Playback Buffer Management
+```rust
+pub struct AudioPlaybackSystem {
+    last_processed_audio: Arc<Mutex<Vec<f32>>>,
+    playback_sample_rate: u32,
+    output_device: Option<Device>,
+}
+```
+
+#### Diagnostic Features
+- **Audio Quality Analysis**: Check for clipping, noise, silence
+- **Sample Rate Verification**: Ensure proper resampling
+- **Buffer Monitoring**: Track buffer underruns and overruns
+- **Device Compatibility**: Test input/output device compatibility
+
+#### Playback Flow
+1. **Audio Capture**: Record from microphone during dictation
+2. **Buffer Storage**: Store raw audio for playback testing
+3. **Quality Analysis**: Analyze audio characteristics
+4. **Playback Testing**: Play back recorded audio for verification
+5. **Diagnostic Reporting**: Provide detailed audio quality metrics
+
+### Event-Driven Playback Testing
+```rust
+// Triggered after dictation stops
+app_handle.emit("request_audio_playback_test", ());
+
+// Frontend responds with playback request
+invoke("playback_last_audio_chunk");
+```
+
+## Bar State Synchronization
+
+### Floating Bar UI State Management
+The floating dictation bar requires synchronized state between backend voice controller and frontend UI.
+
+#### State Synchronization Pattern
+```typescript
+// Frontend state sync
+const [barState, setBarState] = useState<'idle' | 'listening' | 'processing'>('idle');
+
+useEffect(() => {
+  const unlisten = listen('dictation-state-changed', (event) => {
+    setBarState(event.payload.state);
+  });
+  return () => unlisten.then(fn => fn());
+}, []);
+```
+
+#### Backend State Management
+```rust
+// Emit state changes from VoiceController
+pub fn update_bar_state(&self, state: &str) -> Result<(), String> {
+    self.app_handle.emit("dictation-state-changed", json!({
+        "state": state,
+        "timestamp": chrono::Utc::now().timestamp()
+    })).map_err(|e| e.to_string())
+}
+```
+
+#### State Transitions
+- **Idle**: No active dictation, bar shows ready state
+- **Listening**: Active audio capture, visual feedback
+- **Processing**: Transcription in progress, loading indicator
+- **Error**: Display error state with recovery options
+
+## CLI Transcription QA
+
+### Command-Line Testing Interface
+Provides command-line tools for testing voice transcription without the full GUI.
+
+#### CLI Commands
+```bash
+# Test transcription with audio file
+cargo run --bin cli-transcribe -- --file path/to/audio.wav
+
+# Test model loading performance
+cargo run --bin cli-transcribe -- --benchmark
+
+# Validate audio quality
+cargo run --bin cli-transcribe -- --analyze path/to/audio.wav
+```
+
+#### QA Testing Workflow
+1. **Audio File Testing**: Test transcription with known audio samples
+2. **Model Validation**: Verify Whisper model loading and performance
+3. **Quality Metrics**: Measure transcription accuracy and speed
+4. **Regression Testing**: Automated testing of transcription quality
+
+#### Test Data Management
+```rust
+pub struct TranscriptionTest {
+    pub audio_file: PathBuf,
+    pub expected_text: String,
+    pub tolerance: f32,  // Acceptable error rate
+    pub metadata: TestMetadata,
+}
+```
+
+## Agent Event Display
+
+### Real-Time Agent Activity Monitoring
+Provides visual feedback for agent operations and tool execution.
+
+#### Event Display Components
+- **Tool Execution Log**: Real-time display of tool calls and results
+- **Agent Reasoning**: Show agent decision-making process
+- **Error Reporting**: Detailed error information with context
+- **Performance Metrics**: Execution time and resource usage
+
+#### Event Stream Management
+```typescript
+interface AgentEvent {
+  type: 'tool_call' | 'reasoning' | 'error' | 'completion';
+  timestamp: number;
+  data: any;
+  metadata?: {
+    duration?: number;
+    success?: boolean;
+    error?: string;
+  };
+}
+```
+
+#### Visual Feedback Patterns
+- **Progress Indicators**: Show long-running operations
+- **Status Icons**: Visual status for different event types
+- **Expandable Details**: Detailed information on demand
+- **Filtering Options**: Filter events by type or importance
+
+## Agent Configuration
+
+### Runtime Configuration Management
+Manages agent behavior, model selection, and operational parameters.
+
+#### Configuration Structure
+```rust
+pub struct AgentConfig {
+    pub provider: ProviderConfig,
+    pub model_params: ModelParameters,
+    pub tool_settings: ToolConfiguration,
+    pub safety_settings: SafetyConfiguration,
+}
+```
+
+#### Provider Configuration
+- **Model Selection**: Choose between different AI models
+- **API Settings**: Endpoint URLs, timeouts, retry policies
+- **Authentication**: API key management and rotation
+- **Rate Limiting**: Request throttling and quota management
+
+#### Tool Configuration
+```rust
+pub struct ToolConfiguration {
+    pub enabled_tools: Vec<String>,
+    pub tool_timeouts: HashMap<String, Duration>,
+    pub safety_constraints: ToolSafetyConstraints,
+    pub execution_limits: ExecutionLimits,
+}
+```
+
+#### Dynamic Configuration Updates
+- **Runtime Changes**: Update configuration without restart
+- **Profile Management**: Save and load configuration profiles
+- **Environment-Specific**: Different configs for dev/prod
+- **User Preferences**: Customizable behavior settings
+
+## Voice Plugin Integration Patterns
+
+### Advanced Plugin Integration Techniques
+Specialized patterns for complex plugin interactions and event handling.
+
+#### Multi-Stage Event Processing
+```rust
+// Plugin emits raw events
+app_handle.emit("voice:raw-audio-data", audio_chunk);
+
+// Main app processes and transforms
+app.listen("voice:raw-audio-data", |event| {
+    let processed = process_audio_chunk(event.payload);
+    app_handle.emit("voice:processed-audio", processed);
+});
+
+// Frontend receives processed events
+listen("voice:processed-audio", handle_audio_update);
+```
+
+#### State Persistence Across Sessions
+- **Plugin State**: Maintain state between app restarts
+- **Configuration Persistence**: Save plugin settings
+- **Session Recovery**: Restore interrupted operations
+- **Error Recovery**: Handle plugin crashes gracefully
+
+#### Performance Optimization
+- **Lazy Loading**: Load plugins only when needed
+- **Resource Pooling**: Share resources between plugin instances
+- **Memory Management**: Prevent memory leaks in long-running plugins
+- **Background Processing**: Offload intensive operations
+
+These specialized guides provide detailed implementation patterns for specific technical challenges in the Juno AI Computer Use Agent system.

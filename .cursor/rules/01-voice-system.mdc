@@ -3,3 +3,199 @@ description:
 globs:
 alwaysApply: false
 ---
+# Voice Control and Transcription System
+
+## Overview
+
+The voice transcription system uses a custom Tauri plugin that integrates Whisper.cpp for real-time speech-to-text conversion. The system consists of three main components working together to provide seamless voice control.
+
+## Architecture Components
+
+### 1. Voice Transcription Plugin (tauri-plugin-voice-transcription/)
+- **Core Controller**: [tauri-plugin-voice-transcription/src/controller.rs](mdc:tauri-plugin-voice-transcription/src/controller.rs)
+- **Commands**: [tauri-plugin-voice-transcription/src/commands.rs](mdc:tauri-plugin-voice-transcription/src/commands.rs)
+- **Plugin Init**: [tauri-plugin-voice-transcription/src/lib.rs](mdc:tauri-plugin-voice-transcription/src/lib.rs)
+
+### 2. Main App Integration
+- **Event Routing**: [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Event listeners and payload transformation
+- **Permissions**: [src-tauri/capabilities/default.json](mdc:src-tauri/capabilities/default.json) - Plugin permissions
+
+### 3. Frontend Integration
+- **Event Handling**: [src/App.tsx](mdc:src/App.tsx) - Voice event processing and AI submission
+- **UI Components**: [src/Bar.tsx](mdc:src/Bar.tsx) - Floating dictation bar
+
+## Event Flow Architecture
+
+### Complete Dictation Flow
+```
+1. Alt+D Press → Global Shortcut Handler → toggle-dictation-request event
+2. Plugin Controller → voice-transcription:dictation-started
+3. Audio Recording → Whisper Processing → voice-transcription:partial-result
+4. Audio Complete → Final Processing → voice-transcription:final-result
+5. Event Transformation → app-dictation-finished (with "query" field)
+6. Frontend → submitQuery(transcribedText, true) → AI Agent Processing
+```
+
+## Critical Implementation Details
+
+### Payload Transformation (Essential Fix)
+**Problem**: Plugin events use different field names than frontend expects
+**Solution**: Transform payload in main app event listeners
+
+```rust
+// In src-tauri/src/lib.rs - CRITICAL TRANSFORMATION
+app.listen("voice-transcription:final-result", move |event| {
+    let payload_str = event.payload();
+    match serde_json::from_str::<serde_json::Value>(payload_str) {
+        Ok(payload_json) => {
+            if let Some(text_value) = payload_json.get("text") {
+                let transformed_payload = serde_json::json!({
+                    "query": text_value  // Transform "text" to "query"
+                });
+                app_handle.emit("app-dictation-finished", transformed_payload);
+            }
+        }
+        Err(e) => tracing::error!("Failed to parse voice transcription payload: {}", e),
+    }
+});
+```
+
+### Global Shortcut Integration
+- **macOS**: Option+D
+- **Other Platforms**: Alt+D
+- Registered in global shortcut handler
+- Emits `toggle-dictation-request` event
+
+## Audio Processing Details
+
+### Core Processing Flow
+1. **Recording**: Audio captured from default input device at native sample rate
+2. **Raw Audio Collection**: All audio stored in `raw_full_session_audio` during session
+3. **Playback Buffer**: Audio copied to `last_processed_audio_buffer` for developer playback
+4. **Resampling**: Audio resampled to `WHISPER_SAMPLE_RATE` (16000 Hz) for transcription
+5. **Transcription**: Whisper model processes 16kHz audio for final text output
+
+### Key Constants and Buffers
+- `WHISPER_SAMPLE_RATE`: 16000 Hz (required for Whisper)
+- `raw_full_session_audio`: Original sample rate audio for entire session
+- `last_processed_audio_buffer`: Copy for playback functionality
+- `audio_for_transcription`: 16kHz resampled audio for Whisper
+
+### Threading Architecture
+```
+Main Thread → Audio Thread (WhisperContext + State)
+           → Audio Stream (CPAL)
+           → Whisper Processing
+           → Event Emission back to Main
+```
+
+## VoiceController Implementation
+
+### Key Methods
+- `new(model_path: &str)`: Initialize with Whisper model
+- `start_dictation()`: Begin audio capture and processing
+- `stop_dictation()`: End session and trigger transcription
+- `toggle_dictation()`: Switch dictation state
+- `is_dictating()`: Get current state
+- `get_last_processed_audio_buffer()`: Access recorded audio for playback
+
+### State Management
+```rust
+pub struct VoiceController {
+    whisper_context: WhisperContext,
+    is_dictating: Arc<AtomicBool>,
+    last_processed_audio_buffer: Arc<Mutex<Vec<f32>>>,
+    recording_sample_rate: Arc<Mutex<Option<u32>>>,
+    // ... other fields
+}
+```
+
+## Required Permissions
+
+### Plugin Permissions
+```json
+{
+  "voice-transcription:default",
+  "voice-transcription:allow-toggle-dictation",
+  "voice-transcription:allow-start-dictation",
+  "voice-transcription:allow-stop-dictation",
+  "voice-transcription:allow-get-dictation-status"
+}
+```
+
+### System Permissions
+- **Microphone Access**: Required for audio capture
+- **Background Audio**: For continuous recording during dictation
+
+## Debugging and Diagnostics
+
+### Debug WAV File
+- **Location**: `debug_live_audio.wav` in project root
+- **Content**: Audio passed to Whisper (post-resampling at 16kHz)
+- **Purpose**: Verify audio quality before transcription
+
+### Event-Driven Playback
+- `stop_dictation_command` emits `request_audio_playback_test` event
+- Frontend responds by calling `playback_last_audio_chunk`
+- Only triggered when active dictation session actually stops
+
+### Logging Strategy
+```rust
+tracing::info!("[VoiceController] Starting dictation session");
+tracing::debug!("[AudioThread] Resampling from {}Hz to {}Hz", input_rate, WHISPER_SAMPLE_RATE);
+tracing::error!("[VoiceController] Transcription failed: {:?}", error);
+```
+
+## Testing Workflow
+
+### Manual Testing Steps
+1. Press Alt+D to start dictation (verify UI feedback)
+2. Speak clearly (monitor for partial transcription feedback)
+3. Press Alt+D to stop dictation (verify processing indicator)
+4. Verify transcription appears in chat interface
+5. Confirm AI agent receives and processes the query
+
+### Common Issues and Solutions
+
+#### Dictation Starts But Doesn't Stop
+- Check event listener registration in main app
+- Verify `toggle-dictation-request` event emission
+- Ensure plugin command permissions are granted
+
+#### Transcription Not Sent to AI
+- Verify payload transformation in main app event listeners
+- Check frontend event handler for `app-dictation-finished`
+- Ensure `submitQuery` is called with `isFromDictation: true`
+
+#### Poor Audio Quality
+- Check `debug_live_audio.wav` for audio issues
+- Verify resampling is working correctly
+- Monitor log messages for sample rate mismatches
+
+## Performance Considerations
+
+### Current Limitations
+- Whisper model loads from disk for each session
+- No model caching between sessions
+- Audio threading prevents UI blocking
+
+### Future Optimizations
+1. **Model Caching**: Share WhisperContext across sessions
+2. **Stream Processing**: Real-time transcription display
+3. **Model Selection**: Support for different Whisper model sizes
+4. **Background Processing**: Keep model warm in background
+
+## Integration with AI Agent
+
+### Event Transformation Flow
+```
+Plugin: voice-transcription:final-result {"text": "..."}
+  ↓
+Main App: Transform to {"query": "..."}
+  ↓
+Frontend: app-dictation-finished → submitQuery(text, true)
+  ↓
+AI Agent: Process voice command with isFromDictation flag
+```
+
+This voice system provides the foundation for natural voice interaction with the AI computer use agent, enabling hands-free operation and intuitive command input.
