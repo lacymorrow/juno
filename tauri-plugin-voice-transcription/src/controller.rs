@@ -230,7 +230,7 @@ impl VoiceController {
         Ok(())
     }
 
-    fn audio_thread_worker<R: Runtime + 'static>(
+        fn audio_thread_worker<R: Runtime + 'static>(
         model_path: String,
         last_buffer_arc: Arc<Mutex<Option<Vec<f32>>>>,
         actual_rate: u32,
@@ -327,11 +327,20 @@ impl VoiceController {
         let partial_buffer_capacity_samples = (actual_rate as u64 * 1500 / 1000) as usize;
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
 
+        info!("[AudioThread] Partial transcription threshold: {} samples ({:.2} seconds at {}Hz)",
+              partial_buffer_capacity_samples,
+              partial_buffer_capacity_samples as f32 / actual_rate as f32,
+              actual_rate);
+
         loop {
             // Check for control messages
             match control_rx.try_recv() {
                 Ok(AudioThreadMessage::Stop) => {
                     info!("[AudioThread] Stop message received.");
+                    info!("[AudioThread] Final audio buffer size: {} samples", audio_buffer_for_whisper_chunks.len());
+                    info!("[AudioThread] Raw session audio size: {} samples ({:.2} seconds)",
+                          raw_full_session_audio.len(),
+                          raw_full_session_audio.len() as f32 / actual_rate as f32);
 
                     // Process final audio
                     Self::process_final_audio(
@@ -361,6 +370,8 @@ impl VoiceController {
 
                     // Process partial transcriptions
                     if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
+                        info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
+                              audio_buffer_for_whisper_chunks.len(), partial_buffer_capacity_samples);
                         Self::process_partial_transcription(
                             &mut whisper_state,
                             &audio_buffer_for_whisper_chunks,
@@ -498,19 +509,27 @@ impl VoiceController {
 
         // Perform final transcription
         if !audio_for_transcription.is_empty() {
+            info!("[AudioThread] Performing final transcription on {} samples ({:.2} seconds at 16kHz)",
+                  audio_for_transcription.len(),
+                  audio_for_transcription.len() as f32 / WHISPER_SAMPLE_RATE as f32);
+
             let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
             params.set_temperature(0.0);
 
             match whisper_state.full(params, &audio_for_transcription[..]) {
                 Ok(_) => {
                     let num_segments = whisper_state.full_n_segments().unwrap_or(0);
+                    info!("[AudioThread] Transcription completed. Number of segments: {}", num_segments);
+
                     let mut transcription_text = String::new();
                     for i in 0..num_segments {
                         if let Ok(segment) = whisper_state.full_get_segment_text(i) {
+                            info!("[AudioThread] Segment {}: '{}'", i, segment);
                             transcription_text.push_str(&segment);
                         }
                     }
 
+                    info!("[AudioThread] Final transcription result: '{}'", transcription_text);
                     let _ = app_handle.emit("voice-transcription:final-result",
                         serde_json::json!({ "text": transcription_text }));
                     let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
@@ -521,6 +540,7 @@ impl VoiceController {
                 }
             }
         } else {
+            info!("[AudioThread] No audio to transcribe (empty buffer)");
             let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
         }
     }

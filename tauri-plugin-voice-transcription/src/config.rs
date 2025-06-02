@@ -67,7 +67,7 @@ impl VoiceTranscriptionConfig {
 }
 
 fn default_model_path() -> String {
-    "models/ggml-base.en.bin".to_string()
+    "models/ggml-tiny.en.bin".to_string()
 }
 
 fn default_sample_rate() -> u32 {

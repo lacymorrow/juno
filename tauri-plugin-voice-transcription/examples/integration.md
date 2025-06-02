@@ -91,7 +91,7 @@ Add plugin configuration to `tauri.conf.json`:
 {
   "plugins": {
     "voice-transcription": {
-      "modelPath": "models/ggml-base.en.bin"
+      "modelPath": "models/ggml-tiny.en.bin"
     }
   }
 }

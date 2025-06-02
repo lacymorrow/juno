@@ -44,7 +44,7 @@ Add plugin configuration to your `tauri.conf.json`:
 {
   "plugins": {
     "voice-transcription": {
-      "modelPath": "models/ggml-base.en.bin",
+      "modelPath": "models/ggml-tiny.en.bin",
       "sampleRate": 16000,
       "bufferDurationMs": 1500,
       "enablePartials": true,
