@@ -45,6 +45,7 @@ pub mod agent;
 pub mod voice_control; // Added for voice control functionality
 pub mod constants;
 
+
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, voice_control::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
