@@ -14,7 +14,7 @@ use tauri::Emitter; // Added Emitter trait for .emit()
 
 const WHISPER_SAMPLE_RATE: u32 = 16000; // Define the constant
 
-// TODO: Define proper error types
+
 
 // Enum to send messages to the audio thread
 enum AudioThreadMessage {
@@ -27,12 +27,7 @@ pub struct VoiceController {
     is_dictating: bool,
     // Use an Option to hold the handle and sender for the audio thread
     audio_thread: Option<(thread::JoinHandle<()>, Sender<AudioThreadMessage>)>,
-    // TODO: Add state for recording if needed (e.g., a buffer or file handle)
-    // Add state for handling transcription segments
-    // Need a way to send transcription updates back to the main thread/frontend
-    // This could be a channel, or emitting a Tauri event.
-    // For now, we'll need a way to communicate the transcription out.
-    // This will be handled by emitting Tauri events later.
+
     last_processed_audio_buffer: Arc<Mutex<Option<Vec<f32>>>>, // Stores raw audio at original sample rate
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>, // New field
     developer_playback_enabled: bool, // New field for developer setting
@@ -824,6 +819,6 @@ mod tests {
          assert!(!controller.is_dictating());
      }
 
-     // TODO: Add more sophisticated tests requiring actual audio devices or mocks
+
 }
 
