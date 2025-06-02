@@ -5,17 +5,17 @@ alwaysApply: false
 ---
 # Browser Automation and Control
 
-Browser interactions are managed by the `BrowserController` ([src-tauri/src/agent/tools/browser_controller.rs](mdc:src-tauri/src/agent/tools/browser_controller.rs)). 
+Browser interactions are managed by the `BrowserController` ([src-tauri/src/agent/tools/browser_controller.rs](mdc:src-tauri/src/agent/tools/browser_controller.rs)).
 
 ## Key Components:
 
-1.  **`Playwright` Driver**: 
+1.  **`Playwright` Driver**:
     *   The core `Playwright` instance, responsible for overall browser communication, is managed within `AppState` ([src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)).
     *   It is stored in `AppState.playwright_driver` as an `Arc<TokioMutex<Option<Arc<Playwright>>>>`.
     *   This ensures the driver is initialized once and persists for the application lifetime, preventing premature disconnection from the browser.
     *   The `get_or_init_playwright_driver` method in `AppState` handles its lazy initialization.
 
-2.  **`BrowserController`**: 
+2.  **`BrowserController`**:
     *   Located in `[src-tauri/src/agent/tools/browser_controller.rs](mdc:src-tauri/src/agent/tools/browser_controller.rs)`.
     *   This struct encapsulates the logic for specific browser actions (navigation, content extraction, interaction, screenshots).
     *   It receives an `Arc<Playwright>` upon construction (`BrowserController::new(playwright_arc)`).
