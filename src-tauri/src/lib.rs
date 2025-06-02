@@ -44,6 +44,7 @@ pub mod utils;
 pub mod agent;
 pub mod constants;
 
+
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
@@ -114,7 +115,6 @@ pub fn run() {
             let escape_shortcut = Shortcut::new(None, Code::Escape);
             // TODO: Make the dictation shortcut configurable
             let dictation_toggle_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
-
 
             if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
                 println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
@@ -201,7 +201,7 @@ pub fn run() {
             qa_test_click_visualization,
             qa_test_select_text,
             qa_test_scroll,
-            // App Life Cycle
+            qa_transcribe_file, // Add the new QA command here
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -241,7 +241,6 @@ pub fn run() {
                     &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
                     &toggle_item,
                 ]).map_err(|e| eprintln!("[Tray Setup Error] Failed to create tray menu: {}", e)).ok();
-
 
                 let mut tray_builder = TrayIconBuilder::new()
                     .on_menu_event(move |app_handle, event| {

@@ -1,0 +1,231 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP (Model Context Protocol) Integration
+
+## MCP Server Overview
+
+The project includes a comprehensive MCP server implementation in [src-tauri/mcp-server-os-level/](mdc:src-tauri/mcp-server-os-level) that provides operating system level interactions for AI agents.
+
+## Architecture
+
+### Core Components
+
+#### Engine Implementation ([src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs))
+The macOS-specific implementation provides:
+
+**Screen Capture Capabilities**:
+```rust
+async fn screenshot(&self, display_id: Option<i32>) -> Result<String, EngineError>
+```
+- Full screen or specific display capture
+- Base64 encoded image output
+- Error handling for permission issues
+
+**Mouse and Keyboard Automation**:
+```rust
+async fn click(&self, x: i32, y: i32, button: MouseButton) -> Result<(), EngineError>
+async fn type_text(&self, text: &str) -> Result<(), EngineError>
+async fn key_press(&self, key: &str, modifiers: Option<Vec<String>>) -> Result<(), EngineError>
+```
+- Precise coordinate-based clicking
+- Text input simulation
+- Complex key combinations with modifiers
+
+**Window Management**:
+```rust
+async fn get_window_title(&self, window_id: u32) -> Result<String, EngineError>
+async fn list_windows(&self) -> Result<Vec<WindowInfo>, EngineError>
+async fn resize_window(&self, window_id: u32, width: u32, height: u32) -> Result<(), EngineError>
+```
+- Window enumeration and identification
+- Window manipulation (resize, move, minimize, close)
+- Application focus management
+
+### Platform Support
+
+#### macOS Implementation
+**Current Status**: Fully implemented
+**Capabilities**:
+- Accessibility API integration
+- Core Graphics for screen capture
+- Input event simulation
+- Window management via Accessibility API
+
+**Permission Requirements**:
+- Accessibility permissions for UI automation
+- Screen recording permissions for screenshots
+- Input monitoring for keyboard/mouse control
+
+#### Future Platform Support
+**Windows**: Planned support using Windows API
+**Linux**: Planned support using X11/Wayland
+
+## Integration with Main Application
+
+### Command Interface
+The MCP server integrates with the main Tauri application through command interfaces:
+
+```rust
+// Example integration pattern
+let engine = MacOSEngine::new();
+let screenshot_result = engine.screenshot(None).await?;
+```
+
+### Error Handling
+**Platform-specific Errors**:
+- Permission denied errors
+- Accessibility API failures
+- Display/window not found errors
+
+**Graceful Degradation**:
+- Fallback to alternative methods when possible
+- Clear error messages for missing permissions
+- User guidance for enabling required permissions
+
+## MCP Protocol Compliance
+
+### Standard MCP Methods
+The server implements standard MCP protocol methods:
+- Resource discovery
+- Tool registration
+- Capability negotiation
+- Error reporting
+
+### Custom Extensions
+**Desktop Automation Tools**:
+- Screenshot capture
+- Mouse and keyboard control
+- Window management
+- Application launching
+
+**System Information**:
+- Display configuration
+- Available windows
+- System capabilities
+
+## Development Guidelines
+
+### Adding New Automation Features
+
+1. **Define the Interface**:
+   ```rust
+   async fn new_feature(&self, params: FeatureParams) -> Result<FeatureResult, EngineError>
+   ```
+
+2. **Implement Platform-Specific Logic**:
+   - Handle macOS-specific APIs
+   - Add appropriate error handling
+   - Validate input parameters
+
+3. **Add Permission Checks**:
+   - Verify required permissions before operation
+   - Provide helpful error messages
+   - Handle permission denial gracefully
+
+4. **Update Documentation**:
+   - Document new capabilities
+   - Add usage examples
+   - Update permission requirements
+
+### Testing MCP Components
+
+#### Unit Testing
+```bash
+cd src-tauri/mcp-server-os-level
+cargo test
+```
+
+#### Integration Testing
+- Test with actual MCP clients
+- Verify permission handling
+- Test error scenarios
+
+#### Performance Testing
+- Measure automation operation latency
+- Test screenshot capture performance
+- Monitor memory usage during operations
+
+## Security Considerations
+
+### Permission Management
+**Principle of Least Privilege**:
+- Request only necessary permissions
+- Validate all operations before execution
+- Audit permission usage
+
+**User Consent**:
+- Clear explanation of permission needs
+- Graceful handling of denied permissions
+- Optional features for different permission levels
+
+### Input Validation
+**Coordinate Validation**:
+- Ensure click coordinates are within screen bounds
+- Validate window IDs exist
+- Sanitize text input for type operations
+
+**Command Validation**:
+- Whitelist allowed applications for launching
+- Validate file paths for operations
+- Prevent injection attacks
+
+## Troubleshooting
+
+### Common Issues
+
+#### Permission Problems
+```
+Error: AXUIElementPerformAction failed with error -25204
+```
+**Solution**: Enable Accessibility permissions in System Preferences
+
+#### Screen Capture Failures
+```
+Error: CGDisplayCreateImage returned null
+```
+**Solution**: Enable Screen Recording permissions for the application
+
+#### Window Not Found
+```
+Error: Window with ID 123 not found
+```
+**Solution**: Verify window still exists and is accessible
+
+### Debugging Tools
+
+#### Enable Debug Logging
+```bash
+export RUST_LOG=debug
+```
+
+#### MCP Protocol Debugging
+- Log all MCP messages
+- Verify protocol compliance
+- Monitor performance metrics
+
+#### Platform API Debugging
+- Enable macOS accessibility debugging
+- Monitor Core Graphics operations
+- Track permission state changes
+
+## Future Enhancements
+
+### Protocol Extensions
+- **File System Operations**: Safe file manipulation through MCP
+- **Network Operations**: Web automation capabilities
+- **System Monitoring**: Performance and status monitoring
+
+### Performance Improvements
+- **Asynchronous Operations**: Non-blocking automation
+- **Batch Operations**: Multiple actions in single call
+- **Caching**: Optimize repeated operations
+
+### Cross-Platform Compatibility
+- **Unified API**: Platform-agnostic interface
+- **Feature Detection**: Runtime capability discovery
+- **Graceful Degradation**: Fallback for unsupported features
+
+The MCP integration provides the foundation for robust, secure, and cross-platform desktop automation capabilities within the Juno AI agent system.
