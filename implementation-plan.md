@@ -1,126 +1,243 @@
-# Implementation Plan for Anthropic Computer Use Tools
+# Multi-Agent Architecture Implementation Plan
 
-This plan tracks the implementation status of tools required by the Anthropic computer use specification (`computer_20250124` schema) and outlines the next steps for achieving full compliance and functionality within the `dotdot` Tauri application.
+## Overview
+Implement a sophisticated multi-agent orchestrator system that delegates tasks to specialized agents, building on the core agent traits we've established in `src-tauri/src/agent/core.rs`.
 
-## 1. Target Tool Specification (Based on Anthropic Docs)
+## Phase 1: Core Agent Infrastructure
+**Status: ✅ COMPLETED**
+- [x] Added core agent traits (`AgentBrain`, `MemoryManager`, `ToolProvider`, `AgentRunnable`)
+- [x] Implemented comprehensive error handling with `AgentError` enum
+- [x] Added state management with `AgentState` and `AgentAction` enums
+- [x] Added orchestrator documentation
 
-The core tools and their actions required by the Anthropic `computer_20250124` specification are:
+## Phase 2: Specialized Agent Implementations
+**Goal: Create specialized agents that handle specific tool categories**
 
-**1.1. `computer` Tool:**
+### 2.1 Base Agent Framework
+**Files to create:**
+- `src-tauri/src/agents/mod.rs`
+- `src-tauri/src/agents/base_agent.rs` - Abstract base for all agents
+- `src-tauri/src/agents/agent_factory.rs` - Factory for creating agents
 
-*   **Keyboard:**
-    *   `key`: Press a key or key combination (potentially global).
-    *   `hold_key`: Hold down a key or key combination (requires duration).
-    *   `type`: Type text into the focused element.
-*   **Mouse:**
-    *   `cursor_position`: Get current cursor coordinates.
-    *   `mouse_move`: Move cursor to specified coordinates.
-    *   `left_mouse_down`/`up`: Press/release left mouse button at coordinates.
-    *   `left_click`: Perform a left click at coordinates (allows modifier keys).
-    *   `left_click_drag`: Drag with the left mouse button held down.
-    *   `right_click`: Perform a right click at coordinates (allows modifier keys).
-    *   `middle_click`: Perform a middle click at coordinates (allows modifier keys).
-    *   `double_click`: Perform a double click at coordinates (allows modifier keys).
-    *   `triple_click`: Perform a triple click at coordinates (allows modifier keys).
-    *   `scroll`: Scroll the window/element at specified coordinates (allows modifier keys).
-*   **Other:**
-    *   `wait`: Pause execution for a specified duration.
-    *   `screenshot`: Capture a screenshot of the entire screen or a specific window/element.
-    *   *Implicit: Clipboard Get/Set (Needed for practical automation)*
-    *   *Implicit: Window Management (Needed for practical automation)*
-    *   *Implicit: UI Element Interaction (Find, Get Attributes - Needed for reliable automation)*
+**Base Agent Structure:**
+```rust
+pub trait SpecializedAgent: Send + Sync {
+    fn agent_type(&self) -> AgentType;
+    fn get_capabilities(&self) -> Vec<String>;
+    async fn can_handle_task(&self, task: &Task) -> bool;
+    async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError>;
+}
+```
 
-**1.2. `text_editor` Tool:**
+### 2.2 Browser Agent Implementation
+**File: `src-tauri/src/agents/browser_agent.rs`**
 
-*   `view`: Read the content of a file.
-*   `create`: Create a new file with specified content.
-*   `str_replace`: Find and replace text within a file.
-*   `insert`: Insert text at a specific line number in a file.
-*   `undo_edit`: Undo the last modification made by the `text_editor` tool.
+**Responsibilities:**
+- Web navigation and interaction
+- Content extraction and analysis
+- Form filling and web automation
+- Screenshot capture
 
-**1.3. `bash` Tool:**
+**Tool Categories:**
+- `browser_navigate`, `browser_click`, `browser_type`
+- `browser_extract_content`, `browser_screenshot`
+- `browser_get_current_url`, `browser_back`, `browser_forward`
 
-*   `command`: Execute a shell command (requires timeout handling).
-*   `restart`: Restart the shell process (if stateful).
+### 2.3 Desktop Agent Implementation  
+**File: `src-tauri/src/agents/desktop_agent.rs`**
 
-**1.4. `BrowserUseTool` (Inspired by Manus/Common Use Cases - *Future Consideration*):**
+**Responsibilities:**
+- Native application interaction
+- File system operations
+- Window management
+- Mouse and keyboard automation
 
-*   **Goal:** Provide dedicated, robust browser automation beyond generic desktop actions.
-*   **Potential Actions:** Navigate, find elements (CSS/XPath), click, type, scrape content, manage cookies/state.
-*   **Requirement:** Requires a dedicated browser driver (e.g., WebDriver, Playwright bindings, `headless_chrome`).
+**Tool Categories:**
+- `desktop_click`, `desktop_type`, `desktop_scroll`
+- `desktop_open_app`, `desktop_focus_window`
+- `desktop_screenshot`, `desktop_get_element`
 
-## 2. Implementation Status & Completed Steps
+### 2.4 System Agent Implementation
+**File: `src-tauri/src/agents/system_agent.rs`**
 
-*   **Initial Setup & Analysis:** Completed.
-*   **`wait` Tool:**
-    *   Implemented in SDK and exposed as `dev_wait` Tauri command. **[Done]**
-*   **Mouse Actions:**
-    *   `cursor_position`, `mouse_move`, `left_mouse_down`, `left_mouse_up`, `left_click`, `right_click`, `middle_click`, `double_click`, `triple_click`, `left_click_drag` implemented in SDK.
-    *   Exposed via corresponding `dev_...` Tauri commands. **[Done]**
-    *   `scroll_at_position` implemented in SDK, exposed as `dev_scroll_window`. **[Done]**
-*   **Keyboard Actions:**
-    *   `press_key` (element-focused), `type_text` implemented in SDK and exposed as `dev_press_key`, `dev_type_text`. **[Done]**
-    *   `hold_key`, `release_key` implemented in SDK and exposed as `dev_hold_key`, `dev_release_key`. **[Done]**
-    *   Global text typing exposed via `dev_global_type_text`. **[Done]**
-*   **Screenshot Actions:**
-    *   Implemented `capture_screenshot` (full screen) and `capture_element_screenshot` in SDK.
-    *   Exposed via `capture_screenshot_command`, `capture_element_screenshot_command` Tauri commands. **[Done]**
-*   **Clipboard Actions:**
-    *   Implemented `get_clipboard_content`, `set_clipboard_content` in SDK.
-    *   Exposed via `dev_get_clipboard`, `dev_set_clipboard` Tauri commands. **[Done]**
-*   **Window Management Actions:**
-    *   Implemented `get_window_title`, `list_windows`, `close_window`, `maximize_window`, `minimize_window`, `resize_window`, `move_window` in SDK.
-    *   Exposed via `dev_get_window_info`, `dev_get_window_list`, `dev_focus_window` (and potentially others implicitly used). **[Done]**
-*   **UI Element Actions:**
-    *   Implemented `find_element`, `get_tree`, `get_all_attributes`, `is_enabled`, `is_focused` in SDK.
-    *   Exposed via `dev_find_element_by_selector`, `dev_get_focused_element_info`, `dev_get_ui_tree` Tauri commands. **[Done]**
-    *   Implemented basic `Selector::Chain` and `Selector::Path` for `find_element`. **[Done]**
-*   **`text_editor` Tool Actions:**
-    *   Backend logic for `view`, `create`, `str_replace`, `insert` using `std::fs` implemented. **[Done]**
-    *   Backend logic for `undo_edit` using `AppState` implemented. **[Done]**
-    *   Exposed all actions via `dev_text_editor_view`, `dev_text_editor_create`, `dev_text_editor_str_replace`, `dev_text_editor_insert`, `dev_text_editor_undo_edit` Tauri commands. **[Done]**
-*   **`bash` Tool Actions:**
-    *   Backend logic for `command` using `std::process::Command` with timeout implemented. **[Done]**
-    *   Exposed via `dev_bash_command` Tauri command. **[Done]**
+**Responsibilities:**
+- Shell command execution
+- File operations (read, write, create, delete)
+- System information gathering
+- Process management
 
-## 3. Current Status & Remaining Gaps
+**Tool Categories:**
+- `system_exec`, `system_read_file`, `system_write_file`
+- `system_list_processes`, `system_get_info`
 
-*   **Overall:** Most core functionality specified by Anthropic for `computer`, `text_editor`, and `bash` tools is implemented at the SDK level and exposed via `dev_...` Tauri commands.
-*   **Tool Formalization:** While commands exist, they are not yet integrated into a formal `Tool` trait/struct and registry system managed by a central agent (See `agent-roadmap.md`). This is primarily an architectural gap, but affects how tools are presented to and used by the agent.
-*   **`computer` Tool Gaps (vs. Anthropic Spec):**
-    *   **`hold_key` Duration:** `dev_hold_key` lacks the `duration` parameter specified by Anthropic; it currently holds indefinitely until `dev_release_key` is called.
-    *   **Modifier Keys for Clicks/Scroll:** The `dev_left_click`, `dev_right_click`, `dev_middle_click`, `dev_double_click`, `dev_triple_click`, and `dev_scroll_window` commands do *not* currently accept modifier keys (Shift, Ctrl, Alt, Meta) as described in the Anthropic spec (e.g., via a `mod` parameter or similar).
-    *   **`key` vs. `press_key`:** Anthropic's `key` tool implies a potentially *global* key press/combination, whereas `dev_press_key` acts on the *currently focused element*. A dedicated `dev_global_press_key` command might be needed for true parity. `dev_global_type_text` covers typing strings globally.
-*   **`bash` Tool Gaps:**
-    *   **`restart` Action:** The ability to restart the bash process (relevant for stateful sessions) is not implemented in the SDK or the `dev_bash_command` handler.
-*   **`BrowserUseTool` Gap:**
-    *   **Complete Gap:** No dedicated browser automation tool exists. Current `dev_...` commands provide generic desktop actions which *can* interact with browsers but lack browser-specific context (DOM structure, sessions, dedicated scraping).
-*   **Other Gaps:**
-    *   `cargo check` warnings: Some warnings related to unused code may exist.
-    *   Error Handling: Error reporting from tools/commands could be refined for better user feedback and agent recovery.
-    *   Testing: Lack of comprehensive automated tests for the Tauri command layer and tool logic.
+## Phase 3: Orchestrator Implementation
+**Goal: Create the central coordinator that manages task delegation**
 
-## 4. Next Steps (Tool Implementation Focus)
+### 3.1 Task Management System
+**File: `src-tauri/src/agents/orchestrator.rs`**
 
-1.  **Address `cargo check` Warnings:** *(Low Priority)*
-    *   Add `#[allow(...)]` annotations or remove unused code as appropriate. Ensure `cargo check` passes cleanly.
-2.  **Refine Error Handling:** *(Medium Priority)*
-    *   Review error return types and messages from SDK functions and Tauri commands.
-    *   Ensure errors are propagated clearly and provide sufficient context for the agent/user.
-3.  **Add Tests:** *(Medium Priority)*
-    *   Implement unit and integration tests for the Tauri command handlers (`commands.rs`) and underlying tool logic (e.g., file system operations, process execution).
-4.  **Address `computer` Tool Gaps:** *(High Priority for Anthropic Compliance)*
-    *   **`hold_key` Duration:** Modify `dev_hold_key` (and underlying SDK function) to accept an optional duration. **[Done]**
-    *   **Modifier Keys:** Update SDK click/scroll functions and corresponding `dev_...` commands to accept and handle modifier key parameters. **[Done for left_click; Remaining click functions support the parameter but implementation is pending]**
-    *   **Global `key`:** Evaluate the need for and potentially implement a `dev_global_press_key` command for global hotkey simulation distinct from element-focused input.
-5.  **Implement `bash.restart`:** *(Low Priority unless required)*
-    *   Investigate requirements and feasibility of managing and restarting a persistent shell process if needed.
-6.  **Develop `BrowserUseTool`:** *(Medium/High Priority for Web Automation Use Cases)*
-    *   Research and select a Rust browser automation library.
-    *   Implement core browser actions (navigate, find, click, type, scrape).
-    *   Design and expose as a new set of `dev_browser_...` Tauri commands or a dedicated tool structure.
-7.  **(Ongoing) Tool Formalization:** *(See `agent-roadmap.md`)*
-    *   Refactor existing `dev_...` command logic to conform to a `Tool` trait as the agent architecture evolves.
+**Core Components:**
+```rust
+pub struct Task {
+    pub id: String,
+    pub description: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub agent_type: AgentType,
+    pub priority: TaskPriority,
+    pub dependencies: Vec<String>,
+}
 
----
-*This plan will be updated as steps are completed.* 
+pub struct TaskResult {
+    pub task_id: String,
+    pub success: bool,
+    pub output: serde_json::Value,
+    pub error: Option<String>,
+    pub execution_time: std::time::Duration,
+}
+```
+
+### 3.2 Orchestrator Core Logic
+**Key Methods:**
+- `process_command(user_input: String) -> Result<String, AgentError>`
+- `plan_tasks(messages: &[Message]) -> Result<Vec<Task>, AgentError>`
+- `delegate_task(task: Task) -> Result<TaskResult, AgentError>`
+- `merge_results(results: Vec<TaskResult>) -> String`
+
+### 3.3 Intelligence Layer
+**Smart Task Planning:**
+- Analyze user intent to determine required capabilities
+- Break complex requests into subtasks
+- Determine optimal agent for each task
+- Handle task dependencies and sequencing
+
+## Phase 4: Enhanced Memory Management
+**Goal: Implement sophisticated conversation and context management**
+
+### 4.1 Advanced Memory Manager
+**File: `src-tauri/src/agent/implementations/advanced_memory.rs`**
+
+**Features:**
+- Conversation history with context windows
+- Task execution history and results
+- Agent performance metrics
+- Automatic context summarization for long conversations
+
+### 4.2 Context Management
+**Capabilities:**
+- Remember successful task patterns
+- Learn from failed attempts
+- Maintain agent specialization knowledge
+- Cross-task context sharing
+
+## Phase 5: Integration with Existing System
+**Goal: Seamlessly integrate with current anthropic.rs architecture**
+
+### 5.1 Command Integration
+**Update `src-tauri/src/anthropic.rs`:**
+- Add orchestrator mode toggle
+- Maintain backward compatibility with current agent system
+- Add orchestrator-specific settings and configuration
+
+### 5.2 New Tauri Commands
+**Add to command handlers:**
+```rust
+#[tauri::command]
+pub async fn submit_orchestrated_query(
+    query: String,
+    use_orchestrator: bool,
+    state: State<AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String>
+
+#[tauri::command] 
+pub async fn get_agent_status() -> Result<AgentStatusReport, String>
+
+#[tauri::command]
+pub async fn configure_orchestrator(config: OrchestratorConfig) -> Result<(), String>
+```
+
+## Phase 6: Advanced Features
+**Goal: Add sophisticated coordination and optimization**
+
+### 6.1 Parallel Task Execution
+- Execute independent tasks concurrently
+- Smart dependency resolution
+- Resource conflict detection and resolution
+
+### 6.2 Agent Communication
+- Inter-agent message passing
+- Shared context and state
+- Collaborative problem solving
+
+### 6.3 Performance Optimization
+- Agent selection optimization based on past performance
+- Caching of successful task patterns
+- Adaptive timeout and retry logic
+
+## Phase 7: Testing and Validation
+**Goal: Comprehensive testing of the multi-agent system**
+
+### 7.1 Unit Tests
+- Individual agent capability tests
+- Orchestrator logic tests
+- Memory management tests
+
+### 7.2 Integration Tests
+- End-to-end workflow tests
+- Multi-agent coordination tests
+- Error handling and recovery tests
+
+### 7.3 Performance Tests
+- Concurrent task execution
+- Memory usage optimization
+- Response time benchmarks
+
+## Implementation Timeline
+
+### Week 1-2: Foundation
+- Implement base agent framework and factory
+- Create agent trait implementations
+- Set up basic orchestrator structure
+
+### Week 3-4: Specialized Agents
+- Implement Browser Agent
+- Implement Desktop Agent  
+- Implement System Agent
+- Test individual agent capabilities
+
+### Week 5-6: Orchestrator Logic
+- Implement task planning and delegation
+- Add smart agent selection
+- Integrate with existing memory management
+
+### Week 7-8: Integration & Polish
+- Integrate with current anthropic.rs system
+- Add new Tauri commands
+- Implement advanced features (parallel execution, etc.)
+
+### Week 9-10: Testing & Optimization
+- Comprehensive testing suite
+- Performance optimization
+- Documentation and examples
+
+## Success Criteria
+
+1. **Functional Multi-Agent System**: Users can submit complex queries that are automatically broken down and delegated to appropriate specialized agents
+
+2. **Maintained Compatibility**: Existing single-agent workflows continue to work unchanged
+
+3. **Improved Capabilities**: Complex tasks that required multiple steps can now be completed in a single request
+
+4. **Performance**: Multi-agent coordination doesn't significantly impact response times for simple tasks
+
+5. **Reliability**: Error handling and recovery ensures robust operation even when individual agents fail
+
+## Next Steps
+
+1. **Create Agent Factory and Base Classes** - Start with the foundation
+2. **Implement Browser Agent** - Most complex agent, good starting point
+3. **Build Orchestrator Core** - Central coordination logic
+4. **Integration Testing** - Ensure everything works together
+5. **UI Integration** - Add orchestrator controls to the frontend
+
+This plan builds incrementally on the solid foundation we've established, ensuring each phase adds value while maintaining system stability. 
