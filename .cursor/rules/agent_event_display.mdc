@@ -3,7 +3,6 @@ description:
 globs:
 alwaysApply: false
 ---
-<<<<<<< HEAD
 This rule describes how the agent's internal states, such as thinking processes, tool calls (requests and results), and screenshots, are surfaced to the user within the main chat interface.
 
 **Frontend Implementation (`[src/App.tsx](mdc:src/App.tsx)`)**
@@ -31,5 +30,3 @@ This rule describes how the agent's internal states, such as thinking processes,
     *   `log_async_tool_execution` calls:
         *   `log_tool_call_request` before the tool's future is executed.
         *   `log_tool_call_result` after the tool's future completes, including success status and output/error.
-=======
->>>>>>> main

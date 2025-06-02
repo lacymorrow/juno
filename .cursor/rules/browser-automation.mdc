@@ -3,7 +3,6 @@ description:
 globs:
 alwaysApply: false
 ---
-<<<<<<< HEAD
 # Browser Automation and Control
 
 Browser interactions are managed by the `BrowserController` ([src-tauri/src/agent/tools/browser_controller.rs](mdc:src-tauri/src/agent/tools/browser_controller.rs)). 
@@ -46,5 +45,3 @@ Browser interactions are managed by the `BrowserController` ([src-tauri/src/agen
 *   Specific launch arguments are used to improve stability, especially on macOS.
 
 This setup ensures that the browser is a persistent resource, reducing the overhead of repeated launches and improving the reliability of browser-based tools.
-=======
->>>>>>> main
