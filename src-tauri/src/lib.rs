@@ -42,12 +42,13 @@ pub mod commands;
 pub mod cli;
 pub mod utils;
 pub mod agent;
+pub mod agents; // Multi-agent system with specialized agents
 pub mod voice_control; // Added for voice control functionality
 pub mod constants;
 
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, voice_control::*};
+use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, voice_control::*, orchestrator::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import VoiceController for the new QA command
@@ -198,6 +199,13 @@ pub fn run() {
             list_apps,
             check_server_status,
             submit_query,
+            // Orchestrator Commands
+            submit_orchestrated_query,
+            get_orchestrator_status,
+            configure_orchestrator,
+            get_task_history,
+            get_active_tasks,
+            get_agent_capabilities,
             anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection
@@ -428,6 +436,16 @@ pub fn run() {
             }
 
             // --- End of Floating Bar State Listener Setup ---
+
+            // --- Initialize Multi-Agent Orchestrator ---
+            let app_handle_for_orchestrator = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = commands::orchestrator::init_orchestrator_with_app_handle(app_handle_for_orchestrator).await {
+                    tracing::error!("[Setup] Failed to initialize orchestrator system: {}", e);
+                } else {
+                    tracing::info!("[Setup] Multi-agent orchestrator system initialized successfully");
+                }
+            });
 
             let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {
