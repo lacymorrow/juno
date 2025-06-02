@@ -200,8 +200,7 @@ pub fn run() {
             qa_test_coordinate_transformation,
             qa_test_click_visualization,
             qa_test_select_text,
-            qa_test_scroll,
-            qa_transcribe_file, // Add the new QA command here
+            qa_test_scroll
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
