@@ -3,3 +3,274 @@ description:
 globs:
 alwaysApply: false
 ---
+# Advanced Voice Integration Patterns
+
+## Voice Transcription Plugin Integration
+
+### Plugin Architecture Overview
+The voice transcription functionality has been successfully extracted from Juno into a reusable Tauri plugin (`tauri-plugin-voice-transcription`). The integration maintains backward compatibility while providing a modular architecture.
+
+#### Plugin Structure
+- **Location**: [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription)
+- **Main Module**: [tauri-plugin-voice-transcription/src/lib.rs](mdc:tauri-plugin-voice-transcription/src/lib.rs)
+- **Controller**: [tauri-plugin-voice-transcription/src/controller.rs](mdc:tauri-plugin-voice-transcription/src/controller.rs)
+- **Commands**: [tauri-plugin-voice-transcription/src/commands.rs](mdc:tauri-plugin-voice-transcription/src/commands.rs)
+
+#### Integration Points
+
+##### Cargo.toml Integration
+```toml
+# Added in src-tauri/Cargo.toml
+tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription" }
+```
+
+##### Main Application Setup
+Modified [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+```rust
+// Plugin initialization
+.plugin(tauri_plugin_voice_transcription::init())
+
+// Event rebroadcasting for backward compatibility
+app.listen("plugin:voice-transcription:dictation-started", |event| {
+    app_handle.emit("app-dictation-started", event.payload());
+});
+```
+
+##### Frontend Integration
+- API package: `tauri-plugin-voice-transcription-api`
+- Used in [src/App.tsx](mdc:src/App.tsx) via `toggleDictation()` function
+
+### Event Flow Architecture
+
+#### Dictation Toggle Flow
+1. **Global Shortcut (Alt+D)** → Emits `toggle-dictation-request`
+2. **Frontend Handler** ([src/App.tsx](mdc:src/App.tsx)) → Listens for event and calls `toggleDictation()`
+3. **Plugin Execution** → Processes voice input
+4. **Event Broadcasting** → Plugin events rebroadcast as app events
+
+#### Event Mapping (Backward Compatibility)
+- `plugin:voice-transcription:dictation-started` → `app-dictation-started`
+- `plugin:voice-transcription:dictation-finished` → `app-dictation-finished`
+- `plugin:voice-transcription:dictation-partial-result` → `app-dictation-partial-result`
+- `plugin:voice-transcription:dictation-error` → `app-dictation-error`
+
+## Dictation Event Flow and Bar State Synchronization
+
+### Frontend Bar State Management ([src/Bar.tsx](mdc:src/Bar.tsx))
+
+The `FloatingBar` component manages its visual state (`barState`) based on events received from the backend:
+
+#### Key Event Handlers
+
+##### 1. `app-dictation-started`
+- **Trigger**: Backend successfully initiates dictation process
+- **State Change**: `barState` → `"listening"`
+- **UI Effect**: Displays "Listening..." message and pulsing microphone icon
+
+##### 2. `app-dictation-partial-result`
+- **Payload**: `{ partial: "transcribed text chunk" }`
+- **Trigger**: Periodic transcription updates as user speaks
+- **State Change**: `barState` → `"transcribing"`
+- **UI Effect**: Displays incoming `transcriptionText`, changes microphone icon to blue
+
+##### 3. `app-dictation-finished`
+- **Payload**: `{ query: "full transcribed text" | null, error?: "error message" }`
+- **Trigger**: Dictation session ends (user action, silence, or error)
+- **State Changes**:
+  - If `query` present: `barState` → `"input"` (allows edit/submit)
+  - If `error` or null `query`: `barState` → `"error"` or `"default"` via `"shrinking"`
+
+#### State Synchronization Pattern
+```typescript
+// Bar.tsx emits state changes for backend synchronization
+const emitBarStateChange = (newState: string) => {
+  emit('bar-state-changed', { newState });
+};
+
+// Backend listens for bar state changes
+app.listen('bar-state-changed', (event) => {
+  // Update AppState bar_ui_state
+  let bar_state = app_state.bar_ui_state.lock().unwrap();
+  *bar_state = event.payload.newState;
+});
+```
+
+### Backend Event Emission ([src-tauri/src/voice_control.rs](mdc:src-tauri/src/voice_control.rs))
+
+The `VoiceController` manages audio input, transcription, and event emission:
+
+#### Event Emission Points
+
+##### 1. `app-dictation-started` Emission
+- **Location**: `start_dictation` method
+- **Timing**: After audio capture setup, before intensive processing
+- **Purpose**: Signal frontend that application is actively listening
+
+##### 2. `app-dictation-partial-result` Emission
+- **Location**: Audio processing thread
+- **Timing**: Every 1.5 seconds during audio capture
+- **Process**:
+  - Audio collected in chunks
+  - Each chunk transcribed via `whisper_state`
+  - Result emitted as `partial` field
+- **Purpose**: Near real-time UI updates
+
+##### 3. `app-dictation-finished` Emission
+- **Location**: `stop_dictation` method or thread termination
+- **Process**:
+  - Final transcription of remaining audio
+  - Full text sent as `query` in payload
+  - Error field populated if issues occurred
+- **Purpose**: Complete transcription delivery
+
+## Dictation Shortcut and Events
+
+### Global Shortcut Integration
+
+#### Shortcut Registration
+```rust
+// Platform-specific shortcut strings
+let shortcut_string = if cfg!(target_os = "macos") {
+    "Option+D"
+} else {
+    "Alt+D"
+};
+
+// Shortcut object for handler comparison
+let shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
+
+// Registration in app setup
+app_handle.global_shortcut().register(shortcut_string);
+```
+
+#### Handler Logic
+```rust
+.plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(move |event| {
+    if event.shortcut == shortcut {
+        // Retrieve VoiceController from AppState
+        let voice_controller = app_state.get::<Arc<Mutex<VoiceController>>>();
+
+        // Toggle dictation state
+        let new_state = voice_controller.lock().unwrap().toggle_dictation();
+
+        // Emit state change event
+        app_handle.emit("dictation_state_changed", new_state);
+    }
+}))
+```
+
+### Event Chain Architecture
+
+#### Complete Event Flow
+```
+1. Alt+D Press → Global Shortcut Handler
+2. Handler → toggle_dictation() call
+3. VoiceController → State change + audio processing
+4. Audio Thread → Periodic partial results
+5. Stop Trigger → Final transcription
+6. Event Emission → Frontend state updates
+7. UI Updates → Visual feedback to user
+```
+
+#### Error Handling in Event Chain
+- **Audio Capture Failure**: Emit error event with diagnostic info
+- **Transcription Failure**: Fallback to partial results or error state
+- **State Synchronization Issues**: Automatic recovery mechanisms
+- **UI State Corruption**: Reset to default state with user notification
+
+## AI Agent Interaction Patterns
+
+### Voice-to-Agent Integration
+
+#### Query Submission Flow
+```typescript
+// In App.tsx - voice transcription handler
+const handleDictationFinished = (event: any) => {
+  const { query, error } = event.payload;
+
+  if (query && !error) {
+    // Submit to AI agent with voice flag
+    submitQuery(query, true); // isFromDictation = true
+  }
+};
+```
+
+#### Agent Processing
+```rust
+// In anthropic.rs - submit_query command
+pub async fn submit_query(
+    query: String,
+    app_state: State<'_, AppState>
+) -> Result<(), String> {
+    // Process voice query with agent
+    let agent_response = process_with_agent(query).await?;
+
+    // Emit response back to frontend
+    app_handle.emit("backend-response", SubmitQueryResult {
+        response: agent_response,
+        original_query: query,
+    });
+
+    Ok(())
+}
+```
+
+### Voice Context Awareness
+
+#### Context Preservation
+- **Session Context**: Maintain conversation context across voice interactions
+- **Application Context**: Consider currently focused application
+- **User Intent**: Distinguish between commands and queries
+- **Error Context**: Provide context-aware error recovery
+
+#### Multi-Modal Integration
+```rust
+pub struct VoiceContext {
+    pub transcription_confidence: f32,
+    pub background_noise_level: f32,
+    pub speaking_rate: f32,
+    pub application_context: Option<String>,
+}
+```
+
+## Advanced Plugin Patterns
+
+### Plugin State Persistence
+
+#### Configuration Management
+```rust
+// Plugin maintains its own configuration
+pub struct VoicePluginConfig {
+    pub model_path: PathBuf,
+    pub sample_rate: u32,
+    pub chunk_duration: Duration,
+    pub confidence_threshold: f32,
+}
+```
+
+#### State Recovery
+- **Session Recovery**: Restore interrupted dictation sessions
+- **Model Caching**: Persist loaded Whisper models between sessions
+- **User Preferences**: Save and restore user-specific settings
+- **Error Recovery**: Graceful handling of plugin crashes
+
+### Performance Optimization
+
+#### Resource Management
+- **Model Loading**: Lazy loading and caching of Whisper models
+- **Memory Management**: Efficient audio buffer management
+- **Thread Pooling**: Reuse audio processing threads
+- **Background Processing**: Offload intensive operations
+
+#### Quality Optimization
+```rust
+// Audio quality enhancement
+pub struct AudioProcessor {
+    pub noise_reduction: bool,
+    pub automatic_gain_control: bool,
+    pub echo_cancellation: bool,
+    pub voice_activity_detection: bool,
+}
+```
+
+This advanced voice integration system provides sophisticated voice control capabilities with robust error handling, state management, and seamless AI agent integration.

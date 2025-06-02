@@ -3,3 +3,113 @@ description:
 globs:
 alwaysApply: false
 ---
+# Juno AI Computer Use Agent - Project Overview
+
+## Project Description
+
+Juno is a Tauri v2 application that implements an AI Computer Use Bot powered by Anthropic's Claude with custom tool integration. The system provides desktop automation capabilities through voice commands, computer vision, and automated interactions.
+
+## Technology Stack
+
+- **Backend**: Rust (Tauri v2) located in [src-tauri](mdc:src-tauri)
+- **Frontend**: TypeScript and React located in [src](mdc:src)
+- **Desktop Automation**: `computer_use_ai_sdk` for OS-level interactions
+- **AI Provider**: Anthropic Claude API integration
+- **Voice Processing**: Custom Tauri plugin with Whisper.cpp
+- **Browser Automation**: Playwright integration
+
+## Project Structure
+
+### Frontend (src/)
+- [src/App.tsx](mdc:src/App.tsx) - Main chat interface, event handling, AI query submission
+- [src/Bar.tsx](mdc:src/Bar.tsx) - Floating dictation bar UI
+- [src/components/](mdc:src/components) - React components
+- [src/components/DevToolsPanel.tsx](mdc:src/components/DevToolsPanel.tsx) - Development testing UI
+
+### Backend Core (src-tauri/)
+- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Main Tauri app setup, commands registration, event routing
+- [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Claude API integration and query processing
+- [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs) - Application state management
+- [src-tauri/src/commands/](mdc:src-tauri/src/commands) - Tauri command handlers
+
+### AI Agent System (src-tauri/src/agent/)
+- [src-tauri/src/agent/core.rs](mdc:src-tauri/src/agent/core.rs) - Core traits and data structures
+- [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations) - Agent implementations
+- [src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers) - AI provider integrations
+- [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools) - Computer use tools
+
+### Computer Use Tools (src-tauri/src/tools/)
+- Desktop automation tools for mouse, keyboard, screen capture, etc.
+
+### Voice Transcription Plugin (tauri-plugin-voice-transcription/)
+- Custom Tauri plugin for real-time speech-to-text using Whisper.cpp
+- [tauri-plugin-voice-transcription/src/controller.rs](mdc:tauri-plugin-voice-transcription/src/controller.rs) - Main audio processing controller
+
+### macOS Implementation (src-tauri/mcp-server-os-level/)
+- Platform-specific implementations for computer use operations
+- [src-tauri/mcp-server-os-level/src/platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos) - macOS accessibility and automation
+
+## Key Features
+
+### Voice Control
+- Global shortcut activation (Alt+D / Option+D)
+- Real-time speech-to-text transcription
+- Integration with AI agent for voice commands
+
+### Computer Use Capabilities
+- Mouse control (click, drag, scroll)
+- Keyboard input and shortcuts
+- Screen capture and analysis
+- Window management
+- Application control
+- File system operations
+
+### AI Integration
+- Anthropic Claude API integration
+- Tool-based computer automation
+- Multi-step operation planning
+- Error handling and recovery
+
+### Browser Automation
+- Playwright integration for web interactions
+- Persistent browser sessions
+- Web content extraction and manipulation
+
+## Development Workflow
+
+### Rust Development
+- After any Rust code modifications, run: `cargo check --manifest-path src-tauri/Cargo.toml`
+- Ensure exit code 0 before proceeding
+- Address any reported errors or warnings
+
+### Testing
+- Use [src/components/DevToolsPanel.tsx](mdc:src/components/DevToolsPanel.tsx) for manual testing
+- Test voice dictation flow: Alt+D → speak → verify transcription → check AI response
+- Validate computer use operations through the dev panel
+
+## Configuration
+
+### Environment Variables
+```bash
+ANTHROPIC_API_KEY=your_key_here
+VOICE_MODEL_PATH=models/ggml-tiny.en.bin  # Optional, has default
+```
+
+### Permissions
+- macOS: Accessibility permissions required for computer use
+- Microphone: Required for voice transcription
+- Screen recording: Required for screenshot capabilities
+
+## Key Integration Points
+
+### Event Flow
+1. Voice Input: Alt+D → audio capture → Whisper transcription → AI processing
+2. Manual Input: Text submission → AI processing → tool execution → response
+3. Event routing: Plugin events → main app transformation → frontend updates
+
+### State Management
+- Centralized AppState with Arc<Mutex<>> for thread-safe access
+- Persistent browser sessions and tool state
+- Voice controller state management
+
+This overview provides the foundation for understanding the project architecture and serves as a reference for all development activities.
