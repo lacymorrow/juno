@@ -65,8 +65,7 @@ hound = "3.5"
 cpal = "0.15"
 rubato = "0.14.1"
 chrono = "0.4"
-# logging = { path = "../logging" } # Commented out due to path issue and no current usages
-# rabDab = { path = "../rabDab" }   # Commented out due to path issue and no current usages
+
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
