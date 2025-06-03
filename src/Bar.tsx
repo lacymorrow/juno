@@ -43,6 +43,7 @@ export function FloatingBar() {
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const isPreparingToDrag = useRef(false); // Added: Flag for drag operation
   const [isAnimatingSize, setIsAnimatingSize] = useState(false); // For conditional backdrop-blur
+  const [isSpacebarDictation, setIsSpacebarDictation] = useState(false); // Track spacebar vs AI agent mode
 
   // For debugging - log state changes
   useEffect(() => {
@@ -454,6 +455,29 @@ export function FloatingBar() {
     };
   }, [barState, inputRef]); // barState needed for conditional, inputRef for focus attempt
 
+  // Effect to listen for spacebar dictation events to differentiate from AI agent mode
+  useEffect(() => {
+    let unlistenSpacebarActive: (() => void) | undefined;
+
+    const setupSpacebarListeners = async () => {
+      unlistenSpacebarActive = await listen<boolean>(
+        "spacebar-dictation-active",
+        (event) => {
+          console.log(
+            "FloatingBar Event: spacebar-dictation-active",
+            event.payload
+          );
+          setIsSpacebarDictation(event.payload);
+        }
+      );
+    };
+
+    setupSpacebarListeners();
+    return () => {
+      unlistenSpacebarActive?.();
+    };
+  }, []);
+
   // Effect to listen for TTS lifecycle events
   useEffect(() => {
     let unlistenTtsStarted: (() => void) | undefined;
@@ -809,7 +833,9 @@ export function FloatingBar() {
           {barState === "listening" && (
             <div className="w-full h-full flex items-center justify-center overflow-hidden animate-pulse">
               <Mic size={16} className="mr-2 text-white/70" />
-              <span className="text-sm text-white/80">Listening...</span>
+              <span className="text-sm text-white/80">
+                {isSpacebarDictation ? "Dictating..." : "Listening..."}
+              </span>
             </div>
           )}
 
@@ -818,7 +844,8 @@ export function FloatingBar() {
             <div className="w-full h-full flex items-center justify-start overflow-hidden px-3">
               <Mic size={16} className="mr-2 text-blue-400 flex-shrink-0" />
               <span className="text-sm text-white/90 truncate">
-                {transcriptionText || "Transcribing..."}
+                {transcriptionText ||
+                  (isSpacebarDictation ? "Dictating..." : "Transcribing...")}
               </span>
             </div>
           )}
