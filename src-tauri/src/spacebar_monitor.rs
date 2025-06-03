@@ -5,13 +5,15 @@ use tokio::sync::Mutex;
 use tracing::{info, error, debug, warn};
 
 // Configuration constants
-const HOLD_DURATION_MS: u64 = 500; // Hold spacebar for 500ms to trigger dictation
+const HOLD_DURATION_MS: u64 = 500; // Hold spacebar for 500ms to commit dictation
+const IMMEDIATE_START_MS: u64 = 0; // Start transcription immediately (0ms delay)
 
 // State for spacebar monitoring
 #[derive(Debug)]
 pub struct SpacebarMonitorState {
     pub hold_start_time: Option<Instant>,
-    pub dictation_triggered: bool,
+    pub transcription_started: bool,
+    pub hold_threshold_reached: bool,
     pub passthrough_scheduled: bool,
 }
 
@@ -19,42 +21,65 @@ impl SpacebarMonitorState {
     pub fn new() -> Self {
         Self {
             hold_start_time: None,
-            dictation_triggered: false,
+            transcription_started: false,
+            hold_threshold_reached: false,
             passthrough_scheduled: false,
         }
     }
 
     pub fn start_hold(&mut self) {
         self.hold_start_time = Some(Instant::now());
-        self.dictation_triggered = false;
+        self.transcription_started = false;
+        self.hold_threshold_reached = false;
         self.passthrough_scheduled = false;
         debug!("[SpacebarMonitor] Started tracking spacebar hold");
     }
 
-    pub fn end_hold(&mut self) -> (bool, Duration) {
-        let was_triggered = self.dictation_triggered;
+    pub fn end_hold(&mut self) -> (bool, bool, Duration) {
+        let transcription_was_started = self.transcription_started;
+        let threshold_was_reached = self.hold_threshold_reached;
         let duration = self.hold_start_time
             .map(|start| start.elapsed())
             .unwrap_or(Duration::ZERO);
 
         self.hold_start_time = None;
-        self.dictation_triggered = false;
+        self.transcription_started = false;
+        self.hold_threshold_reached = false;
         self.passthrough_scheduled = false;
 
-        debug!("[SpacebarMonitor] Ended spacebar hold tracking, duration: {:?}ms, was_triggered: {}", duration.as_millis(), was_triggered);
-        (was_triggered, duration)
+        debug!(
+            "[SpacebarMonitor] Ended spacebar hold tracking, duration: {:?}ms, transcription_started: {}, threshold_reached: {}",
+            duration.as_millis(), transcription_was_started, threshold_was_reached
+        );
+        (transcription_was_started, threshold_was_reached, duration)
     }
 
-    pub fn check_and_trigger_dictation(&mut self) -> bool {
-        if self.dictation_triggered {
+    pub fn check_and_start_transcription(&mut self) -> bool {
+        if self.transcription_started {
+            return false;
+        }
+
+        if let Some(start_time) = self.hold_start_time {
+            let duration = start_time.elapsed();
+            if duration.as_millis() >= IMMEDIATE_START_MS as u128 {
+                self.transcription_started = true;
+                info!("[SpacebarMonitor] Spacebar held for {}ms - starting immediate transcription", duration.as_millis());
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn check_and_reach_threshold(&mut self) -> bool {
+        if self.hold_threshold_reached {
             return false;
         }
 
         if let Some(start_time) = self.hold_start_time {
             let duration = start_time.elapsed();
             if duration.as_millis() >= HOLD_DURATION_MS as u128 {
-                self.dictation_triggered = true;
-                info!("[SpacebarMonitor] Spacebar held for {}ms - triggering dictation", duration.as_millis());
+                self.hold_threshold_reached = true;
+                info!("[SpacebarMonitor] Spacebar held for {}ms - threshold reached, committing to dictation", duration.as_millis());
                 return true;
             }
         }
@@ -68,7 +93,7 @@ static SPACEBAR_STATE: once_cell::sync::Lazy<Arc<Mutex<SpacebarMonitorState>>> =
 
 // Initialize spacebar monitoring for the application
 pub async fn init_spacebar_monitoring(app_handle: AppHandle) -> Result<(), String> {
-    info!("[SpacebarMonitor] Initializing spacebar monitoring system with hold-to-dictate logic");
+    info!("[SpacebarMonitor] Initializing spacebar monitoring system with immediate transcription start");
 
     // Start the monitoring task that checks for held spacebar
     let app_handle_clone = app_handle.clone();
@@ -82,17 +107,26 @@ pub async fn init_spacebar_monitoring(app_handle: AppHandle) -> Result<(), Strin
 
 // Monitoring task that checks hold duration and triggers events
 async fn spacebar_monitoring_task(app_handle: AppHandle) {
-    let mut interval = tokio::time::interval(Duration::from_millis(100)); // Check every 100ms
+    let mut interval = tokio::time::interval(Duration::from_millis(50)); // Check every 50ms for better responsiveness
 
     loop {
         interval.tick().await;
 
         let mut state = SPACEBAR_STATE.lock().await;
 
-        if state.check_and_trigger_dictation() {
-            // Emit event to start dictation
-            if let Err(e) = app_handle.emit("spacebar-dictation-start", ()) {
-                error!("[SpacebarMonitor] Failed to emit spacebar-dictation-start: {}", e);
+        // Check if we should start transcription immediately
+        if state.check_and_start_transcription() {
+            // Emit event to start transcription immediately
+            if let Err(e) = app_handle.emit("spacebar-transcription-start", ()) {
+                error!("[SpacebarMonitor] Failed to emit spacebar-transcription-start: {}", e);
+            }
+        }
+
+        // Check if we've reached the hold threshold (commit to dictation)
+        if state.check_and_reach_threshold() {
+            // Emit event to confirm dictation commitment
+            if let Err(e) = app_handle.emit("spacebar-dictation-committed", ()) {
+                error!("[SpacebarMonitor] Failed to emit spacebar-dictation-committed: {}", e);
             }
         }
     }
@@ -102,37 +136,48 @@ async fn spacebar_monitoring_task(app_handle: AppHandle) {
 pub async fn on_spacebar_pressed() {
     let mut state = SPACEBAR_STATE.lock().await;
     state.start_hold();
-    debug!("[SpacebarMonitor] Spacebar pressed down - starting hold timer");
+    debug!("[SpacebarMonitor] Spacebar pressed down - starting immediate tracking");
 }
 
 // Called when spacebar is released
 pub async fn on_spacebar_released(app_handle: &AppHandle) {
     let mut state = SPACEBAR_STATE.lock().await;
-    let (was_triggered, duration) = state.end_hold();
+    let (transcription_started, threshold_reached, duration) = state.end_hold();
 
-    if was_triggered {
-        info!("[SpacebarMonitor] Spacebar released after dictation trigger - stopping dictation");
+    if threshold_reached {
+        info!("[SpacebarMonitor] Spacebar released after threshold reached - completing dictation normally");
 
-        // Emit event to stop dictation
+        // Emit event to stop dictation normally
         if let Err(e) = app_handle.emit("spacebar-dictation-stop", ()) {
             error!("[SpacebarMonitor] Failed to emit spacebar-dictation-stop: {}", e);
         }
-    } else if duration.as_millis() < HOLD_DURATION_MS as u128 {
-        // Short press - attempt passthrough
-        debug!("[SpacebarMonitor] Short spacebar press ({}ms) - attempting passthrough", duration.as_millis());
+    } else if transcription_started {
+        info!(
+            "[SpacebarMonitor] Spacebar released before threshold ({}ms) - cancelling transcription",
+            duration.as_millis()
+        );
 
-        // Unfortunately, with global shortcuts, we can't easily do true passthrough
-        // The global shortcut system captures the event before it reaches other apps
-        warn!("[SpacebarMonitor] Note: Spacebar passthrough is limited due to global shortcut system");
+        // Emit event to cancel transcription and do passthrough
+        if let Err(e) = app_handle.emit("spacebar-transcription-cancel", ()) {
+            error!("[SpacebarMonitor] Failed to emit spacebar-transcription-cancel: {}", e);
+        }
 
-        // For short presses, we could try to type a space into the currently focused application
-        // This is a workaround since true passthrough isn't possible with global shortcuts
+        // Attempt passthrough space typing
         #[cfg(target_os = "macos")]
         {
             attempt_space_passthrough(app_handle).await;
         }
     } else {
-        debug!("[SpacebarMonitor] Spacebar released without triggering dictation ({}ms)", duration.as_millis());
+        debug!(
+            "[SpacebarMonitor] Spacebar released without starting transcription ({}ms)",
+            duration.as_millis()
+        );
+
+        // Very short press - just do passthrough
+        #[cfg(target_os = "macos")]
+        {
+            attempt_space_passthrough(app_handle).await;
+        }
     }
 }
 
