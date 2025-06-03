@@ -1,7 +1,6 @@
 use crate::cli::Cli;
 use crate::tts;
 use crate::utils;
-use crate::voice_control::VoiceController; // Added for voice control functionality
 use computer_use_ai_sdk::Desktop; // Import Desktop
 use std::process::Command;
 use std::io::Write;
@@ -15,34 +14,6 @@ use tracing::{info, error}; // Import tracing macros
 pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> bool {
     // Prefix unused desktop_instance with _
     let _command_handled = false;
-
-    // --- Transcription Test Handling ---
-    if let (Some(model_path), Some(audio_path)) = (&cli.transcribe_model_path, &cli.transcribe_audio_path) {
-        println!("[CLI] Requesting transcription test...");
-        println!("  Model path: {}", model_path);
-        println!("  Audio path: {}", audio_path);
-
-        // Running blocking voice controller operations
-        match VoiceController::new(model_path) {
-            Ok(controller) => {
-                match controller.transcribe_audio_file(audio_path) {
-                    Ok(text) => {
-                        info!("[CLI Transcription Success] Result: {}", text);
-                        println!("Transcription Result: {}", text);
-                    }
-                    Err(e) => {
-                        error!("[CLI Transcription Error] {}", e);
-                        eprintln!("Transcription Error: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                error!("[CLI VoiceController Error] Failed to initialize VoiceController: {}", e);
-                eprintln!("Error initializing voice controller: {}", e);
-            }
-        }
-        return true; // Transcription test was run, so exit
-    }
 
     // --- TTS Test Handling ---
     if let Some(provider) = &cli.tts_provider {

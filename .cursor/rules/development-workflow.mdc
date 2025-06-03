@@ -8,6 +8,11 @@ alwaysApply: false
 ## Project Context
 This is a **Tauri v2** application implementing an AI Computer Use Agent with multi-agent orchestration capabilities. The project follows strict development rules and maintains high code quality standards.
 
+### Recent Major Integration
+- **Voice-Plugin Merge**: Successfully merged voice transcription plugin architecture with multi-agent system
+- **Preserved Features**: Both voice capabilities (tauri-plugin-voice-transcription) and multi-agent architecture (src-tauri/src/agents/) are fully functional
+- **Unified Architecture**: Combined the best of both branches while maintaining backward compatibility
+
 ## Critical Development Rules
 
 ### Code Quality Requirements
@@ -45,7 +50,7 @@ This is a **Tauri v2** application implementing an AI Computer Use Agent with mu
 - **Primary docs**: https://v2.tauri.app
 - **Platform**: macOS (darwin 24.2.0)
 - **Shell**: /bin/zsh
-- **Workspace**: `/Users/lmorrow/repo/dotdot`
+- **Workspace**: `/Users/lmorrow/repo/juno`
 
 ### Build Process
 ```bash
@@ -126,6 +131,9 @@ mod tests {
 
 ### Core Directories
 - **`src-tauri/src/`**: Rust backend code
+- **`src-tauri/src/agents/`**: Multi-agent orchestrator system with specialized agents
+- **`tauri-plugin-voice-transcription/`**: Voice transcription plugin (Rust)
+- **`tauri-plugin-voice-transcription-api/`**: Voice transcription TypeScript API bindings
 - **`src/`**: Frontend TypeScript/React code
 - **`.cursor/rules/`**: Cursor AI rules and documentation
 - **`tasks/`**: Project task management
