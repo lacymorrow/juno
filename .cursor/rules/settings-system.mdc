@@ -26,6 +26,12 @@ Users can access settings through multiple pathways:
 - Uses `set_tts_provider_command` and `get_tts_provider_command`
 - Integrated with existing voice transcription system
 
+### Agent Architecture Settings
+- **Single Agent Mode**: Direct execution with all tools (faster, simpler)
+- **Multi-Agent Mode**: Specialized agents with orchestration (robust for complex tasks)
+- Uses `get_agent_mode` and `set_agent_mode` commands
+- Real-time switching without restart required
+
 ### AI Provider Settings
 - Provider selection: Anthropic, OpenAI, Rig
 - Per-provider configuration:
@@ -41,7 +47,15 @@ Users can access settings through multiple pathways:
 - Integration with view management system
 
 ## Backend Commands Pattern
-All provider settings use these Tauri commands:
+Settings use these Tauri commands:
+
+### Agent Mode Commands
+```rust
+get_agent_mode() -> String
+set_agent_mode(mode: String) -> Result<(), String>
+```
+
+### Provider Settings Commands
 ```rust
 get_providers() -> Vec<ProviderInfo>
 get_active_provider() -> String

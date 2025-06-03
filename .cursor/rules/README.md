@@ -18,7 +18,7 @@ Tauri development patterns, security requirements, testing, and workflow.
 - **Always run**: `cargo check --manifest-path src-tauri/Cargo.toml` after Rust changes
 - **Tech Stack**: Tauri v2, Rust backend, React/TypeScript frontend
 - **Voice**: Custom plugin with Whisper.cpp, Alt+D to toggle
-- **AI**: Multi-agent system with specialized Browser/Desktop/System agents
+- **AI**: Configurable single or multi-agent system with specialized Browser/Desktop/File agents
 - **Security**: File operations need sandboxing (see TODOs in basic_tools.rs)
 
 ## Development Workflow
