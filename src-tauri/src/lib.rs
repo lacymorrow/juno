@@ -8,7 +8,7 @@ use std::env;
 use std::sync::Arc;
 use tauri::{
     Manager, // WindowEvent, // Removed WindowEvent
-    menu::{MenuItemKind, Menu}, // Removed Menu, MenuItemBuilder, PredefinedMenuItem // Added Menu
+    menu::{MenuItemKind, Menu, PredefinedMenuItem, SubmenuBuilder}, // Added PredefinedMenuItem, SubmenuBuilder
     tray::{TrayIconEvent, MouseButton, MouseButtonState, TrayIconBuilder}, // Ensured TrayIconBuilder
     image::Image as TauriImage, // Use tauri::image::Image, aliased
     AppHandle, // Keep AppHandle
@@ -60,6 +60,8 @@ pub use anthropic::submit_query; // Re-export the submit_query command
 struct BarStateChangeEventPayload {
     new_state: String,
 }
+
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -255,8 +257,20 @@ pub fn run() {
                 .quit()
                 .build()?;
 
+            // Create Edit submenu with standard keyboard shortcuts
+            let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                .item(&PredefinedMenuItem::undo(app, None)?)
+                .item(&PredefinedMenuItem::redo(app, None)?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(app, None)?)
+                .item(&PredefinedMenuItem::copy(app, None)?)
+                .item(&PredefinedMenuItem::paste(app, None)?)
+                .separator()
+                .item(&PredefinedMenuItem::select_all(app, None)?)
+                .build()?;
+
             let app_menu = tauri::menu::MenuBuilder::new(app)
-                .items(&[&app_submenu])
+                .items(&[&app_submenu, &edit_submenu])
                 .build()?;
 
             app.set_menu(app_menu)?;
