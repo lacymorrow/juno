@@ -37,6 +37,7 @@ export function FloatingBar() {
   const [currentError, setCurrentError] = useState<string | null>(null);
   const [transcriptionText, setTranscriptionText] = useState<string>("");
   const [spokenText, setSpokenText] = useState<string>("");
+  const [isAgentWorking, setIsAgentWorking] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
@@ -184,6 +185,7 @@ export function FloatingBar() {
   useEffect(() => {
     let unlistenWillSubmit: (() => void) | undefined;
     let unlistenDidSubmit: (() => void) | undefined;
+    let unlistenBackendResponse: (() => void) | undefined;
     let unlistenTimerExpired: (() => void) | undefined;
 
     const setupSubmitListeners = async () => {
@@ -195,6 +197,7 @@ export function FloatingBar() {
           setLastSubmittedValue(query);
           setInputValue(""); // Clear input field
           setCurrentError(null); // Clear any previous error
+          setIsAgentWorking(true); // Agent starts working
 
           if (transitionTimeoutRef.current)
             clearTimeout(transitionTimeoutRef.current);
@@ -217,37 +220,83 @@ export function FloatingBar() {
             "current state:",
             barState
           );
-          if (barState === "loading") {
-            if (transitionTimeoutRef.current)
-              clearTimeout(transitionTimeoutRef.current);
-
-            if (event.payload.success) {
-              setBarState("finishing");
-              transitionTimeoutRef.current = setTimeout(() => {
-                setBarState("input");
-                requestAnimationFrame(() => {
-                  if (inputRef.current) inputRef.current.focus();
-                });
-              }, 300); // Finishing duration
-            } else {
-              // Error handling
-              setCurrentError(
-                event.payload.error ||
-                  `Failed: ${lastSubmittedValue}` ||
-                  "An unexpected error occurred."
-              );
-              setBarState("error");
-              transitionTimeoutRef.current = setTimeout(() => {
-                setBarState("input");
-                setCurrentError(null); // Clear error after timeout
-                requestAnimationFrame(() => {
-                  if (inputRef.current) inputRef.current.focus();
-                });
-              }, 3000); // Error state duration
-            }
+          // Note: Don't transition to final states here anymore
+          // Wait for backend-response to know when agent is actually done
+          if (!event.payload.success) {
+            // Only handle immediate submission errors
+            setIsAgentWorking(false); // Agent is not working if submission failed
+            setCurrentError(
+              event.payload.error ||
+                `Failed to submit: ${lastSubmittedValue}` ||
+                "An unexpected error occurred during submission."
+            );
+            setBarState("error");
+            transitionTimeoutRef.current = setTimeout(() => {
+              setBarState("input");
+              setCurrentError(null); // Clear error after timeout
+              requestAnimationFrame(() => {
+                if (inputRef.current) inputRef.current.focus();
+              });
+            }, 3000); // Error state duration
           }
+          // If success, keep loading state until backend-response
         }
       );
+
+      // Listen for actual agent completion
+      unlistenBackendResponse = await listen<{
+        query: string;
+        response: {
+          text: string;
+          agent_state: string;
+          audio_base64?: string;
+          screenshot_base64?: string;
+        };
+      }>("backend-response", (event) => {
+        console.log("FloatingBar Event: backend-response", event.payload);
+        const { response } = event.payload;
+
+        // Agent is no longer working regardless of state
+        setIsAgentWorking(false);
+
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+
+        // Handle agent completion based on actual agent state
+        if (response.agent_state === "Finished") {
+          setBarState("finishing");
+          transitionTimeoutRef.current = setTimeout(() => {
+            setBarState("input");
+            requestAnimationFrame(() => {
+              if (inputRef.current) inputRef.current.focus();
+            });
+          }, 300); // Finishing duration
+        } else if (
+          response.agent_state === "Failed" ||
+          response.agent_state === "Cancelled"
+        ) {
+          setCurrentError(
+            response.agent_state === "Cancelled"
+              ? "Agent execution was cancelled"
+              : `Agent failed: ${response.text}`
+          );
+          setBarState("error");
+          transitionTimeoutRef.current = setTimeout(() => {
+            setBarState("input");
+            setCurrentError(null); // Clear error after timeout
+            requestAnimationFrame(() => {
+              if (inputRef.current) inputRef.current.focus();
+            });
+          }, 3000); // Error state duration
+        } else {
+          // Other states - just transition to input for now
+          setBarState("input");
+          requestAnimationFrame(() => {
+            if (inputRef.current) inputRef.current.focus();
+          });
+        }
+      });
 
       unlistenTimerExpired = await listen<{
         id: string;
@@ -289,6 +338,9 @@ export function FloatingBar() {
 
           console.log("Restarting agent with timer context:", resumeQuery);
 
+          // Mark agent as working when restarting
+          setIsAgentWorking(true);
+
           // Restart the agent with the saved context
           await invoke("submit_query", {
             query: resumeQuery,
@@ -304,6 +356,7 @@ export function FloatingBar() {
           }, 2000);
         } catch (error) {
           console.error("Failed to restart agent from timer:", error);
+          setIsAgentWorking(false); // Agent is not working if restart failed
           setCurrentError(`Failed to restart: ${error}`);
           setBarState("error");
 
@@ -321,6 +374,7 @@ export function FloatingBar() {
     return () => {
       unlistenWillSubmit?.();
       unlistenDidSubmit?.();
+      unlistenBackendResponse?.();
       unlistenTimerExpired?.();
     };
   }, [barState, inputRef]); // barState needed for the conditional in unlistenDidSubmit
@@ -478,7 +532,7 @@ export function FloatingBar() {
       "transcribing",
       "error",
     ];
-    return workingStates.includes(state);
+    return workingStates.includes(state) || isAgentWorking;
   };
 
   // Effect to handle window focus changes
@@ -544,7 +598,7 @@ export function FloatingBar() {
       unlisten?.();
     };
     // Dependencies: Include states and handlers used inside the effect
-  }, [barState, inputValue, handleBarClick, handleInputBlur]);
+  }, [barState, inputValue, isAgentWorking, handleBarClick, handleInputBlur]);
 
   // Effect for global mouseup to handle end of drag or click on bar
   useEffect(() => {
@@ -586,7 +640,7 @@ export function FloatingBar() {
     return () => {
       window.removeEventListener("mouseup", handleGlobalMouseUp);
     };
-  }, [barState, inputValue, setBarState, setInputValue]); // Dependencies for the effect
+  }, [barState, inputValue, isAgentWorking, setBarState, setInputValue]); // Dependencies for the effect
 
   // Determine dimensions based on state
   const getBarStyles = () => {
