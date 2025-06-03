@@ -18,6 +18,7 @@ use crate::agent::traits::{AgentRunnable, MemoryManager};
 use crate::agent::providers::factory::BrainFactory;
 use crate::agent::providers::config::AgentMode;
 use crate::state::AppState;
+use crate::utils::{gather_system_context, format_system_context_for_agent};
 
 // use crate::tools::{list_tools, handle_tool_call}; // Removed unused
 // use reqwest::Client; // Removed unused
@@ -128,6 +129,18 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
+    // --- Gather System Context ---
+    let system_context = match gather_system_context(Some(&*state)).await {
+        Ok(context) => {
+            info!("System context gathered successfully");
+            Some(context)
+        }
+        Err(e) => {
+            warn!("Failed to gather system context: {}", e);
+            None
+        }
+    };
+
     let cancel_rx = state.cancel_rx.clone();
 
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
@@ -231,7 +244,15 @@ pub async fn submit_query(
             crate::register_escape_key_shortcut(&app_handle);
 
             info!("Starting single agent run...");
-            let result = single_agent_runner.run(query.clone(), cancel_rx).await;
+
+            // Prepare the query with system context
+            let contextual_query = if let Some(ref context) = system_context {
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+            } else {
+                query.clone()
+            };
+
+            let result = single_agent_runner.run(contextual_query, cancel_rx).await;
 
             // Always unregister escape key shortcut when agent finishes
             crate::unregister_escape_key_shortcut(&app_handle);
@@ -285,7 +306,15 @@ pub async fn submit_query(
             crate::register_escape_key_shortcut(&app_handle);
 
             info!("Starting orchestrator run...");
-            let result = orchestrator_runner.run(query.clone(), cancel_rx).await;
+
+            // Prepare the query with system context for orchestrator
+            let contextual_query = if let Some(ref context) = system_context {
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+            } else {
+                query.clone()
+            };
+
+            let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
 
             // Always unregister escape key shortcut when orchestrator finishes
             crate::unregister_escape_key_shortcut(&app_handle);
