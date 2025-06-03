@@ -49,7 +49,7 @@ pub mod spacebar_monitor; // New module for intelligent spacebar handling
 
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -224,6 +224,9 @@ pub fn run() {
             update_provider_system_prompt,
             get_agent_mode,
             set_agent_mode,
+            // Dictation Settings Commands
+            get_spacebar_clipboard_enabled,
+            set_spacebar_clipboard_enabled,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,
@@ -710,7 +713,29 @@ pub fn run() {
                                                                 // Only type if the text is not empty and not just whitespace
                         let trimmed_text = text.trim();
                         if !trimmed_text.is_empty() {
-                            // Type the transcribed text immediately using the computer use tools
+                            // Check if clipboard saving is enabled
+                            let clipboard_enabled = app_state.spacebar_clipboard_enabled.lock()
+                                .map(|enabled| *enabled)
+                                .unwrap_or(true); // Default to true if lock fails
+
+                            // Store to clipboard if enabled
+                            if clipboard_enabled {
+                                match crate::commands::core::dev_set_clipboard(
+                                    trimmed_text.to_string(),
+                                    app_state.clone()
+                                ).await {
+                                    Ok(()) => {
+                                        info!("[Spacebar Dictation] Successfully stored text to clipboard: '{}'", trimmed_text);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("[Spacebar Dictation] Failed to store text to clipboard: {}", e);
+                                    }
+                                }
+                            } else {
+                                info!("[Spacebar Dictation] Clipboard saving is disabled, skipping clipboard storage");
+                            }
+
+                            // Then type the transcribed text immediately using the computer use tools
                             match crate::commands::keyboard::dev_global_type_text(
                                 trimmed_text.to_string(),
                                 app_state.clone()
