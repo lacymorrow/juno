@@ -62,9 +62,13 @@ struct BarStateChangeEventPayload {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Explicitly initialize tracing with INFO level by default
+    // Initialize enhanced tracing with Slack/Apple Messages style formatting
     fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
+        .with_target(false) // Hide target module names for cleaner output
+        .with_thread_ids(false) // Hide thread IDs for cleaner output
+        .with_ansi(true) // Enable colors for better readability
+        .compact() // Use compact format instead of full
         .init();
     dotenv().ok();
     let cli = cli::Cli::parse();

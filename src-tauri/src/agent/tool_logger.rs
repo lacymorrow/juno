@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Emitter};
 use tracing::{info, warn, error};
 use futures::FutureExt;
+use chrono::{DateTime, Local};
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -14,6 +15,111 @@ pub struct ToolUsageEntry {
     result: Option<Value>,
     success: bool,
     screenshot_base64: Option<String>, // Optional screenshot data
+    show_timestamp: bool, // New field to control timestamp display
+    formatted_time: Option<String>, // Pre-formatted time string for consistent display
+}
+
+/// Configuration for timestamp grouping (similar to Slack/Apple Messages)
+struct TimestampGroupingConfig {
+    /// Show timestamp if this many minutes have passed since last entry
+    time_threshold_minutes: i64,
+    /// Show timestamp if this many events have occurred since last timestamp
+    event_threshold: usize,
+    /// Always show timestamp on first entry of a session
+    show_first_timestamp: bool,
+    /// Time format for display (12h or 24h)
+    use_24h_format: bool,
+}
+
+impl Default for TimestampGroupingConfig {
+    fn default() -> Self {
+        Self {
+            time_threshold_minutes: 5, // Show timestamp every 5 minutes like Slack
+            event_threshold: 10,       // Or every 10 events, whichever comes first
+            show_first_timestamp: true,
+            use_24h_format: false,     // Default to 12h format (3:45 PM vs 15:45)
+        }
+    }
+}
+
+/// Helper function to determine if timestamp should be shown
+fn should_show_timestamp(
+    current_timestamp: u64,
+    last_timestamp_shown: Option<u64>,
+    events_since_last_timestamp: usize,
+    config: &TimestampGroupingConfig,
+) -> bool {
+    // Always show first timestamp
+    if last_timestamp_shown.is_none() && config.show_first_timestamp {
+        return true;
+    }
+
+    // Check event threshold
+    if events_since_last_timestamp >= config.event_threshold {
+        return true;
+    }
+
+    // Check time threshold
+    if let Some(last_ts) = last_timestamp_shown {
+        let time_diff_minutes = (current_timestamp.saturating_sub(last_ts)) / (1000 * 60);
+        if time_diff_minutes >= config.time_threshold_minutes as u64 {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Format timestamp for display based on configuration
+fn format_timestamp(timestamp_ms: u64, use_24h: bool) -> String {
+    let timestamp_secs = timestamp_ms / 1000;
+    let dt = match DateTime::from_timestamp(timestamp_secs as i64, 0) {
+        Some(utc_dt) => utc_dt.with_timezone(&Local),
+        None => return "Invalid time".to_string(),
+    };
+
+    if use_24h {
+        dt.format("%H:%M").to_string()
+    } else {
+        dt.format("%l:%M %p").to_string().trim().to_string()
+    }
+}
+
+/// Enhanced tool usage entry creation with timestamp grouping
+fn create_tool_usage_entry(
+    timestamp: u64,
+    tool: String,
+    inputs: Value,
+    result: Option<Value>,
+    success: bool,
+    screenshot_base64: Option<String>,
+    last_timestamp_shown: Option<u64>,
+    events_since_last_timestamp: usize,
+) -> ToolUsageEntry {
+    let config = TimestampGroupingConfig::default();
+    let show_timestamp = should_show_timestamp(
+        timestamp,
+        last_timestamp_shown,
+        events_since_last_timestamp,
+        &config,
+    );
+
+    let formatted_time = if show_timestamp {
+        Some(format_timestamp(timestamp, config.use_24h_format))
+    } else {
+        None
+    };
+
+    ToolUsageEntry {
+        timestamp,
+        tool,
+        inputs,
+        result,
+        success,
+        screenshot_base64,
+        show_timestamp,
+        formatted_time,
+    }
 }
 
 /// Wraps a tool execution with logging and event emission
@@ -26,14 +132,16 @@ pub async fn log_tool_execution<F>(
 where
     F: FnOnce(Value) -> Result<Value, String>,
 {
+    use crate::state::AppState;
+
     // Record the start time
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
 
-    // Log tool invocation
-    info!("Tool execution started: {}", tool_name);
+    // Log tool invocation with enhanced formatting using new log formatter
+    crate::utils::log_formatter::log_tool_start(tool_name, None);
 
     // Execute the tool
     let result = executor(inputs.clone());
@@ -41,12 +149,19 @@ where
     // Determine if execution was successful
     let success = result.is_ok();
 
+    // Enhanced success/error logging
+    if success {
+        info!("✅ Tool '{}' completed successfully", tool_name);
+    } else if let Err(ref e) = result {
+        warn!("❌ Tool '{}' failed: {}", tool_name, e);
+    }
+
     // If this is a screenshot tool, we want to include the screenshot in the event
     let screenshot_base64 = if tool_name == "capture_screenshot" || tool_name == "screenshot" {
         match &result {
             Ok(output) => {
                 if let Some(base64) = output.as_str() {
-                    info!("Screenshot captured successfully. Including in event.");
+                    info!("📸 Screenshot captured successfully. Including in event.");
                     Some(base64.to_string())
                 } else {
                     warn!("Screenshot tool returned non-string result");
@@ -62,15 +177,32 @@ where
         None
     };
 
-    // Create the tool usage entry
-    let entry = ToolUsageEntry {
+    // Get timestamp tracking state from AppState
+    let (last_timestamp_shown, events_since_last) = if let Some(state) = app_handle.try_state::<AppState>() {
+        let tracker = state.timestamp_tracker.lock().unwrap();
+        (tracker.last_timestamp_shown, tracker.events_since_last_timestamp)
+    } else {
+        warn!("AppState not available for timestamp tracking");
+        (None, 0)
+    };
+
+    // Create the enhanced tool usage entry with proper timestamp logic
+    let entry = create_tool_usage_entry(
         timestamp,
-        tool: tool_name.to_string(),
+        tool_name.to_string(),
         inputs,
-        result: result.as_ref().ok().cloned(),
+        result.as_ref().ok().cloned(),
         success,
         screenshot_base64,
-    };
+        last_timestamp_shown,
+        events_since_last,
+    );
+
+    // Update the timestamp tracker in AppState
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        let mut tracker = state.timestamp_tracker.lock().unwrap();
+        tracker.record_event(timestamp, entry.show_timestamp);
+    }
 
     // Emit the event to the frontend
     if let Some(window) = app_handle.get_window("main") {
@@ -85,7 +217,7 @@ where
     result
 }
 
-// Add a function to log async tool execution
+// Add a function to log async tool execution with proper timestamp grouping
 pub async fn log_async_tool_execution<F>(
     app_handle: &AppHandle,
     tool_name: &str,
@@ -95,61 +227,46 @@ pub async fn log_async_tool_execution<F>(
 where
     F: std::future::Future<Output = Result<Value, String>> + Send,
 {
-    // Log tool call request
-    log_tool_call_request(
-        app_handle,
-        tool_name,
-        input.clone(), // Clone input for logging
-        Some(format!("Attempting to execute tool: {}", tool_name)),
-    );
+    use crate::state::AppState;
+
+    // Record the start time
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    // Log tool invocation with enhanced formatting using new log formatter
+    crate::utils::log_formatter::log_tool_start(tool_name, None);
 
     let result = std::panic::AssertUnwindSafe(execution_future)
         .catch_unwind()
         .await;
 
-    match result {
+    // Determine if execution was successful and extract results
+    let (success, final_result, screenshot_base64) = match result {
         Ok(Ok(output)) => {
             let mut final_screenshot_base64: Option<String> = None;
-            let mut final_tool_output = output.clone(); // Clone original output to potentially modify
 
             // Check for screenshot tool names
             if tool_name == "capture_screenshot" || tool_name == "capture_element_screenshot" || tool_name == "browser_screenshot" {
                 if let Some(s_val) = output.as_str() {
                     final_screenshot_base64 = Some(s_val.to_string());
-                    // Set a generic success message for the main tool_output as the screenshot is now separate
-                    final_tool_output = serde_json::json!({ "status": "success", "message": "Screenshot captured and available in screenshot_base64 field." });
+                    info!("📸 Screenshot captured successfully. Including in event.");
                 } else if let Some(obj) = output.as_object() {
-                    // Handle cases where the output might be an object containing the base64 string, e.g., {"base64": "..."}
-                    // This was seen in the browser_controller.rs screenshot tool
+                    // Handle cases where the output might be an object containing the base64 string
                     if let Some(b64_val) = obj.get("base64").and_then(|v| v.as_str()) {
                         final_screenshot_base64 = Some(b64_val.to_string());
-                        final_tool_output = serde_json::json!({ "status": "success", "message": "Screenshot extracted from tool output." });
+                        info!("📸 Screenshot extracted from tool output.");
                     }
                 }
             }
 
-            // Log tool call success
-            log_tool_call_result(
-                app_handle,
-                tool_name,
-                final_tool_output, // Use the (potentially modified) tool output
-                true,
-                Some(format!("Tool {} executed successfully.", tool_name)),
-                final_screenshot_base64, // Pass the extracted screenshot data
-            );
-            Ok(output) // Return the original, unmodified output from the tool execution
+            info!("✅ Tool '{}' completed successfully", tool_name);
+            (true, Ok(output.clone()), final_screenshot_base64)
         }
         Ok(Err(e)) => {
-            // Log tool call failure
-            log_tool_call_result(
-                app_handle,
-                tool_name,
-                serde_json::json!({ "error": e }), // Log error as JSON
-                false,
-                Some(format!("Tool {} failed: {}", tool_name, e)),
-                None,
-            );
-            Err(e)
+            warn!("❌ Tool '{}' failed: {}", tool_name, e);
+            (false, Err(e.clone()), None)
         }
         Err(panic_payload) => {
             let err_msg = if let Some(s) = panic_payload.downcast_ref::<String>() {
@@ -160,18 +277,48 @@ where
                 format!("Tool {} panicked with unknown type.", tool_name)
             };
             error!("{}", err_msg);
-            // Log tool call panic as failure
-            log_tool_call_result(
-                app_handle,
-                tool_name,
-                serde_json::json!({ "panic": err_msg }),
-                false,
-                Some(err_msg.clone()),
-                None,
-            );
-            Err(err_msg)
+            (false, Err(err_msg.clone()), None)
         }
+    };
+
+    // Get timestamp tracking state from AppState
+    let (last_timestamp_shown, events_since_last) = if let Some(state) = app_handle.try_state::<AppState>() {
+        let tracker = state.timestamp_tracker.lock().unwrap();
+        (tracker.last_timestamp_shown, tracker.events_since_last_timestamp)
+    } else {
+        warn!("AppState not available for timestamp tracking");
+        (None, 0)
+    };
+
+    // Create the enhanced tool usage entry with proper timestamp logic
+    let entry = create_tool_usage_entry(
+        timestamp,
+        tool_name.to_string(),
+        input,
+        final_result.as_ref().ok().cloned(),
+        success,
+        screenshot_base64,
+        last_timestamp_shown,
+        events_since_last,
+    );
+
+    // Update the timestamp tracker in AppState
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        let mut tracker = state.timestamp_tracker.lock().unwrap();
+        tracker.record_event(timestamp, entry.show_timestamp);
     }
+
+    // Emit the event to the frontend
+    if let Some(window) = app_handle.get_window("main") {
+        if let Err(e) = window.emit("tool-usage", entry) {
+            warn!("Failed to emit tool-usage event: {}", e);
+        }
+    } else {
+        warn!("Main window not found, cannot emit tool-usage event");
+    }
+
+    // Return the original result
+    final_result
 }
 
 // NEW: Define the structure for our generic agent event
