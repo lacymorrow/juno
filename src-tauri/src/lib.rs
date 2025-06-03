@@ -45,6 +45,7 @@ pub mod utils;
 pub mod agent;
 pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
+pub mod spacebar_monitor; // New module for intelligent spacebar handling
 
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
@@ -138,19 +139,15 @@ pub fn run() {
                     tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
                 }
             } else if shortcut == &spacebar_shortcut {
-                if event.state() == ShortcutState::Pressed {
-                    info!("[GlobalShortcut] Spacebar pressed - starting immediate dictation");
-                    // Emit event to start immediate voice dictation
-                    if let Err(e) = app.emit("spacebar-dictation-start", ()) {
-                        tracing::error!("[GlobalShortcut] Failed to emit spacebar-dictation-start event: {}", e);
+                // Handle spacebar with timing logic
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if event.state() == ShortcutState::Pressed {
+                        crate::spacebar_monitor::on_spacebar_pressed().await;
+                    } else if event.state() == ShortcutState::Released {
+                        crate::spacebar_monitor::on_spacebar_released(&app_clone).await;
                     }
-                } else if event.state() == ShortcutState::Released {
-                    info!("[GlobalShortcut] Spacebar released - stopping immediate dictation");
-                    // Emit event to stop immediate voice dictation
-                    if let Err(e) = app.emit("spacebar-dictation-stop", ()) {
-                        tracing::error!("[GlobalShortcut] Failed to emit spacebar-dictation-stop event: {}", e);
-                    }
-                }
+                });
             }
         }).build())
         .manage(app_state) // Manage the AppState
@@ -523,11 +520,18 @@ pub fn run() {
                      eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_shortcut_str, e);
                 }
 
-                // Register Spacebar Shortcut for immediate dictation
+                // Register Spacebar Shortcut with intelligent hold-to-dictate logic
                 if let Err(e) = app_handle_shortcuts.global_shortcut().register("Space") {
                     eprintln!("[GlobalShortcut Error] Failed to register Space shortcut: {}", e);
                 } else {
-                    info!("[GlobalShortcut] Spacebar shortcut registered successfully for immediate dictation");
+                    info!("[GlobalShortcut] Spacebar shortcut registered with hold-to-dictate logic");
+                }
+
+                // Initialize spacebar monitoring system
+                if let Err(e) = crate::spacebar_monitor::init_spacebar_monitoring(app_handle_shortcuts.clone()).await {
+                    tracing::error!("[Setup] Failed to initialize spacebar monitoring: {}", e);
+                } else {
+                    info!("[Setup] Spacebar monitoring system initialized successfully");
                 }
             });
 
