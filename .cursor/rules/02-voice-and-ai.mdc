@@ -3,104 +3,178 @@ description:
 globs:
 alwaysApply: false
 ---
-# Voice & AI Systems
+# Voice Transcription & AI Agent Architecture ✅
 
-> **📖 Comprehensive Documentation**: See [`voice-interaction-modes.mdc`](mdc:.cursor/rules/voice-interaction-modes.mdc) for detailed documentation of both voice interaction modes.
->
-> **🔧 Recent Fix**: See [`spacebar-dictation-fix.mdc`](mdc:.cursor/rules/spacebar-dictation-fix.mdc) for details on the spacebar dictation event handler fix.
+## Voice Interaction System
 
-## Voice Transcription Plugin
+### Dual-Mode Voice Control
+The application supports two distinct voice interaction modes with different triggers and behaviors:
 
-### Architecture
-- **Plugin**: `tauri-plugin-voice-transcription/` - Reusable Tauri plugin
-- **Controller**: `controller.rs` - Core audio processing with Whisper.cpp
-- **Integration**: Events rebroadcast in `src-tauri/src/lib.rs` for compatibility
+#### 1. Agent Mode (Alt+D)
+- **Trigger**: Alt+D key combination
+- **Purpose**: Dictate queries for AI agent processing
+- **Flow**: Voice → Transcription → AI Agent → Response
+- **UI**: Shows listening → transcribing → processing states
+- **Implementation**: [tauri-plugin-voice-transcription](mdc:tauri-plugin-voice-transcription)
 
-### Event Flow
-1. **Alt+D Press** → `toggle-dictation-request` event
-2. **Plugin Processing** → Voice input with Whisper.cpp
-3. **Event Chain**:
-   - `voice-transcription:dictation-started` → `app-dictation-started`
-   - `voice-transcription:partial-result` → `app-dictation-partial-result`
-   - `voice-transcription:final-result` → `app-dictation-finished` (with `"text"` → `"query"` transformation)
+#### 2. Dictation Mode (Spacebar)
+- **Trigger**: Hold spacebar (intelligent timing)
+- **Purpose**: Direct voice-to-text typing at cursor position
+- **Flow**: Voice → Transcription → Immediate typing
+- **Timing Logic**:
+  - **0ms**: Transcription starts immediately
+  - **500ms**: Commitment threshold - if held, completes normally
+  - **<500ms**: Cancellation - stops transcription, types space character
+- **Implementation**: [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs)
 
-### Key Implementation
+### Voice Transcription Plugin Architecture
+
+#### Plugin Structure
+- **Core Plugin**: [tauri-plugin-voice-transcription/src/lib.rs](mdc:tauri-plugin-voice-transcription/src/lib.rs)
+- **API Bindings**: [tauri-plugin-voice-transcription-api/src/index.ts](mdc:tauri-plugin-voice-transcription-api/src/index.ts)
+- **Controller**: [tauri-plugin-voice-transcription/src/controller.rs](mdc:tauri-plugin-voice-transcription/src/controller.rs)
+
+#### Event Flow
 ```rust
-// Critical payload transformation in lib.rs
+// Plugin events → App events rebroadcasting pattern
 app.listen("voice-transcription:final-result", move |event| {
-    let transformed_payload = serde_json::json!({
-        "query": text_value  // Transform "text" to "query"
-    });
-    app_handle.emit("app-dictation-finished", transformed_payload);
+    // Transform and rebroadcast for frontend compatibility
+    app_handle.emit("app-dictation-finished", transformed_payload)
 });
 ```
 
-## AI Agent System
+#### Key Events
+- `voice-transcription:dictation-started` → `app-dictation-started`
+- `voice-transcription:partial-result` → `app-dictation-partial-result`
+- `voice-transcription:final-result` → `app-dictation-finished`
+- `voice-transcription:dictation-stopped` → `app-dictation-stopped`
 
-### Core Architecture
-- **Traits**: `AgentBrain`, `MemoryManager`, `ToolProvider`, `AgentRunnable` in `agent/core.rs`
-- **Execution**: `DefaultAgentRunner` orchestrates agent flow with cancellation support
-- **Providers**: Anthropic (primary), OpenAI, Ollama, xAI via `agent/providers/`
+## Hierarchical AI Agent System ✅
 
-### Agent Architecture Modes
-- **Single Agent Mode**: Direct execution with all tools available to one agent (faster, simpler)
-- **Multi-Agent Mode**: Specialized agents with orchestration (more robust for complex tasks)
-- **Configuration**: User-configurable via Settings UI or `AgentMode` enum in backend
+### Architecture Overview
+The system implements a sophisticated multi-agent architecture with clear separation of concerns:
 
-### Multi-Agent System (when enabled)
-- **Orchestrator**: Central task coordinator with personality and memory
-- **Specialized Agents**:
-  - **Browser**: Web navigation, content extraction, form automation
-  - **Desktop**: Native app interaction, window management, input automation
-  - **File**: Shell commands, file operations, code editing
+#### Orchestrator Agent
+- **Location**: [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - `submit_query` function
+- **Role**: Maintains conversation personality and memory
+- **Capabilities**: Task analysis and intelligent delegation
+- **Memory**: Persistent conversation history via AppState
+- **Tools**: Delegation tools only (`delegate_to_*_agent`)
 
-### Single Agent System (when enabled)
-- **Direct Execution**: All tools available to single agent instance
-- **Unified Runner**: `DefaultAgentRunner` with complete tool provider
-- **Memory**: Shared conversation history maintained
+#### Specialist Agents
+Located in [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations):
 
-### Tool Categories
-```rust
-// Tool registration pattern
-register_basic_tools(&mut tool_provider);      // File ops, system info
-register_desktop_tools(&mut tool_provider);    // Mouse, keyboard, screen
-register_browser_tools(&mut tool_provider);    // Web automation
+1. **Browser Agent**
+   - **Purpose**: Web automation and navigation
+   - **Tools**: Browser automation, web scraping, page interaction
+   - **Model**: Anthropic (vision capabilities for web tasks)
+
+2. **Desktop Agent**
+   - **Purpose**: macOS system interaction and automation
+   - **Tools**: All 17 Anthropic Computer Use actions + enhanced desktop tools
+   - **Model**: Anthropic (vision for screen understanding)
+
+3. **File Agent**
+   - **Purpose**: Code editing, file operations, terminal commands
+   - **Tools**: str_replace_based_edit_tool, bash commands, file system operations
+   - **Model**: OpenAI (optimized for code generation)
+
+### Delegation Flow
+```
+User Query → Orchestrator Agent → Task Analysis → Specialist Selection → Tool Execution → Response Integration
 ```
 
-### Agent Execution Flow
-1. **Mode Detection**: Check `AgentMode` configuration (Single vs Multi)
-2. **Runtime Creation**:
-   - Single: Create `DefaultAgentRunner` with all tools
-   - Multi: Create orchestrator with delegation tools
-3. **Execution**: Unified `submit_query` command handles both modes
-4. **Response**: Via `backend-response` event + TTS
+### Memory Management
+- **Orchestrator**: Uses persistent memory manager from AppState
+- **Specialists**: Use isolated `SimpleMemoryManager::new()` for task focus
+- **Critical**: Never mix orchestrator and specialist memory managers
 
-### Agent Mode Configuration
+### Tool Registration Pattern
 ```rust
-// Backend configuration enum
-pub enum AgentMode {
-    Single,  // Direct execution with all tools
-    Multi,   // Orchestrated delegation
+// In src-tauri/src/agent/providers/factory.rs
+impl AgentFactory {
+    pub async fn register_computer_use_tools(
+        provider: &mut LocalToolProvider,
+        app_handle: AppHandle,
+    ) -> Result<(), String> {
+        // Register official Anthropic Computer Use tools
+        register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+
+        // Register enhanced desktop tools
+        register_desktop_tools(provider, app_state, app_handle).await?;
+
+        Ok(())
+    }
 }
-
-// Tauri commands for UI control
-get_agent_mode() -> String
-set_agent_mode(mode: String) -> Result<(), String>
 ```
 
-### Integration Points
+## State Management Integration
+
+### Spacebar Dictation State
+```rust
+// In src-tauri/src/state.rs
+pub struct AppState {
+    pub spacebar_dictation_active: Arc<Mutex<bool>>,
+    pub spacebar_clipboard_enabled: Arc<Mutex<bool>>,
+    // ... other state
+}
+```
+
+### Event Coordination
+The system coordinates between voice transcription and agent processing:
+
+```rust
+// Check spacebar dictation mode to avoid AI processing
+let is_spacebar_active = app_state.spacebar_dictation_active.lock()
+    .map(|active| *active)
+    .unwrap_or(false);
+
+if is_spacebar_active {
+    // Process for immediate typing
+    return;
+}
+// Otherwise process for AI agent
+```
+
+## Frontend Integration
+
+### Bar State Management
+The floating bar ([src/Bar.tsx](mdc:src/Bar.tsx)) handles multiple voice states:
+
+- `listening` - Agent mode listening for voice
+- `transcribing` - Agent mode processing speech
+- `dictating` - Spacebar mode with immediate transcription
+- `speaking` - TTS playback state
+
+### Event Listeners
 ```typescript
-// Frontend integration
-const submitQuery = async (text: string, isFromDictation: boolean = false) => {
-  await invoke("submit_query", { query: text });
-};
+// Spacebar dictation events
+useEffect(() => {
+    const setupSpacebarListeners = async () => {
+        unlistenSpacebarStart = await listen("spacebar-transcription-start", () => {
+            setIsSpacebarDictation(true);
+            setBarState("dictating");
+        });
 
-const submitOrchestratedQuery = async (text: string) => {
-  await invoke("submit_orchestrated_query", { query: text });
-};
+        unlistenSpacebarCancel = await listen("spacebar-transcription-cancel", () => {
+            setIsSpacebarDictation(false);
+            setBarState("default");
+        });
+    };
+}, []);
 ```
 
-## Voice-AI Integration
-- Voice transcription triggers `submitQuery(text, true)` with `isFromDictation` flag
-- AI responses include TTS playback via `tts::invoke_tts`
-- State synchronization between voice controller and UI via events
+## Configuration & Settings
+
+### Provider Management
+- **Multi-Provider Support**: Anthropic, OpenAI, Gemini via factory pattern
+- **Settings UI**: [src/components/Settings.tsx](mdc:src/components/Settings.tsx)
+- **Agent Mode Selection**: Single vs Multi-agent architecture
+- **Voice Provider**: Off, System, ElevenLabs, Replicate
+
+### Voice Settings
+- **Clipboard Integration**: Optional saving of dictated text
+- **Transcription Models**: Whisper.cpp variants
+- **Audio Input**: Microphone selection and sensitivity
+
+This architecture provides enterprise-grade voice control with intelligent AI agent delegation while maintaining responsive user experience through immediate transcription start and smart cancellation handling.
