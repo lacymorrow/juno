@@ -94,6 +94,7 @@ export function FloatingBar() {
   }, [barState]);
 
   const handleBarClick = () => {
+    // Only allow expansion from default state - agent working states take precedence
     if (barState !== "default") return;
 
     // Start expansion animation
@@ -141,6 +142,7 @@ export function FloatingBar() {
   const handleInputBlur = () => {
     // Only shrink if the bar is in 'input' state AND the input field is empty (trimmed).
     // AND a drag operation isn't being initiated on the bar itself.
+    // Note: Working state checks are now handled at the caller level to preserve agent state priority
     if (isPreparingToDrag.current) {
       console.log(
         "handleInputBlur: Potential drag operation in progress, not shrinking."
@@ -465,6 +467,20 @@ export function FloatingBar() {
     };
   }, []); // Empty dependency array, runs once on mount
 
+  // Helper function to determine if the bar should remain expanded for status display
+  const shouldRemainExpandedForStatus = (state: BarState): boolean => {
+    const workingStates: BarState[] = [
+      "loading",
+      "finishing",
+      "success",
+      "speaking",
+      "listening",
+      "transcribing",
+      "error",
+    ];
+    return workingStates.includes(state);
+  };
+
   // Effect to handle window focus changes
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -473,7 +489,25 @@ export function FloatingBar() {
       const currentWindow = Window.getCurrent();
       unlisten = await currentWindow.onFocusChanged(
         ({ payload: isFocused }) => {
-          console.log("Window focus changed:", isFocused);
+          console.log(
+            "Window focus changed:",
+            isFocused,
+            "Current bar state:",
+            barState
+          );
+
+          // Never change bar state if agent is working - agent state takes precedence
+          if (shouldRemainExpandedForStatus(barState)) {
+            console.log(
+              "Window focus changed: Agent is working, no bar state changes allowed"
+            );
+            if (isFocused && barState === "input" && inputRef.current) {
+              // Still allow input focus when window gains focus, but don't change bar state
+              inputRef.current.focus();
+            }
+            return;
+          }
+
           if (isFocused) {
             // When window gains focus, if in default state, expand it
             if (barState === "default") {
@@ -487,24 +521,15 @@ export function FloatingBar() {
               inputRef.current.focus();
             }
           } else {
-            // When window loses focus
-            if (barState === "input") {
-              if (!inputValue.trim()) {
-                // If in input state and input is empty, collapse by calling handleInputBlur.
-                console.log(
-                  "Window lost focus: Input is empty and state is 'input'. Calling handleInputBlur."
-                );
-                handleInputBlur();
-              } else {
-                // If in input state and input has text, do nothing to the bar state.
-                // The input field will lose focus naturally. Bar remains expanded.
-                console.log(
-                  "Window lost focus: Input has text and state is 'input'. Bar remains expanded."
-                );
-              }
+            // When window loses focus - only handle if agent is idle
+            if (barState === "input" && !inputValue.trim()) {
+              console.log(
+                "Window lost focus: Input is empty and agent is idle. Shrinking bar."
+              );
+              handleInputBlur();
             } else {
               console.log(
-                "Window lost focus: Bar not in 'input' state. No action."
+                "Window lost focus: Bar state preserved (has content or agent active)."
               );
             }
           }
@@ -528,7 +553,15 @@ export function FloatingBar() {
         console.log("Global mouseup: Clearing isPreparingToDrag flag.");
         isPreparingToDrag.current = false;
 
-        // After a potential drag, check if the bar should shrink
+        // Never change bar state if agent is working - agent state takes precedence
+        if (shouldRemainExpandedForStatus(barState)) {
+          console.log(
+            `Global mouseup: Agent is working (${barState}), preserving bar state.`
+          );
+          return;
+        }
+
+        // After a potential drag, check if the bar should shrink (only when agent is idle)
         if (
           barState === "input" &&
           !inputValue.trim() &&
