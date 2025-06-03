@@ -234,8 +234,14 @@ pub async fn submit_query(
     );
     info!("Agent runner created with max {} iterations.", MAX_ITERATIONS);
 
+    // Register escape key shortcut for agent execution (only when agent is actually running)
+    crate::register_escape_key_shortcut(&app_handle);
+
     info!("Starting agent run...");
     let agent_result = agent_runner.run(query.clone(), cancel_rx).await;
+
+    // Always unregister escape key shortcut when agent finishes (regardless of success/failure)
+    crate::unregister_escape_key_shortcut(&app_handle);
 
     state.reset_cancel();
     info!("Agent cancellation signal reset.");
