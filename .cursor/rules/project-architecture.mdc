@@ -1,5 +1,154 @@
 ---
-description:
+description: Complete project architecture with hierarchical agent system
 globs:
-alwaysApply: false
+alwaysApply: true
 ---
+# Project Architecture - Hierarchical AI Agent System ✅
+
+## System Overview
+Juno implements a sophisticated hierarchical agent architecture with:
+- **Orchestrator Agent**: Maintains personality and conversation memory
+- **Specialist Agents**: Handle domain-specific task execution
+- **Multi-Provider Support**: Anthropic, OpenAI, Gemini integration
+- **Complete Computer Use**: All 17 Anthropic Computer Use actions
+
+## Architecture Layers
+
+### 1. Frontend Layer (React/TypeScript)
+- **Main Application**: `src/App.tsx` - Full-featured chat interface
+- **Floating Bar**: `src/Bar.tsx` - Minimal interaction overlay
+- **Component System**: Shadcn UI with custom extensions
+- **State Management**: React hooks with Tauri event system
+
+### 2. Agent Orchestration Layer (Rust)
+- **Orchestrator**: `src-tauri/src/anthropic.rs` - Main personality and delegation
+- **Memory Management**: Persistent conversation history via AppState
+- **Task Analysis**: Intelligent routing to appropriate specialists
+- **Response Integration**: Contextualizes specialist results for user
+
+### 3. Specialist Agent Layer (Rust)
+- **Browser Agent**: Web automation and navigation
+- **Desktop Agent**: macOS system interaction and automation
+- **File Agent**: Code editing, file operations, terminal commands
+- **Isolated Execution**: Each specialist operates with focused scope
+
+### 4. Tool Provider Layer (Rust)
+- **Computer Use Tools**: Official Anthropic 17-action implementation
+- **Desktop Tools**: macOS-specific automation (click, type, scroll, etc.)
+- **Browser Tools**: Web interaction and content extraction
+- **File Tools**: str_replace_based_edit_tool, bash commands
+- **Timer Tools**: Long-running task management with context resumption
+
+### 5. Platform Integration Layer (Rust)
+- **macOS Automation**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
+- **Accessibility APIs**: Screen reader integration for element detection
+- **System APIs**: Native mouse, keyboard, and window management
+- **Multi-Method Clicking**: Robust interaction with fallback strategies
+
+## Data Flow Architecture
+
+### Request Flow
+```
+User Input → Orchestrator Agent → Task Analysis → Specialist Delegation → Tool Execution → Response Integration → User Output
+```
+
+### Memory Flow
+```
+Persistent Memory (AppState) ↔ Orchestrator ← Specialist Results → Conversation Context
+```
+
+### Tool Access Flow
+```
+Orchestrator: Delegation Tools Only
+├── delegate_to_browser_agent → Browser Tools
+├── delegate_to_desktop_agent → Computer Use + Desktop Tools
+└── delegate_to_file_agent → File Tools + Terminal
+```
+
+## Key Design Principles
+
+### 1. Separation of Concerns
+- **Personality**: Orchestrator handles conversation and context
+- **Execution**: Specialists handle technical implementation
+- **Memory**: Clear separation between persistent and task-specific memory
+
+### 2. Scalability
+- Easy addition of new specialist agents
+- Modular tool organization
+- Provider-agnostic brain factory
+
+### 3. Reliability
+- Graceful error handling at all layers
+- Resource cleanup and management
+- Cancellation support via escape key
+
+### 4. Performance
+- Lazy resource initialization
+- Shared tool providers via Arc
+- Reduced iterations for specialists (10 vs 15)
+
+This architecture provides enterprise-grade AI agent capabilities while maintaining conversational engagement and memory persistence.
+# Project Architecture Guide
+
+## Project Structure
+Juno is a Tauri v2 desktop application with a React frontend and Rust backend.
+
+## Frontend Architecture
+Located in `src/` directory:
+
+- [Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI component
+- [components/](mdc:src/components) - Reusable UI components
+- [lib/](mdc:src/lib) - Utility functions and shared logic
+- [styles/](mdc:src/styles) - CSS and styling
+
+## Backend Architecture
+Located in `src-tauri/` directory:
+
+### Core Agent System
+- [src/agent/](mdc:src-tauri/src/agent) - Main agent architecture
+- [implementations/](mdc:src-tauri/src/agent/implementations) - Tool and memory providers
+- [providers/](mdc:src-tauri/src/agent/providers) - AI provider implementations
+- [tools/](mdc:src-tauri/src/agent/tools) - Computer Use and custom tools
+
+### Key Backend Files
+- [main.rs](mdc:src-tauri/src/main.rs) - Application entry point
+- [state.rs](mdc:src-tauri/src/state.rs) - Global app state management
+- [commands/](mdc:src-tauri/src/commands) - Tauri command handlers
+
+### Platform Integration
+- [mcp-server-os-level/](mdc:src-tauri/mcp-server-os-level) - Operating system integration
+- [platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos) - macOS-specific automation
+
+## AI Provider Support
+Multi-provider architecture in [providers/](mdc:src-tauri/src/agent/providers):
+
+- [anthropic.rs](mdc:src-tauri/src/agent/providers/anthropic.rs) - Anthropic Claude integration
+- [openai.rs](mdc:src-tauri/src/agent/providers/openai.rs) - OpenAI GPT integration
+- [gemini.rs](mdc:src-tauri/src/agent/providers/gemini.rs) - Google Gemini integration
+- [factory.rs](mdc:src-tauri/src/agent/providers/factory.rs) - Provider factory and registration
+
+## Tool System
+Modular tool architecture in [tools/](mdc:src-tauri/src/agent/tools):
+
+- [anthropic_computer_use.rs](mdc:src-tauri/src/agent/tools/anthropic_computer_use.rs) - Official Computer Use tools
+- [timer_tools.rs](mdc:src-tauri/src/agent/tools/timer_tools.rs) - Timer system for long tasks
+- [desktop_tools.rs](mdc:src-tauri/src/agent/tools/desktop_tools.rs) - Additional desktop automation
+
+## Configuration
+- [.env.example](mdc:.env.example) - Environment variable template
+- [tauri.conf.json](mdc:src-tauri/tauri.conf.json) - Tauri configuration
+- [Cargo.toml](mdc:src-tauri/Cargo.toml) - Rust dependencies
+
+## Communication Flow
+1. User interacts with React frontend ([Bar.tsx](mdc:src/Bar.tsx))
+2. Frontend calls Tauri commands in [commands/](mdc:src-tauri/src/commands)
+3. Commands use agent system from [agent/](mdc:src-tauri/src/agent)
+4. Agents execute tools via platform APIs ([macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos))
+5. Results flow back through the chain to update UI
+
+## Key Design Patterns
+- **Command Pattern**: Tauri commands for frontend-backend communication
+- **Provider Pattern**: Pluggable AI providers with unified interface
+- **Tool Pattern**: Modular tool system with async execution
+- **State Management**: Centralized app state with type safety
+- **Event System**: Tauri events for real-time updates (timer expiration, etc.)
