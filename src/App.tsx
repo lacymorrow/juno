@@ -1,5 +1,6 @@
 import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
+import Settings from "@/components/Settings"; // Import the Settings component
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
 import {
@@ -12,6 +13,7 @@ import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
 import {
+  ArrowLeft,
   DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
