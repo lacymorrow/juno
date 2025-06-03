@@ -150,7 +150,7 @@ where
             // Handle agent action
             match action {
                 AgentAction::Finish(text) => {
-                    log::info!("Agent finished with text response");
+                    log::info!("Agent finished with text response: \"{}\"", text);
                     self.transition_state(AgentState::Finished).await;
                     let final_response = text;
                     return Ok(final_response);
