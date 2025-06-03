@@ -166,6 +166,88 @@ function App() {
     // For now, assuming playAudioFromBase64 is stable or relies only on its arguments and `currentAudio` state/setter.
   );
 
+  // Submit query using Tauri invoke (primarily for the main input)
+  // Note: This function might need adjustment if the backend
+  // `submit_query` command no longer returns the result directly.
+  // For now, we assume it might still be used by the main input,
+  // OR that the main input also triggers the event flow.
+  // If `submit_query` backend now ONLY emits, this function needs adjustment.
+  const submitQuery = useCallback(
+    async (text: string, isFromDictation: boolean = false) => {
+      console.log(
+        "[submitQuery called] Text:",
+        text,
+        "Trimmed empty?",
+        !text.trim(),
+        "isProcessing:",
+        isProcessing,
+        "serverStatus:",
+        serverStatus,
+        "isFromDictation:",
+        isFromDictation
+      );
+
+      // Common check for empty text
+      if (!text.trim()) {
+        console.log("[submitQuery] Returning early due to empty text.");
+        return;
+      }
+
+      // Server status check - only enforced if NOT from dictation
+      if (!isFromDictation && serverStatus !== "connected") {
+        console.log(
+          "[submitQuery] Returning early: server not connected (and not from dictation)."
+        );
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content:
+              "Cannot submit query: Server is not connected. Please wait or check connection.",
+          },
+        ]);
+        return;
+      }
+      // For dictated queries, we proceed even if serverStatus is not "connected".
+      // The `invoke` call will likely fail and be caught below, providing user feedback.
+
+      // isProcessing check - only enforced if NOT from dictation
+      if (!isFromDictation && isProcessing) {
+        console.log(
+          "[submitQuery] Returning early: query already in progress (and not from dictation)."
+        );
+        return;
+      }
+      // For dictated queries, we proceed even if isProcessing is true.
+
+      // If we reach here for dictation:
+      // - text is not empty.
+      // - serverStatus check was skipped (or passed if not dictation).
+      // - isProcessing check was skipped (or passed if not dictation).
+
+      setQuery(""); // Clear input immediately IF it was from the manual input field
+      setIsProcessing(true); // Set processing state
+
+      try {
+        // Invoke the backend command. We assume it triggers the "backend-response" event.
+        await invoke("submit_query", { query: text });
+        console.log("submit_query invoked for:", text);
+        // Response handling is now done via the event listener.
+        // isProcessing will be set to false by the backend-response event handler.
+      } catch (error) {
+        const errorMessage: ChatMessage = {
+          role: "system",
+          content: `Error invoking submit_query: ${error}`,
+          timestamp: Date.now(),
+        };
+        setConversation((prev) => [...prev, errorMessage]);
+        setIsProcessing(false); // Reset processing on error
+      }
+      // No finally block to set isProcessing(false) here, as the event listener handles it on success.
+    },
+    [isProcessing, serverStatus, setConversation, setQuery, setIsProcessing]
+  );
+
   // Add tool usage event listener to update the conversation with screenshots
   useEffect(() => {
     const unlisten = listen<any>("agent-event", (event) => {
@@ -278,12 +360,12 @@ function App() {
         }
 
         if (transcribedText && transcribedText.trim() !== "") {
-          // Transcribed text is now handled by Bar.tsx - it will display the text in the input field
-          // and the user can submit it manually just like typed text
+          // Automatically submit the transcribed text to the AI agent
           console.log(
-            "Transcribed text received, Bar.tsx will handle display:",
+            "Transcribed text received, automatically submitting to AI agent:",
             transcribedText
           );
+          submitQuery(transcribedText, true); // isFromDictation = true
         } else {
           console.log(
             "Received empty, whitespace-only, or null transcription, not submitting."
@@ -295,7 +377,7 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, []);
+  }, [submitQuery]);
 
   // Listen for dictation toggle requests
   useEffect(() => {
@@ -378,88 +460,6 @@ function App() {
       unlisten?.();
     };
   }, [handleBackendResponseDebounced]); // Add debounced handler to dependency array
-
-  // Submit query using Tauri invoke (primarily for the main input)
-  // Note: This function might need adjustment if the backend
-  // `submit_query` command no longer returns the result directly.
-  // For now, we assume it might still be used by the main input,
-  // OR that the main input also triggers the event flow.
-  // If `submit_query` backend now ONLY emits, this function needs adjustment.
-  const submitQuery = async (
-    text: string,
-    isFromDictation: boolean = false
-  ) => {
-    console.log(
-      "[submitQuery called] Text:",
-      text,
-      "Trimmed empty?",
-      !text.trim(),
-      "isProcessing:",
-      isProcessing,
-      "serverStatus:",
-      serverStatus,
-      "isFromDictation:",
-      isFromDictation
-    );
-
-    // Common check for empty text
-    if (!text.trim()) {
-      console.log("[submitQuery] Returning early due to empty text.");
-      return;
-    }
-
-    // Server status check - only enforced if NOT from dictation
-    if (!isFromDictation && serverStatus !== "connected") {
-      console.log(
-        "[submitQuery] Returning early: server not connected (and not from dictation)."
-      );
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content:
-            "Cannot submit query: Server is not connected. Please wait or check connection.",
-        },
-      ]);
-      return;
-    }
-    // For dictated queries, we proceed even if serverStatus is not "connected".
-    // The `invoke` call will likely fail and be caught below, providing user feedback.
-
-    // isProcessing check - only enforced if NOT from dictation
-    if (!isFromDictation && isProcessing) {
-      console.log(
-        "[submitQuery] Returning early: query already in progress (and not from dictation)."
-      );
-      return;
-    }
-    // For dictated queries, we proceed even if isProcessing is true.
-
-    // If we reach here for dictation:
-    // - text is not empty.
-    // - serverStatus check was skipped (or passed if not dictation).
-    // - isProcessing check was skipped (or passed if not dictation).
-
-    setQuery(""); // Clear input immediately IF it was from the manual input field
-    setIsProcessing(true); // Set processing state
-
-    try {
-      // Invoke the backend command. We assume it triggers the "backend-response" event.
-      await invoke("submit_query", { query: text });
-      console.log("submit_query invoked for:", text);
-      // Response handling is now done via the event listener.
-      // isProcessing will be set to false by the backend-response event handler.
-    } catch (error) {
-      const errorMessage: ChatMessage = {
-        role: "system",
-        content: `Error invoking submit_query: ${error}`,
-        timestamp: Date.now(),
-      };
-      setConversation((prev) => [...prev, errorMessage]);
-      setIsProcessing(false); // Reset processing on error
-    }
-    // No finally block to set isProcessing(false) here, as the event listener handles it on success.
-  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
