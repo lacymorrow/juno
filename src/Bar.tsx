@@ -182,6 +182,7 @@ export function FloatingBar() {
   useEffect(() => {
     let unlistenWillSubmit: (() => void) | undefined;
     let unlistenDidSubmit: (() => void) | undefined;
+    let unlistenTimerExpired: (() => void) | undefined;
 
     const setupSubmitListeners = async () => {
       unlistenWillSubmit = await listen<{ query: string }>(
@@ -245,12 +246,80 @@ export function FloatingBar() {
           }
         }
       );
+
+      unlistenTimerExpired = await listen<{
+        id: string;
+        description: string;
+        context: any;
+        trigger_time: number;
+        created_at: number;
+      }>("timer-expired", async (event) => {
+        console.log("FloatingBar Event: timer-expired", event.payload);
+        const { description, context } = event.payload;
+
+        // Reset UI state
+        setBarState("loading");
+        setInputValue("");
+        setCurrentError(null);
+        setTranscriptionText("");
+        setSpokenText("");
+
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+
+        try {
+          // Extract the resumption query from the context
+          let resumeQuery = "";
+
+          if (context.resumeQuery) {
+            resumeQuery = context.resumeQuery;
+          } else if (context.description) {
+            resumeQuery = `Resume task: ${context.description}`;
+          } else {
+            resumeQuery = `Resume timer task: ${description}`;
+          }
+
+          // Add context information to the query
+          if (context.gameState || context.taskState) {
+            resumeQuery += ` Context: ${JSON.stringify(context)}`;
+          }
+
+          console.log("Restarting agent with timer context:", resumeQuery);
+
+          // Restart the agent with the saved context
+          await invoke("submit_query", {
+            query: resumeQuery,
+          });
+
+          // Update UI to show success
+          setBarState("success");
+          transitionTimeoutRef.current = setTimeout(() => {
+            setBarState("shrinking");
+            transitionTimeoutRef.current = setTimeout(() => {
+              setBarState("default");
+            }, 300);
+          }, 2000);
+        } catch (error) {
+          console.error("Failed to restart agent from timer:", error);
+          setCurrentError(`Failed to restart: ${error}`);
+          setBarState("error");
+
+          transitionTimeoutRef.current = setTimeout(() => {
+            setBarState("shrinking");
+            transitionTimeoutRef.current = setTimeout(() => {
+              setBarState("default");
+            }, 300);
+          }, 3000);
+        }
+      });
     };
 
     setupSubmitListeners();
     return () => {
       unlistenWillSubmit?.();
       unlistenDidSubmit?.();
+      unlistenTimerExpired?.();
     };
   }, [barState, inputRef]); // barState needed for the conditional in unlistenDidSubmit
 

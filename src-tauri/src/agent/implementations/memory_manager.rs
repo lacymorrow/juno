@@ -23,12 +23,14 @@ impl SimpleMemoryManager {
 impl MemoryManager for SimpleMemoryManager {
     async fn add_message(&mut self, message: Message) -> Result<(), AgentError> {
         let mut messages = self.messages.write().await;
-        messages.push(message);
+        messages.push(message.clone());
+        log::info!("Memory: Added message. Role={:?}, Total_count={}", message.role, messages.len());
         Ok(())
     }
 
     async fn get_messages(&self) -> Result<Vec<Message>, AgentError> {
         let messages = self.messages.read().await;
+        log::info!("Memory: Retrieved {} messages", messages.len());
         Ok(messages.clone())
     }
 

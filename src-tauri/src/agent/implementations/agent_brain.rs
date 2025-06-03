@@ -222,6 +222,13 @@ impl AgentBrain for AnthropicBrain {
         messages: &[Message],
         available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
+        // --- Debug: Log incoming messages ---
+        log::info!("AnthropicBrain received {} messages for processing", messages.len());
+        for (i, msg) in messages.iter().enumerate() {
+            log::info!("Message {}: Role={:?}, Content_Length={}, Has_Tool_Calls={}",
+                i, msg.role, msg.content.len(), msg.tool_calls.is_some());
+        }
+
         // --- 1. Construct API Request ---
 
         // Convert internal messages to API format, handling tool results correctly
