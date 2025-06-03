@@ -1,5 +1,6 @@
 import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
+import Settings from "@/components/Settings"; // Import the Settings component
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
 import {
@@ -12,6 +13,7 @@ import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
 import {
+  ArrowLeft,
   DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -51,6 +53,9 @@ type BackendResponsePayload = {
   response: SubmitQueryResult;
 };
 
+// Type for view state
+type AppView = "chat" | "settings" | "devtools";
+
 // Simple debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -71,6 +76,7 @@ function App() {
     "checking" | "connected" | "error"
   >("checking");
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false); // State for collapsible panel
+  const [currentView, setCurrentView] = useState<AppView>("chat"); // State for current view
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
@@ -155,6 +161,31 @@ function App() {
       if (newMessage) {
         setConversation((prev) => [...prev, newMessage!]);
       }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for settings menu requests from native menu
+  useEffect(() => {
+    const unlisten = listen<string>("settings-requested", (event) => {
+      console.log("Settings requested from menu:", event.payload);
+      setCurrentView("settings");
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for devtools menu requests from tray menu
+  useEffect(() => {
+    const unlisten = listen<string>("devtools-requested", (event) => {
+      console.log("DevTools requested from tray menu:", event.payload);
+      setCurrentView("devtools");
+      setIsDevPanelOpen(true); // Also open the dev panel
     });
 
     return () => {
@@ -437,206 +468,254 @@ function App() {
       <div className="w-screen h-screen bg-background text-foreground">
         <div className="container mx-auto p-4 h-full flex flex-col">
           {/* Header */}
-          <header className="flex justify-between items-center mb-4 flex-shrink-0 border-b pb-2">
-            <h1 className="text-xl font-semibold flex items-center gap-2">
-              <DogIcon size={24} /> Juno{" "}
-              <span className="text-xs text-muted-foreground">Operator</span>
-            </h1>
-            <div className="flex items-center gap-4">
-              {/* Status Indicator */}
-              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Server
-                  size={16}
-                  className={cn(
-                    serverStatus === "connected"
-                      ? "text-green-500"
+          <header className="flex justify-between items-center mb-4 p-4 border-b">
+            <div className="flex items-center gap-3">
+              <DogIcon size={32} className="text-blue-500" />
+              <div>
+                <h1 className="text-xl font-bold">
+                  {currentView === "settings"
+                    ? "Settings"
+                    : currentView === "devtools"
+                    ? "Developer Tools"
+                    : "Juno AI Assistant"}
+                </h1>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Server
+                    size={14}
+                    className={
+                      serverStatus === "connected"
+                        ? "text-green-500"
+                        : serverStatus === "error"
+                        ? "text-red-500"
+                        : "text-yellow-500"
+                    }
+                  />
+                  <span>
+                    {serverStatus === "connected"
+                      ? "Connected"
                       : serverStatus === "error"
-                      ? "text-red-500"
-                      : "text-yellow-500 animate-pulse"
-                  )}
-                />
-                {serverStatus === "connected"
-                  ? "Connected"
-                  : serverStatus === "error"
-                  ? "Connection Error"
-                  : "Connecting..."}
+                      ? "Connection Error"
+                      : "Checking..."}
+                  </span>
+                </div>
               </div>
-              {/* Toggle Dev Panel Button */}
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
-                title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
-              >
-                {isDevPanelOpen ? (
-                  <PanelLeftClose size={18} />
-                ) : (
-                  <PanelLeftOpen size={18} />
-                )}
-              </Button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Back Button - show for settings and devtools views */}
+              {(currentView === "settings" || currentView === "devtools") && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentView("chat")}
+                  title="Back to Chat"
+                >
+                  <ArrowLeft size={18} />
+                </Button>
+              )}
+              {/* Toggle Dev Panel Button - only show in chat view */}
+              {currentView === "chat" && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
+                  title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
+                >
+                  {isDevPanelOpen ? (
+                    <PanelLeftClose size={18} />
+                  ) : (
+                    <PanelLeftOpen size={18} />
+                  )}
+                </Button>
+              )}
             </div>
           </header>
 
-          {/* Main Content Area (Resizable Chat + Dev Panel) */}
-          <ResizablePanelGroup
-            direction="horizontal"
-            className="flex-grow rounded-lg border overflow-hidden"
-          >
-            {/* Chat Panel */}
-            <ResizablePanel defaultSize={75} minSize={30}>
-              <div className="flex flex-col h-full p-4">
-                {/* Conversation Area */}
-                <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
-                  {conversation.map((msg, index) => (
-                    <div
-                      key={index}
-                      className={`mb-3 flex ${
-                        msg.role === "user" ? "justify-end" : "justify-start"
-                      }`}
-                    >
-                      <span
-                        className={cn(
-                          "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
-                          msg.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : msg.role === "assistant"
-                            ? "bg-muted"
-                            : (msg.role === "system" ||
-                                msg.role === "thinking" ||
-                                msg.role === "tool_call_request" ||
-                                msg.role === "tool_call_result") &&
-                              msg.screenshot_base64
-                            ? "bg-muted/80 border border-primary/20 p-2"
-                            : msg.role === "thinking"
-                            ? "bg-blue-100 text-blue-800 text-xs italic opacity-90"
-                            : msg.role === "tool_call_request"
-                            ? "bg-purple-100 text-purple-800 text-xs"
-                            : msg.role === "tool_call_result"
-                            ? "bg-green-100 text-green-800 text-xs"
-                            : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
-                        )}
-                      >
-                        {msg.role === "thinking" && (
-                          <div className="font-semibold mb-1">Thinking...</div>
-                        )}
-                        {msg.role === "tool_call_request" && msg.tool_name && (
-                          <div className="font-semibold mb-1">
-                            Tool Call:{" "}
-                            <code className="font-mono bg-purple-200 px-1 rounded">
-                              {msg.tool_name}
-                            </code>
-                          </div>
-                        )}
-                        {msg.role === "tool_call_result" && msg.tool_name && (
-                          <div className="font-semibold mb-1">
-                            Tool Result:{" "}
-                            <code className="font-mono bg-green-200 px-1 rounded">
-                              {msg.tool_name}
-                            </code>
-                          </div>
-                        )}
-                        {msg.content}
-                        {msg.role === "tool_call_request" && msg.tool_args && (
-                          <pre className="mt-1 p-1.5 bg-purple-50 text-xs rounded overflow-x-auto">
-                            Args: {JSON.stringify(msg.tool_args, null, 2)}
-                          </pre>
-                        )}
-                        {msg.role === "tool_call_result" && msg.tool_output && (
-                          <pre className="mt-1 p-1.5 bg-green-50 text-xs rounded overflow-x-auto">
-                            Output:{" "}
-                            {typeof msg.tool_output === "string"
-                              ? msg.tool_output
-                              : JSON.stringify(msg.tool_output, null, 2)}
-                          </pre>
-                        )}
-                        {msg.screenshot_base64 && (
-                          <div
-                            className={cn(
-                              "mt-2",
-                              msg.role !== "system" && "border-t pt-2"
-                            )}
-                          >
-                            <div className="text-xs text-muted-foreground mb-1">
-                              {msg.role === "system"
-                                ? "Screenshot captured by AI:"
-                                : "Screenshot:"}
-                            </div>
-                            <div className="relative">
-                              <img
-                                src={`data:image/png;base64,${msg.screenshot_base64}`}
-                                alt="Screenshot"
-                                className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-                              />
-                              <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-                            </div>
-                          </div>
-                        )}
-                      </span>
-                    </div>
-                  ))}
-                  <div ref={conversationEndRef} />
-                </ScrollArea>
-
-                {/* Input Form */}
-                <form
-                  onSubmit={handleSubmit}
-                  className="flex gap-2 flex-shrink-0 mt-auto"
-                >
-                  <Input
-                    type="text"
-                    placeholder={
-                      isProcessing ? "Processing..." : "Enter your query..."
-                    }
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    disabled={isProcessing || serverStatus !== "connected"}
-                    className="flex-grow"
-                  />
-                  <Button
-                    type="submit"
-                    disabled={
-                      isProcessing ||
-                      serverStatus !== "connected" ||
-                      !query.trim()
-                    }
-                  >
-                    <Send size={18} />
-                  </Button>
-                </form>
-              </div>
-            </ResizablePanel>
-
-            {/* Resizable Handle */}
-            <ResizableHandle withHandle />
-
-            {/* Dev Tools & Logs Panel (Collapsible) */}
-            <ResizablePanel
-              collapsible
-              collapsedSize={0} // Completely collapses
-              minSize={50} // Minimum size when expanded - Updated min size from main
-              defaultSize={100} // Default size when expanded - Updated default size from main
-              className={cn(
-                isDevPanelOpen ? "block" : "hidden",
-                "overflow-hidden" // Ensure panel itself doesn't scroll
-              )}
-            >
-              {/* Apply ScrollArea directly inside the panel */}
-              <ScrollArea className="h-full w-full p-3">
-                {" "}
-                {/* Full size and padding */}
-                {/* Title (replaces CardHeader) */}
+          {/* Main Content Area - Conditional based on current view */}
+          {currentView === "settings" ? (
+            <div className="flex-grow rounded-lg border overflow-hidden">
+              <ScrollArea className="h-full w-full">
+                <Settings
+                  onNavigateToDevTools={() => setCurrentView("devtools")}
+                  onNavigateToChat={() => setCurrentView("chat")}
+                />
+              </ScrollArea>
+            </div>
+          ) : currentView === "devtools" ? (
+            <div className="flex-grow rounded-lg border overflow-hidden">
+              <ScrollArea className="h-full w-full p-4">
                 <h2 className="text-lg font-semibold mb-3 border-b pb-2">
                   Developer Tools & Logs
                 </h2>
-                {/* DevToolsPanel Component */}
-                <div className="border-b pb-3 mb-3">
-                  <DevToolsPanel />
-                </div>
-                {/* Logs Area */}
-                <div className="flex-grow">{/* Logs Area */}</div>
+                <DevToolsPanel />
               </ScrollArea>
-            </ResizablePanel>
-          </ResizablePanelGroup>
+            </div>
+          ) : (
+            <ResizablePanelGroup
+              direction="horizontal"
+              className="flex-grow rounded-lg border overflow-hidden"
+            >
+              {/* Chat Panel */}
+              <ResizablePanel defaultSize={75} minSize={30}>
+                <div className="flex flex-col h-full p-4">
+                  {/* Conversation Area */}
+                  <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
+                    {conversation.map((msg, index) => (
+                      <div
+                        key={index}
+                        className={`mb-3 flex ${
+                          msg.role === "user" ? "justify-end" : "justify-start"
+                        }`}
+                      >
+                        <span
+                          className={cn(
+                            "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
+                            msg.role === "user"
+                              ? "bg-primary text-primary-foreground"
+                              : msg.role === "assistant"
+                              ? "bg-muted"
+                              : (msg.role === "system" ||
+                                  msg.role === "thinking" ||
+                                  msg.role === "tool_call_request" ||
+                                  msg.role === "tool_call_result") &&
+                                msg.screenshot_base64
+                              ? "bg-muted/80 border border-primary/20 p-2"
+                              : msg.role === "thinking"
+                              ? "bg-blue-100 text-blue-800 text-xs italic opacity-90"
+                              : msg.role === "tool_call_request"
+                              ? "bg-purple-100 text-purple-800 text-xs"
+                              : msg.role === "tool_call_result"
+                              ? "bg-green-100 text-green-800 text-xs"
+                              : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
+                          )}
+                        >
+                          {msg.role === "thinking" && (
+                            <div className="font-semibold mb-1">
+                              Thinking...
+                            </div>
+                          )}
+                          {msg.role === "tool_call_request" &&
+                            msg.tool_name && (
+                              <div className="font-semibold mb-1">
+                                Tool Call:{" "}
+                                <code className="font-mono bg-purple-200 px-1 rounded">
+                                  {msg.tool_name}
+                                </code>
+                              </div>
+                            )}
+                          {msg.role === "tool_call_result" && msg.tool_name && (
+                            <div className="font-semibold mb-1">
+                              Tool Result:{" "}
+                              <code className="font-mono bg-green-200 px-1 rounded">
+                                {msg.tool_name}
+                              </code>
+                            </div>
+                          )}
+                          {msg.content}
+                          {msg.role === "tool_call_request" &&
+                            msg.tool_args && (
+                              <pre className="mt-1 p-1.5 bg-purple-50 text-xs rounded overflow-x-auto">
+                                Args: {JSON.stringify(msg.tool_args, null, 2)}
+                              </pre>
+                            )}
+                          {msg.role === "tool_call_result" &&
+                            msg.tool_output && (
+                              <pre className="mt-1 p-1.5 bg-green-50 text-xs rounded overflow-x-auto">
+                                Output:{" "}
+                                {typeof msg.tool_output === "string"
+                                  ? msg.tool_output
+                                  : JSON.stringify(msg.tool_output, null, 2)}
+                              </pre>
+                            )}
+                          {msg.screenshot_base64 && (
+                            <div
+                              className={cn(
+                                "mt-2",
+                                msg.role !== "system" && "border-t pt-2"
+                              )}
+                            >
+                              <div className="text-xs text-muted-foreground mb-1">
+                                {msg.role === "system"
+                                  ? "Screenshot captured by AI:"
+                                  : "Screenshot:"}
+                              </div>
+                              <div className="relative">
+                                <img
+                                  src={`data:image/png;base64,${msg.screenshot_base64}`}
+                                  alt="Screenshot"
+                                  className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+                              </div>
+                            </div>
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                    <div ref={conversationEndRef} />
+                  </ScrollArea>
+
+                  {/* Input Form */}
+                  <form
+                    onSubmit={handleSubmit}
+                    className="flex gap-2 flex-shrink-0 mt-auto"
+                  >
+                    <Input
+                      type="text"
+                      placeholder={
+                        isProcessing ? "Processing..." : "Enter your query..."
+                      }
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      disabled={isProcessing || serverStatus !== "connected"}
+                      className="flex-grow"
+                    />
+                    <Button
+                      type="submit"
+                      disabled={
+                        isProcessing ||
+                        serverStatus !== "connected" ||
+                        !query.trim()
+                      }
+                    >
+                      <Send size={18} />
+                    </Button>
+                  </form>
+                </div>
+              </ResizablePanel>
+
+              {/* Resizable Handle */}
+              <ResizableHandle withHandle />
+
+              {/* Dev Tools & Logs Panel (Collapsible) */}
+              <ResizablePanel
+                collapsible
+                collapsedSize={0} // Completely collapses
+                minSize={50} // Minimum size when expanded - Updated min size from main
+                defaultSize={100} // Default size when expanded - Updated default size from main
+                className={cn(
+                  isDevPanelOpen ? "block" : "hidden",
+                  "overflow-hidden" // Ensure panel itself doesn't scroll
+                )}
+              >
+                {/* Apply ScrollArea directly inside the panel */}
+                <ScrollArea className="h-full w-full p-3">
+                  {" "}
+                  {/* Full size and padding */}
+                  {/* Title (replaces CardHeader) */}
+                  <h2 className="text-lg font-semibold mb-3 border-b pb-2">
+                    Developer Tools & Logs
+                  </h2>
+                  {/* DevToolsPanel Component */}
+                  <div className="border-b pb-3 mb-3">
+                    <DevToolsPanel />
+                  </div>
+                  {/* Logs Area */}
+                  <div className="flex-grow">{/* Logs Area */}</div>
+                </ScrollArea>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          )}
         </div>
       </div>
     </main>

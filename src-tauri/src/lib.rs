@@ -213,6 +213,56 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
+            // --- Setup Application Menu ---
+            let settings_menu_item = tauri::menu::MenuItemBuilder::new("Settings...")
+                .id(constants::app_menu_ids::SETTINGS)
+                .accelerator("CmdOrCtrl+,")
+                .build(app)?;
+
+            let about_menu_item = tauri::menu::MenuItemBuilder::new("About Juno")
+                .id(constants::app_menu_ids::ABOUT)
+                .build(app)?;
+
+            let app_submenu = tauri::menu::SubmenuBuilder::new(app, "Juno")
+                .item(&about_menu_item)
+                .separator()
+                .item(&settings_menu_item)
+                .separator()
+                .services()
+                .separator()
+                .hide()
+                .hide_others()
+                .quit()
+                .build()?;
+
+            let app_menu = tauri::menu::MenuBuilder::new(app)
+                .items(&[&app_submenu])
+                .build()?;
+
+            app.set_menu(app_menu)?;
+
+            // Listen for menu events
+            let app_handle_for_menu = app_handle.clone();
+            app.on_menu_event(move |_app, event| {
+                match event.id().as_ref() {
+                    constants::app_menu_ids::SETTINGS => {
+                        info!("[Menu] Settings menu item clicked");
+                        if let Err(e) = app_handle_for_menu.emit(constants::events::SETTINGS_REQUESTED, "/settings") {
+                            tracing::error!("[Menu] Failed to emit settings event: {}", e);
+                        }
+                    }
+                    constants::app_menu_ids::ABOUT => {
+                        info!("[Menu] About menu item clicked");
+                        if let Err(e) = app_handle_for_menu.emit("about-requested", ()) {
+                            tracing::error!("[Menu] Failed to emit about event: {}", e);
+                        }
+                    }
+                    _ => {
+                        info!("[Menu] Unhandled menu event: {:?}", event.id());
+                    }
+                }
+            });
+
             // --- Setup Tray Icon ---
             let tray_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
@@ -243,10 +293,12 @@ pub fn run() {
                 // Create a simple menu
                 let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).unwrap());
                 let toggle_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::TOGGLE_FLOATING_BAR, "Toggle Floating Bar", true, None::<&str>).unwrap());
+                let devtools_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::SHOW_DEVTOOLS, "Developer Tools", true, None::<&str>).unwrap());
                 let tray_menu = Menu::with_items(&tray_app_handle, &[
-                    &quit_item,
-                    &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
                     &toggle_item,
+                    &devtools_item,
+                    &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
+                    &quit_item,
                 ]).map_err(|e| eprintln!("[Tray Setup Error] Failed to create tray menu: {}", e)).ok();
 
                 let mut tray_builder = TrayIconBuilder::new()
@@ -279,8 +331,18 @@ pub fn run() {
                                     eprintln!("[Tray Menu Error] Floating bar window not found for toggle.");
                                 }
                             }
+                            constants::tray_menu_ids::SHOW_DEVTOOLS => {
+                                info!("[Tray Menu] Developer Tools menu item clicked");
+                                if let Err(e) = app_handle.emit("devtools-requested", ()) {
+                                    tracing::error!("[Tray Menu] Failed to emit devtools-requested event: {}", e);
+                                }
+                            }
+                            // Only log as unhandled if it's not an app menu ID
+                            id if id != constants::app_menu_ids::SETTINGS && id != constants::app_menu_ids::ABOUT => {
+                                println!("[Tray Menu] Unhandled tray menu event: {:?}", event.id());
+                            }
                             _ => {
-                                println!("[Tray Menu] Unhandled event: {:?}", event.id());
+                                // App menu events handled elsewhere, no need to log
                             }
                         }
                     })
@@ -467,7 +529,7 @@ pub fn run() {
                 // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
                 let payload_str = event.payload();
                 match serde_json::from_str::<serde_json::Value>(payload_str) {
-                    Ok(mut payload_json) => {
+                    Ok(payload_json) => {
                         if let Some(text_value) = payload_json.get("text") {
                             // Transform { "text": "..." } to { "query": "..." }
                             let transformed_payload = serde_json::json!({

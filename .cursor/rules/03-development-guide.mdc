@@ -175,10 +175,116 @@ impl SpecializedAgent for BrowserAgent {
 
     async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {
         // Implement task execution logic
+>>>>>>> 4732b5d8e63f89a775ad725c13c1699a4829c31d
     }
 }
 ```
 
+<<<<<<< HEAD
+### Threading & State
+```rust
+// Thread-safe state access
+let app_state = app.state::<AppState>();
+let shared_data = app_state.shared_resource.clone();
+
+// Background processing
+tauri::async_runtime::spawn(async move {
+    // CPU-intensive work
+    let result = process_data().await;
+    app_handle.emit("result-ready", result);
+});
+```
+
+## Security Requirements (CRITICAL)
+
+### File System Security - TODOs in `basic_tools.rs`
+```rust
+// TODO: Add proper path validation and sandboxing
+// - Prevent directory traversal attacks (../, absolute paths)
+// - Restrict access to system directories
+// - Implement whitelist of allowed directories
+// - Validate file extensions and types
+
+// TODO: Add command validation and sandboxing
+// - Whitelist allowed commands
+// - Validate and sanitize command arguments
+// - Run commands in sandboxed environment
+// - Prevent shell injection attacks
+```
+
+### API Key Management
+- Store in environment variables only
+- Never commit `.env` files
+- Use `.env.example` as template
+- Rotate keys regularly
+
+## Testing Strategy
+
+### Manual Testing Flow
+1. **Voice**: Alt+D → speak → verify transcription → check AI response
+2. **DevToolsPanel**: Use `src/components/DevToolsPanel.tsx` for backend testing
+3. **Agent Tools**: Test tool execution and error handling
+4. **Permissions**: Test with minimal macOS permissions first
+
+### QA Commands
+```bash
+bun run qa:whisper     # Test voice recognition
+bun run qa:tools       # Test desktop automation
+bun run qa:browser     # Test browser automation
+bun run qa:full        # Run all tests
+```
+
+### Debugging
+```rust
+// Enable detailed logging
+RUST_LOG=debug
+
+// Structured logging throughout
+tracing::info!("Operation started: {}", details);
+tracing::error!("Failed: {:?}", error);
+```
+
+## Code Standards
+- **Explicit variable names** - prefer descriptive over short
+- **Performance first** - consider performance implications
+- **Robust error handling** - implement comprehensive error handling
+- **Security first** - always consider security implications
+- **Modular design** - encourage modular principles
+
+## Frontend Integration
+```typescript
+// Event listeners
+useEffect(() => {
+  const unlisten = listen("app-event-name", (event) => {
+    console.log("Event:", event.payload);
+  });
+  return () => unlisten.then(fn => fn());
+}, []);
+
+// Command invocation with error handling
+try {
+  const result = await invoke("command_name", { param: value });
+} catch (error) {
+  console.error("Command failed:", error);
+}
+```
+
+## Development Environment
+```bash
+# Required
+ANTHROPIC_API_KEY=your_key_here
+RUST_LOG=info  # or debug for verbose
+
+# Optional
+VOICE_MODEL_PATH=models/ggml-tiny.en.bin
+OPENAI_API_KEY=your_key_here
+```
+
+## Platform Requirements
+- **macOS**: Accessibility + Screen Recording + Microphone permissions
+- **Build**: `~/.cargo/bin/cargo build --manifest-path src-tauri/Cargo.toml`
+- **Development**: `bun tauri dev`
+=======
 #### Error Handling Pattern
 ```rust
 // Use appropriate AgentError variants
