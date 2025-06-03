@@ -531,7 +531,7 @@ export function FloatingBar() {
       }}
     >
       {/* Container for the bar, positioned relative to the flex container */}
-      <div className="relative z-50">
+      <div className="relative z-50 p-3">
         {/* Universal Bar Container - Now positioned within the flex container */}
         <div
           data-tauri-drag-region

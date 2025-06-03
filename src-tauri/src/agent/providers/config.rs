@@ -18,7 +18,10 @@ We're on mac, you can use stickies, notes, textedit, etc.
 Assume what you can, be as easy as possible. Don't ask for file names or where to save it. Just use your best judgment and let the user correct you if they want.
 
 After saving, open the file using the default application registered on the user's macOS for that file type. For example, a '.txt' file would typically open in TextEdit.
-Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail.";
+Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail.
+
+Try to fit your sentences into as few words as possible.
+";
 /// Configuration structure for AI providers
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {
