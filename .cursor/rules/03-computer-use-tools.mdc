@@ -1,0 +1,295 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Computer Use Tools and Implementation
+
+## Overview
+
+This rule describes the implementation of Anthropic Computer Use features for desktop automation. The system provides comprehensive computer control capabilities through a set of tools that enable mouse control, keyboard input, screen analysis, application management, and browser automation.
+
+## Core Computer Use Features
+
+### User Interface Interaction
+- **Mouse Control**: Click, right click, double click, triple click, scroll, drag, and hover
+- **Keyboard Control**: Type text, press keyboard shortcuts, select text
+- **Text Operations**: Copy, paste, select, and edit text
+- **Clipboard Management**: Get and set clipboard contents
+
+### UI Navigation and Recognition
+- **Element Finding**: Locate UI elements by various attributes (text, role, position)
+- **Window Management**: Find, focus, and manipulate application windows
+- **Screen Capture**: Capture screenshots of the entire screen or specific regions
+- **OCR**: Recognize text in screen regions
+
+### System Integration
+- **File Operations**: Read, write, and manage files
+- **Application Control**: Launch, focus, and close applications
+- **System Information**: Access system information (OS, screen resolution, etc.)
+
+## macOS Implementation
+
+### Key Implementation Files
+- **[src-tauri/mcp-server-os-level/src/platforms/macos/mod.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/mod.rs)**: Entry point for macOS platform module
+- **[src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs)**: Main engine for accessibility features
+- **[src-tauri/mcp-server-os-level/src/platforms/macos/interaction.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/interaction.rs)**: Mouse and keyboard interaction functions
+- **[src-tauri/mcp-server-os-level/src/platforms/macos/element.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/element.rs)**: UI element representation and operations
+- **[src-tauri/mcp-server-os-level/src/platforms/macos/screen.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/screen.rs)**: Screen capture and analysis
+- **[src-tauri/mcp-server-os-level/src/platforms/macos/system.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/system.rs)**: System-level operations
+- **[src-tauri/mcp-server-os-level/src/platforms/macos/application.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/application.rs)**: Application management
+
+### Mouse Operations
+- `click_auto`: Context-aware clicking with accessibility fallback
+- `click_press` / `click_release`: Press and release mouse buttons independently
+- `click_left` / `click_right`: Standard left and right mouse clicks
+- `click_double` / `click_triple`: Multi-click operations
+- `move_mouse`: Move cursor to specific coordinates
+- `scroll`: Viewport scrolling (vertical/horizontal)
+- `drag`: Click, hold, move, and release operations
+
+### Keyboard Operations
+- `type_text`: Type strings at current focus
+- `press_key`: Execute specific keys or key combinations
+- `key_press` / `key_release`: Independent key press/release
+- `select_text`: Select text between positions
+- `delete_text`: Delete selected or positioned text
+
+### Clipboard Operations
+- `get_clipboard_contents`: Retrieve current clipboard data
+- `set_clipboard_contents`: Set clipboard to specified value
+
+### UI Element Operations
+- `find_element`: Locate elements by criteria (text, role, etc.)
+- `get_element_attributes`: Extract element properties
+- `get_element_children` / `get_element_parent`: Navigate element hierarchy
+- `focus`: Set focus on specific elements
+- `set_value`: Modify element values (text fields, sliders, etc.)
+
+### Screen Operations
+- `capture_screen`: Screenshot entire screen or regions
+- `get_screen_size`: Get display dimensions
+- `recognize_text`: OCR for text extraction from screen regions
+
+### Application Operations
+- `launch_application`: Start apps by bundle ID or path
+- `focus_application`: Bring apps to foreground
+- `close_application`: Terminate running applications
+- `get_frontmost_application`: Get currently focused app info
+- `get_running_applications`: List all running applications
+
+### System Operations
+- `get_system_info`: System information (OS version, hardware)
+- `get_file_contents` / `write_file_contents`: File system access
+
+## Browser Automation
+
+### Architecture
+Browser interactions are managed by `BrowserController` ([src-tauri/src/agent/tools/browser_controller.rs](mdc:src-tauri/src/agent/tools/browser_controller.rs)) using Playwright for web automation.
+
+### Key Components
+
+#### Playwright Driver Management
+- **Global Driver**: Stored in `AppState.playwright_driver` as `Arc<TokioMutex<Option<Arc<Playwright>>>>`
+- **Lazy Initialization**: `get_or_init_playwright_driver` method handles startup
+- **Persistence**: Driver remains active for application lifetime
+
+#### BrowserController
+- **Location**: [src-tauri/src/agent/tools/browser_controller.rs](mdc:src-tauri/src/agent/tools/browser_controller.rs)
+- **Functionality**: Navigation, content extraction, interaction, screenshots
+- **Persistence**: Stored in `AppState.browser_controller` for reuse across operations
+- **Initialization**: `get_or_init_browser_controller` ensures valid Playwright driver
+
+### Browser Lifecycle
+1. **Launch**: Browser (Chrome) launched by `BrowserController::new()` via Playwright
+2. **Persistence**: Browser remains open between agent runs due to persistent instances
+3. **Cleanup**: Explicit cleanup via `BrowserController::cleanup()` on app termination
+
+### Error Handling & Stability
+- Robust error handling for browser launch and context creation
+- Retry mechanisms and fallback launch configurations
+- Timeout management for improved reliability
+- macOS-specific launch arguments for stability
+
+## Tool System Integration
+
+### Tool Registration Pattern
+```rust
+// Register tools with LocalToolProvider during agent initialization
+register_basic_tools(&mut tool_provider);
+register_desktop_tools(&mut tool_provider, desktop.clone());
+register_browser_tools(&mut tool_provider, app_handle.clone());
+```
+
+### Tool Interface
+```rust
+pub trait ComputerUseTool {
+    async fn execute(&self, params: Value) -> Result<ToolResult, String>;
+}
+```
+
+### Available Tool Categories
+1. **Basic Tools**: Text processing, file operations, system info
+2. **Desktop Tools**: Mouse, keyboard, screen capture, window management
+3. **Browser Tools**: Web navigation, content extraction, form interaction
+
+## Implementation Guidelines
+
+### Reliability Requirements
+- Always attempt accessibility actions before falling back to mouse simulation
+- Check accessibility support for applications before attempting operations
+- Implement appropriate timeouts and retry mechanisms
+- Provide detailed error information for diagnostics
+
+### Performance Considerations
+- Operations should execute with minimal latency
+- Resource usage optimized to minimize system impact
+- UI element searches may be resource-intensive - implement caching where appropriate
+- Persistent browser sessions reduce launch overhead
+
+### Security Considerations
+- Limit access to sensitive operations (file system, credentials)
+- Implement proper permission models for system access
+- Validate input parameters to prevent malicious usage
+
+### Cross-Platform Support
+- Primary platforms: macOS, Windows, Linux
+- Consistent API across platforms with platform-specific implementations
+- macOS implementation uses Apple's Accessibility API (AX) with Core Graphics fallback
+
+## Permission Requirements
+
+### macOS Specific
+- **Accessibility Permissions**: Required for UI element interaction
+- **Screen Recording**: Needed for screenshot capabilities
+- **Input Monitoring**: Required for keyboard and mouse simulation
+
+### General System Permissions
+- **File System Access**: For file operations
+- **Network Access**: For browser operations
+- **Application Control**: For launching and managing applications
+
+## Implementation Status Tracking
+
+Document the implementation status of each operation:
+- ✅ **Fully implemented**: Complete functionality with proper error handling
+- ⚠️ **Partially implemented**: Working but with known limitations
+- ❌ **Not implemented**: Stubbed functions requiring completion
+- 🔍 **Needs testing**: Implementation complete but requires verification
+
+### Current Implementation Focus
+1. Complete any stubbed functions in macOS platform implementation
+2. Enhance error handling and fallback mechanisms
+3. Improve performance for UI element searches
+4. Add comprehensive testing for all computer use operations
+5. Implement missing Anthropic Computer Use features
+
+## Testing Strategy
+
+### Manual Testing Workflow
+1. **Mouse Operations**: Test clicking, dragging, scrolling across applications
+2. **Keyboard Operations**: Verify text input, shortcuts, special keys
+3. **Screen Analysis**: Test screenshot capture and OCR functionality
+4. **Application Control**: Launch, focus, and close various applications
+5. **Browser Automation**: Navigate websites, extract content, fill forms
+6. **Error Scenarios**: Test accessibility failures, invalid parameters
+
+### Automated Testing
+- Unit tests for individual tool functions
+- Integration tests for tool registration and execution
+- Platform-specific tests for macOS accessibility features
+- Browser automation test suite
+
+## Agent Tools Development Guide
+
+### Defining Tools
+Tools allow the agent to interact with the environment (filesystem, system, web, etc.).
+
+#### Tool Definition Structure
+Each tool requires a `ToolDefinition` struct (defined in [src-tauri/src/agent/core.rs](mdc:src-tauri/src/agent/core.rs)):
+- **name**: Unique identifier for the tool
+- **description**: Human-readable description for the LLM
+- **input_schema**: JSON schema defining expected arguments
+
+Example from [src-tauri/src/agent/tools/basic_tools.rs](mdc:src-tauri/src/agent/tools/basic_tools.rs):
+```rust
+fn read_file_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "read_file".to_string(),
+        description: "Read the contents of a file".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to read"}
+            },
+            "required": ["path"]
+        }),
+    }
+}
+```
+
+#### Tool Execution
+Each tool needs a corresponding async function that:
+- Takes `serde_json::Value` (matching the `input_schema`)
+- Returns `Result<Value, String>`
+- `Ok(Value)` contains the tool's output
+- `Err(String)` indicates execution error
+
+### Implementing Tools
+
+#### File Organization
+- Place tool definition and execution logic in [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools)
+- Group related tools in modules (basic_tools.rs, desktop_tools.rs, etc.)
+- Implement proper error handling and validation
+
+#### Security Considerations
+**CRITICAL**: Tools that interact with the filesystem or run commands **must** include robust security measures:
+- Path validation and sandboxing
+- Restricted command execution
+- Input sanitization
+- Permission checks
+
+### Registering Tools
+
+#### Registration Process
+Tools are registered with `LocalToolProvider` during agent initialization:
+```rust
+// Register individual tool
+provider.register_async_tool(definition, async_executor_fn).await;
+
+// Register tool groups
+register_basic_tools(&mut tool_provider);
+register_desktop_tools(&mut tool_provider, desktop.clone());
+register_browser_tools(&mut tool_provider, app_handle.clone());
+```
+
+#### Helper Functions
+- `register_basic_tools`: File operations, system info
+- `register_desktop_tools`: Mouse, keyboard, screen capture
+- `register_browser_tools`: Web automation capabilities
+
+### Tool Usage by Agent
+
+#### Execution Flow
+1. **Tool Discovery**: Available tools retrieved from `ToolProvider`
+2. **LLM Decision**: Brain uses tool descriptions to select appropriate tool
+3. **Argument Generation**: LLM generates input arguments based on `input_schema`
+4. **Tool Execution**: `DefaultAgentRunner` calls `tool_provider.execute_tool()`
+5. **Result Processing**: Tool output added to memory as `Role::Tool` message
+
+#### Tool Call Structure
+```rust
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
+}
+
+pub struct ToolResult {
+    pub call_id: String,
+    pub output: Value,
+    pub error: Option<String>,
+}
+```
+
+This computer use tools system provides the foundation for comprehensive desktop automation, enabling AI agents to interact naturally with any application or system component through a reliable, cross-platform interface.

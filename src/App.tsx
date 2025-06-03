@@ -19,6 +19,7 @@ import {
   Server,
 } from "lucide-react"; // Icons
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toggleDictation } from "tauri-plugin-voice-transcription-api"; // Import toggleDictation from plugin API
 
 // Type for conversation messages
 type ChatMessage = {
@@ -195,6 +196,30 @@ function App() {
         }
       }
     );
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for dictation toggle requests
+  useEffect(() => {
+    const unlisten = listen("toggle-dictation-request", async () => {
+      console.log("Received toggle-dictation-request event");
+      try {
+        const isNowDictating = await toggleDictation();
+        console.log("Toggled dictation, now dictating:", isNowDictating);
+      } catch (error) {
+        console.error("Failed to toggle dictation:", error);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `Failed to toggle dictation: ${error}`,
+          },
+        ]);
+      }
+    });
 
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
