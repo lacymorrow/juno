@@ -3,3 +3,142 @@ description:
 globs:
 alwaysApply: false
 ---
+# Multi-Agent Architecture Handoff Summary
+
+## Project Status: Phase 2.1 Complete ✅
+
+You are taking over development of a sophisticated **multi-agent orchestrator system** for an AI computer use agent built with **Tauri v2**. The foundation has been successfully implemented and is ready for the next phase of specialized agent development.
+
+## What Has Been Accomplished
+
+### ✅ Phase 1: Core Agent Infrastructure
+- Enhanced [src-tauri/src/agent/core.rs](mdc:src-tauri/src/agent/core.rs) with sophisticated agent traits
+- Added `AgentBrain`, `MemoryManager`, `ToolProvider`, `AgentRunnable` interfaces
+- Comprehensive error handling with `AgentError` enum (including `Other` variant)
+- State management with `AgentState` and `AgentAction` enums
+
+### ✅ Phase 2.1: Base Agent Framework
+- **[src-tauri/src/agents/base_agent.rs](mdc:src-tauri/src/agents/base_agent.rs)**: Complete `SpecializedAgent` trait system
+- **[src-tauri/src/agents/agent_factory.rs](mdc:src-tauri/src/agents/agent_factory.rs)**: Intelligent agent registry and factory
+- **[src-tauri/src/agents/mod.rs](mdc:src-tauri/src/agents/mod.rs)**: Module organization with re-exports
+- Multi-agent types: `Browser`, `Desktop`, `System`, `Orchestrator`
+- Capability-based task routing with confidence scoring
+- Thread-safe agent management with `tokio::sync::RwLock`
+
+### ✅ Integration Complete
+- Updated [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) to include agents module
+- All code compiles successfully with `cargo check`
+- Detailed roadmap in [implementation-plan.md](mdc:implementation-plan.md)
+
+## Your Next Mission: Phase 2.2 - Browser Agent Implementation
+
+### Immediate Task
+**Create `src-tauri/src/agents/browser_agent.rs`** implementing the `SpecializedAgent` trait for web automation.
+
+### Required Capabilities
+```rust
+// Browser Agent should handle these tool patterns:
+- browser_*, web_*, navigate_*
+- Content extraction and analysis
+- Form filling and web automation  
+- Screenshot capture for web pages
+```
+
+### Implementation Template
+```rust
+use async_trait::async_trait;
+use crate::agents::base_agent::*;
+use crate::agent::core::{AgentError, ToolCall};
+use std::time::{Duration, Instant};
+
+pub struct BrowserAgent {
+    // Add state management with interior mutability
+    stats: Arc<Mutex<AgentStats>>,
+}
+
+#[async_trait]
+impl SpecializedAgent for BrowserAgent {
+    fn agent_type(&self) -> AgentType { AgentType::Browser }
+    
+    fn get_capabilities(&self) -> Vec<AgentCapability> {
+        vec![
+            AgentCapability {
+                name: "Web Navigation".to_string(),
+                description: "Navigate and interact with web pages".to_string(),
+                tool_patterns: vec!["browser_".to_string(), "web_".to_string(), "navigate_".to_string()],
+                confidence: 0.9,
+            },
+            // Add more capabilities...
+        ]
+    }
+    
+    async fn can_handle_task(&self, task: &Task) -> bool {
+        // Check if any tool calls match browser patterns
+    }
+    
+    async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {
+        // Implement task execution logic
+    }
+}
+```
+
+## Key Architecture Points
+
+### Agent Selection Algorithm
+1. Check specific agent type requested in task
+2. Evaluate agent availability via `is_available()`
+3. Calculate confidence scores for tool patterns
+4. Select agent with highest average confidence
+
+### Tool Integration Strategy
+- Map to existing commands in [src-tauri/src/commands/](mdc:src-tauri/src/commands/)
+- Use pattern matching on tool names: `tool_call.name.contains(pattern)`
+- Maintain backward compatibility with single-agent workflows
+
+### Error Handling Pattern
+```rust
+// Use appropriate AgentError variants
+AgentError::Other(format!("Browser agent error: {}", details))
+AgentError::ToolError("Specific tool error".to_string())
+```
+
+## Development Requirements
+
+### Must-Do After Each Change
+```bash
+# ALWAYS run this after modifying Rust code
+~/.cargo/bin/cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+### Registration Process
+1. Implement `BrowserAgent` with `SpecializedAgent` trait
+2. Add `browser_agent` module to [src-tauri/src/agents/mod.rs](mdc:src-tauri/src/agents/mod.rs)
+3. Uncomment and implement in `AgentFactory::initialize_default_agents()`
+4. Test compilation and basic functionality
+
+## Available Tools for Integration
+The system has extensive existing tools in [src-tauri/src/commands/](mdc:src-tauri/src/commands/):
+- **Mouse/Keyboard**: `dev_left_click`, `dev_type_text`, `dev_press_key`
+- **Screenshots**: `capture_screenshot_command`, `capture_element_screenshot_command`
+- **Window Management**: `dev_focus_window`, `dev_get_window_list`
+- **System**: `dev_bash_command`, file operations
+
+## Success Criteria for Phase 2.2
+1. ✅ BrowserAgent compiles and implements all required trait methods
+2. ✅ Agent registers successfully in factory
+3. ✅ Can handle basic browser-related tool patterns
+4. ✅ Returns appropriate confidence scores for web tasks
+5. ✅ Maintains system stability and backward compatibility
+
+## Future Phases Ready
+- **Phase 2.3**: Desktop Agent (native app interaction)
+- **Phase 2.4**: System Agent (shell commands, file operations)
+- **Phase 3**: Orchestrator (multi-agent coordination and planning)
+
+## Critical Context
+- **Project**: AI Computer Use Agent with multi-agent architecture
+- **Platform**: Tauri v2 on macOS (darwin 24.2.0)
+- **Language**: Rust backend, TypeScript frontend
+- **Key Principle**: Maintain backward compatibility while adding multi-agent capabilities
+
+You have a solid foundation and clear next steps. The hardest architectural work is done - now it's about implementing the specialized behaviors for each agent type. Start with the Browser Agent and you'll be building on a robust, well-tested foundation.
