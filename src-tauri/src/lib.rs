@@ -139,6 +139,7 @@ pub fn run() {
             list_apps,
             check_server_status,
             submit_query,
+            anthropic::clear_conversation_history, // Add conversation history clearing
             // Orchestrator Commands
             submit_orchestrated_query,
             get_orchestrator_status,
