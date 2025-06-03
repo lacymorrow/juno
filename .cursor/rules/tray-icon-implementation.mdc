@@ -3,3 +3,126 @@ description:
 globs:
 alwaysApply: false
 ---
+# Tray Icon Implementation Guide
+
+## Overview
+The application uses a system tray icon for easy access and control. The implementation uses **embedded icon data** for maximum reliability and simplicity across development and production environments.
+
+## Key Files
+
+### Core Implementation
+- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Main tray icon setup and event handling (lines 305-312, 427)
+- [src-tauri/build.rs](mdc:src-tauri/build.rs) - Simplified build script (no icon copying needed)
+- [src-tauri/icons/](mdc:src-tauri/icons) - Source icon files directory
+
+### Icon Assets
+- [src-tauri/icons/32x32.png](mdc:src-tauri/icons/32x32.png) - Primary tray icon (embedded at compile time)
+- [src-tauri/icons/icon.png](mdc:src-tauri/icons/icon.png) - Main application icon
+- [src-tauri/icons/icon.ico](mdc:src-tauri/icons/icon.ico) - Windows icon format
+- [src-tauri/icons/icon.icns](mdc:src-tauri/icons/icon.icns) - macOS icon format
+
+## Implementation Details
+
+### Embedded Icon Approach
+The tray icon is embedded directly in the binary using `include_bytes!` macro:
+
+```rust
+// Embedded at compile time - no file system dependencies
+const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
+
+// Load from memory instead of file system
+let loaded_tauri_icon = match image::load_from_memory(TRAY_ICON_DATA) {
+    Ok(dynamic_image) => {
+        // Convert to Tauri format...
+    }
+}
+```
+
+### Tray Icon Setup Process
+1. **Embedded Loading**: Icon data is compiled into the binary
+2. **Memory Loading**: Uses `image::load_from_memory()` for instant access
+3. **Menu Creation**: Context menu with "Toggle Floating Bar", "Developer Tools", and "Quit" options
+4. **Event Handling**: Click events to show/hide floating bar window
+
+### Advantages of Embedded Approach
+- ✅ **Consistent**: Works identically in development and production
+- ✅ **No File Dependencies**: No file system access required
+- ✅ **Faster Loading**: Icon data is immediately available
+- ✅ **Simpler Code**: No complex path resolution needed
+- ✅ **Smaller Deployment**: No separate icon files to distribute
+
+## Troubleshooting
+
+### Common Issues
+
+#### Tray Icon Not Showing
+**Symptoms**: Application starts but no tray icon appears
+**Common Causes**:
+1. Missing source icon file at compile time
+2. Image format not supported
+3. System tray disabled
+
+**Solution**:
+1. Verify [src-tauri/icons/32x32.png](mdc:src-tauri/icons/32x32.png) exists
+2. Check compilation logs for `include_bytes!` errors
+3. Look for `[Tray Setup Error]` messages in application output
+
+#### Compilation Errors
+**Symptoms**: Build fails with "file not found" for `include_bytes!`
+**Solution**: Ensure the icon file exists at `src-tauri/icons/32x32.png` relative to the source file
+
+### Verification Steps
+1. **Check Source Icon**: Ensure [src-tauri/icons/32x32.png](mdc:src-tauri/icons/32x32.png) exists
+2. **Compile Clean**: Run `cargo clean && cargo build` to ensure fresh compilation
+3. **Check Logs**: Look for tray setup messages in application output
+4. **Test Functionality**: Verify tray menu items work correctly
+
+## Menu Functionality
+
+### Available Menu Items
+- **Toggle Floating Bar**: Show/hide the main floating bar window
+- **Developer Tools**: Open DevTools for debugging
+- **Quit Juno**: Exit the application
+
+### Click Behavior
+- **Left Click**: Toggle floating bar visibility
+- **Right Click**: Show context menu
+- **Menu Actions**: Handled via event system with proper window management
+
+## Development Guidelines
+
+### Adding New Menu Items
+1. Add menu item constants to [src-tauri/src/constants.rs](mdc:src-tauri/src/constants.rs)
+2. Create menu item in tray setup (around line 346 in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs))
+3. Add event handler in `on_menu_event` callback
+4. Test functionality with `cargo run`
+
+### Icon Management
+- Keep primary tray icon at [src-tauri/icons/32x32.png](mdc:src-tauri/icons/32x32.png)
+- Icon should be 32x32 pixels for best compatibility
+- Changes require recompilation to embed new icon data
+- Use PNG format for transparency support
+
+### Testing
+- Test with `cargo run` (development builds)
+- Verify menu functionality across different window states
+- Check icon visibility in various system themes (light/dark mode)
+- Ensure proper cleanup when application exits
+
+## Migration from File-Based Approach
+
+### Previous Implementation Issues
+The previous implementation used complex file path resolution:
+- Multiple fallback paths for development vs production
+- Build script copying icons to target directory
+- Inconsistent behavior between environments
+- Unnecessary file system dependencies
+
+### Current Benefits
+- Single source of truth (embedded data)
+- Consistent behavior everywhere
+- Simplified build process
+- No external file dependencies
+
+## Error Handling
+All tray-related errors are logged with `[Tray Setup Error]` prefix for easy identification. The embedded approach reduces potential failure points by eliminating file system access.
