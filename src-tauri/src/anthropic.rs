@@ -16,6 +16,7 @@ use crate::agent::tools::{
 use crate::agent::structs::AgentError;
 use crate::agent::traits::{AgentRunnable, MemoryManager};
 use crate::agent::providers::factory::BrainFactory;
+use crate::agent::providers::config::AgentMode;
 use crate::state::AppState;
 
 // use crate::tools::{list_tools, handle_tool_call}; // Removed unused
@@ -185,63 +186,119 @@ pub async fn submit_query(
         info!("Registered browser tool for specialized agents: {}", definition.name);
     }
 
-    // --- Create Orchestrator Agent with Personality ---
-    // The orchestrator is the main "personality" that maintains memory and delegates tasks
-    let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(get_orchestrator_personality_prompt()) {
-        Ok(brain) => brain,
-        Err(e) => {
-            let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
-            error!("{}", err_msg);
-            let result = SubmitQueryResult {
-                text: err_msg.clone(),
-                audio_base64: None,
-                agent_state: "Failed".to_string(),
-                screenshot_base64: None
+    // --- Determine Agent Mode and Create Runtime ---
+    let agent_mode = BrainFactory::get_agent_mode();
+    info!("Using agent mode: {:?}", agent_mode);
+
+    let agent_result = match agent_mode {
+        AgentMode::Single => {
+            // Single agent mode - use traditional approach with all tools
+            let brain = match BrainFactory::create_brain() {
+                Ok(brain) => brain,
+                Err(e) => {
+                    let err_msg = format!("Failed to initialize single agent brain: {}", e);
+                    error!("{}", err_msg);
+                    let result = SubmitQueryResult {
+                        text: err_msg.clone(),
+                        audio_base64: None,
+                        agent_state: "Failed".to_string(),
+                        screenshot_base64: None
+                    };
+                    let payload = BackendResponsePayload { query: query.clone(), response: result };
+                    if let Some(window) = app_handle.get_window("main") {
+                        window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
+                    } else {
+                        error!("Main window not found, cannot emit initial brain error.");
+                    }
+                    return Err(err_msg);
+                }
             };
-            let payload = BackendResponsePayload { query: query.clone(), response: result };
-            if let Some(window) = app_handle.get_window("main") {
-                window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
-            } else {
-                error!("Main window not found, cannot emit initial brain error.");
-            }
-            return Err(err_msg);
+            info!("Single agent brain initialized.");
+
+            const MAX_ITERATIONS: u32 = 15;
+
+            // Create single agent runner with all tools
+            let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
+                memory_manager_clone,
+                tool_provider,
+                brain,
+                MAX_ITERATIONS,
+                app_handle.clone(),
+            );
+            info!("Single agent runner created with all tools.");
+
+            // Register escape key shortcut for agent execution
+            crate::register_escape_key_shortcut(&app_handle);
+
+            info!("Starting single agent run...");
+            let result = single_agent_runner.run(query.clone(), cancel_rx).await;
+
+            // Always unregister escape key shortcut when agent finishes
+            crate::unregister_escape_key_shortcut(&app_handle);
+
+            result
+        },
+        AgentMode::Multi => {
+            // Multi-agent mode - use orchestrator with specialized agents
+            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(get_orchestrator_personality_prompt()) {
+                Ok(brain) => brain,
+                Err(e) => {
+                    let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
+                    error!("{}", err_msg);
+                    let result = SubmitQueryResult {
+                        text: err_msg.clone(),
+                        audio_base64: None,
+                        agent_state: "Failed".to_string(),
+                        screenshot_base64: None
+                    };
+                    let payload = BackendResponsePayload { query: query.clone(), response: result };
+                    if let Some(window) = app_handle.get_window("main") {
+                        window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
+                    } else {
+                        error!("Main window not found, cannot emit initial brain error.");
+                    }
+                    return Err(err_msg);
+                }
+            };
+            info!("Orchestrator brain initialized.");
+
+            // Create orchestrator with delegation tools
+            let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+
+            // Register delegation tools for the orchestrator
+            register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, tool_provider, app_handle.clone()).await;
+            info!("Registered delegation tools for orchestrator.");
+
+            const MAX_ITERATIONS: u32 = 15;
+
+            // Create the orchestrator agent runner with personality-focused system prompt
+            let mut orchestrator_runner = DefaultAgentRunner::with_boxed_brain(
+                memory_manager_clone,
+                orchestrator_tool_provider,
+                orchestrator_brain,
+                MAX_ITERATIONS,
+                app_handle.clone(),
+            );
+            info!("Orchestrator agent runner created with personality and delegation capabilities.");
+
+            // Register escape key shortcut for orchestrator execution
+            crate::register_escape_key_shortcut(&app_handle);
+
+            info!("Starting orchestrator run...");
+            let result = orchestrator_runner.run(query.clone(), cancel_rx).await;
+
+            // Always unregister escape key shortcut when orchestrator finishes
+            crate::unregister_escape_key_shortcut(&app_handle);
+
+            result
         }
     };
-    info!("Orchestrator brain initialized.");
-
-    // --- Create Orchestrator with Delegation Tools ---
-    let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
-
-    // Register delegation tools for the orchestrator
-    register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, tool_provider, app_handle.clone()).await;
-    info!("Registered delegation tools for orchestrator.");
-
-    const MAX_ITERATIONS: u32 = 15;
-
-    // Create the orchestrator agent runner with personality-focused system prompt
-    let mut orchestrator_runner = DefaultAgentRunner::with_boxed_brain(
-        memory_manager_clone,
-        orchestrator_tool_provider,
-        orchestrator_brain,
-        MAX_ITERATIONS,
-        app_handle.clone(),
-    );
-    info!("Orchestrator agent runner created with personality and delegation capabilities.");
-
-    // Register escape key shortcut for orchestrator execution
-    crate::register_escape_key_shortcut(&app_handle);
-
-    info!("Starting orchestrator run...");
-    let orchestrator_result = orchestrator_runner.run(query.clone(), cancel_rx).await;
-
-    // Always unregister escape key shortcut when orchestrator finishes
-    crate::unregister_escape_key_shortcut(&app_handle);
 
     state.reset_cancel();
     info!("Agent cancellation signal reset.");
 
-    // --- Process Orchestrator Result ---
-    let final_response = match orchestrator_result {
+    // --- Process Agent Result ---
+    let final_response = match agent_result {
         Ok(message) => SubmitQueryResult {
             text: message,
             audio_base64: None, // Add TTS later if needed
@@ -249,7 +306,7 @@ pub async fn submit_query(
             screenshot_base64: None, // Capture screenshot if needed
         },
         Err(e) => {
-            error!("Orchestrator run failed: {}", e);
+            error!("Agent run failed: {}", e);
             let (state_str, msg) = match e {
                 AgentError::Terminated => ("Cancelled".to_string(), "Agent execution was cancelled.".to_string()),
                 AgentError::MaxStepsReached => ("Failed".to_string(), "Agent reached maximum steps.".to_string()),
@@ -264,7 +321,7 @@ pub async fn submit_query(
         }
     };
 
-    info!("Orchestrator run complete. Final state: {}", final_response.agent_state);
+    info!("Agent run complete. Final state: {}", final_response.agent_state);
 
     // --- Emit Final Response ---
     let payload = BackendResponsePayload { query, response: final_response };
