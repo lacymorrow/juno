@@ -1,6 +1,8 @@
 // Main module for all Tauri commands, broken down by category.
 
-use tauri_plugin_notification::NotificationExt;
+use crate::utils::{gather_system_context, format_system_context_for_agent};
+use crate::state::AppState;
+use tauri::{State, Emitter};
 
 // Declare the submodules
 pub mod app_url;
@@ -25,11 +27,27 @@ pub use self::orchestrator::*;
 
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::
-pub(crate) fn send_dev_tool_notification(app: &tauri::AppHandle, title: &str, body: &str) -> Result<(), String> {
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|e| format!("Failed to send notification: {}", e))
+pub(crate) fn send_dev_tool_notification(
+    app: &tauri::AppHandle,
+    action: &str,
+    message: &str,
+) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "action": action,
+        "message": message
+    });
+    app.emit("dev-tool-notification", payload)
+        .map_err(|e| format!("Failed to emit dev tool notification: {}", e))
+}
+
+/// Test command to verify system context gathering
+#[tauri::command]
+pub async fn test_system_context(state: State<'_, AppState>) -> Result<String, String> {
+    match gather_system_context(Some(&*state)).await {
+        Ok(context) => {
+            let formatted = format_system_context_for_agent(&context);
+            Ok(formatted)
+        }
+        Err(e) => Err(format!("Failed to gather system context: {}", e))
+    }
 }
