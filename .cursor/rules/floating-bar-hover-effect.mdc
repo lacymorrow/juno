@@ -3,3 +3,116 @@ description:
 globs:
 alwaysApply: false
 ---
+# Floating Bar Hover Effect Implementation
+
+## Overview
+The floating bar window has a subtle hover effect that scales the bar slightly (`scale-105`) when the user mouses over it in the default collapsed state. This feature requires both frontend and backend coordination.
+
+## Architecture
+
+### Frontend Implementation
+The hover effect is implemented in [src/Bar.tsx](mdc:src/Bar.tsx):
+
+1. **State Management**: Uses `isWindowHovered` state to track mouse hover status
+2. **Event Listeners**: Listens for `mouse-entered-window` and `mouse-left-window` events from the backend
+3. **CSS Styling**: Applies optimized 3D transform when `barState === "default" && isWindowHovered`
+
+Key code location:
+```typescript
+// Event listeners around line 380
+useEffect(() => {
+  const setupListeners = async () => {
+    unlistenEnter = await listen<null>("mouse-entered-window", () => {
+      setIsWindowHovered(true);
+    });
+    unlistenLeave = await listen<null>("mouse-left-window", () => {
+      setIsWindowHovered(false);
+    });
+  };
+  // ...
+}, []);
+
+// Optimized CSS styling around line 548
+className={cn(
+  // ... other classes
+  `[will-change:width,height,transform]
+   [backface-visibility:hidden]
+   [transform-origin:center]`,
+  // Crisp scaling effect
+  barState === "default" && isWindowHovered && "[transform:scale3d(1.05,1.05,1)]"
+)}
+```
+
+### Backend Implementation
+The backend mouse tracking is implemented in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+
+1. **macOS Tracking Module**: `macos_tracking` module contains the NSTrackingArea setup
+2. **Mouse Delegates**: `mouse_entered` and `mouse_exited` functions emit the required events
+3. **Setup Function**: `setup_tracking_area()` initializes the mouse tracking
+
+## Critical Setup Requirement
+
+**IMPORTANT**: The `macos_tracking::setup_tracking_area()` function MUST be called during app initialization in the `.setup()` method. This is located around line 440 in the macOS-specific setup section:
+
+```rust
+// --- macOS Specific Setup for Floating Bar ---
+#[cfg(target_os = "macos")]
+{
+    if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
+        // Window styling setup...
+
+        // --- Setup Mouse Tracking --- (CRITICAL)
+        macos_tracking::setup_tracking_area(&window, app_handle.clone());
+    }
+}
+```
+
+## Common Issues
+
+### Hover Effect Not Working
+If the hover effect stops working, check:
+
+1. **Missing Setup Call**: Ensure `setup_tracking_area()` is called in the macOS setup section
+2. **Event Emission**: Verify the mouse tracking delegates are emitting events correctly
+3. **Frontend Listeners**: Confirm the event listeners are properly set up in Bar.tsx
+4. **Window Reference**: Make sure the floating-bar window is found during setup
+
+### Required macOS Imports
+The following imports are required in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+
+```rust
+#[cfg(target_os = "macos")]
+use {
+    cocoa::{
+        appkit::{NSWindow, NSWindowCollectionBehavior},
+        base::{id as cocoa_id, nil, YES, NO, BOOL},
+        foundation::{NSRect},
+    },
+    objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
+};
+```
+
+## Anti-Aliasing Optimization
+
+To prevent blurriness during scaling, the hover effect uses optimized CSS properties:
+
+1. **`will-change: transform`** - Tells the browser to optimize for transform changes
+2. **`backface-visibility: hidden`** - Forces hardware acceleration for crisp rendering
+3. **`transform-origin: center`** - Ensures scaling happens from the center
+4. **`scale3d(1.05,1.05,1)`** - Uses 3D transform instead of 2D for better GPU acceleration
+
+These properties prevent sub-pixel rendering issues that can cause blurriness on retina displays.
+
+## Testing
+To verify the hover effect:
+1. Run the application
+2. Ensure the floating bar is in default (collapsed) state
+3. Mouse over the floating bar window
+4. Observe the crisp scaling effect (5% increase)
+5. Check browser console for mouse tracking debug logs
+6. Verify no blurriness occurs during scaling on retina displays
+
+## Regression Prevention
+- Always verify `cargo check --manifest-path src-tauri/Cargo.toml` passes after modifying lib.rs
+- Test the hover effect manually after any changes to the floating bar or mouse tracking code
+- Ensure the macOS setup section remains intact during refactoring

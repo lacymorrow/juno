@@ -430,10 +430,7 @@ pub fn run() {
 
             let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {
-                // Register Escape shortcut
-                if let Err(e) = app_handle_shortcuts.global_shortcut().register("Escape") {
-                    eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
-                }
+                // Note: Escape shortcut is now registered dynamically only when AI agent is running
 
                 // Register Dictation Toggle Shortcut
                 let dictation_shortcut_str = if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };
@@ -509,6 +506,25 @@ pub fn run() {
     builder
         .run(tauri::generate_context!()) // Use context relative to lib.rs now
         .expect("error while running tauri application");
+}
+
+// Helper functions for dynamic escape key management
+pub fn register_escape_key_shortcut(app_handle: &AppHandle) {
+    info!("[GlobalShortcut] Registering escape key for agent execution");
+    if let Err(e) = app_handle.global_shortcut().register("Escape") {
+        eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
+    } else {
+        info!("[GlobalShortcut] Escape key registered successfully");
+    }
+}
+
+pub fn unregister_escape_key_shortcut(app_handle: &AppHandle) {
+    info!("[GlobalShortcut] Unregistering escape key shortcut");
+    if let Err(e) = app_handle.global_shortcut().unregister("Escape") {
+        eprintln!("[GlobalShortcut Error] Failed to unregister Escape shortcut: {}", e);
+    } else {
+        info!("[GlobalShortcut] Escape key unregistered successfully");
+    }
 }
 
 // Unit tests module
