@@ -426,14 +426,18 @@ export function FloatingBar() {
             clearTimeout(transitionTimeoutRef.current);
           if (event.payload.query) {
             // A query was successfully dictated.
-            // Transition to 'input' state. The dictation handler (elsewhere)
-            // should then emit 'will-submit-query' which will trigger the processing flow.
+            // Display the transcribed text in the input field just like typing
+            setInputValue(event.payload.query);
             setBarState("input");
-            // The actual inputValue will be set by the global dictation handler that emits will-submit-query
-            // For now, we can pre-fill it, but the will-submit-query will overwrite it if dictation handler sets it differently.
-            // setInputValue(event.payload.query); // Optional: pre-fill input for immediate visibility
             requestAnimationFrame(() => {
-              if (inputRef.current) inputRef.current.focus();
+              if (inputRef.current) {
+                inputRef.current.focus();
+                // Place cursor at the end of the transcribed text
+                inputRef.current.setSelectionRange(
+                  event.payload.query.length,
+                  event.payload.query.length
+                );
+              }
             });
           } else {
             // No query from dictation (e.g., cancelled, error). Revert to default.
