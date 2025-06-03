@@ -105,8 +105,7 @@ tauri-plugin-voice-transcription = { version = "0.1.0", features = ["download-mo
 ```
 
 Common models:
-- `ggml-tiny.en.bin` - English only, ~39 MB
-- `ggml-base.en.bin` - English only, ~74 MB
+- `ggml-tiny.en.bin` - English only, ~39 MB (included)
 - `ggml-small.en.bin` - English only, ~150 MB
 - `ggml-medium.en.bin` - English only, ~462 MB
 - `ggml-large.bin` - Multilingual, ~1460 MB
