@@ -1,2 +1,2 @@
-lose focus shouldnt shrink bar while processing
+✅ lose focus shouldnt shrink bar while processing - FIXED: Added intelligent focus handling that preserves bar expansion during working states (loading, speaking, error, etc.)
 
