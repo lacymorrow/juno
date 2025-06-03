@@ -1,0 +1,303 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# AI Agent System Architecture
+
+## Overview
+
+The Juno AI agent system provides computer use capabilities powered by Anthropic's Claude with custom tool integration. The system features both a core composable architecture and an advanced multi-agent orchestrator system that delegates tasks to specialized agents. The architecture separates concerns like reasoning (brain), memory management, tool execution, and the main execution loop, while also enabling sophisticated task delegation through specialized agents.
+
+For detailed information on the multi-agent architecture with specialized agents, see [multi-agent-architecture.mdc](mdc:.cursor/rules/multi-agent-architecture.mdc).
+
+## Dual Architecture Approach
+
+### 1. Core Agent System (src-tauri/src/agent/)
+The foundational agent system provides the basic building blocks and is used for direct agent execution.
+
+### 2. Multi-Agent System (src-tauri/src/agents/)
+The specialized agent orchestrator system enables intelligent task delegation to specialized agents:
+- **Browser Agent**: Web automation and content extraction
+- **Desktop Agent**: Native application interactions
+- **System Agent**: Shell commands and file operations
+- **Orchestrator**: Central coordination and task planning
+
+## Core Architecture Components
+
+### 1. Core Definitions ([src-tauri/src/agent/core.rs](mdc:src-tauri/src/agent/core.rs))
+Defines fundamental traits and data structures:
+- **Traits**: `AgentBrain`, `MemoryManager`, `ToolProvider`, `AgentRunnable`
+- **Data Structures**: `Message`, `ToolDefinition`, `ToolCall`, `ToolResult`, `AgentAction`, `AgentError`, `AgentState`
+
+### 2. Implementations ([src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations))
+- **[basic.rs](mdc:src-tauri/src/agent/implementations/basic.rs)**: `SimpleMemoryManager`, `LocalToolProvider`
+- **[agent_runner.rs](mdc:src-tauri/src/agent/implementations/agent_runner.rs)**: `DefaultAgentRunner` - orchestrates agent flow
+- **[agent_brain.rs](mdc:src-tauri/src/agent/implementations/agent_brain.rs)**: `SimpleBrain` placeholder
+
+### 3. Providers ([src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers))
+- **[anthropic.rs](mdc:src-tauri/src/agent/providers/anthropic.rs)**: Anthropic Claude integration
+- **[openai.rs](mdc:src-tauri/src/agent/providers/openai.rs)**: OpenAI integration
+- **[config.rs](mdc:src-tauri/src/agent/providers/config.rs)**: Provider configuration
+- **[factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)**: Brain factory for creating provider instances
+
+### 4. Tools ([src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools))
+Computer use tools and execution logic for desktop automation
+
+## Agent Execution Flow
+
+### Direct Agent Execution (submit_query command)
+1. **Setup Components**:
+   - Retrieve cancellation receiver from `AppState`
+   - Instantiate `SimpleMemoryManager`
+   - Create `LocalToolProvider` with app_handle for event logging
+   - Register tools (basic_tools, desktop_tools)
+   - Create `AgentBrain` via `BrainFactory::create_brain()`
+   - Initialize `DefaultAgentRunner` with components
+
+### Multi-Agent Orchestrated Execution (submit_orchestrated_query command)
+1. **Orchestrator Planning**:
+   - Analyze user query complexity and requirements
+   - Determine which specialized agents are needed
+   - Plan task delegation and dependencies
+   - Execute through specialized agents (Browser, Desktop, System)
+
+### Main Execution Loop
+2. **Run Process**:
+   ```rust
+   agent_runner.run(query, cancel_rx)
+   ```
+   - Add initial user query to memory
+   - Enter main execution loop
+   - Check cancellation and step limits
+   - Call `runner.step(cancel_rx)`
+
+### Agent Step Processing
+3. **Step Execution**:
+   - Check cancellation status
+   - Get current messages from `MemoryManager`
+   - Get available tools from `ToolProvider`
+   - Call `brain.decide_next_action()` with messages and tools
+   - Brain queries LLM API and returns `AgentAction`
+
+### Action Handling
+4. **Action Processing**:
+   - **`ExecuteTool(calls)`**: Execute tool calls, add results to memory, continue loop
+   - **`Finish(response)`**: Terminate loop, return final response
+   - **`RespondToUser(response)`**: Add response to memory, continue loop
+   - **`Error(e)`**: Terminate with error
+   - **`Think`**: Continue loop for more reasoning
+
+### Result Processing
+5. **Completion**:
+   - Handle `Result<String, AgentError>` from run
+   - Perform TTS on final text
+   - Emit `SubmitQueryResult` via `backend-response` event
+
+## Integration Architecture
+
+### Key Integration Files
+
+#### Backend Core
+- **[src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs)**: Primary AI integration and query processing
+- **[src-tauri/src/commands/core.rs](mdc:src-tauri/src/commands/core.rs)**: Core Tauri commands
+- **[src-tauri/src/commands/orchestrator.rs](mdc:src-tauri/src/commands/orchestrator.rs)**: Multi-agent orchestrator commands
+- **[src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)**: Application state management
+
+#### Frontend
+- **[src/App.tsx](mdc:src/App.tsx)**: Main chat interface and query handling
+- **[src/Bar.tsx](mdc:src/Bar.tsx)**: Floating dictation bar
+
+### Query Processing Flow
+
+#### Input Sources
+```
+Voice Dictation (Alt+D) → app-dictation-finished event → submitQuery()
+Manual Input → Form submission → submitQuery() or submitOrchestratedQuery()
+```
+
+#### Query Submission Options
+```typescript
+// Direct agent execution
+const submitQuery = async (text: string, isFromDictation: boolean = false) => {
+  await invoke("submit_query", { query: text });
+  // Response handled via backend-response event
+}
+
+// Multi-agent orchestrated execution
+const submitOrchestratedQuery = async (text: string) => {
+  await invoke("submit_orchestrated_query", { query: text });
+  // Handles complex tasks through specialized agents
+}
+```
+
+#### Backend Processing
+```rust
+// Direct agent processing
+#[tauri::command]
+pub async fn submit_query(query: String, app_state: State<'_, AppState>) -> Result<(), String> {
+    // Process query with Claude directly
+    // Execute computer use tools
+    // Emit response events
+}
+
+// Multi-agent orchestrated processing
+#[tauri::command]
+pub async fn submit_orchestrated_query(query: String, app_state: State<'_, AppState>) -> Result<(), String> {
+    // Analyze query complexity
+    // Delegate to specialized agents
+    // Coordinate results
+}
+```
+
+#### Response Handling
+```
+Backend Processing → backend-response event → Frontend → UI Update + Audio
+Multi-Agent Processing → orchestrator events → Frontend → UI Update + Audio
+```
+
+## Tool System Architecture
+
+### Available Computer Use Tools
+- **Mouse Control**: Click, drag, move, scroll operations
+- **Keyboard Input**: Text typing, key combinations
+- **Screen Capture**: Screenshots and visual analysis
+- **Window Management**: Focus, list, manipulate windows
+- **File System**: Read, write, list files
+- **Application Control**: Launch apps, URLs
+- **Shell Commands**: Execute terminal commands
+- **Browser Control**: Web automation via Playwright
+
+### Tool Integration Pattern
+```rust
+pub trait ComputerUseTool {
+    async fn execute(&self, params: Value) -> Result<ToolResult, String>;
+}
+```
+
+### Tool Registration
+```rust
+// Register tools with LocalToolProvider
+register_basic_tools(&mut tool_provider);
+register_desktop_tools(&mut tool_provider, desktop.clone());
+register_browser_tools(&mut tool_provider, app_handle.clone());
+```
+
+## State Management
+
+### AppState Structure
+```rust
+pub struct AppState {
+    pub desktop: Arc<Desktop>,                    // Computer use engine
+    pub cancellation_token: Arc<AtomicBool>,      // Cancel operations
+    pub bar_ui_state: Arc<Mutex<String>>,         // Floating bar state
+    pub playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
+    pub browser_controller: Arc<TokioMutex<Option<Arc<BrowserController>>>>,
+    // Multi-agent orchestrator state
+    // ... other shared state
+}
+```
+
+### State Access Pattern
+```rust
+#[tauri::command]
+pub async fn some_command(state: State<'_, AppState>) -> Result<String, String> {
+    let desktop = &state.desktop;
+    // Use shared state safely
+}
+```
+
+## Configuration Management
+
+### Provider Settings
+- AI model selection (Claude variants, OpenAI models, Ollama, xAI, OpenRouter)
+- API key management via environment variables
+- Model parameters (temperature, max tokens)
+- System prompt customization
+
+### Environment Variables
+```bash
+ANTHROPIC_API_KEY=your_key_here
+OPENAI_API_KEY=your_key_here  # If using OpenAI
+```
+
+### Brain Factory Configuration
+```rust
+// Create appropriate brain based on configuration
+let brain = BrainFactory::create_brain(provider_config, api_key)?;
+```
+
+## Error Handling Strategies
+
+### Frontend Error Display
+```typescript
+setConversation(prev => [...prev, {
+  role: "system",
+  content: `Error: ${error_message}`
+}]);
+```
+
+### Backend Error Propagation
+```rust
+pub type Result<T> = std::result::Result<T, String>;
+
+// Convert errors to strings for Tauri
+.map_err(|e| format!("Operation failed: {}", e))
+```
+
+## Performance Optimizations
+
+### Background Processing
+- AI queries run in background threads
+- Computer use operations are non-blocking
+- Voice processing happens in separate audio thread
+- Browser sessions persist across operations
+- Multi-agent coordination for parallel task execution
+
+### Resource Management
+- Desktop automation engine shared via Arc
+- Cancellation tokens for long-running operations
+- Proper cleanup on application shutdown
+- Persistent browser contexts reduce launch overhead
+- Specialized agent instances for optimal resource usage
+
+## Testing and Debugging
+
+### Manual Testing Flow
+1. **Voice Input**: Alt+D → speak → verify transcription → check AI response
+2. **Manual Input**: Type query → submit → verify processing → check result
+3. **Multi-Agent Flow**: Complex query → orchestrated execution → verify agent delegation
+4. **Tool Execution**: Request computer action → verify execution → check feedback
+5. **Error Handling**: Invalid inputs → verify error display → check recovery
+
+### Debugging Techniques
+```rust
+// Structured logging throughout system
+tracing::info!("Processing query: {}", query);
+tracing::debug!("Tool execution started: {:?}", tool_call);
+tracing::error!("Agent step failed: {:?}", error);
+tracing::info!("Orchestrator delegating to: {:?}", agent_type);
+```
+
+### Event Monitoring
+```typescript
+// Monitor all events for debugging
+useEffect(() => {
+  const unlisten = listen("backend-response", (event) => {
+    console.log("Agent response:", event.payload);
+  });
+  return () => unlisten.then(fn => fn());
+}, []);
+```
+
+## Key Validation Points
+- Event payload transformations work correctly
+- AI responses include appropriate tool calls
+- Computer use tools execute without errors
+- Multi-agent task delegation functions properly
+- Specialized agents execute their tool categories correctly
+- UI updates reflect system state accurately
+- Cancellation works properly across all operations
+- Memory management prevents leaks during long sessions
+
+This AI agent system provides the foundation for intelligent computer automation, enabling natural language control over desktop operations through both direct agent execution and sophisticated multi-agent orchestration.
