@@ -38,6 +38,7 @@ type ChatMessage = {
   tool_name?: string;
   tool_args?: any;
   tool_output?: any;
+  timestamp?: number; // Add timestamp field for message grouping
 };
 
 // Type for the result from submit_query
@@ -69,6 +70,52 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
   };
 }
 
+// Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
+function shouldShowTimestamp(
+  currentMessage: ChatMessage,
+  previousMessage: ChatMessage | null,
+  timeThresholdMinutes: number = 5
+): boolean {
+  if (!currentMessage.timestamp) return false;
+  if (!previousMessage || !previousMessage.timestamp) return true;
+
+  const timeDiffMinutes =
+    (currentMessage.timestamp - previousMessage.timestamp) / (1000 * 60);
+  return timeDiffMinutes >= timeThresholdMinutes;
+}
+
+// Helper function to format timestamp for display
+function formatMessageTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } else {
+    return date.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+}
+
+// Helper function to format full timestamp for title attribute (hover tooltip)
+function formatFullTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  return date.toLocaleString([], {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function App() {
   const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
@@ -89,13 +136,19 @@ function App() {
       console.log("Debounced handler executing for:", payload.query);
       const { query, response } = payload;
 
-      // Add user query message
-      const userMessage: ChatMessage = { role: "user", content: query };
+      // Add user query message with timestamp
+      const currentTime = Date.now();
+      const userMessage: ChatMessage = {
+        role: "user",
+        content: query,
+        timestamp: currentTime,
+      };
       // Add assistant response message with screenshot if available
       const assistantMessage: ChatMessage = {
         role: "assistant",
         content: response.text,
         screenshot_base64: response.screenshot_base64,
+        timestamp: currentTime + 100, // Slight offset to ensure ordering
       };
 
       setConversation((prev) => [...prev, userMessage, assistantMessage]);
@@ -121,10 +174,13 @@ function App() {
 
       let newMessage: ChatMessage | null = null;
 
+      const eventTimestamp = Date.now();
+
       if (type === "thinking" && payload.content) {
         newMessage = {
           role: "thinking",
           content: payload.content,
+          timestamp: eventTimestamp,
         };
       } else if (
         type === "tool_call_request" &&
@@ -136,6 +192,7 @@ function App() {
           content: payload.content || `Calling tool: ${payload.tool_name}`,
           tool_name: payload.tool_name,
           tool_args: payload.tool_args,
+          timestamp: eventTimestamp,
         };
       } else if (
         type === "tool_call_result" &&
@@ -148,6 +205,7 @@ function App() {
           tool_name: payload.tool_name,
           tool_output: payload.tool_output,
           screenshot_base64: payload.screenshot_base64, // Include screenshot if part of tool result
+          timestamp: eventTimestamp,
         };
       } else if (type === "screenshot" && payload.screenshot_base64) {
         // This can also be a specific type of tool_call_result if a screenshot tool was called
@@ -156,6 +214,7 @@ function App() {
           role: "system", // Or could be 'tool_call_result' if tied to a specific tool action
           content: payload.content || "The AI captured a screenshot.",
           screenshot_base64: payload.screenshot_base64,
+          timestamp: eventTimestamp,
         };
       }
 
@@ -212,6 +271,7 @@ function App() {
             {
               role: "system",
               content: `Dictation failed: ${error}`,
+              timestamp: Date.now(),
             },
           ]);
           return; // Stop further processing if there was an error
@@ -390,6 +450,7 @@ function App() {
       const errorMessage: ChatMessage = {
         role: "system",
         content: `Error invoking submit_query: ${error}`,
+        timestamp: Date.now(),
       };
       setConversation((prev) => [...prev, errorMessage]);
       setIsProcessing(false); // Reset processing on error
@@ -453,6 +514,7 @@ function App() {
           role: "system",
           content:
             "Conversation history cleared. You can start a new conversation.",
+          timestamp: Date.now(),
         },
       ]);
       console.log("Conversation history cleared successfully");
@@ -463,6 +525,7 @@ function App() {
         {
           role: "system",
           content: `Error clearing conversation: ${error}`,
+          timestamp: Date.now(),
         },
       ]);
     }
@@ -585,98 +648,128 @@ function App() {
                 <div className="flex flex-col h-full p-4">
                   {/* Conversation Area */}
                   <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
-                    {conversation.map((msg, index) => (
-                      <div
-                        key={index}
-                        className={`mb-3 flex ${
-                          msg.role === "user" ? "justify-end" : "justify-start"
-                        }`}
-                      >
-                        <span
-                          className={cn(
-                            "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
-                            msg.role === "user"
-                              ? "bg-primary text-primary-foreground"
-                              : msg.role === "assistant"
-                              ? "bg-muted"
-                              : (msg.role === "system" ||
-                                  msg.role === "thinking" ||
-                                  msg.role === "tool_call_request" ||
-                                  msg.role === "tool_call_result") &&
-                                msg.screenshot_base64
-                              ? "bg-muted/80 border border-primary/20 p-2"
-                              : msg.role === "thinking"
-                              ? "bg-blue-100 text-blue-800 text-xs italic opacity-90"
-                              : msg.role === "tool_call_request"
-                              ? "bg-purple-100 text-purple-800 text-xs"
-                              : msg.role === "tool_call_result"
-                              ? "bg-green-100 text-green-800 text-xs"
-                              : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
-                          )}
-                        >
-                          {msg.role === "thinking" && (
-                            <div className="font-semibold mb-1">
-                              Thinking...
+                    {conversation.map((msg, index) => {
+                      const previousMsg =
+                        index > 0 ? conversation[index - 1] : null;
+                      const showTimestamp = shouldShowTimestamp(
+                        msg,
+                        previousMsg
+                      );
+
+                      return (
+                        <div key={index}>
+                          {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
+                          {showTimestamp && msg.timestamp && (
+                            <div className="flex justify-center my-4">
+                              <span
+                                className="text-xs text-muted-foreground bg-background px-3 py-1 border rounded-full shadow-sm cursor-default"
+                                title={formatFullTimestamp(msg.timestamp)}
+                              >
+                                {formatMessageTimestamp(msg.timestamp)}
+                              </span>
                             </div>
                           )}
-                          {msg.role === "tool_call_request" &&
-                            msg.tool_name && (
-                              <div className="font-semibold mb-1">
-                                Tool Call:{" "}
-                                <code className="font-mono bg-purple-200 px-1 rounded">
-                                  {msg.tool_name}
-                                </code>
-                              </div>
-                            )}
-                          {msg.role === "tool_call_result" && msg.tool_name && (
-                            <div className="font-semibold mb-1">
-                              Tool Result:{" "}
-                              <code className="font-mono bg-green-200 px-1 rounded">
-                                {msg.tool_name}
-                              </code>
-                            </div>
-                          )}
-                          {msg.content}
-                          {msg.role === "tool_call_request" &&
-                            msg.tool_args && (
-                              <pre className="mt-1 p-1.5 bg-purple-50 text-xs rounded overflow-x-auto">
-                                Args: {JSON.stringify(msg.tool_args, null, 2)}
-                              </pre>
-                            )}
-                          {msg.role === "tool_call_result" &&
-                            msg.tool_output && (
-                              <pre className="mt-1 p-1.5 bg-green-50 text-xs rounded overflow-x-auto">
-                                Output:{" "}
-                                {typeof msg.tool_output === "string"
-                                  ? msg.tool_output
-                                  : JSON.stringify(msg.tool_output, null, 2)}
-                              </pre>
-                            )}
-                          {msg.screenshot_base64 && (
-                            <div
+
+                          <div
+                            className={`mb-3 flex ${
+                              msg.role === "user"
+                                ? "justify-end"
+                                : "justify-start"
+                            }`}
+                          >
+                            <span
                               className={cn(
-                                "mt-2",
-                                msg.role !== "system" && "border-t pt-2"
+                                "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
+                                msg.role === "user"
+                                  ? "bg-primary text-primary-foreground"
+                                  : msg.role === "assistant"
+                                  ? "bg-muted"
+                                  : (msg.role === "system" ||
+                                      msg.role === "thinking" ||
+                                      msg.role === "tool_call_request" ||
+                                      msg.role === "tool_call_result") &&
+                                    msg.screenshot_base64
+                                  ? "bg-muted/80 border border-primary/20 p-2"
+                                  : msg.role === "thinking"
+                                  ? "bg-blue-100 text-blue-800 text-xs italic opacity-90"
+                                  : msg.role === "tool_call_request"
+                                  ? "bg-purple-100 text-purple-800 text-xs"
+                                  : msg.role === "tool_call_result"
+                                  ? "bg-green-100 text-green-800 text-xs"
+                                  : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
                               )}
                             >
-                              <div className="text-xs text-muted-foreground mb-1">
-                                {msg.role === "system"
-                                  ? "Screenshot captured by AI:"
-                                  : "Screenshot:"}
-                              </div>
-                              <div className="relative">
-                                <img
-                                  src={`data:image/png;base64,${msg.screenshot_base64}`}
-                                  alt="Screenshot"
-                                  className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-                              </div>
-                            </div>
-                          )}
-                        </span>
-                      </div>
-                    ))}
+                              {msg.role === "thinking" && (
+                                <div className="font-semibold mb-1">
+                                  Thinking...
+                                </div>
+                              )}
+                              {msg.role === "tool_call_request" &&
+                                msg.tool_name && (
+                                  <div className="font-semibold mb-1">
+                                    Tool Call:{" "}
+                                    <code className="font-mono bg-purple-200 px-1 rounded">
+                                      {msg.tool_name}
+                                    </code>
+                                  </div>
+                                )}
+                              {msg.role === "tool_call_result" &&
+                                msg.tool_name && (
+                                  <div className="font-semibold mb-1">
+                                    Tool Result:{" "}
+                                    <code className="font-mono bg-green-200 px-1 rounded">
+                                      {msg.tool_name}
+                                    </code>
+                                  </div>
+                                )}
+                              {msg.content}
+                              {msg.role === "tool_call_request" &&
+                                msg.tool_args && (
+                                  <pre className="mt-1 p-1.5 bg-purple-50 text-xs rounded overflow-x-auto">
+                                    Args:{" "}
+                                    {JSON.stringify(msg.tool_args, null, 2)}
+                                  </pre>
+                                )}
+                              {msg.role === "tool_call_result" &&
+                                msg.tool_output && (
+                                  <pre className="mt-1 p-1.5 bg-green-50 text-xs rounded overflow-x-auto">
+                                    Output:{" "}
+                                    {typeof msg.tool_output === "string"
+                                      ? msg.tool_output
+                                      : JSON.stringify(
+                                          msg.tool_output,
+                                          null,
+                                          2
+                                        )}
+                                  </pre>
+                                )}
+                              {msg.screenshot_base64 && (
+                                <div
+                                  className={cn(
+                                    "mt-2",
+                                    msg.role !== "system" && "border-t pt-2"
+                                  )}
+                                >
+                                  <div className="text-xs text-muted-foreground mb-1">
+                                    {msg.role === "system"
+                                      ? "Screenshot captured by AI:"
+                                      : "Screenshot:"}
+                                  </div>
+                                  <div className="relative">
+                                    <img
+                                      src={`data:image/png;base64,${msg.screenshot_base64}`}
+                                      alt="Screenshot"
+                                      className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                                    />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+                                  </div>
+                                </div>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                     <div ref={conversationEndRef} />
                   </ScrollArea>
 

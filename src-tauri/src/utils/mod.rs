@@ -94,3 +94,38 @@ pub(crate) fn run_check_accessibility() -> Result<(), String> {
         }
     }
 }
+
+pub mod log_formatter;
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Get current timestamp in milliseconds
+pub fn current_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Get current timestamp in seconds
+pub fn current_timestamp_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Format elapsed time in a human-readable way
+pub fn format_elapsed_time(start_ms: u64, end_ms: u64) -> String {
+    let elapsed_ms = end_ms.saturating_sub(start_ms);
+
+    if elapsed_ms < 1000 {
+        format!("{}ms", elapsed_ms)
+    } else if elapsed_ms < 60_000 {
+        format!("{:.1}s", elapsed_ms as f64 / 1000.0)
+    } else {
+        let minutes = elapsed_ms / 60_000;
+        let seconds = (elapsed_ms % 60_000) / 1000;
+        format!("{}m{}s", minutes, seconds)
+    }
+}
