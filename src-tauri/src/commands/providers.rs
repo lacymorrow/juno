@@ -1,6 +1,6 @@
 // Commands for managing AI providers
 
-use crate::agent::providers::config::{ProviderConfig, ProviderSettings};
+use crate::agent::providers::config::{ProviderConfig, ProviderSettings, AgentMode};
 use crate::agent::providers::factory::{ProviderInfo, BrainFactory};
 use tracing::info;
 
@@ -146,5 +146,28 @@ pub(crate) async fn update_provider_system_prompt(provider_id: String, system_pr
         .map_err(|e| format!("Failed to save config: {}", e))?;
 
     info!("Updated system prompt for provider: {}", provider_id);
+    Ok(())
+}
+
+/// Get the current agent mode
+#[tauri::command]
+pub(crate) async fn get_agent_mode() -> Result<String, String> {
+    let mode = BrainFactory::get_agent_mode();
+    Ok(mode.to_string().to_string())
+}
+
+/// Set the agent mode (single or multi)
+#[tauri::command]
+pub(crate) async fn set_agent_mode(mode: String) -> Result<(), String> {
+    let agent_mode = AgentMode::from_str(&mode)
+        .ok_or_else(|| format!("Invalid agent mode: '{}'. Must be 'single' or 'multi'", mode))?;
+
+    let mut config = ProviderConfig::load()
+        .map_err(|e| format!("Failed to load config: {}", e))?;
+
+    config.set_agent_mode(agent_mode)
+        .map_err(|e| format!("Failed to set agent mode: {}", e))?;
+
+    info!("Set agent mode to: {}", mode);
     Ok(())
 }

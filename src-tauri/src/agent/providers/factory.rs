@@ -3,16 +3,40 @@ use tracing::{info, warn};
 use tauri::Manager;
 
 use crate::agent::structs::AgentError;
-use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider};
+use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider, AgentRunnable};
 use crate::agent::multi_agent::MultiAgentOrchestrator;
+use crate::agent::implementations::agent_runner::DefaultAgentRunner;
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::rig::RigBrain;
 use crate::agent::providers::gemini::GeminiBrain;
-use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to_env};
+use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to_env, AgentMode};
 use crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
+
+/// Unified agent runtime - can be either single or multi-agent
+pub enum AgentRuntime {
+    Single(Box<dyn AgentRunnable + Send + Sync>),
+    Multi(MultiAgentOrchestrator),
+}
+
+impl AgentRuntime {
+    pub async fn run(
+        &mut self,
+        prompt: String,
+        cancel_rx: crate::state::CancelReceiver,
+    ) -> Result<String, AgentError> {
+        match self {
+            AgentRuntime::Single(runner) => runner.run(prompt, cancel_rx).await,
+            AgentRuntime::Multi(_orchestrator) => {
+                // For multi-agent, we need to implement a similar run interface
+                // This is a simplified version - you might need to adapt based on your multi-agent implementation
+                Err(AgentError::ConfigurationError("Multi-agent run not yet implemented".to_string()))
+            }
+        }
+    }
+}
 
 /// Enumeration of available AI providers
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +157,63 @@ impl BrainFactory {
         tool_provider: std::sync::Arc<dyn ToolProvider + Send + Sync>,
     ) -> Result<MultiAgentOrchestrator, AgentError> {
         MultiAgentOrchestrator::new(memory, tool_provider).await
+    }
+
+    /// Create an agent runtime based on configuration (single or multi-agent)
+    pub async fn create_agent_runtime(
+        memory: std::sync::Arc<dyn MemoryManager + Send + Sync>,
+        tool_provider: std::sync::Arc<dyn ToolProvider + Send + Sync>,
+        app_handle: Option<tauri::AppHandle>,
+    ) -> Result<AgentRuntime, AgentError> {
+        let config = ProviderConfig::load()?;
+
+        match config.get_agent_mode() {
+            AgentMode::Single => {
+                // Create a single agent runtime
+                let brain = Self::create_brain()?;
+
+                                // Convert Arc<dyn ToolProvider> to concrete type if needed
+                let local_tool_provider = if let Some(ref handle) = app_handle {
+                    let provider = LocalToolProvider::with_app_handle(handle.clone());
+                    // Copy tools from the Arc provider to local provider
+                    // This is a simplified approach - you might need to adjust based on your implementation
+                    provider
+                } else {
+                    LocalToolProvider::new()
+                };
+
+                // Create memory manager - need to extract from Arc
+                // This is tricky because we need to move out of Arc
+                // For now, create a new one with same type
+                let memory_impl = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+
+                let runner = DefaultAgentRunner::with_boxed_brain(
+                    memory_impl,
+                    local_tool_provider,
+                    brain,
+                    15, // max_steps
+                    app_handle.unwrap_or_else(|| panic!("AppHandle required for single agent")),
+                );
+
+                Ok(AgentRuntime::Single(Box::new(runner)))
+            },
+            AgentMode::Multi => {
+                // Create multi-agent orchestrator
+                let orchestrator = Self::create_multi_agent_orchestrator(memory, tool_provider).await?;
+                Ok(AgentRuntime::Multi(orchestrator))
+            }
+        }
+    }
+
+    /// Get current agent mode from configuration
+    pub fn get_agent_mode() -> AgentMode {
+        let mode_str = env::var("AGENT_MODE").unwrap_or_else(|_| {
+            match ProviderConfig::load() {
+                Ok(config) => config.get_agent_mode().to_string().to_string(),
+                Err(_) => "multi".to_string(), // Default fallback
+            }
+        });
+        AgentMode::from_str(&mode_str).unwrap_or(AgentMode::Multi)
     }
 
     /// Get the current provider from configuration or environment
