@@ -74,6 +74,7 @@ type LoadingStates = {
   setDeveloperPlayback: boolean; // Added for voice control setting
   playbackAudio: boolean; // Added for playing back audio
   setTtsProvider: boolean; // Added for TTS Provider selection
+  testSystemContext: boolean; // Added for system context testing
 };
 
 // Helper type for file listing result (assuming backend sends this structure)
@@ -136,6 +137,7 @@ const initialLoadingStates: LoadingStates = {
   setDeveloperPlayback: false,
   playbackAudio: false,
   setTtsProvider: false, // Added
+  testSystemContext: false, // Added
 };
 
 // Type for result data from QA tests
@@ -1033,6 +1035,19 @@ const DevToolsPanel: React.FC = () => {
     } catch (e) {
       console.error("Critical error during set_tts_provider_command:", e);
       toast.error("Failed to set AI Response TTS provider.");
+    }
+  };
+
+  // Handler for testing system context
+  const handleTestSystemContext = async () => {
+    const result = await invokeCommand<string>(
+      "test_system_context",
+      {},
+      "testSystemContext"
+    );
+    if (result !== null) {
+      toast.success("System context retrieved successfully!");
+      console.log("System Context:", result);
     }
   };
 
@@ -2327,6 +2342,21 @@ const DevToolsPanel: React.FC = () => {
           {loadingStates.testClickVisualization
             ? "Testing..."
             : "Test Click Visualization"}
+        </Button>
+      </div>
+      {/* Test System Context */}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          onClick={handleTestSystemContext}
+          disabled={loadingStates.testSystemContext}
+          variant="outline"
+          title="Test System Context Gathering"
+        >
+          <Info size={14} className="mr-1" />
+          {loadingStates.testSystemContext
+            ? "Testing..."
+            : "Test System Context"}
         </Button>
       </div>
     </div>

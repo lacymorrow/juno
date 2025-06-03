@@ -161,6 +161,7 @@ pub fn run() {
             check_server_status,
             submit_query,
             anthropic::clear_conversation_history, // Add conversation history clearing
+            commands::test_system_context, // Test system context gathering
             // Orchestrator Commands
             submit_orchestrated_query,
             get_orchestrator_status,

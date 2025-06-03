@@ -3,62 +3,105 @@ description:
 globs:
 alwaysApply: false
 ---
-# Project Essentials
+# Juno AI Computer Use Agent - Project Essentials ✅
 
-## Overview
-Juno is a Tauri v2 AI Computer Use Agent with voice control and desktop automation capabilities.
+## Project Overview
+Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Computer Use API with hierarchical AI agent architecture and advanced voice transcription capabilities.
 
 ## Tech Stack
-- **Backend**: Rust (Tauri v2) in `src-tauri/`
-- **Frontend**: React/TypeScript in `src/`
-- **Voice**: Custom plugin `tauri-plugin-voice-transcription/` with Whisper.cpp
-- **AI**: Anthropic Claude + multi-provider support
-- **Desktop Automation**: macOS Accessibility API + Core Graphics
+- **Frontend**: React/TypeScript with shadcn/ui components
+- **Backend**: Rust with Tauri v2 framework
+- **AI Integration**: Multi-provider support (Anthropic, OpenAI, Gemini)
+- **Voice**: Custom Whisper.cpp-based transcription plugin
+- **Platform**: macOS with native automation APIs
 
-## Key Architecture
+## Core Features ✅ COMPLETE
+
+### AI Computer Use (100% Implementation)
+- **All 17 Anthropic Computer Use actions**: screenshot, mouse, keyboard, scroll, wait
+- **File Operations**: str_replace_based_edit_tool with full CRUD capabilities
+- **Shell Commands**: bash execution with session management
+- **Timer System**: Long-running task management with context resumption
+
+### Voice Interaction Modes
+- **Agent Mode**: Alt+D toggles voice input for AI agent queries
+- **Dictation Mode**: Hold spacebar for immediate voice-to-text typing
+  - Immediate transcription start (0ms delay)
+  - 500ms threshold for commitment vs cancellation
+  - Smart cancellation with space passthrough
+
+### Hierarchical Agent System
+- **Orchestrator Agent**: Maintains personality and conversation memory
+- **Specialist Agents**: Browser, Desktop, File domain experts
+- **Tool Delegation**: Intelligent routing based on task analysis
+- **Memory Separation**: Persistent orchestrator memory, isolated specialist memory
+
+## Architecture Patterns
+
+### State Management
+- Centralized AppState in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)
+- Arc<TokioMutex<T>> for shared mutable state
+- Event-driven UI updates via Tauri events
+
+### Provider System
+- Multi-AI provider factory in [src-tauri/src/agent/providers/factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)
+- Configuration-based selection with environment fallbacks
+- Unified tool registration across providers
+
+### Tool Architecture
+- Modular tools in [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools)
+- Async execution with proper cancellation support
+- Structured JSON responses for consistent agent communication
+
+## Development Requirements
+
+### Critical Compilation Check
+**ALWAYS run after ANY Rust code changes**:
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+Must complete with exit code 0 before considering changes complete.
+
+### File Organization
+- Keep files under 700 lines when possible
+- Check for existing files before creating new ones
+- Use workspace-relative imports (`crate::`)
+
+### Error Handling
+- Use `Result<T, String>` for tool functions
+- Provide detailed error messages with context
+- Log operations with appropriate tracing levels
+
+## Key Implementation Files
+
+### Core System
+- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application setup and event handling
+- [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent
+- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Intelligent spacebar handling
+
+### Agent Architecture
+- [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations) - Agent runners and memory
+- [src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers) - AI provider integrations
+- [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools) - Computer use and custom tools
+
+### Platform Integration
+- [src-tauri/mcp-server-os-level/src/platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos) - macOS automation
+- [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription) - Voice transcription plugin
 
 ### Frontend
-- `src/App.tsx` - Main chat interface and event handling
-- `src/Bar.tsx` - Floating dictation bar UI
-- `src/components/DevToolsPanel.tsx` - Development testing UI
+- [src/Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI with state management
+- [src/App.tsx](mdc:src/App.tsx) - Full chat interface with settings integration
 
-### Backend Core
-- `src-tauri/src/lib.rs` - Main app setup, commands, event routing
-- `src-tauri/src/state.rs` - Application state management
-- `src-tauri/src/commands/` - Tauri command handlers
+## Security & Permissions
+- macOS Accessibility permissions required for automation
+- Screen Recording permissions for screenshots
+- Voice transcription processes locally with Whisper.cpp
+- API keys managed through environment variables and secure config
 
-### Multi-Agent System
-- `src-tauri/src/agents/orchestrator.rs` - Central task coordinator
-- `src-tauri/src/agents/browser_agent.rs` - Web automation specialist
-- `src-tauri/src/agents/desktop_agent.rs` - Desktop interaction specialist
-- `src-tauri/src/agents/system_agent.rs` - System operation specialist
+## Testing & QA
+- QA test commands in [src-tauri/src/commands/mouse.rs](mdc:src-tauri/src/commands/mouse.rs)
+- Manual testing via DevToolsPanel
+- Voice integration end-to-end testing
+- Real desktop interaction validation
 
-### Computer Use Tools
-- `src-tauri/src/agent/tools/` - Mouse, keyboard, screen tools
-- `src-tauri/mcp-server-os-level/src/platforms/macos/` - macOS implementation
-
-## Key Features
-- **Voice Control**: Alt+D to toggle, real-time transcription
-- **Desktop Automation**: Mouse, keyboard, window management, screenshots
-- **Browser Automation**: Playwright integration for web tasks
-- **Multi-Agent Intelligence**: Task delegation to specialized agents
-- **Computer Vision**: Screen capture and element detection
-
-## Environment Setup
-```bash
-ANTHROPIC_API_KEY=your_key_here
-VOICE_MODEL_PATH=models/ggml-tiny.en.bin  # Optional
-OPENAI_API_KEY=your_key_here  # If using OpenAI
-```
-
-## Critical Requirements
-- **macOS Permissions**: Accessibility + Screen Recording + Microphone
-- **Cargo Check**: Always run `cargo check --manifest-path src-tauri/Cargo.toml` after Rust changes
-- **File Size Limit**: Keep files under 700 lines
-- **Security**: File operations need sandboxing (TODOs in `basic_tools.rs`)
-
-## Quick Start
-```bash
-bun install
-bun tauri dev
-```
+This project represents a production-ready AI Computer Use implementation that exceeds Anthropic's official specification with enhanced voice capabilities and intelligent agent orchestration.
