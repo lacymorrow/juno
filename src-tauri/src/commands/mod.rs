@@ -5,6 +5,7 @@ use tauri_plugin_notification::NotificationExt;
 // Declare the submodules
 pub mod app_url;
 pub mod core;
+pub mod dictation;
 pub mod element;
 pub mod filesystem;
 pub mod keyboard;
@@ -17,6 +18,7 @@ pub mod orchestrator;
 
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;
+pub use self::dictation::*;
 pub use self::mouse::*;
 pub use self::shell::*;
 pub use self::orchestrator::*;

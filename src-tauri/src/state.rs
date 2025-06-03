@@ -65,6 +65,7 @@ pub struct AppState {
     pub tts_provider: Arc<Mutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
     pub bar_ui_state: Arc<Mutex<String>>, // Added to store the current UI state of the floating bar
     pub spacebar_dictation_active: Arc<Mutex<bool>>, // Track if spacebar dictation is active
+    pub spacebar_clipboard_enabled: Arc<Mutex<bool>>, // Track if spacebar dictation should save to clipboard
     pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
 }
 
@@ -85,6 +86,7 @@ impl AppState {
             tts_provider: Arc::new(Mutex::new("off".to_string())), // Initialize TTS provider to "off"
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
             spacebar_dictation_active: Arc::new(Mutex::new(false)), // Initialize spacebar dictation as inactive
+            spacebar_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
             timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
         }
     }

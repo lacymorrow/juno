@@ -1,0 +1,108 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Spacebar Dictation Event Handler Fix
+
+## Issue Description
+Previously, spacebar dictation mode was incorrectly triggering the AI agent instead of typing text directly. This occurred because both the general AI agent event handler and the spacebar-specific event handler were processing the same `"voice-transcription:final-result"` event.
+
+## Root Cause
+Two event listeners were registered for the same event in [`src-tauri/src/lib.rs`](mdc:src-tauri/src/lib.rs):
+
+1. **General Handler** (lines 561-590): Always emitted `"app-dictation-finished"` → triggered AI agent
+2. **Spacebar Handler** (lines 675-720): Checked `spacebar_dictation_active` and typed text directly
+
+Both handlers ran simultaneously, causing the AI agent to activate even during spacebar dictation.
+
+## Solution Implemented
+Modified the general event handler to check the spacebar dictation state first and skip AI agent processing when spacebar dictation is active:
+
+```rust
+// Listen for final result events from the plugin (for AI agent mode only)
+let app_handle_for_listener = app.handle().clone();
+app.listen("voice-transcription:final-result", move |event| {
+    info!("[Event] Received voice-transcription:final-result event: {:?}", event.payload());
+
+    // Check if spacebar dictation is active - if so, skip AI agent processing
+    let app_state = app_handle_for_listener.state::<state::AppState>();
+    let is_spacebar_active = app_state.spacebar_dictation_active.lock()
+        .map(|active| *active)
+        .unwrap_or(false);
+
+    if is_spacebar_active {
+        info!("[Event] Skipping AI agent processing - spacebar dictation is active");
+        return; // Exit early, let spacebar handler process this
+    }
+
+    info!("[Event] Processing final result for AI agent mode");
+    // ... rest of AI agent processing
+});
+```
+
+## Event Flow After Fix
+
+### Spacebar Dictation Mode
+```
+Hold Spacebar → spacebar-dictation-start → Voice Recording → voice-transcription:final-result
+  ↓
+General Handler: Check spacebar_dictation_active = true → SKIP AI processing
+  ↓
+Spacebar Handler: Check spacebar_dictation_active = true → Type text directly
+```
+
+### AI Agent Mode (Option+D)
+```
+Press Option+D → toggle-dictation-request → Voice Recording → voice-transcription:final-result
+  ↓
+General Handler: Check spacebar_dictation_active = false → Process for AI agent
+  ↓
+Spacebar Handler: Check spacebar_dictation_active = false → SKIP spacebar processing
+```
+
+## Key Implementation Details
+
+### State Management
+- **State Flag**: `spacebar_dictation_active` in [`AppState`](mdc:src-tauri/src/state.rs)
+- **Set to True**: When spacebar dictation starts
+- **Set to False**: When spacebar dictation stops or completes
+- **Thread Safety**: Protected by `Mutex<bool>`
+
+### Event Handler Isolation
+- **Mutual Exclusion**: Only one handler processes the event based on state
+- **Early Return**: Prevents duplicate processing
+- **State-Based Routing**: Clean separation of concerns
+
+### Debug Logging
+Key log messages to monitor proper operation:
+```rust
+tracing::info!("[Event] Skipping AI agent processing - spacebar dictation is active");
+tracing::info!("[Event] Processing final result for AI agent mode");
+tracing::info!("[Spacebar Dictation] Processing final result for immediate typing");
+```
+
+## Testing Verification
+
+### Before Fix
+- ❌ Spacebar dictation triggered AI agent
+- ❌ Text typed AND AI agent activated
+- ❌ Dual event processing
+
+### After Fix
+- ✅ Spacebar dictation types text directly
+- ✅ AI agent mode works independently
+- ✅ Clean event handler separation
+- ✅ No duplicate processing
+
+## Files Modified
+- [`src-tauri/src/lib.rs`](mdc:src-tauri/src/lib.rs) - Added state check to general event handler
+- [`.cursor/rules/voice-interaction-modes.mdc`](mdc:.cursor/rules/voice-interaction-modes.mdc) - Updated documentation
+
+## Prevention Measures
+1. **State-Based Routing**: Always check mode state before processing
+2. **Early Returns**: Exit handlers when not applicable
+3. **Clear Logging**: Track which handler processes each event
+4. **Testing Protocol**: Verify both modes work independently
+
+This fix ensures clean separation between the two voice interaction modes while maintaining backward compatibility and proper event flow.

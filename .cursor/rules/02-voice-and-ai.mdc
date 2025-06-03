@@ -5,6 +5,10 @@ alwaysApply: false
 ---
 # Voice & AI Systems
 
+> **📖 Comprehensive Documentation**: See [`voice-interaction-modes.mdc`](mdc:.cursor/rules/voice-interaction-modes.mdc) for detailed documentation of both voice interaction modes.
+>
+> **🔧 Recent Fix**: See [`spacebar-dictation-fix.mdc`](mdc:.cursor/rules/spacebar-dictation-fix.mdc) for details on the spacebar dictation event handler fix.
+
 ## Voice Transcription Plugin
 
 ### Architecture

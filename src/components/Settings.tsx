@@ -66,6 +66,10 @@ const Settings: React.FC<SettingsProps> = ({
   // Agent Mode Settings
   const [agentMode, setAgentMode] = useState<string>("multi");
 
+  // Dictation Settings
+  const [spacebarClipboardEnabled, setSpacebarClipboardEnabled] =
+    useState<boolean>(true);
+
   // Form state for provider settings
   const [formData, setFormData] = useState<{
     apiKey: string;
@@ -105,6 +109,12 @@ const Settings: React.FC<SettingsProps> = ({
       // Load agent mode settings
       const currentAgentMode = await invoke<string>("get_agent_mode");
       setAgentMode(currentAgentMode);
+
+      // Load dictation settings
+      const currentClipboardEnabled = await invoke<boolean>(
+        "get_spacebar_clipboard_enabled"
+      );
+      setSpacebarClipboardEnabled(currentClipboardEnabled);
 
       if (currentActiveProvider) {
         const settings = await invoke<ProviderSettings>(
@@ -240,6 +250,21 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const handleSpacebarClipboardChange = async (enabled: boolean) => {
+    try {
+      await invoke("set_spacebar_clipboard_enabled", { enabled });
+      setSpacebarClipboardEnabled(enabled);
+      toast.success(
+        `Spacebar dictation clipboard saving ${
+          enabled ? "enabled" : "disabled"
+        }`
+      );
+    } catch (error) {
+      console.error("Failed to set spacebar clipboard setting:", error);
+      toast.error("Failed to set spacebar clipboard setting");
+    }
+  };
+
   const handleAgentModeChange = async (newMode: string) => {
     try {
       await invoke("set_agent_mode", { mode: newMode });
@@ -292,6 +317,32 @@ const Settings: React.FC<SettingsProps> = ({
             <p className="text-sm text-muted-foreground">
               Choose how AI responses should be spoken aloud. Use Alt+D for AI
               agent dictation or hold Spacebar for direct voice typing.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="spacebar-clipboard">
+              Spacebar Dictation Clipboard
+            </Label>
+            <div className="flex items-center gap-3">
+              <Button
+                variant={spacebarClipboardEnabled ? "default" : "outline"}
+                size="sm"
+                onClick={() =>
+                  handleSpacebarClipboardChange(!spacebarClipboardEnabled)
+                }
+                className="min-w-[80px]"
+              >
+                {spacebarClipboardEnabled ? "Enabled" : "Disabled"}
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Save transcribed text to clipboard when using spacebar dictation
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              When enabled, text transcribed via spacebar dictation (hold
+              Spacebar) will be saved to the system clipboard in addition to
+              being typed directly.
             </p>
           </div>
         </CardContent>
