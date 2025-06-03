@@ -11,6 +11,36 @@ pub use error::{Error, Result};
 
 pub use controller::VoiceController;
 
+/// Resolve the model path for both development and production environments
+fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, default_path: &str) -> String {
+    // First try the default path (for development)
+    if std::path::Path::new(default_path).exists() {
+        return default_path.to_string();
+    }
+
+    // Try to resolve as a bundled resource (for production)
+    // The bundled resources are in _up_/models/ subdirectory
+    if let Ok(resource_path) = app.path().resolve("_up_/models/ggml-tiny.en.bin", tauri::path::BaseDirectory::Resource) {
+        if resource_path.exists() {
+            if let Some(path_str) = resource_path.to_str() {
+                return path_str.to_string();
+            }
+        }
+    }
+
+    // Also try the direct filename in case the structure changes
+    if let Ok(resource_path) = app.path().resolve("ggml-tiny.en.bin", tauri::path::BaseDirectory::Resource) {
+        if resource_path.exists() {
+            if let Some(path_str) = resource_path.to_str() {
+                return path_str.to_string();
+            }
+        }
+    }
+
+    // Fallback to the original path (will likely fail, but preserves error handling)
+    default_path.to_string()
+}
+
 /// Initialize the Voice Transcription plugin
 pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
     Builder::<R>::new("voice-transcription")
@@ -27,11 +57,14 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
 
-            // Initialize voice controller with model path from config
-            match VoiceController::new(&config.model_path) {
+            // Try to resolve the model path for both development and production
+            let model_path = resolve_model_path(app, &config.model_path);
+
+            // Initialize voice controller with resolved model path
+            match VoiceController::new(&model_path) {
                 Ok(controller) => {
                     app.manage(Arc::new(Mutex::new(controller)));
-                    tracing::info!("Voice transcription plugin initialized with model: {}", config.model_path);
+                    tracing::info!("Voice transcription plugin initialized with model: {}", model_path);
                 }
                 Err(e) => {
                     tracing::error!("Failed to initialize voice controller: {}. Voice transcription will be unavailable.", e);
