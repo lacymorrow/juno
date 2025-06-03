@@ -293,10 +293,12 @@ pub fn run() {
                 // Create a simple menu
                 let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).unwrap());
                 let toggle_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::TOGGLE_FLOATING_BAR, "Toggle Floating Bar", true, None::<&str>).unwrap());
+                let devtools_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::SHOW_DEVTOOLS, "Developer Tools", true, None::<&str>).unwrap());
                 let tray_menu = Menu::with_items(&tray_app_handle, &[
-                    &quit_item,
-                    &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
                     &toggle_item,
+                    &devtools_item,
+                    &MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(&tray_app_handle).unwrap()),
+                    &quit_item,
                 ]).map_err(|e| eprintln!("[Tray Setup Error] Failed to create tray menu: {}", e)).ok();
 
                 let mut tray_builder = TrayIconBuilder::new()
@@ -327,6 +329,12 @@ pub fn run() {
                                     }
                                 } else {
                                     eprintln!("[Tray Menu Error] Floating bar window not found for toggle.");
+                                }
+                            }
+                            constants::tray_menu_ids::SHOW_DEVTOOLS => {
+                                info!("[Tray Menu] Developer Tools menu item clicked");
+                                if let Err(e) = app_handle.emit("devtools-requested", ()) {
+                                    tracing::error!("[Tray Menu] Failed to emit devtools-requested event: {}", e);
                                 }
                             }
                             // Only log as unhandled if it's not an app menu ID

@@ -23,6 +23,7 @@ pub mod events {
 
     // Settings events
     pub const SETTINGS_REQUESTED: &str = "settings-requested";
+    pub const DEVTOOLS_REQUESTED: &str = "devtools-requested";
 }
 
 pub mod window_labels {
@@ -33,6 +34,7 @@ pub mod window_labels {
 pub mod tray_menu_ids {
     pub const QUIT: &str = "quit";
     pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";
+    pub const SHOW_DEVTOOLS: &str = "show-devtools";
 }
 
 pub mod app_menu_ids {

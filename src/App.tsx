@@ -54,7 +54,7 @@ type BackendResponsePayload = {
 };
 
 // Type for view state
-type AppView = "chat" | "settings";
+type AppView = "chat" | "settings" | "devtools";
 
 // Simple debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
@@ -173,6 +173,19 @@ function App() {
     const unlisten = listen<string>("settings-requested", (event) => {
       console.log("Settings requested from menu:", event.payload);
       setCurrentView("settings");
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for devtools menu requests from tray menu
+  useEffect(() => {
+    const unlisten = listen<string>("devtools-requested", (event) => {
+      console.log("DevTools requested from tray menu:", event.payload);
+      setCurrentView("devtools");
+      setIsDevPanelOpen(true); // Also open the dev panel
     });
 
     return () => {
@@ -455,45 +468,50 @@ function App() {
       <div className="w-screen h-screen bg-background text-foreground">
         <div className="container mx-auto p-4 h-full flex flex-col">
           {/* Header */}
-          <header className="flex justify-between items-center mb-4 flex-shrink-0 border-b pb-2">
+          <header className="flex justify-between items-center mb-4 p-4 border-b">
+            <div className="flex items-center gap-3">
+              <DogIcon size={32} className="text-blue-500" />
+              <div>
+                <h1 className="text-xl font-bold">
+                  {currentView === "settings"
+                    ? "Settings"
+                    : currentView === "devtools"
+                    ? "Developer Tools"
+                    : "Juno AI Assistant"}
+                </h1>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Server
+                    size={14}
+                    className={
+                      serverStatus === "connected"
+                        ? "text-green-500"
+                        : serverStatus === "error"
+                        ? "text-red-500"
+                        : "text-yellow-500"
+                    }
+                  />
+                  <span>
+                    {serverStatus === "connected"
+                      ? "Connected"
+                      : serverStatus === "error"
+                      ? "Connection Error"
+                      : "Checking..."}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <div className="flex items-center gap-2">
-              {currentView === "settings" && (
+              {/* Back Button - show for settings and devtools views */}
+              {(currentView === "settings" || currentView === "devtools") && (
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="icon"
                   onClick={() => setCurrentView("chat")}
                   title="Back to Chat"
                 >
                   <ArrowLeft size={18} />
                 </Button>
-              )}
-              <h1 className="text-xl font-semibold flex items-center gap-2">
-                <DogIcon size={24} /> Juno{" "}
-                <span className="text-xs text-muted-foreground">
-                  {currentView === "settings" ? "Settings" : "Operator"}
-                </span>
-              </h1>
-            </div>
-            <div className="flex items-center gap-4">
-              {/* Status Indicator - only show in chat view */}
-              {currentView === "chat" && (
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <Server
-                    size={16}
-                    className={cn(
-                      serverStatus === "connected"
-                        ? "text-green-500"
-                        : serverStatus === "error"
-                        ? "text-red-500"
-                        : "text-yellow-500 animate-pulse"
-                    )}
-                  />
-                  {serverStatus === "connected"
-                    ? "Connected"
-                    : serverStatus === "error"
-                    ? "Connection Error"
-                    : "Connecting..."}
-                </div>
               )}
               {/* Toggle Dev Panel Button - only show in chat view */}
               {currentView === "chat" && (
@@ -517,7 +535,19 @@ function App() {
           {currentView === "settings" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
               <ScrollArea className="h-full w-full">
-                <Settings />
+                <Settings
+                  onNavigateToDevTools={() => setCurrentView("devtools")}
+                  onNavigateToChat={() => setCurrentView("chat")}
+                />
+              </ScrollArea>
+            </div>
+          ) : currentView === "devtools" ? (
+            <div className="flex-grow rounded-lg border overflow-hidden">
+              <ScrollArea className="h-full w-full p-4">
+                <h2 className="text-lg font-semibold mb-3 border-b pb-2">
+                  Developer Tools & Logs
+                </h2>
+                <DevToolsPanel />
               </ScrollArea>
             </div>
           ) : (

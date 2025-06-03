@@ -16,7 +16,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { invoke } from "@tauri-apps/api/core";
-import { Brain, Mic, Save, Settings as SettingsIcon } from "lucide-react";
+import {
+  Brain,
+  Mic,
+  MonitorSpeaker,
+  Save,
+  Settings as SettingsIcon,
+  Terminal,
+} from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -36,7 +43,15 @@ interface ProviderSettings {
   system_prompt?: string;
 }
 
-const Settings: React.FC = () => {
+interface SettingsProps {
+  onNavigateToDevTools?: () => void;
+  onNavigateToChat?: () => void;
+}
+
+const Settings: React.FC<SettingsProps> = ({
+  onNavigateToDevTools,
+  onNavigateToChat,
+}) => {
   // TTS Settings
   const [ttsProvider, setTtsProvider] = useState<string>("off");
 
@@ -431,6 +446,55 @@ const Settings: React.FC = () => {
             <span>Settings</span>
             <kbd className="px-2 py-1 bg-muted rounded text-sm">Cmd+,</kbd>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Developer Tools */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Terminal size={20} />
+            Developer Tools
+          </CardTitle>
+          <CardDescription>
+            Access developer tools and application windows
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col items-center justify-center gap-2"
+              onClick={onNavigateToDevTools}
+            >
+              <Terminal size={24} />
+              <div className="text-center">
+                <div className="font-medium">Developer Tools</div>
+                <div className="text-xs text-muted-foreground">
+                  Debug and testing tools
+                </div>
+              </div>
+            </Button>
+
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col items-center justify-center gap-2"
+              onClick={onNavigateToChat}
+            >
+              <MonitorSpeaker size={24} />
+              <div className="text-center">
+                <div className="font-medium">Main Chat</div>
+                <div className="text-xs text-muted-foreground">
+                  Return to main interface
+                </div>
+              </div>
+            </Button>
+          </div>
+
+          <p className="text-sm text-muted-foreground">
+            You can also access Developer Tools from the system tray menu or use
+            the toggle button in the main interface.
+          </p>
         </CardContent>
       </Card>
     </div>
