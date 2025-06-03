@@ -540,13 +540,17 @@ export function FloatingBar() {
             flex items-center justify-center bg-black/90 text-white
             rounded-full shadow-lg border border-white/20 overflow-hidden
             transition-all duration-300 ease-in-out
-            [will-change:width,height]
+            [will-change:width,height,transform]
+            [backface-visibility:hidden]
+            [transform-origin:center]
             ${getBarStyles()}
             ${barState === "default" ? "cursor-pointer" : ""}
             `,
             !isAnimatingSize && "backdrop-blur-md", // Conditionally apply backdrop-blur
-            // Add slight size increase on hover only when in default state
-            barState === "default" && isWindowHovered && "scale-105"
+            // Add slight size increase on hover only when in default state with optimized transform
+            barState === "default" &&
+              isWindowHovered &&
+              "[transform:scale3d(1.05,1.05,1)]"
           )}
           onClick={barState === "default" ? handleBarClick : undefined}
           onMouseDownCapture={(e) => {

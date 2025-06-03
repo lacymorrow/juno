@@ -26,8 +26,8 @@ use serde::Deserialize; // Added for deserializing payload struct
 #[cfg(target_os = "macos")]
 use {
     cocoa::{
-        appkit::{NSWindow}, // Removed NSWindowCollectionBehavior
-        base::{id as cocoa_id, nil}, // Removed YES, NO, BOOL
+        appkit::{NSWindow, NSWindowCollectionBehavior},
+        base::{id as cocoa_id, nil, YES, NO, BOOL},
         foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
@@ -213,6 +213,56 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
+            // --- Setup Application Menu ---
+            let settings_menu_item = tauri::menu::MenuItemBuilder::new("Settings...")
+                .id(constants::app_menu_ids::SETTINGS)
+                .accelerator("CmdOrCtrl+,")
+                .build(app)?;
+
+            let about_menu_item = tauri::menu::MenuItemBuilder::new("About Juno")
+                .id(constants::app_menu_ids::ABOUT)
+                .build(app)?;
+
+            let app_submenu = tauri::menu::SubmenuBuilder::new(app, "Juno")
+                .item(&about_menu_item)
+                .separator()
+                .item(&settings_menu_item)
+                .separator()
+                .services()
+                .separator()
+                .hide()
+                .hide_others()
+                .quit()
+                .build()?;
+
+            let app_menu = tauri::menu::MenuBuilder::new(app)
+                .items(&[&app_submenu])
+                .build()?;
+
+            app.set_menu(app_menu)?;
+
+            // Listen for menu events
+            let app_handle_for_menu = app_handle.clone();
+            app.on_menu_event(move |_app, event| {
+                match event.id().as_ref() {
+                    constants::app_menu_ids::SETTINGS => {
+                        info!("[Menu] Settings menu item clicked");
+                        if let Err(e) = app_handle_for_menu.emit(constants::events::SETTINGS_REQUESTED, "/settings") {
+                            tracing::error!("[Menu] Failed to emit settings event: {}", e);
+                        }
+                    }
+                    constants::app_menu_ids::ABOUT => {
+                        info!("[Menu] About menu item clicked");
+                        if let Err(e) = app_handle_for_menu.emit("about-requested", ()) {
+                            tracing::error!("[Menu] Failed to emit about event: {}", e);
+                        }
+                    }
+                    _ => {
+                        info!("[Menu] Unhandled menu event: {:?}", event.id());
+                    }
+                }
+            });
+
             // --- Setup Tray Icon ---
             let tray_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
@@ -369,6 +419,55 @@ pub fn run() {
 
             // --- End of Floating Bar State Listener Setup ---
 
+            // --- macOS Specific Setup for Floating Bar ---
+            #[cfg(target_os = "macos")]
+            {
+                info!("Applying macOS specific setup...");
+                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
+                    info!("Found floating-bar for macOS setup.");
+                    // --- Apply Standard Window Styling ---
+                    match window.ns_window() {
+                        Ok(ns_window_ptr) => {
+                            let ns_window = ns_window_ptr as cocoa_id;
+                            unsafe {
+                                // Keep window floating above others - Use integer value for Floating level
+                                ns_window.setLevel_(5); // kCGFloatingWindowLevelKey is typically 5
+                                // Allow clicks to pass through transparent areas
+                                ns_window.setOpaque_(NO);
+                                ns_window.setHasShadow_(NO); // Optional: remove shadow if desired
+                                // Keep it visible across spaces
+                                ns_window.setCollectionBehavior_(
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
+                                );
+
+                                // Set initial ignore state based on visibility (handled by tray logic, but good initial state)
+                                if !window.is_visible().unwrap_or(false) {
+                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
+                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
+                                     info!("macOS Setup: Floating bar initially hidden, ignoring mouse events.");
+                                } else {
+                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
+                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
+                                     info!("macOS Setup: Floating bar initially visible, accepting mouse events.");
+                                }
+                                info!("macOS standard styling applied to floating-bar.");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting NSWindow for styling floating-bar: {}", e);
+                        }
+                    }
+                     // --- Setup Mouse Tracking ---
+                    macos_tracking::setup_tracking_area(&window, app_handle.clone());
+
+                } else {
+                    eprintln!("Warning: floating-bar window not found during macOS specific setup.");
+                }
+            }
+            // --- End macOS Specific Setup ---
+
             // --- Initialize Multi-Agent Orchestrator ---
             let app_handle_for_orchestrator = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -381,10 +480,7 @@ pub fn run() {
 
             let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {
-                // Register Escape shortcut
-                if let Err(e) = app_handle_shortcuts.global_shortcut().register("Escape") {
-                    eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
-                }
+                // Note: Escape shortcut is now registered dynamically only when AI agent is running
 
                 // Register Dictation Toggle Shortcut
                 let dictation_shortcut_str = if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };
@@ -421,7 +517,7 @@ pub fn run() {
                 // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
                 let payload_str = event.payload();
                 match serde_json::from_str::<serde_json::Value>(payload_str) {
-                    Ok(mut payload_json) => {
+                    Ok(payload_json) => {
                         if let Some(text_value) = payload_json.get("text") {
                             // Transform { "text": "..." } to { "query": "..." }
                             let transformed_payload = serde_json::json!({
@@ -460,6 +556,25 @@ pub fn run() {
     builder
         .run(tauri::generate_context!()) // Use context relative to lib.rs now
         .expect("error while running tauri application");
+}
+
+// Helper functions for dynamic escape key management
+pub fn register_escape_key_shortcut(app_handle: &AppHandle) {
+    info!("[GlobalShortcut] Registering escape key for agent execution");
+    if let Err(e) = app_handle.global_shortcut().register("Escape") {
+        eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
+    } else {
+        info!("[GlobalShortcut] Escape key registered successfully");
+    }
+}
+
+pub fn unregister_escape_key_shortcut(app_handle: &AppHandle) {
+    info!("[GlobalShortcut] Unregistering escape key shortcut");
+    if let Err(e) = app_handle.global_shortcut().unregister("Escape") {
+        eprintln!("[GlobalShortcut Error] Failed to unregister Escape shortcut: {}", e);
+    } else {
+        info!("[GlobalShortcut] Escape key unregistered successfully");
+    }
 }
 
 // Unit tests module

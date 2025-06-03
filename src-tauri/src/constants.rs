@@ -20,6 +20,9 @@ pub mod events {
     // Voice Control specific events (if any beyond started/finished/partial)
     pub const DICTATION_STATE_CHANGED: &str = "dictation-state-changed";
     pub const REQUEST_AUDIO_PLAYBACK_TEST: &str = "request-audio-playback-test";
+
+    // Settings events
+    pub const SETTINGS_REQUESTED: &str = "settings-requested";
 }
 
 pub mod window_labels {
@@ -30,6 +33,11 @@ pub mod window_labels {
 pub mod tray_menu_ids {
     pub const QUIT: &str = "quit";
     pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";
+}
+
+pub mod app_menu_ids {
+    pub const SETTINGS: &str = "settings";
+    pub const ABOUT: &str = "about";
 }
 
 pub mod timeouts {
