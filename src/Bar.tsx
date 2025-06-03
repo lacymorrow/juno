@@ -508,20 +508,56 @@ export function FloatingBar() {
         }
       );
 
-      // Listen for spacebar dictation start events
-      unlistenSpacebarStart = await listen("spacebar-dictation-start", () => {
-        console.log("FloatingBar Event: spacebar-dictation-start");
-        setIsSpacebarDictation(true);
-        setBarState("dictating");
-        setTranscriptionText(""); // Clear any previous transcription
-        if (transitionTimeoutRef.current) {
-          clearTimeout(transitionTimeoutRef.current);
+      // Listen for immediate transcription start events
+      unlistenSpacebarStart = await listen(
+        "spacebar-transcription-start",
+        () => {
+          console.log(
+            "FloatingBar Event: spacebar-transcription-start (immediate)"
+          );
+          setIsSpacebarDictation(true);
+          setBarState("dictating");
+          setTranscriptionText(""); // Clear any previous transcription
+          if (transitionTimeoutRef.current) {
+            clearTimeout(transitionTimeoutRef.current);
+          }
         }
-      });
+      );
 
-      // Listen for spacebar dictation stop events
+      // Listen for dictation commitment (threshold reached)
+      const unlistenSpacebarCommitted = await listen(
+        "spacebar-dictation-committed",
+        () => {
+          console.log(
+            "FloatingBar Event: spacebar-dictation-committed (threshold reached)"
+          );
+          // User has committed to dictation - we can show additional UI feedback here if desired
+          // The "dictating" state is already set, so this is just for additional feedback
+        }
+      );
+
+      // Listen for transcription cancellation events
+      const unlistenSpacebarCancel = await listen(
+        "spacebar-transcription-cancel",
+        () => {
+          console.log("FloatingBar Event: spacebar-transcription-cancel");
+          setIsSpacebarDictation(false);
+
+          // Quickly return to default state since this was cancelled
+          setBarState("default");
+          setTranscriptionText("");
+
+          if (transitionTimeoutRef.current) {
+            clearTimeout(transitionTimeoutRef.current);
+          }
+        }
+      );
+
+      // Listen for spacebar dictation stop events (normal completion)
       unlistenSpacebarStop = await listen("spacebar-dictation-stop", () => {
-        console.log("FloatingBar Event: spacebar-dictation-stop");
+        console.log(
+          "FloatingBar Event: spacebar-dictation-stop (normal completion)"
+        );
         setIsSpacebarDictation(false);
 
         // Briefly show a completion state, then return to default
@@ -532,13 +568,20 @@ export function FloatingBar() {
           setBarState("default");
         }, 500); // Show finishing state briefly
       });
+
+      // Return cleanup functions for new listeners
+      return () => {
+        unlistenSpacebarCommitted?.();
+        unlistenSpacebarCancel?.();
+      };
     };
 
-    setupSpacebarListeners();
+    const spacebarCleanup = setupSpacebarListeners();
     return () => {
       unlistenSpacebarActive?.();
       unlistenSpacebarStart?.();
       unlistenSpacebarStop?.();
+      spacebarCleanup?.then((cleanup) => cleanup?.());
     };
   }, []);
 
