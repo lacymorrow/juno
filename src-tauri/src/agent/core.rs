@@ -33,6 +33,8 @@ pub enum AgentError {
     Terminated,
     #[error("Unknown error: {0}")]
     Unknown(String),
+    #[error("General error: {0}")]
+    Other(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

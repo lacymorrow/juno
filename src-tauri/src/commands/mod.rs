@@ -14,12 +14,14 @@ pub mod shell;
 pub mod text_editor;
 pub mod window;
 pub mod voice_control;
+pub mod orchestrator;
 
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;
 pub use self::mouse::*;
 pub use self::shell::*;
 pub use self::voice_control::*;
+pub use self::orchestrator::*;
 
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::
