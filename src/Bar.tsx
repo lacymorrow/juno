@@ -28,7 +28,8 @@ type BarState =
   | "listening"
   | "error"
   | "transcribing"
-  | "speaking";
+  | "speaking"
+  | "dictating"; // New state for spacebar dictation
 
 export function FloatingBar() {
   const [barState, setBarState] = useState<BarState>("default");
@@ -81,6 +82,7 @@ export function FloatingBar() {
           case "error":
           case "transcribing":
           case "speaking":
+          case "dictating":
             // Larger window size for expanded bar
             await appWindow?.setSize(
               new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
@@ -407,9 +409,17 @@ export function FloatingBar() {
             "FloatingBar Event: app-dictation-partial-result",
             event.payload
           );
-          if (barState === "listening" || barState === "transcribing") {
+          // Handle partial results for both listening/transcribing and dictating states
+          if (
+            barState === "listening" ||
+            barState === "transcribing" ||
+            barState === "dictating"
+          ) {
             setTranscriptionText(event.payload.partial);
-            setBarState("transcribing"); // Ensure state is transcribing when we have partials
+            // Update state to show transcribing unless we're in spacebar dictation mode
+            if (barState === "listening") {
+              setBarState(isSpacebarDictation ? "dictating" : "transcribing");
+            }
           }
         }
       );
@@ -421,25 +431,38 @@ export function FloatingBar() {
         console.log("FloatingBar Event: app-dictation-finished", event.payload);
         setTranscriptionText(""); // Clear transcription on finish
 
-        if (barState === "listening" || barState === "transcribing") {
+        if (
+          barState === "listening" ||
+          barState === "transcribing" ||
+          barState === "dictating"
+        ) {
           // Only act if we were in a dictation state
           if (transitionTimeoutRef.current)
             clearTimeout(transitionTimeoutRef.current);
           if (event.payload.query) {
             // A query was successfully dictated.
-            // Display the transcribed text in the input field just like typing
-            setInputValue(event.payload.query);
-            setBarState("input");
-            requestAnimationFrame(() => {
-              if (inputRef.current) {
-                inputRef.current.focus();
-                // Place cursor at the end of the transcribed text
-                inputRef.current.setSelectionRange(
-                  event.payload.query.length,
-                  event.payload.query.length
-                );
-              }
-            });
+            // For spacebar dictation, we don't show input field, just process directly
+            if (isSpacebarDictation) {
+              // Spacebar dictation is handled differently - text is typed directly
+              setBarState("finishing");
+              transitionTimeoutRef.current = setTimeout(() => {
+                setBarState("default");
+              }, 500);
+            } else {
+              // Regular dictation - Display the transcribed text in the input field
+              setInputValue(event.payload.query);
+              setBarState("input");
+              requestAnimationFrame(() => {
+                if (inputRef.current) {
+                  inputRef.current.focus();
+                  // Place cursor at the end of the transcribed text
+                  inputRef.current.setSelectionRange(
+                    event.payload.query.length,
+                    event.payload.query.length
+                  );
+                }
+              });
+            }
           } else {
             // No query from dictation (e.g., cancelled, error). Revert to default.
             setBarState("shrinking");
@@ -462,6 +485,8 @@ export function FloatingBar() {
   // Effect to listen for spacebar dictation events to differentiate from AI agent mode
   useEffect(() => {
     let unlistenSpacebarActive: (() => void) | undefined;
+    let unlistenSpacebarStart: (() => void) | undefined;
+    let unlistenSpacebarStop: (() => void) | undefined;
 
     const setupSpacebarListeners = async () => {
       unlistenSpacebarActive = await listen<boolean>(
@@ -472,13 +497,48 @@ export function FloatingBar() {
             event.payload
           );
           setIsSpacebarDictation(event.payload);
+
+          // Set visual state based on spacebar dictation status
+          if (event.payload) {
+            setBarState("dictating");
+            if (transitionTimeoutRef.current) {
+              clearTimeout(transitionTimeoutRef.current);
+            }
+          }
         }
       );
+
+      // Listen for spacebar dictation start events
+      unlistenSpacebarStart = await listen("spacebar-dictation-start", () => {
+        console.log("FloatingBar Event: spacebar-dictation-start");
+        setIsSpacebarDictation(true);
+        setBarState("dictating");
+        setTranscriptionText(""); // Clear any previous transcription
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+      });
+
+      // Listen for spacebar dictation stop events
+      unlistenSpacebarStop = await listen("spacebar-dictation-stop", () => {
+        console.log("FloatingBar Event: spacebar-dictation-stop");
+        setIsSpacebarDictation(false);
+
+        // Briefly show a completion state, then return to default
+        setBarState("finishing");
+        setTranscriptionText("");
+
+        transitionTimeoutRef.current = setTimeout(() => {
+          setBarState("default");
+        }, 500); // Show finishing state briefly
+      });
     };
 
     setupSpacebarListeners();
     return () => {
       unlistenSpacebarActive?.();
+      unlistenSpacebarStart?.();
+      unlistenSpacebarStop?.();
     };
   }, []);
 
@@ -558,6 +618,7 @@ export function FloatingBar() {
       "speaking",
       "listening",
       "transcribing",
+      "dictating",
       "error",
     ];
     return workingStates.includes(state) || isAgentWorking;
@@ -694,6 +755,8 @@ export function FloatingBar() {
       case "transcribing":
         return "h-[40px] w-[240px] px-3";
       case "speaking":
+        return "h-[40px] w-[240px] px-3";
+      case "dictating":
         return "h-[40px] w-[240px] px-3";
       default:
         return "h-[20px] w-[60px] px-2";
@@ -836,9 +899,12 @@ export function FloatingBar() {
           {/* Listening State Content */}
           {barState === "listening" && (
             <div className="w-full h-full flex items-center justify-center overflow-hidden animate-pulse">
-              <Mic size={16} className="mr-2 text-white/70" />
-              <span className="text-sm text-white/80">
-                {isSpacebarDictation ? "Dictating..." : "Listening..."}
+              <div className="mr-2 flex-shrink-0 relative">
+                <Mic size={16} className="text-blue-400" />
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+              </div>
+              <span className="text-sm text-blue-200 font-medium">
+                Listening for voice...
               </span>
             </div>
           )}
@@ -846,10 +912,12 @@ export function FloatingBar() {
           {/* Transcribing State Content */}
           {barState === "transcribing" && (
             <div className="w-full h-full flex items-center justify-start overflow-hidden px-3">
-              <Mic size={16} className="mr-2 text-blue-400 flex-shrink-0" />
-              <span className="text-sm text-white/90 truncate">
-                {transcriptionText ||
-                  (isSpacebarDictation ? "Dictating..." : "Transcribing...")}
+              <div className="mr-2 flex-shrink-0 relative">
+                <Mic size={16} className="text-green-400" />
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-400 rounded-full animate-bounce"></div>
+              </div>
+              <span className="text-sm text-green-200 truncate font-medium">
+                {transcriptionText || "Transcribing..."}
               </span>
             </div>
           )}
@@ -863,6 +931,19 @@ export function FloatingBar() {
               />
               <span className="text-sm text-white/90 truncate">
                 {spokenText || "Speaking..."}
+              </span>
+            </div>
+          )}
+
+          {/* Dictating State Content - Spacebar hold-to-dictate */}
+          {barState === "dictating" && (
+            <div className="w-full h-full flex items-center justify-start overflow-hidden px-3 animate-pulse">
+              <div className="mr-2 flex-shrink-0 relative">
+                <Mic size={16} className="text-orange-400" />
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-orange-400 rounded-full animate-ping"></div>
+              </div>
+              <span className="text-sm text-orange-200 truncate font-medium">
+                {transcriptionText || "Hold spacebar to dictate..."}
               </span>
             </div>
           )}
