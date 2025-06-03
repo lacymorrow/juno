@@ -1,12 +1,18 @@
 use std::env;
 use tracing::{info, warn};
+use tauri::Manager;
 
 use crate::agent::structs::AgentError;
-use crate::agent::traits::AgentBrain;
+use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider};
+use crate::agent::multi_agent::MultiAgentOrchestrator;
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::agent::providers::rig::RigBrain;
+use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::config::{ProviderConfig, apply_provider_settings_to_env};
+use crate::agent::tools::anthropic_computer_use::register_anthropic_computer_use_tools;
+use crate::agent::implementations::tool_provider::LocalToolProvider;
+use crate::state::AppState;
 
 /// Enumeration of available AI providers
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +20,7 @@ pub enum Provider {
     Anthropic,
     OpenAI,
     Rig,
+    Gemini,
     // Add other providers as needed
 }
 
@@ -24,6 +31,7 @@ impl Provider {
             "anthropic" => Some(Provider::Anthropic),
             "openai" => Some(Provider::OpenAI),
             "rig" => Some(Provider::Rig),
+            "gemini" => Some(Provider::Gemini),
             // Add other provider matches as needed
             _ => None,
         }
@@ -35,6 +43,7 @@ impl Provider {
             Provider::Anthropic => "Anthropic Claude",
             Provider::OpenAI => "OpenAI GPT",
             Provider::Rig => "Rig AI Agent",
+            Provider::Gemini => "Google Gemini",
         }
     }
 
@@ -44,6 +53,7 @@ impl Provider {
             Provider::Anthropic => "anthropic",
             Provider::OpenAI => "openai",
             Provider::Rig => "rig",
+            Provider::Gemini => "gemini",
         }
     }
 }
@@ -66,6 +76,14 @@ impl BrainFactory {
         apply_provider_settings_to_env()
     }
 
+    /// Create a multi-agent orchestrator system
+    pub async fn create_multi_agent_orchestrator(
+        memory: std::sync::Arc<dyn MemoryManager + Send + Sync>,
+        tool_provider: std::sync::Arc<dyn ToolProvider + Send + Sync>,
+    ) -> Result<MultiAgentOrchestrator, AgentError> {
+        MultiAgentOrchestrator::new(memory, tool_provider).await
+    }
+
     /// Get the current provider from configuration or environment
     pub fn get_current_provider() -> Provider {
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
@@ -80,7 +98,7 @@ impl BrainFactory {
     /// Get list of all available providers with their status
     pub fn list_providers() -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
-        let providers = vec![Provider::Anthropic, Provider::OpenAI, Provider::Rig];
+        let providers = vec![Provider::Anthropic, Provider::OpenAI, Provider::Rig, Provider::Gemini];
         let config = ProviderConfig::load().ok();
 
         providers.into_iter().map(|provider| {
@@ -89,6 +107,7 @@ impl BrainFactory {
                 Provider::Anthropic => env::var("ANTHROPIC_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
                 Provider::OpenAI => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
                 Provider::Rig => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings("openai")).and_then(|s| s.api_key.as_ref()).is_some() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
+                Provider::Gemini => env::var("GOOGLE_GEMINI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
             };
             ProviderInfo {
                 id: provider_id.to_string(),
@@ -144,6 +163,18 @@ impl BrainFactory {
                     }
                 }
             }
+            Some(Provider::Gemini) => {
+                info!("Attempting to initialize Gemini brain...");
+                match GeminiBrain::from_env() {
+                    Ok(brain) => Ok(Box::new(brain) as Box<dyn AgentBrain + Send + Sync>),
+                    Err(e) => {
+                        warn!("Failed to initialize Gemini brain ({}). Falling back to Anthropic.", e);
+                        env::set_var("AI_PROVIDER", "anthropic");
+                        apply_provider_settings_to_env()?;
+                        AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                    }
+                }
+            }
             None => {
                 warn!("Unknown AI provider specified: '{}'. Using Anthropic as fallback.", provider_str);
                 env::set_var("AI_PROVIDER", "anthropic");
@@ -151,5 +182,23 @@ impl BrainFactory {
                 AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
         }
+    }
+
+    /// Register all available computer use tools for the agent
+    pub async fn register_computer_use_tools(
+        provider: &mut LocalToolProvider,
+        app_handle: tauri::AppHandle,
+    ) -> Result<(), String> {
+        info!("Registering all Computer Use tools...");
+
+        // Register the official Anthropic Computer Use tools
+        register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+
+        // Register additional desktop automation tools (your existing ones)
+        let state_manager = app_handle.state::<AppState>();
+        crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager, app_handle.clone()).await;
+
+        info!("All Computer Use tools registered successfully");
+        Ok(())
     }
 }
