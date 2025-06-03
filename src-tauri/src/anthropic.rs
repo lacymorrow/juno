@@ -1,4 +1,4 @@
-use log::{info, error};
+use log::{info, error, warn};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -298,10 +298,10 @@ pub async fn submit_query(
     info!("Agent cancellation signal reset.");
 
     // --- Process Agent Result ---
-    let final_response = match agent_result {
+    let mut final_response = match agent_result {
         Ok(message) => SubmitQueryResult {
-            text: message,
-            audio_base64: None, // Add TTS later if needed
+            text: message.clone(),
+            audio_base64: None, // Will be set below if TTS is enabled
             agent_state: "Finished".to_string(),
             screenshot_base64: None, // Capture screenshot if needed
         },
@@ -313,13 +313,30 @@ pub async fn submit_query(
                 _ => ("Failed".to_string(), format!("Agent error: {}", e)),
             };
             SubmitQueryResult {
-                text: msg,
-                audio_base64: None,
+                text: msg.clone(),
+                audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: state_str,
                 screenshot_base64: None,
             }
         }
     };
+
+    // --- Generate TTS Audio ---
+    // Try to generate TTS for the response text if TTS is enabled
+    match crate::tts::invoke_tts(final_response.text.clone(), state.clone()).await {
+        Ok(audio_result) => {
+            if audio_result != "TTS_DISABLED_BY_SETTING" {
+                final_response.audio_base64 = Some(audio_result);
+                info!("TTS audio generated successfully for response");
+            } else {
+                info!("TTS is disabled, skipping audio generation");
+            }
+        }
+        Err(e) => {
+            warn!("Failed to generate TTS audio: {}. Continuing without audio.", e);
+            // Don't fail the whole response, just continue without audio
+        }
+    }
 
     info!("Agent run complete. Final state: {}", final_response.agent_state);
 
