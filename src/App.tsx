@@ -218,9 +218,12 @@ function App() {
         }
 
         if (transcribedText && transcribedText.trim() !== "") {
-          // Submit the transcribed text as a query to the agent.
-          // The backend-response listener will handle adding both user and assistant messages.
-          submitQuery(transcribedText, true); // Pass true: this is from dictation
+          // Transcribed text is now handled by Bar.tsx - it will display the text in the input field
+          // and the user can submit it manually just like typed text
+          console.log(
+            "Transcribed text received, Bar.tsx will handle display:",
+            transcribedText
+          );
         } else {
           console.log(
             "Received empty, whitespace-only, or null transcription, not submitting."
