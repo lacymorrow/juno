@@ -300,11 +300,26 @@ pub fn run() {
             // --- Setup Tray Icon ---
             let tray_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                // Load the icon
-                let icon_path = tray_app_handle.path().resolve("icons/32x32.png", tauri::path::BaseDirectory::Resource).unwrap_or_else(|_| {
-                    eprintln!("[Tray Setup Error] Failed to resolve icon path. Using a placeholder or default mechanism if available.");
-                    std::path::PathBuf::from("icons/32x32.png")
-                });
+                // Load the icon - try multiple possible paths for development and production
+                let icon_path = tray_app_handle.path().resolve("icons/32x32.png", tauri::path::BaseDirectory::Resource)
+                    .unwrap_or_else(|_| {
+                        // Try current directory for development
+                        let current_dir_path = std::env::current_dir()
+                            .map(|p| p.join("src-tauri/icons/32x32.png"))
+                            .unwrap_or_else(|_| std::path::PathBuf::from("src-tauri/icons/32x32.png"));
+                        if current_dir_path.exists() {
+                            current_dir_path
+                        } else {
+                            // Try target debug path for development builds
+                            let debug_path = std::path::PathBuf::from("src-tauri/target/debug/icons/32x32.png");
+                            if debug_path.exists() {
+                                debug_path
+                            } else {
+                                eprintln!("[Tray Setup Error] Failed to resolve icon path from multiple locations. Using fallback.");
+                                std::path::PathBuf::from("src-tauri/icons/32x32.png")
+                            }
+                        }
+                    });
 
                 let loaded_tauri_icon = match image::open(&icon_path) { // Use the `image` crate to open
                     Ok(dynamic_image) => {
