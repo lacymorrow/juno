@@ -324,7 +324,8 @@ pub async fn submit_query(
     info!("Agent run complete. Final state: {}", final_response.agent_state);
 
     // --- Emit Final Response ---
-    let payload = BackendResponsePayload { query, response: final_response };
+    let payload = BackendResponsePayload { query, response: final_response.clone() };
+    info!("Final response text: \"{}\"", final_response.text);
     if let Some(window) = app_handle.get_window("main") {
         window.emit("backend-response", payload)
             .map_err(|e| format!("Emit failed: {}", e))?;
