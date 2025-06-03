@@ -53,6 +53,7 @@ impl Provider {
             Provider::Anthropic => "High-performance AI assistant with advanced reasoning capabilities",
             Provider::OpenAI => "OpenAI's GPT models for conversational AI and text generation",
             Provider::Rig => "Rig framework for building AI agents with structured outputs",
+            Provider::Gemini => "Google's advanced generative AI models",
         }
     }
 
@@ -75,6 +76,11 @@ impl Provider {
                 "gpt-4o-mini".to_string(),
                 "claude-3-5-sonnet-20241022".to_string(),
             ],
+            Provider::Gemini => vec![
+                "gemini-1.5-pro".to_string(),
+                "gemini-1.5-flash".to_string(),
+                "gemini-pro".to_string(),
+            ],
         }
     }
 
@@ -84,6 +90,7 @@ impl Provider {
             Provider::Anthropic => "claude-3-5-sonnet-20241022",
             Provider::OpenAI => "gpt-4o",
             Provider::Rig => "gpt-4o",
+            Provider::Gemini => "gemini-1.5-pro",
         }
     }
 
