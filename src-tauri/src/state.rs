@@ -14,6 +14,31 @@ use crate::agent::tools::browser_controller::BrowserController;
 // Import the memory manager for persistent conversation state
 use crate::agent::implementations::memory_manager::SimpleMemoryManager;
 
+/// Timestamp tracking for log grouping (Slack/Apple Messages style)
+#[derive(Debug, Clone)]
+pub struct TimestampTracker {
+    pub last_timestamp_shown: Option<u64>,
+    pub events_since_last_timestamp: usize,
+}
+
+impl TimestampTracker {
+    pub fn new() -> Self {
+        Self {
+            last_timestamp_shown: None,
+            events_since_last_timestamp: 0,
+        }
+    }
+
+    pub fn record_event(&mut self, timestamp: u64, should_show_timestamp: bool) {
+        if should_show_timestamp {
+            self.last_timestamp_shown = Some(timestamp);
+            self.events_since_last_timestamp = 0;
+        } else {
+            self.events_since_last_timestamp += 1;
+        }
+    }
+}
+
 // Define a type alias for the cancellation sender for clarity
 type CancelSender = watch::Sender<bool>;
 // Define a type alias for the cancellation receiver for clarity
@@ -40,6 +65,7 @@ pub struct AppState {
     pub tts_provider: Arc<Mutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
     pub bar_ui_state: Arc<Mutex<String>>, // Added to store the current UI state of the floating bar
     pub spacebar_dictation_active: Arc<Mutex<bool>>, // Track if spacebar dictation is active
+    pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
 }
 
 impl AppState {
@@ -59,6 +85,7 @@ impl AppState {
             tts_provider: Arc::new(Mutex::new("off".to_string())), // Initialize TTS provider to "off"
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
             spacebar_dictation_active: Arc::new(Mutex::new(false)), // Initialize spacebar dictation as inactive
+            timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
         }
     }
 

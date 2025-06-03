@@ -2943,6 +2943,7 @@ dependencies = [
  "glob",
  "hound",
  "image",
+ "lazy_static",
  "log",
  "objc",
  "once_cell",

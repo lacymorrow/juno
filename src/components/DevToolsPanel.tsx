@@ -92,6 +92,8 @@ type ToolUsageEntry = {
   result?: any;
   success: boolean;
   screenshot_base64?: string; // Optional screenshot data
+  show_timestamp: boolean; // New field to control timestamp display
+  formatted_time?: string; // Pre-formatted time string for consistent display
 };
 
 // Default loading states
@@ -1048,52 +1050,63 @@ const DevToolsPanel: React.FC = () => {
         ) : (
           <div className="max-h-[300px] overflow-y-auto border rounded-md p-2">
             {toolHistory.map((entry, index) => (
-              <div
-                key={index}
-                className="mb-2 border-b pb-2 last:border-b-0 last:pb-0"
-              >
-                <div className="flex justify-between items-start">
-                  <span className="font-medium text-sm">{entry.tool}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(entry.timestamp).toLocaleTimeString()}
-                  </span>
-                </div>
-                <div className="text-xs mt-1">
-                  <div className="text-muted-foreground">Inputs:</div>
-                  <pre className="bg-muted p-1 rounded text-[10px] mt-1 overflow-x-auto">
-                    {JSON.stringify(entry.inputs, null, 2)}
-                  </pre>
-                </div>
-                {entry.result && (
+              <div key={index}>
+                {/* Timestamp header - only show when specified by backend logic */}
+                {entry.show_timestamp && entry.formatted_time && (
+                  <div className="flex justify-center my-3">
+                    <span className="text-xs text-muted-foreground bg-background px-2 py-1 border rounded-full">
+                      {entry.formatted_time}
+                    </span>
+                  </div>
+                )}
+
+                <div className="mb-2 border-b pb-2 last:border-b-0 last:pb-0">
+                  <div className="flex justify-between items-start">
+                    <span className="font-medium text-sm">{entry.tool}</span>
+                    {/* Only show individual timestamp if no grouped timestamp is shown */}
+                    {!entry.show_timestamp && (
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(entry.timestamp).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs mt-1">
-                    <div className="text-muted-foreground">Result:</div>
+                    <div className="text-muted-foreground">Inputs:</div>
                     <pre className="bg-muted p-1 rounded text-[10px] mt-1 overflow-x-auto">
-                      {typeof entry.result === "string"
-                        ? entry.result.length > 150
-                          ? entry.result.substring(0, 150) + "..."
-                          : entry.result
-                        : JSON.stringify(entry.result, null, 2)}
+                      {JSON.stringify(entry.inputs, null, 2)}
                     </pre>
                   </div>
-                )}
-                {entry.screenshot_base64 && (
-                  <div className="mt-1">
-                    <div className="text-xs text-muted-foreground">
-                      Screenshot:
+                  {entry.result && (
+                    <div className="text-xs mt-1">
+                      <div className="text-muted-foreground">Result:</div>
+                      <pre className="bg-muted p-1 rounded text-[10px] mt-1 overflow-x-auto">
+                        {typeof entry.result === "string"
+                          ? entry.result.length > 150
+                            ? entry.result.substring(0, 150) + "..."
+                            : entry.result
+                          : JSON.stringify(entry.result, null, 2)}
+                      </pre>
                     </div>
-                    <img
-                      src={`data:image/png;base64,${entry.screenshot_base64}`}
-                      alt="Tool Screenshot"
-                      className="mt-1 border rounded w-full object-contain max-h-[200px]"
-                    />
+                  )}
+                  {entry.screenshot_base64 && (
+                    <div className="mt-1">
+                      <div className="text-xs text-muted-foreground">
+                        Screenshot:
+                      </div>
+                      <img
+                        src={`data:image/png;base64,${entry.screenshot_base64}`}
+                        alt="Tool Screenshot"
+                        className="mt-1 border rounded w-full object-contain max-h-[200px]"
+                      />
+                    </div>
+                  )}
+                  <div
+                    className={`text-xs mt-1 ${
+                      entry.success ? "text-green-500" : "text-red-500"
+                    }`}
+                  >
+                    {entry.success ? "Success" : "Failed"}
                   </div>
-                )}
-                <div
-                  className={`text-xs mt-1 ${
-                    entry.success ? "text-green-500" : "text-red-500"
-                  }`}
-                >
-                  {entry.success ? "Success" : "Failed"}
                 </div>
               </div>
             ))}
