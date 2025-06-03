@@ -19,6 +19,7 @@ import {
   PanelLeftOpen,
   Send,
   Server,
+  Trash2,
 } from "lucide-react"; // Icons
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api"; // Import toggleDictation from plugin API
@@ -443,6 +444,30 @@ function App() {
     }
   };
 
+  // Clear conversation history
+  const clearConversation = async () => {
+    try {
+      await invoke("clear_conversation_history");
+      setConversation([
+        {
+          role: "system",
+          content:
+            "Conversation history cleared. You can start a new conversation.",
+        },
+      ]);
+      console.log("Conversation history cleared successfully");
+    } catch (error) {
+      console.error("Failed to clear conversation history:", error);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `Error clearing conversation: ${error}`,
+        },
+      ]);
+    }
+  };
+
   // Cleanup effect for audio
   useEffect(() => {
     return () => {
@@ -670,6 +695,15 @@ function App() {
                       disabled={isProcessing || serverStatus !== "connected"}
                       className="flex-grow"
                     />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={clearConversation}
+                      disabled={isProcessing}
+                      title="Clear conversation history"
+                    >
+                      <Trash2 size={18} />
+                    </Button>
                     <Button
                       type="submit"
                       disabled={

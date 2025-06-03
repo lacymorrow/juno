@@ -24,11 +24,46 @@ Strive for clear, concise, and direct responses. Avoid unnecessary elaboration u
 
 Try to fit your sentences into as few words as possible.
 ";
+
+/// Agent execution mode
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum AgentMode {
+    /// Single agent handles all tasks directly
+    Single,
+    /// Multi-agent system with specialized agents
+    Multi,
+}
+
+impl Default for AgentMode {
+    fn default() -> Self {
+        AgentMode::Multi
+    }
+}
+
+impl AgentMode {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            AgentMode::Single => "single",
+            AgentMode::Multi => "multi",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "single" => Some(AgentMode::Single),
+            "multi" => Some(AgentMode::Multi),
+            _ => None,
+        }
+    }
+}
+
 /// Configuration structure for AI providers
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {
     /// The active provider ID
     pub active_provider: String,
+    /// Agent execution mode (single vs multi-agent)
+    pub agent_mode: AgentMode,
     /// Configuration for each provider
     pub providers: Vec<ProviderSettings>,
 }
@@ -54,6 +89,7 @@ impl Default for ProviderConfig {
     fn default() -> Self {
         ProviderConfig {
             active_provider: "anthropic".to_string(),
+            agent_mode: AgentMode::Multi,
             providers: vec![
                 ProviderSettings {
                     id: "anthropic".to_string(),
@@ -170,6 +206,19 @@ impl ProviderConfig {
         env::set_var("AI_PROVIDER", provider_id); // Also set env var immediately when UI changes it
         info!("Active provider set to '{}' in config and AI_PROVIDER env var.", provider_id);
         self.save()
+    }
+
+    /// Set agent mode
+    pub fn set_agent_mode(&mut self, mode: AgentMode) -> Result<(), AgentError> {
+        self.agent_mode = mode;
+        env::set_var("AGENT_MODE", self.agent_mode.to_string()); // Set env var for immediate use
+        info!("Agent mode set to '{}' in config and AGENT_MODE env var.", self.agent_mode.to_string());
+        self.save()
+    }
+
+    /// Get current agent mode
+    pub fn get_agent_mode(&self) -> &AgentMode {
+        &self.agent_mode
     }
 
     /// Get settings for the active provider

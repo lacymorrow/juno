@@ -155,6 +155,7 @@ pub fn run() {
             list_apps,
             check_server_status,
             submit_query,
+            anthropic::clear_conversation_history, // Add conversation history clearing
             // Orchestrator Commands
             submit_orchestrated_query,
             get_orchestrator_status,
@@ -218,6 +219,8 @@ pub fn run() {
             update_provider_max_tokens,
             update_provider_temperature,
             update_provider_system_prompt,
+            get_agent_mode,
+            set_agent_mode,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,

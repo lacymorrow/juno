@@ -101,20 +101,48 @@ const MAX_ITERATIONS: u32 = 15;
 - **Lazy Loading**: Browser controller initialized on first use
 - **Error Propagation**: Tool errors converted to agent errors
 
-## Agent Types
+## Agent Architecture Modes
+
+The system supports two execution modes, configurable through the Settings UI:
 
 ### Single Agent Mode
-**Command**: `submit_query(query: String)`
-- Direct AI agent execution
-- Full tool access
-- Straightforward execution flow
+**Configuration**: `AgentMode::Single`
+- **Execution**: Direct agent with all tools available
+- **Performance**: Faster execution, simpler flow
+- **Use Case**: Straightforward tasks, rapid prototyping
+- **Memory**: Shared conversation history maintained
+- **Tools**: Complete tool provider with all capabilities
 
-### Multi-Agent Orchestration
-**Command**: `submit_orchestrated_query(query: String, use_orchestrator: bool)`
-- **Orchestrator**: Coordinates multiple specialized agents
-- **Specialized Agents**: Desktop, Research, Code, Web agents
-- **Task Distribution**: Intelligent task routing
-- **Parallel Execution**: Multiple tasks simultaneously
+### Multi-Agent Mode  
+**Configuration**: `AgentMode::Multi`
+- **Orchestrator**: Central coordinator with personality and memory
+- **Specialized Agents**:
+  - **Browser Agent**: Web navigation and interaction
+  - **Desktop Agent**: System automation and UI control  
+  - **File Agent**: Code editing and terminal operations
+- **Delegation**: Tasks routed to appropriate specialists
+- **Use Case**: Complex workflows, robust error handling
+
+### Mode Configuration
+```rust
+// Backend configuration
+pub enum AgentMode {
+    Single,  // Direct execution
+    Multi,   // Orchestrated delegation  
+}
+
+// Tauri commands for UI control
+get_agent_mode() -> String
+set_agent_mode(mode: String) -> Result<(), String>
+
+// Unified execution command
+submit_query(query: String) // Automatically uses configured mode
+```
+
+### Runtime Factory
+- **AgentRuntime**: Enum wrapping Single or Multi-agent systems
+- **Dynamic Creation**: Mode-specific runtime initialization
+- **Unified Interface**: Same execution API regardless of mode
 
 ## Tool Development
 

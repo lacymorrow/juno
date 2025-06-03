@@ -111,6 +111,11 @@ update_provider_temperature("anthropic", 0.7)
 
 ### Agent Configuration
 ```rust
+// Agent Architecture Mode
+AGENT_MODE: Multi         // Single or Multi-agent mode
+// Single: Direct execution with all tools (faster)
+// Multi: Orchestrated delegation (robust)
+
 // Execution limits
 MAX_ITERATIONS: 15        // Maximum agent steps
 TOOL_TIMEOUT: 30_000     // Tool timeout (ms)
@@ -118,6 +123,11 @@ MEMORY_LIMIT: 100        // Conversation history limit
 
 // Cancellation
 ESCAPE_KEY_DYNAMIC: true  // Only register during execution
+
+// Mode switching commands
+get_agent_mode()          // Get current mode
+set_agent_mode("single")  // Switch to single agent
+set_agent_mode("multi")   // Switch to multi-agent
 ```
 
 ### UI Configuration
@@ -143,8 +153,28 @@ TRANSPARENCY: true        // Allow transparent areas
 ### Runtime Configuration
 ```
 ├── ~/.config/juno/               # User configuration (macOS)
+│   └── ai_providers.json         # AI provider and agent mode settings
 ├── ~/Library/Logs/juno/          # Application logs
 └── ~/Library/Caches/juno/        # Cache files
+```
+
+### Agent Mode Configuration File
+```json
+// ~/.config/juno/ai_providers.json
+{
+  "active_provider": "anthropic",
+  "agent_mode": "Multi",           // "Single" or "Multi"
+  "providers": [
+    {
+      "id": "anthropic",
+      "api_key": "sk-ant-api03-...",
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 4096,
+      "temperature": 0.7,
+      "system_prompt": null
+    }
+  ]
+}
 ```
 
 ## Security Settings
