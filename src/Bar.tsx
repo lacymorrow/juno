@@ -453,7 +453,7 @@ export function FloatingBar() {
               setInputValue(event.payload.query);
               setBarState("input");
               requestAnimationFrame(() => {
-                if (inputRef.current) {
+                if (inputRef.current && event.payload.query) {
                   inputRef.current.focus();
                   // Place cursor at the end of the transcribed text
                   inputRef.current.setSelectionRange(

@@ -555,10 +555,23 @@ pub fn run() {
                 }
             });
 
-            // Listen for final result events from the plugin
+            // Listen for final result events from the plugin (for AI agent mode only)
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:final-result", move |event| {
                 info!("[Event] Received voice-transcription:final-result event: {:?}", event.payload());
+
+                // Check if spacebar dictation is active - if so, skip AI agent processing
+                let app_state = app_handle_for_listener.state::<state::AppState>();
+                let is_spacebar_active = app_state.spacebar_dictation_active.lock()
+                    .map(|active| *active)
+                    .unwrap_or(false);
+
+                if is_spacebar_active {
+                    info!("[Event] Skipping AI agent processing - spacebar dictation is active");
+                    return; // Exit early, let spacebar handler process this
+                }
+
+                info!("[Event] Processing final result for AI agent mode");
 
                 // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
                 let payload_str = event.payload();
