@@ -3,3 +3,62 @@ description:
 globs:
 alwaysApply: false
 ---
+# Project Essentials
+
+## Overview
+Juno is a Tauri v2 AI Computer Use Agent with voice control and desktop automation capabilities.
+
+## Tech Stack
+- **Backend**: Rust (Tauri v2) in `src-tauri/`
+- **Frontend**: React/TypeScript in `src/`
+- **Voice**: Custom plugin `tauri-plugin-voice-transcription/` with Whisper.cpp
+- **AI**: Anthropic Claude + multi-provider support
+- **Desktop Automation**: macOS Accessibility API + Core Graphics
+
+## Key Architecture
+
+### Frontend
+- `src/App.tsx` - Main chat interface and event handling
+- `src/Bar.tsx` - Floating dictation bar UI
+- `src/components/DevToolsPanel.tsx` - Development testing UI
+
+### Backend Core
+- `src-tauri/src/lib.rs` - Main app setup, commands, event routing
+- `src-tauri/src/state.rs` - Application state management
+- `src-tauri/src/commands/` - Tauri command handlers
+
+### Multi-Agent System
+- `src-tauri/src/agents/orchestrator.rs` - Central task coordinator
+- `src-tauri/src/agents/browser_agent.rs` - Web automation specialist
+- `src-tauri/src/agents/desktop_agent.rs` - Desktop interaction specialist
+- `src-tauri/src/agents/system_agent.rs` - System operation specialist
+
+### Computer Use Tools
+- `src-tauri/src/agent/tools/` - Mouse, keyboard, screen tools
+- `src-tauri/mcp-server-os-level/src/platforms/macos/` - macOS implementation
+
+## Key Features
+- **Voice Control**: Alt+D to toggle, real-time transcription
+- **Desktop Automation**: Mouse, keyboard, window management, screenshots
+- **Browser Automation**: Playwright integration for web tasks
+- **Multi-Agent Intelligence**: Task delegation to specialized agents
+- **Computer Vision**: Screen capture and element detection
+
+## Environment Setup
+```bash
+ANTHROPIC_API_KEY=your_key_here
+VOICE_MODEL_PATH=models/ggml-tiny.en.bin  # Optional
+OPENAI_API_KEY=your_key_here  # If using OpenAI
+```
+
+## Critical Requirements
+- **macOS Permissions**: Accessibility + Screen Recording + Microphone
+- **Cargo Check**: Always run `cargo check --manifest-path src-tauri/Cargo.toml` after Rust changes
+- **File Size Limit**: Keep files under 700 lines
+- **Security**: File operations need sandboxing (TODOs in `basic_tools.rs`)
+
+## Quick Start
+```bash
+bun install
+bun tauri dev
+```
