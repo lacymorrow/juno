@@ -35,6 +35,7 @@ pub struct AppState {
     state_components: Arc<std::sync::Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
     pub tts_provider: Arc<Mutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
     pub bar_ui_state: Arc<Mutex<String>>, // Added to store the current UI state of the floating bar
+    pub spacebar_dictation_active: Arc<Mutex<bool>>, // Track if spacebar dictation is active
 }
 
 impl AppState {
@@ -52,6 +53,7 @@ impl AppState {
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tts_provider: Arc::new(Mutex::new("off".to_string())), // Initialize TTS provider to "off"
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
+            spacebar_dictation_active: Arc::new(Mutex::new(false)), // Initialize spacebar dictation as inactive
         }
     }
 

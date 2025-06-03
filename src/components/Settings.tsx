@@ -267,8 +267,8 @@ const Settings: React.FC<SettingsProps> = ({
               </SelectContent>
             </Select>
             <p className="text-sm text-muted-foreground">
-              Choose how AI responses should be spoken aloud. Use Alt+D to
-              toggle voice input.
+              Choose how AI responses should be spoken aloud. Use Alt+D for AI
+              agent dictation or hold Spacebar for direct voice typing.
             </p>
           </div>
         </CardContent>
@@ -433,18 +433,49 @@ const Settings: React.FC<SettingsProps> = ({
             Essential keyboard shortcuts for using Juno
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between items-center">
-            <span>Toggle Voice Input</span>
-            <kbd className="px-2 py-1 bg-muted rounded text-sm">Alt+D</kbd>
+        <CardContent className="space-y-4">
+          {/* Voice Input Shortcuts */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+              Voice Input
+            </h4>
+            <div className="space-y-2">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="font-medium">AI Agent Dictation</span>
+                  <p className="text-xs text-muted-foreground">
+                    Send voice commands to AI agent
+                  </p>
+                </div>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm">Alt+D</kbd>
+              </div>
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="font-medium">Direct Voice Typing</span>
+                  <p className="text-xs text-muted-foreground">
+                    Hold to type speech directly (no AI processing)
+                  </p>
+                </div>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm">Space</kbd>
+              </div>
+            </div>
           </div>
-          <div className="flex justify-between items-center">
-            <span>Stop Current Task</span>
-            <kbd className="px-2 py-1 bg-muted rounded text-sm">Escape</kbd>
-          </div>
-          <div className="flex justify-between items-center">
-            <span>Settings</span>
-            <kbd className="px-2 py-1 bg-muted rounded text-sm">Cmd+,</kbd>
+
+          {/* General Shortcuts */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+              General
+            </h4>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span>Stop Current Task</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm">Escape</kbd>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Settings</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm">Cmd+,</kbd>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
