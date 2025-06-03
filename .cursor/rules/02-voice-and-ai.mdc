@@ -3,3 +3,76 @@ description:
 globs:
 alwaysApply: false
 ---
+# Voice & AI Systems
+
+## Voice Transcription Plugin
+
+### Architecture
+- **Plugin**: `tauri-plugin-voice-transcription/` - Reusable Tauri plugin
+- **Controller**: `controller.rs` - Core audio processing with Whisper.cpp
+- **Integration**: Events rebroadcast in `src-tauri/src/lib.rs` for compatibility
+
+### Event Flow
+1. **Alt+D Press** → `toggle-dictation-request` event
+2. **Plugin Processing** → Voice input with Whisper.cpp
+3. **Event Chain**:
+   - `voice-transcription:dictation-started` → `app-dictation-started`
+   - `voice-transcription:partial-result` → `app-dictation-partial-result`
+   - `voice-transcription:final-result` → `app-dictation-finished` (with `"text"` → `"query"` transformation)
+
+### Key Implementation
+```rust
+// Critical payload transformation in lib.rs
+app.listen("voice-transcription:final-result", move |event| {
+    let transformed_payload = serde_json::json!({
+        "query": text_value  // Transform "text" to "query"
+    });
+    app_handle.emit("app-dictation-finished", transformed_payload);
+});
+```
+
+## AI Agent System
+
+### Core Architecture
+- **Traits**: `AgentBrain`, `MemoryManager`, `ToolProvider`, `AgentRunnable` in `agent/core.rs`
+- **Execution**: `DefaultAgentRunner` orchestrates agent flow with cancellation support
+- **Providers**: Anthropic (primary), OpenAI, Ollama, xAI via `agent/providers/`
+
+### Multi-Agent Orchestrator
+- **Orchestrator**: `agents/orchestrator.rs` - Central task coordinator
+- **Specialized Agents**:
+  - **Browser**: Web navigation, content extraction, form automation
+  - **Desktop**: Native app interaction, window management, input automation
+  - **System**: Shell commands, file operations, process management
+
+### Tool Categories
+```rust
+// Tool registration pattern
+register_basic_tools(&mut tool_provider);      // File ops, system info
+register_desktop_tools(&mut tool_provider);    // Mouse, keyboard, screen
+register_browser_tools(&mut tool_provider);    // Web automation
+```
+
+### Agent Execution Flow
+1. **Query Submission**:
+   - Direct: `submit_query` → Single agent execution
+   - Orchestrated: `submit_orchestrated_query` → Multi-agent delegation
+2. **Task Analysis** → Agent selection → Tool execution → Result coordination
+3. **Response**: Via `backend-response` event + TTS
+
+### Integration Points
+```typescript
+// Frontend integration
+const submitQuery = async (text: string, isFromDictation: boolean = false) => {
+  await invoke("submit_query", { query: text });
+};
+
+const submitOrchestratedQuery = async (text: string) => {
+  await invoke("submit_orchestrated_query", { query: text });
+};
+```
+
+## Voice-AI Integration
+- Voice transcription triggers `submitQuery(text, true)` with `isFromDictation` flag
+- AI responses include TTS playback via `tts::invoke_tts`
+- State synchronization between voice controller and UI via events
