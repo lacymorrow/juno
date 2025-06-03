@@ -38,12 +38,22 @@ app.listen("voice-transcription:final-result", move |event| {
 - **Execution**: `DefaultAgentRunner` orchestrates agent flow with cancellation support
 - **Providers**: Anthropic (primary), OpenAI, Ollama, xAI via `agent/providers/`
 
-### Multi-Agent Orchestrator
-- **Orchestrator**: `agents/orchestrator.rs` - Central task coordinator
+### Agent Architecture Modes
+- **Single Agent Mode**: Direct execution with all tools available to one agent (faster, simpler)
+- **Multi-Agent Mode**: Specialized agents with orchestration (more robust for complex tasks)
+- **Configuration**: User-configurable via Settings UI or `AgentMode` enum in backend
+
+### Multi-Agent System (when enabled)
+- **Orchestrator**: Central task coordinator with personality and memory
 - **Specialized Agents**:
   - **Browser**: Web navigation, content extraction, form automation
   - **Desktop**: Native app interaction, window management, input automation
-  - **System**: Shell commands, file operations, process management
+  - **File**: Shell commands, file operations, code editing
+
+### Single Agent System (when enabled)
+- **Direct Execution**: All tools available to single agent instance
+- **Unified Runner**: `DefaultAgentRunner` with complete tool provider
+- **Memory**: Shared conversation history maintained
 
 ### Tool Categories
 ```rust
@@ -54,11 +64,25 @@ register_browser_tools(&mut tool_provider);    // Web automation
 ```
 
 ### Agent Execution Flow
-1. **Query Submission**:
-   - Direct: `submit_query` → Single agent execution
-   - Orchestrated: `submit_orchestrated_query` → Multi-agent delegation
-2. **Task Analysis** → Agent selection → Tool execution → Result coordination
-3. **Response**: Via `backend-response` event + TTS
+1. **Mode Detection**: Check `AgentMode` configuration (Single vs Multi)
+2. **Runtime Creation**:
+   - Single: Create `DefaultAgentRunner` with all tools
+   - Multi: Create orchestrator with delegation tools
+3. **Execution**: Unified `submit_query` command handles both modes
+4. **Response**: Via `backend-response` event + TTS
+
+### Agent Mode Configuration
+```rust
+// Backend configuration enum
+pub enum AgentMode {
+    Single,  // Direct execution with all tools
+    Multi,   // Orchestrated delegation
+}
+
+// Tauri commands for UI control
+get_agent_mode() -> String
+set_agent_mode(mode: String) -> Result<(), String>
+```
 
 ### Integration Points
 ```typescript

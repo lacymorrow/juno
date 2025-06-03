@@ -11,6 +11,8 @@ use std::sync::Mutex; // Added for tts_provider
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
+// Import the memory manager for persistent conversation state
+use crate::agent::implementations::memory_manager::SimpleMemoryManager;
 
 // Define a type alias for the cancellation sender for clarity
 type CancelSender = watch::Sender<bool>;
@@ -31,6 +33,8 @@ pub struct AppState {
     playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
     // Persistent browser controller instance
     pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
+    // Persistent memory manager for conversation history
+    pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
     // Dynamic storage for other state components - Wrapped in Arc
     state_components: Arc<std::sync::Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
     pub tts_provider: Arc<Mutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
@@ -50,6 +54,7 @@ impl AppState {
             previous_content: Arc::new(std::sync::Mutex::new(None)),
             playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
+            memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tts_provider: Arc::new(Mutex::new("off".to_string())), // Initialize TTS provider to "off"
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
@@ -128,6 +133,11 @@ impl AppState {
             log::debug!("Reusing existing browser controller from AppState.");
             Ok(controller_guard.as_ref().unwrap().clone())
         }
+    }
+
+    // Method to get the persistent memory manager
+    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<SimpleMemoryManager>> {
+        self.memory_manager.clone()
     }
 
     // Insert a component into the state

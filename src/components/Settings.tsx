@@ -20,6 +20,7 @@ import {
   Brain,
   Mic,
   MonitorSpeaker,
+  Network,
   Save,
   Settings as SettingsIcon,
   Terminal,
@@ -62,6 +63,9 @@ const Settings: React.FC<SettingsProps> = ({
     useState<ProviderSettings | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  // Agent Mode Settings
+  const [agentMode, setAgentMode] = useState<string>("multi");
+
   // Form state for provider settings
   const [formData, setFormData] = useState<{
     apiKey: string;
@@ -97,6 +101,10 @@ const Settings: React.FC<SettingsProps> = ({
 
       const currentActiveProvider = await invoke<string>("get_active_provider");
       setActiveProvider(currentActiveProvider);
+
+      // Load agent mode settings
+      const currentAgentMode = await invoke<string>("get_agent_mode");
+      setAgentMode(currentAgentMode);
 
       if (currentActiveProvider) {
         const settings = await invoke<ProviderSettings>(
@@ -232,6 +240,21 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const handleAgentModeChange = async (newMode: string) => {
+    try {
+      await invoke("set_agent_mode", { mode: newMode });
+      setAgentMode(newMode);
+      toast.success(
+        `Agent mode set to: ${
+          newMode === "single" ? "Single Agent" : "Multi-Agent"
+        }`
+      );
+    } catch (error) {
+      console.error("Failed to set agent mode:", error);
+      toast.error("Failed to set agent mode");
+    }
+  };
+
   const currentProvider = providers.find((p) => p.id === activeProvider);
 
   return (
@@ -270,6 +293,43 @@ const Settings: React.FC<SettingsProps> = ({
               Choose how AI responses should be spoken aloud. Use Alt+D for AI
               agent dictation or hold Spacebar for direct voice typing.
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Agent Architecture Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Network size={20} />
+            Agent Architecture
+          </CardTitle>
+          <CardDescription>
+            Choose between single-agent and multi-agent execution modes
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="agent-mode">Agent Mode</Label>
+            <Select value={agentMode} onValueChange={handleAgentModeChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select agent mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single">Single Agent</SelectItem>
+                <SelectItem value="multi">Multi-Agent</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="text-sm text-muted-foreground space-y-1">
+              <p>
+                <strong>Single Agent:</strong> Direct execution with all tools
+                available to one agent. Faster and simpler.
+              </p>
+              <p>
+                <strong>Multi-Agent:</strong> Specialized agents with
+                orchestration. More robust for complex tasks.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>

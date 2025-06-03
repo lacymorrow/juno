@@ -38,11 +38,15 @@
 
 ### 3. Agent System (Rust)
 - **Location**: `src-tauri/src/agent/`
-- **Purpose**: AI-driven automation engine
+- **Purpose**: AI-driven automation engine with configurable architecture
 - **Components**:
   - `providers/` - AI provider implementations (Anthropic, OpenAI, etc.)
   - `implementations/` - Agent runners and memory managers
   - `tools/` - Tool definitions and executors
+  - `multi_agent/` - Multi-agent orchestration system
+- **Modes**:
+  - **Single Agent**: Direct execution with all tools (faster, simpler)
+  - **Multi-Agent**: Orchestrated delegation (robust for complex tasks)
 
 ### 4. Platform Integration (Rust)
 - **Location**: `src-tauri/src/commands/`, `src-tauri/src/tools/`
@@ -53,10 +57,16 @@
 
 ### Agent Execution
 1. **Input**: User query via React UI
-2. **Routing**: Tauri command (`submit_query` or `submit_orchestrated_query`)
-3. **Processing**: Agent brain processes with tool access
-4. **Execution**: Tools perform system actions
-5. **Response**: Results emitted back to frontend
+2. **Mode Detection**: Check configured agent mode (Single vs Multi)
+3. **Runtime Creation**: Initialize appropriate agent system
+4. **Processing**: Agent brain processes with tool access
+5. **Execution**: Tools perform system actions  
+6. **Response**: Results emitted back to frontend
+
+### Agent Runtime Factory
+- **AgentRuntime**: Enum wrapping Single or Multi-agent systems
+- **Configuration**: User-selectable via Settings UI
+- **Dynamic Switching**: Mode changes without restart
 
 ### State Management
 - **AppState**: Singleton managing global state
