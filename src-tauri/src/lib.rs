@@ -47,6 +47,8 @@ pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
 pub mod spacebar_monitor; // New module for intelligent spacebar handling
 
+// Embed tray icon data directly in the binary - no file system dependencies
+const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*};
@@ -304,41 +306,18 @@ pub fn run() {
             // --- Setup Tray Icon ---
             let tray_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                // Load the icon - try multiple possible paths for development and production
-                let icon_path = tray_app_handle.path().resolve("icons/32x32.png", tauri::path::BaseDirectory::Resource)
-                    .unwrap_or_else(|_| {
-                        // Try current directory for development
-                        let current_dir_path = std::env::current_dir()
-                            .map(|p| p.join("src-tauri/icons/32x32.png"))
-                            .unwrap_or_else(|_| std::path::PathBuf::from("src-tauri/icons/32x32.png"));
-                        if current_dir_path.exists() {
-                            current_dir_path
-                        } else {
-                            // Try target debug path for development builds
-                            let debug_path = std::path::PathBuf::from("src-tauri/target/debug/icons/32x32.png");
-                            if debug_path.exists() {
-                                debug_path
-                            } else {
-                                eprintln!("[Tray Setup Error] Failed to resolve icon path from multiple locations. Using fallback.");
-                                std::path::PathBuf::from("src-tauri/icons/32x32.png")
-                            }
-                        }
-                    });
-
-                let loaded_tauri_icon = match image::open(&icon_path) { // Use the `image` crate to open
+                // Load the embedded icon data - no file system dependencies
+                let loaded_tauri_icon = match image::load_from_memory(TRAY_ICON_DATA) {
                     Ok(dynamic_image) => {
                         let width = dynamic_image.width();
                         let height = dynamic_image.height();
                         let rgba_image = dynamic_image.to_rgba8();
                         let bytes = rgba_image.into_raw();
-                        // Assuming TauriImage::new returns TauriImage directly (or panics on error)
-                        // based on `-> Self` in its signature from earlier compiler messages.
-                        // Use new_owned to move the bytes and avoid lifetime issues.
                         let img = TauriImage::new_owned(bytes, width, height);
                         Some(img)
                     },
                     Err(e) => {
-                        eprintln!("[Tray Setup Error] Failed to load image from path {:?} using 'image' crate: {}", icon_path, e);
+                        eprintln!("[Tray Setup Error] Failed to load embedded tray icon: {}", e);
                         None
                     }
                 };
