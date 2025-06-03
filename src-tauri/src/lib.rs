@@ -329,8 +329,12 @@ pub fn run() {
                                     eprintln!("[Tray Menu Error] Floating bar window not found for toggle.");
                                 }
                             }
+                            // Only log as unhandled if it's not an app menu ID
+                            id if id != constants::app_menu_ids::SETTINGS && id != constants::app_menu_ids::ABOUT => {
+                                println!("[Tray Menu] Unhandled tray menu event: {:?}", event.id());
+                            }
                             _ => {
-                                println!("[Tray Menu] Unhandled event: {:?}", event.id());
+                                // App menu events handled elsewhere, no need to log
                             }
                         }
                     })

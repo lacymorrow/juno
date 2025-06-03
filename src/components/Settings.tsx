@@ -39,8 +39,6 @@ interface ProviderSettings {
 const Settings: React.FC = () => {
   // TTS Settings
   const [ttsProvider, setTtsProvider] = useState<string>("off");
-  const [developerPlaybackEnabled, setDeveloperPlaybackEnabled] =
-    useState<boolean>(false);
 
   // AI Provider Settings
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -330,11 +328,15 @@ const Settings: React.FC = () => {
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {currentProvider?.models.map((model) => (
+                      {currentProvider?.models?.map((model) => (
                         <SelectItem key={model} value={model}>
                           {model}
                         </SelectItem>
-                      ))}
+                      )) || (
+                        <SelectItem value="" disabled>
+                          No models available
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

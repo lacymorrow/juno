@@ -38,6 +38,46 @@ impl Provider {
         }
     }
 
+    /// Get description for the provider
+    pub fn description(&self) -> &'static str {
+        match self {
+            Provider::Anthropic => "High-performance AI assistant with advanced reasoning capabilities",
+            Provider::OpenAI => "OpenAI's GPT models for conversational AI and text generation",
+            Provider::Rig => "Rig framework for building AI agents with structured outputs",
+        }
+    }
+
+    /// Get available models for the provider
+    pub fn models(&self) -> Vec<String> {
+        match self {
+            Provider::Anthropic => vec![
+                "claude-3-5-sonnet-20241022".to_string(),
+                "claude-3-5-haiku-20241022".to_string(),
+                "claude-3-opus-20240229".to_string(),
+            ],
+            Provider::OpenAI => vec![
+                "gpt-4o".to_string(),
+                "gpt-4o-mini".to_string(),
+                "gpt-4-turbo".to_string(),
+                "gpt-3.5-turbo".to_string(),
+            ],
+            Provider::Rig => vec![
+                "gpt-4o".to_string(),
+                "gpt-4o-mini".to_string(),
+                "claude-3-5-sonnet-20241022".to_string(),
+            ],
+        }
+    }
+
+    /// Get default model for the provider
+    pub fn default_model(&self) -> &'static str {
+        match self {
+            Provider::Anthropic => "claude-3-5-sonnet-20241022",
+            Provider::OpenAI => "gpt-4o",
+            Provider::Rig => "gpt-4o",
+        }
+    }
+
     /// Get provider ID string
     pub fn id(&self) -> &'static str {
         match self {
@@ -53,6 +93,9 @@ impl Provider {
 pub struct ProviderInfo {
     pub id: String,
     pub name: String,
+    pub description: String,
+    pub models: Vec<String>,
+    pub default_model: String,
     pub is_available: bool,
     pub is_default: bool,
 }
@@ -93,6 +136,9 @@ impl BrainFactory {
             ProviderInfo {
                 id: provider_id.to_string(),
                 name: provider.display_name().to_string(),
+                description: provider.description().to_string(),
+                models: provider.models(),
+                default_model: provider.default_model().to_string(),
                 is_available,
                 is_default: provider == current_provider,
             }
