@@ -12,6 +12,7 @@ pub mod element;
 pub mod filesystem;
 pub mod keyboard;
 pub mod mouse;
+pub mod permissions;
 pub mod providers;
 pub mod shell;
 pub mod text_editor;
@@ -22,6 +23,7 @@ pub mod orchestrator;
 pub use self::core::*;
 pub use self::dictation::*;
 pub use self::mouse::*;
+pub use self::permissions::*;
 pub use self::shell::*;
 pub use self::orchestrator::*;
 

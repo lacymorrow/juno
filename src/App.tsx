@@ -1,5 +1,6 @@
 import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
+import { PermissionsFlow } from "@/components/PermissionsFlow"; // Import the PermissionsFlow component
 import Settings from "@/components/Settings"; // Import the Settings component
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
@@ -56,7 +57,7 @@ type BackendResponsePayload = {
 };
 
 // Type for view state
-type AppView = "chat" | "settings" | "devtools";
+type AppView = "chat" | "settings" | "devtools" | "permissions";
 
 // Simple debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
@@ -129,6 +130,40 @@ function App() {
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
   );
+
+  // Permissions state
+  const [, setShowPermissionsFlow] = useState(false);
+  const [, setPermissionsChecked] = useState(false);
+
+  // Check permissions on startup
+  useEffect(() => {
+    const checkInitialPermissions = async () => {
+      try {
+        const result = await invoke<{
+          accessibility: { granted: boolean; required: boolean };
+          screenRecording: { granted: boolean; required: boolean };
+          microphone: { granted: boolean; required: boolean };
+          allGranted: boolean;
+        }>("check_permissions_status");
+
+        setPermissionsChecked(true);
+
+        // Show permissions flow if any required permissions are missing
+        if (!result.allGranted) {
+          setShowPermissionsFlow(true);
+          setCurrentView("permissions");
+        }
+      } catch (error) {
+        console.error("Error checking permissions:", error);
+        setPermissionsChecked(true);
+        // Optionally show permissions flow even on error
+        setShowPermissionsFlow(true);
+        setCurrentView("permissions");
+      }
+    };
+
+    checkInitialPermissions();
+  }, []);
 
   // Debounced handler function
   const handleBackendResponseDebounced = useCallback(
@@ -568,6 +603,8 @@ function App() {
                     ? "Settings"
                     : currentView === "devtools"
                     ? "Developer Tools"
+                    : currentView === "permissions"
+                    ? "Permissions"
                     : "Juno AI Assistant"}
                 </h1>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -594,7 +631,9 @@ function App() {
 
             <div className="flex items-center gap-2">
               {/* Back Button - show for settings and devtools views */}
-              {(currentView === "settings" || currentView === "devtools") && (
+              {(currentView === "settings" ||
+                currentView === "devtools" ||
+                currentView === "permissions") && (
                 <Button
                   variant="outline"
                   size="icon"
@@ -629,6 +668,7 @@ function App() {
                 <Settings
                   onNavigateToDevTools={() => setCurrentView("devtools")}
                   onNavigateToChat={() => setCurrentView("chat")}
+                  onNavigateToPermissions={() => setCurrentView("permissions")}
                 />
               </ScrollArea>
             </div>
@@ -639,6 +679,23 @@ function App() {
                   Developer Tools & Logs
                 </h2>
                 <DevToolsPanel />
+              </ScrollArea>
+            </div>
+          ) : currentView === "permissions" ? (
+            <div className="flex-grow rounded-lg border overflow-hidden">
+              <ScrollArea className="h-full w-full p-4">
+                <PermissionsFlow
+                  onComplete={() => {
+                    setShowPermissionsFlow(false);
+                    setCurrentView("chat");
+                  }}
+                  onSkip={() => {
+                    setShowPermissionsFlow(false);
+                    setCurrentView("chat");
+                  }}
+                  showSkipOption={true}
+                  className="max-w-4xl mx-auto"
+                />
               </ScrollArea>
             </div>
           ) : (
