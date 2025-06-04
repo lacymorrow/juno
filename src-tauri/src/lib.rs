@@ -51,7 +51,7 @@ pub mod spacebar_monitor; // New module for intelligent spacebar handling
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, spacebar_reset::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -249,9 +249,22 @@ pub fn run() {
             qa_test_click_visualization,
             qa_test_select_text,
             qa_test_scroll,
+<<<<<<< HEAD
             // Spacebar Reset Commands
             force_reset_spacebar_transcription,
             get_spacebar_transcription_status
+=======
+            // Sound Commands
+            play_sound_by_type,
+            play_sound_file,
+            play_notification_sound,
+            play_success_sound,
+            play_error_sound,
+            play_alert_sound,
+            get_available_sounds,
+            get_sound_enabled,
+            set_sound_enabled,
+>>>>>>> origin/main
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -526,6 +539,22 @@ pub fn run() {
                 }
             }
             // --- End macOS Specific Setup ---
+
+            // --- Play Application Boot Sound ---
+            let app_handle_for_boot_sound = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Small delay to ensure UI is ready
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+                let state = app_handle_for_boot_sound.state::<crate::state::AppState>();
+                let app_handle_clone = app_handle_for_boot_sound.clone();
+                if let Err(e) = crate::commands::sound::play_notification_sound(app_handle_clone, state).await {
+                    warn!("Failed to play boot sound: {}", e);
+                } else {
+                    info!("Boot sound played successfully from backend");
+                }
+            });
+            // --- End Boot Sound ---
 
             // --- Initialize Multi-Agent Orchestrator ---
             let app_handle_for_orchestrator = app.handle().clone();

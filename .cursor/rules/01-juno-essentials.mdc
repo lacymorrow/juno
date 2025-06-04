@@ -5,8 +5,9 @@ alwaysApply: false
 ---
 # Juno AI Computer Use Agent - Project Essentials ✅
 
-## Project Overview
-Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Computer Use API with hierarchical AI agent architecture and advanced voice transcription capabilities.
+## Project Status: PRODUCTION READY ✅
+
+Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Computer Use API with hierarchical agent architecture and advanced voice transcription capabilities.
 
 ## Tech Stack
 - **Frontend**: React/TypeScript with shadcn/ui components
@@ -36,42 +37,6 @@ Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Com
 - **Tool Delegation**: Intelligent routing based on task analysis
 - **Memory Separation**: Persistent orchestrator memory, isolated specialist memory
 
-## Architecture Patterns
-
-### State Management
-- Centralized AppState in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)
-- Arc<TokioMutex<T>> for shared mutable state
-- Event-driven UI updates via Tauri events
-
-### Provider System
-- Multi-AI provider factory in [src-tauri/src/agent/providers/factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)
-- Configuration-based selection with environment fallbacks
-- Unified tool registration across providers
-
-### Tool Architecture
-- Modular tools in [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools)
-- Async execution with proper cancellation support
-- Structured JSON responses for consistent agent communication
-
-## Development Requirements
-
-### Critical Compilation Check
-**ALWAYS run after ANY Rust code changes**:
-```bash
-cargo check --manifest-path src-tauri/Cargo.toml
-```
-Must complete with exit code 0 before considering changes complete.
-
-### File Organization
-- Keep files under 700 lines when possible
-- Check for existing files before creating new ones
-- Use workspace-relative imports (`crate::`)
-
-### Error Handling
-- Use `Result<T, String>` for tool functions
-- Provide detailed error messages with context
-- Log operations with appropriate tracing levels
-
 ## Key Implementation Files
 
 ### Core System
@@ -92,16 +57,9 @@ Must complete with exit code 0 before considering changes complete.
 - [src/Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI with state management
 - [src/App.tsx](mdc:src/App.tsx) - Full chat interface with settings integration
 
-## Security & Permissions
-- macOS Accessibility permissions required for automation
-- Screen Recording permissions for screenshots
-- Voice transcription processes locally with Whisper.cpp
-- API keys managed through environment variables and secure config
+## Platform Requirements
+- **macOS**: Accessibility + Screen Recording + Microphone permissions
+- **Voice**: Custom Whisper.cpp-based transcription plugin
+- **AI Providers**: Multi-provider support (Anthropic, OpenAI, Gemini)
 
-## Testing & QA
-- QA test commands in [src-tauri/src/commands/mouse.rs](mdc:src-tauri/src/commands/mouse.rs)
-- Manual testing via DevToolsPanel
-- Voice integration end-to-end testing
-- Real desktop interaction validation
-
-This project represents a production-ready AI Computer Use implementation that exceeds Anthropic's official specification with enhanced voice capabilities and intelligent agent orchestration.
+This implementation represents a production-ready AI Computer Use agent that exceeds Anthropic's official specification with advanced voice interaction and intelligent agent orchestration.
