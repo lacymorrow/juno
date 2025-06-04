@@ -51,7 +51,7 @@ pub mod spacebar_monitor; // New module for intelligent spacebar handling
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -242,7 +242,15 @@ pub fn run() {
             qa_test_coordinate_transformation,
             qa_test_click_visualization,
             qa_test_select_text,
-            qa_test_scroll
+            qa_test_scroll,
+            // Sound Commands
+            play_sound_by_type,
+            play_sound_file,
+            play_notification_sound,
+            play_success_sound,
+            play_error_sound,
+            play_alert_sound,
+            get_available_sounds
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
