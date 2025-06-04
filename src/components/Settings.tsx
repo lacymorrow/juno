@@ -77,6 +77,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [spacebarClipboardEnabled, setSpacebarClipboardEnabled] =
     useState<boolean>(true);
 
+  // Sound Settings
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
   // Form state for provider settings
   const [formData, setFormData] = useState<{
     apiKey: string;
@@ -132,6 +135,10 @@ const Settings: React.FC<SettingsProps> = ({
         "get_spacebar_clipboard_enabled"
       );
       setSpacebarClipboardEnabled(currentClipboardEnabled);
+
+      // Load sound settings
+      const currentSoundEnabled = await invoke<boolean>("get_sound_enabled");
+      setSoundEnabled(currentSoundEnabled);
 
       if (currentActiveProvider) {
         const settings = await invoke<ProviderSettings>(
@@ -303,6 +310,17 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const handleSoundEnabledChange = async (enabled: boolean) => {
+    try {
+      await invoke("set_sound_enabled", { enabled });
+      setSoundEnabled(enabled);
+      toast.success(`Sound effects ${enabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      console.error("Failed to set sound setting:", error);
+      toast.error("Failed to set sound setting");
+    }
+  };
+
   const handleAgentModeChange = async (newMode: string) => {
     try {
       await invoke("set_agent_mode", { mode: newMode });
@@ -405,6 +423,27 @@ const Settings: React.FC<SettingsProps> = ({
               When enabled, text transcribed via spacebar dictation (hold
               Spacebar) will be saved to the system clipboard in addition to
               being typed directly.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sound-enabled">Sound Effects</Label>
+            <div className="flex items-center gap-3">
+              <Button
+                variant={soundEnabled ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleSoundEnabledChange(!soundEnabled)}
+                className="min-w-[80px]"
+              >
+                {soundEnabled ? "Enabled" : "Disabled"}
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Play sound effects for notifications and feedback
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              When enabled, the app will play sound effects for various
+              notifications, successes, errors, and other feedback events.
             </p>
           </div>
         </CardContent>

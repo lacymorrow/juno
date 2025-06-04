@@ -1,3 +1,30 @@
 ✅ lose focus shouldnt shrink bar while processing - FIXED: Added intelligent focus handling that preserves bar expansion during working states (loading, speaking, error, etc.)
 
 [BLANK AUDIO]
+
+
+2025-06-04T15:08:56.330603Z  INFO Executing tool: get_focused_element_info with ID: toolu_01TDBhm11rWH3SZHBpiNfpwB
+2025-06-04T15:08:56.331754Z  INFO    🔧 INFO: Tool execution started: get_focused_element_info
+[DEV_TOOL] Attempting to get focused element info using NSWorkspace...
+2025-06-04T15:08:56.366441Z  WARN Failed to get AXFocusedUIElement attribute for PID 30955: Ax(-25212)
+[DEV_TOOL] Error: Failed to call get_focused_element_info (NSWorkspace): No focused element found: Failed to get AXFocusedUIElement attribute for PID 30955: Ax(-25212)
+2025-06-04T15:08:56.366556Z  WARN ❌ Tool 'get_focused_element_info' failed: Error getting focused element: Failed to call get_focused_element_info (NSWorkspace): No focused element found: Failed to get AXFocusedUIElement attribute for PID 30955: Ax(-25212)
+2025-06-04T15:08:56.366752Z ERROR Tool get_focused_element_info failed: Tool execution error: Error executing tool 'get_focused_element_info': Error getting focused element: Failed to call get_focused_element_info (NSWorkspace): No focused element found: Failed to get AXFocusedUIElement attribute for PID 30955: Ax(-25212)
+
+
+Executing tool: press_key with ID: toolu_01Qa8jwmvuQpSrtGpzuL2fXw
+2025-06-04T15:09:02.142841Z  INFO    🔧 INFO: Tool execution started: press_key
+[DEV_TOOL] Attempting to press key sequence: cmd+ctrl+n with modifier: None
+[DEV_TOOL] Error: Failed to call press_key for 'cmd+ctrl+n' with modifier None: Invalid argument: Unknown key: cmd+ctrl+n
+2025-06-04T15:09:02.143050Z  WARN ❌ Tool 'press_key' failed: Error pressing key: Failed to call press_key for 'cmd+ctrl+n' with modifier None: Invalid argument: Unknown key: cmd+ctrl+n
+2025-06-04T15:09:02.143202Z ERROR Tool press_key failed: Tool execution error: Error executing tool 'press_key': Error pressing key: Failed to call press_key for 'cmd+ctrl+n' with modifier None: Invalid argument: Unknown key: cmd+ctrl+n
+
+
+thread 'tokio-runtime-worker' panicked at /Users/lmorrow/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-2.5.1/src/lib.rs:742:7:
+state() called before manage() for alloc::sync::Arc<std::sync::poison::mutex::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>
+
+2025-06-04T18:35:54.566482Z  INFO Initializing macOS engine...
+2025-06-04T18:35:54.603775Z ERROR Failed to initialize desktop engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
+FATAL: Failed to initialize Desktop Automation Engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
+2025-06-04T18:35:54.603918Z ERROR Failed to initialize Desktop Automation Engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
+error: script "tauri" exited with code 1

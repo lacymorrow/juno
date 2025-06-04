@@ -18,7 +18,7 @@ pub mod shell;
 pub mod text_editor;
 pub mod window;
 pub mod orchestrator;
-pub mod spacebar_reset;
+pub mod sound;
 
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;
@@ -27,7 +27,7 @@ pub use self::mouse::*;
 pub use self::permissions::*;
 pub use self::shell::*;
 pub use self::orchestrator::*;
-pub use self::spacebar_reset::*;
+pub use self::sound::*;
 
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::
