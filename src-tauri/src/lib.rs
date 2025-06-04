@@ -19,7 +19,7 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
-use tracing::info; // Import the info macro
+use tracing::{info, warn}; // Import the info and warn macros
 use serde::Deserialize; // Added for deserializing payload struct
 use std::sync::Mutex; // Added for VoiceController state access
 
@@ -250,7 +250,9 @@ pub fn run() {
             play_success_sound,
             play_error_sound,
             play_alert_sound,
-            get_available_sounds
+            get_available_sounds,
+            get_sound_enabled,
+            set_sound_enabled,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -525,6 +527,22 @@ pub fn run() {
                 }
             }
             // --- End macOS Specific Setup ---
+
+            // --- Play Application Boot Sound ---
+            let app_handle_for_boot_sound = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Small delay to ensure UI is ready
+                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+                let state = app_handle_for_boot_sound.state::<crate::state::AppState>();
+                let app_handle_clone = app_handle_for_boot_sound.clone();
+                if let Err(e) = crate::commands::sound::play_notification_sound(app_handle_clone, state).await {
+                    warn!("Failed to play boot sound: {}", e);
+                } else {
+                    info!("Boot sound played successfully from backend");
+                }
+            });
+            // --- End Boot Sound ---
 
             // --- Initialize Multi-Agent Orchestrator ---
             let app_handle_for_orchestrator = app.handle().clone();

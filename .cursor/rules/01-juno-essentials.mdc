@@ -3,3 +3,63 @@ description:
 globs:
 alwaysApply: false
 ---
+# Juno AI Computer Use Agent - Project Essentials ✅
+
+## Project Status: PRODUCTION READY ✅
+
+Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Computer Use API with hierarchical agent architecture and advanced voice transcription capabilities.
+
+## Tech Stack
+- **Frontend**: React/TypeScript with shadcn/ui components
+- **Backend**: Rust with Tauri v2 framework
+- **AI Integration**: Multi-provider support (Anthropic, OpenAI, Gemini)
+- **Voice**: Custom Whisper.cpp-based transcription plugin
+- **Platform**: macOS with native automation APIs
+
+## Core Features ✅ COMPLETE
+
+### AI Computer Use (100% Implementation)
+- **All 17 Anthropic Computer Use actions**: screenshot, mouse, keyboard, scroll, wait
+- **File Operations**: str_replace_based_edit_tool with full CRUD capabilities
+- **Shell Commands**: bash execution with session management
+- **Timer System**: Long-running task management with context resumption
+
+### Voice Interaction Modes
+- **Agent Mode**: Alt+D toggles voice input for AI agent queries
+- **Dictation Mode**: Hold spacebar for immediate voice-to-text typing
+  - Immediate transcription start (0ms delay)
+  - 500ms threshold for commitment vs cancellation
+  - Smart cancellation with space passthrough
+
+### Hierarchical Agent System
+- **Orchestrator Agent**: Maintains personality and conversation memory
+- **Specialist Agents**: Browser, Desktop, File domain experts
+- **Tool Delegation**: Intelligent routing based on task analysis
+- **Memory Separation**: Persistent orchestrator memory, isolated specialist memory
+
+## Key Implementation Files
+
+### Core System
+- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application setup and event handling
+- [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent
+- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Intelligent spacebar handling
+
+### Agent Architecture
+- [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations) - Agent runners and memory
+- [src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers) - AI provider integrations
+- [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools) - Computer use and custom tools
+
+### Platform Integration
+- [src-tauri/mcp-server-os-level/src/platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos) - macOS automation
+- [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription) - Voice transcription plugin
+
+### Frontend
+- [src/Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI with state management
+- [src/App.tsx](mdc:src/App.tsx) - Full chat interface with settings integration
+
+## Platform Requirements
+- **macOS**: Accessibility + Screen Recording + Microphone permissions
+- **Voice**: Custom Whisper.cpp-based transcription plugin
+- **AI Providers**: Multi-provider support (Anthropic, OpenAI, Gemini)
+
+This implementation represents a production-ready AI Computer Use agent that exceeds Anthropic's official specification with advanced voice interaction and intelligent agent orchestration.

@@ -68,6 +68,7 @@ pub struct AppState {
     pub bar_ui_state: Arc<Mutex<String>>, // Added to store the current UI state of the floating bar
     pub spacebar_dictation_active: Arc<Mutex<bool>>, // Track if spacebar dictation is active
     pub spacebar_clipboard_enabled: Arc<Mutex<bool>>, // Track if spacebar dictation should save to clipboard
+    pub sound_enabled: Arc<Mutex<bool>>, // Track if sound effects are enabled
     pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
     // Permissions state tracking
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
@@ -92,6 +93,7 @@ impl AppState {
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
             spacebar_dictation_active: Arc::new(Mutex::new(false)), // Initialize spacebar dictation as inactive
             spacebar_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
+            sound_enabled: Arc::new(Mutex::new(true)), // Initialize sound effects as enabled by default
             timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
             // Initialize permissions state
             permissions_state: Arc::new(TokioMutex::new(None)),

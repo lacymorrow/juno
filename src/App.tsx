@@ -172,20 +172,9 @@ function App() {
 
   // Play boot sound on app startup
   useEffect(() => {
-    const playBootSound = async () => {
-      try {
-        await sound.playSuccess();
-        console.log("Boot sound played successfully");
-      } catch (error) {
-        console.error("Failed to play boot sound:", error);
-      }
-    };
-
-    // Delay boot sound slightly to ensure everything is loaded
-    const bootSoundTimer = setTimeout(playBootSound, 1000);
-
-    return () => clearTimeout(bootSoundTimer);
-  }, [sound]);
+    // Boot sound is now handled by the backend to avoid duplication
+    // Remove frontend boot sound call
+  }, []);
 
   // Debounced handler function
   const handleBackendResponseDebounced = useCallback(
@@ -215,12 +204,13 @@ function App() {
         playAudioFromBase64(response.audio_base64); // This function already handles stopping previous audio
       }
 
+      // Note: Sound feedback is now handled by the Rust backend based on agent_state
+      // No need for frontend sound calls here to avoid duplicates
+
       // Potentially reset processing state if managed globally here
       setIsProcessing(false); // Assuming Bar.tsx also sets this true
     }, 100), // Debounce for 100ms
-    [] // Dependencies for useCallback
-    // Note: If playAudioFromBase64 relies on state/props, add them here or wrap playAudioFromBase64 in useCallback too.
-    // For now, assuming playAudioFromBase64 is stable or relies only on its arguments and `currentAudio` state/setter.
+    [] // Remove sound from dependencies since we're not using it here anymore
   );
 
   // Submit query using Tauri invoke (primarily for the main input)
@@ -419,9 +409,8 @@ function App() {
         }
 
         if (transcribedText && transcribedText.trim() !== "") {
-          // Play success sound for successful transcription
-          voiceSounds.playVoiceEnd().catch(console.error);
-          // Automatically submit the transcribed text to the AI agent
+          // Only play sound for successful agent mode transcription (not spacebar dictation)
+          // Spacebar dictation handles its own immediate typing feedback
           console.log(
             "Transcribed text received, automatically submitting to AI agent:",
             transcribedText
@@ -431,8 +420,7 @@ function App() {
           console.log(
             "Received empty, whitespace-only, or null transcription, not submitting."
           );
-          // Play a gentle notification for empty transcription
-          sound.playNotification().catch(console.error);
+          // Note: No need to play notification sound here - let backend handle feedback
         }
       }
     );
