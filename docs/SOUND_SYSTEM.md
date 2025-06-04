@@ -4,13 +4,15 @@ The Juno AI Computer Use Agent includes a comprehensive sound system that provid
 
 ## Overview
 
-The sound system is built with:
-- **Rust Backend**: Platform-specific audio playback using system audio players
-- **TypeScript Frontend**: React hooks and components for easy integration
+The sound system is built with a **centralized backend-driven architecture**:
+- **Rust Backend**: Platform-specific audio playback with centralized control logic
+- **TypeScript Frontend**: Minimal React hooks for UI-specific sounds only
 - **Cross-Platform Support**: macOS (afplay), Windows (PowerShell), Linux (multiple players)
 - **Platform-Specific Audio Formats**: 
   - **macOS**: CAF (Core Audio Format) for native support and reliability
   - **Other platforms**: OGG for cross-platform compatibility
+- **Context-Aware Sound Selection**: Different sounds for different operation types
+- **Duplicate Prevention**: Backend coordination prevents overlapping audio
 
 ## Available Sounds
 
@@ -291,13 +293,53 @@ import { SoundDemo } from '../components/SoundDemo';
 
 This provides a comprehensive interface to test all sound types and functionality.
 
+## Architecture Principles
+
+### Backend-Driven Control ✅
+- All primary sound logic is implemented in Rust backend
+- Agent operations trigger sounds directly from `anthropic.rs`
+- Application lifecycle sounds managed in `lib.rs`
+- Prevents duplicate triggers and ensures coordination
+
+### Context-Aware Sound Mapping
+- `NotificationAmbient` - Gentle notifications and boot sounds
+- `HeroDecorativeCelebration01` - Agent operation success
+- `AlertHighIntensity` - Agent operation errors
+- `AlarmGentle` - General alerts and warnings
+- Voice-specific sounds - Dictation start/stop events
+
+### Frontend Sound Usage ⚠️
+- **Limited to UI-specific interactions only**
+- Voice interaction feedback (start/stop recording)
+- Error sounds for frontend-specific failures
+- **Never duplicate backend sound triggers**
+
 ## Best Practices
 
-1. **Use Appropriate Sounds**: Match sound types to their intended use cases
-2. **Don't Overwhelm**: Avoid playing multiple sounds simultaneously
-3. **Handle Errors**: Always check the `SoundPlayResult` for error handling
-4. **Accessibility**: Provide visual feedback as alternatives to audio
-5. **User Preferences**: Consider adding sound preferences/muting options
+1. **Backend First**: Implement sound logic in Rust backend when possible
+2. **Context-Specific Sounds**: Use different sound types for different operations
+3. **Avoid Duplication**: Never trigger the same sound from both frontend and backend
+4. **Handle Errors**: Always check the `SoundPlayResult` for error handling
+5. **Accessibility**: Provide visual feedback as alternatives to audio
+6. **User Preferences**: Consider adding sound preferences/muting options
+
+## Anti-Patterns to Avoid 🚫
+
+```typescript
+// DON'T: Frontend triggering sounds that backend also handles
+const handleAgentResponse = (response) => {
+  sound.playSuccess(); // ❌ Backend already handles this
+  // Process response...
+};
+
+// DON'T: Multiple simultaneous sound triggers
+sound.playNotification();
+sound.playAlert(); // ❌ Creates overlapping audio
+
+// DON'T: Same sound for different contexts
+sound.playSuccess(); // For agent success
+sound.playSuccess(); // For file save - should use different sound
+```
 
 ## Future Enhancements
 

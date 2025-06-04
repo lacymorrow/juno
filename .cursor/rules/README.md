@@ -13,6 +13,12 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 ### [03-ui-frontend-patterns.mdc](03-ui-frontend-patterns.mdc) ✅
 **Frontend implementation guidance** covering React/TypeScript patterns, voice UI states, Tauri integration, component styling, and performance optimizations.
 
+### [sound_system.mdc](sound_system.mdc) ✅
+**Centralized sound system architecture** with backend-driven control patterns, context-aware sound selection, and duplication prevention guidelines.
+
+### [backend-event-coordination.mdc](backend-event-coordination.mdc) ✅
+**Backend-frontend coordination patterns** preventing duplicate triggers, ensuring clean separation of concerns, and establishing single sources of truth.
+
 ## Implementation Status ✅ PRODUCTION READY
 
 ### AI Computer Use (100% Complete)

@@ -22,3 +22,9 @@ Executing tool: press_key with ID: toolu_01Qa8jwmvuQpSrtGpzuL2fXw
 
 thread 'tokio-runtime-worker' panicked at /Users/lmorrow/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-2.5.1/src/lib.rs:742:7:
 state() called before manage() for alloc::sync::Arc<std::sync::poison::mutex::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>
+
+2025-06-04T18:35:54.566482Z  INFO Initializing macOS engine...
+2025-06-04T18:35:54.603775Z ERROR Failed to initialize desktop engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
+FATAL: Failed to initialize Desktop Automation Engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
+2025-06-04T18:35:54.603918Z ERROR Failed to initialize Desktop Automation Engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
+error: script "tauri" exited with code 1

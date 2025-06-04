@@ -92,7 +92,22 @@ impl SoundType {
 pub async fn play_sound_by_type(
     app: AppHandle,
     sound_type: SoundType,
+    state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<SoundPlayResult, String> {
+    // Check if sound is enabled
+    let sound_enabled = state.sound_enabled.lock()
+        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?
+        .clone();
+
+    if !sound_enabled {
+        info!("Sound is disabled, skipping playback of {:?}", sound_type);
+        return Ok(SoundPlayResult {
+            success: true,
+            message: "Sound is disabled".to_string(),
+            file_path: None,
+        });
+    }
+
     let file_path = sound_type.get_file_path();
 
     // Use appropriate directory based on platform
@@ -101,7 +116,7 @@ pub async fn play_sound_by_type(
 
     info!("Playing sound: {:?} from path: {}", sound_type, full_path);
 
-    play_sound_file(app, full_path).await
+    play_sound_file(app, full_path, state).await
 }
 
 /// Play a sound file from the public/sounds directory
@@ -109,8 +124,23 @@ pub async fn play_sound_by_type(
 pub async fn play_sound_file(
     app: AppHandle,
     file_path: String,
+    state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<SoundPlayResult, String> {
     info!("Attempting to play sound file: {}", file_path);
+
+    // Check if sound is enabled
+    let sound_enabled = state.sound_enabled.lock()
+        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?
+        .clone();
+
+    if !sound_enabled {
+        info!("Sound is disabled, skipping playback of {}", file_path);
+        return Ok(SoundPlayResult {
+            success: true,
+            message: "Sound is disabled".to_string(),
+            file_path: Some(file_path),
+        });
+    }
 
     // For Tauri v2, we can use the asset protocol or direct file system access
     // First, let's try to resolve the path relative to the app's public directory
@@ -155,26 +185,38 @@ pub async fn play_sound_file(
 
 /// Play a simple notification sound (convenience function)
 #[tauri::command]
-pub async fn play_notification_sound(app: AppHandle) -> Result<SoundPlayResult, String> {
-    play_sound_by_type(app, SoundType::NotificationSimple01).await
+pub async fn play_notification_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::NotificationAmbient, state).await // Use ambient notification for gentle feedback
 }
 
 /// Play a success sound (convenience function)
 #[tauri::command]
-pub async fn play_success_sound(app: AppHandle) -> Result<SoundPlayResult, String> {
-    play_sound_by_type(app, SoundType::HeroSimpleCelebration01).await
+pub async fn play_success_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::HeroDecorativeCelebration01, state).await // Use decorative celebration for agent success
 }
 
 /// Play an error sound (convenience function)
 #[tauri::command]
-pub async fn play_error_sound(app: AppHandle) -> Result<SoundPlayResult, String> {
-    play_sound_by_type(app, SoundType::AlertHighIntensity).await
+pub async fn play_error_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::AlertHighIntensity, state).await // Keep high intensity for errors
 }
 
 /// Play an alert sound (convenience function)
 #[tauri::command]
-pub async fn play_alert_sound(app: AppHandle) -> Result<SoundPlayResult, String> {
-    play_sound_by_type(app, SoundType::AlertSimple).await
+pub async fn play_alert_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::AlertSimple, state).await // Keep simple alert
 }
 
 /// Get list of available sounds
@@ -198,6 +240,31 @@ pub async fn get_available_sounds() -> Result<Vec<SoundType>, String> {
         SoundType::RingtoneMinimal,
         SoundType::AlarmGentle,
     ])
+}
+
+/// Command to set sound enabled/disabled
+#[tauri::command]
+pub async fn set_sound_enabled(
+    enabled: bool,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let mut sound_enabled = state.sound_enabled.lock()
+        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?;
+    *sound_enabled = enabled;
+    info!("Sound effects set to: {}", enabled);
+    Ok(())
+}
+
+/// Command to get current sound enabled setting
+#[tauri::command]
+pub async fn get_sound_enabled(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<bool, String> {
+    let enabled = state.sound_enabled.lock()
+        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?
+        .clone();
+    info!("Current sound enabled setting: {}", enabled);
+    Ok(enabled)
 }
 
 // Platform-specific audio playback
