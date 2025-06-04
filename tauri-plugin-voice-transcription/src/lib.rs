@@ -12,6 +12,8 @@ pub use error::{Error, Result};
 pub use controller::VoiceController;
 pub use utils::resolve_model_path;
 
+
+
 /// Initialize the Voice Transcription plugin
 pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
     Builder::<R>::new("voice-transcription")
@@ -28,7 +30,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
 
-            // Resolve the model path relative to the app directory
+            // Try to resolve the model path for both development and production
             let resolved_model_path = resolve_model_path(app, &config.model_path);
 
             // Initialize voice controller with resolved model path
