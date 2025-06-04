@@ -91,9 +91,8 @@ impl DesktopAgent {
                     AgentError::InputError("Missing or invalid 'text' parameter".to_string()))?;
 
                 let result = commands::keyboard::dev_type_text(
-                    self.app_handle.clone(),
-                    state,
-                    text.to_string()
+                    text.to_string(),
+                    state
                 ).await;
 
                 match result {
@@ -110,10 +109,9 @@ impl DesktopAgent {
                 let modifier = tool_call.input.get("modifier").and_then(|v| v.as_str()).map(|s| s.to_string());
 
                 let result = commands::keyboard::dev_press_key(
-                    self.app_handle.clone(),
-                    state,
                     key.to_string(),
-                    modifier
+                    modifier,
+                    state
                 ).await;
 
                 match result {
@@ -129,9 +127,8 @@ impl DesktopAgent {
                     AgentError::InputError("Missing or invalid 'app_name' parameter".to_string()))?;
 
                 let result = commands::app_url::dev_open_application(
-                    self.app_handle.clone(),
-                    state,
-                    app_name.to_string()
+                    app_name.to_string(),
+                    state
                 ).await;
 
                 match result {
