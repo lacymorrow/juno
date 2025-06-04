@@ -249,11 +249,6 @@ pub fn run() {
             qa_test_click_visualization,
             qa_test_select_text,
             qa_test_scroll,
-<<<<<<< HEAD
-            // Spacebar Reset Commands
-            force_reset_spacebar_transcription,
-            get_spacebar_transcription_status
-=======
             // Sound Commands
             play_sound_by_type,
             play_sound_file,
@@ -264,7 +259,6 @@ pub fn run() {
             get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
->>>>>>> origin/main
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
