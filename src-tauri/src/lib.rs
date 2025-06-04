@@ -81,11 +81,15 @@ pub fn run() {
     // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
     let desktop_instance_result = Desktop::new(false, true);
     let desktop_instance = match desktop_instance_result {
-        Ok(instance) => instance,
+        Ok(instance) => {
+            tracing::info!("Desktop Automation Engine initialized successfully");
+            Some(instance)
+        },
         Err(e) => {
-            eprintln!("FATAL: Failed to initialize Desktop Automation Engine: {}", e);
-            tracing::error!("Failed to initialize Desktop Automation Engine: {}", e);
-            std::process::exit(1);
+            tracing::warn!("Failed to initialize Desktop Automation Engine: {}", e);
+            tracing::info!("App will start with limited functionality - desktop automation features will be disabled");
+            tracing::info!("To enable full functionality, please grant accessibility permissions in System Preferences");
+            None
         }
     };
 
@@ -106,10 +110,12 @@ pub fn run() {
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---
     println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
-    let desktop_arc = Arc::new(desktop_instance);
 
-    // Create the AppState
-    let app_state = state::AppState::new(desktop_arc.clone());
+    // Create desktop_arc only if we have a valid instance
+    let desktop_arc = desktop_instance.map(|instance| Arc::new(instance));
+
+    // Create the AppState with optional desktop instance
+    let app_state = state::AppState::new(desktop_arc);
 
     // Initialize shell state
     commands::shell::init_shell_state(&app_state);
