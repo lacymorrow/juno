@@ -1,36 +1,35 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area"; // To handle potentially large JSON
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea"; // Added for Set File Content
+import { Textarea } from "@/components/ui/textarea";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event"; // Import listen for tool usage events
+import { listen } from "@tauri-apps/api/event";
 import {
-  AppWindow, // Example icon
-  ArrowUpDown, // Example icon
-  Clipboard, // Added
-  ClipboardPaste, // Example icon
+  AppWindow,
+  ArrowUpDown,
+  ClipboardPaste,
   ExternalLink,
   FileEdit,
-  FileText, // Added for Wait
-  Focus, // Added for Close Window
-  Folder, // Added
-  Hand, // Added for Wait
-  Info, // Example icon
+  FileText,
+  Focus,
+  Folder,
+  Hand,
+  Info,
   Keyboard,
-  Layers, // Added for Window List
+  Layers,
   Maximize2,
-  Mic, // Added for Voice Control
-  Mouse, // Example icon (replace as needed)
-  MousePointerClick, // Added for Wait
+  Mic,
+  Mouse,
+  MousePointer,
   Move,
-  PlayCircle, // Added for Hold/Release
-  TextSelect, // Added for Get Selected Text
+  PlayCircle,
+  TextSelect,
   Timer,
   X,
-} from "lucide-react"; // Import some icons
-import React, { useEffect, useRef, useState } from "react";
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 // Helper type for tracking loading states
@@ -54,27 +53,27 @@ type LoadingStates = {
   wait: boolean;
   findElement: boolean;
   clickElement: boolean;
-  getSelectedText: boolean; // Added
-  getWindowList: boolean; // Added
-  getWindowInfo: boolean; // Added
-  focusWindow: boolean; // Added
-  resizeWindow: boolean; // Added
-  moveWindow: boolean; // Added
-  closeWindow: boolean; // Added
-  listFiles: boolean; // Added
+  getSelectedText: boolean;
+  getWindowList: boolean;
+  getWindowInfo: boolean;
+  focusWindow: boolean;
+  resizeWindow: boolean;
+  moveWindow: boolean;
+  closeWindow: boolean;
+  listFiles: boolean;
   getFileContent: boolean;
-  setFileContent: boolean; // Added
-  mouseMove: boolean; // Added
-  mouseDown: boolean; // Added
-  mouseUp: boolean; // Added
-  mouseClick: boolean; // Added
-  mouseDoubleClick: boolean; // Added
-  mouseDrag: boolean; // Added
-  testClickVisualization: boolean; // Added for click visualization testing
-  setDeveloperPlayback: boolean; // Added for voice control setting
-  playbackAudio: boolean; // Added for playing back audio
-  setTtsProvider: boolean; // Added for TTS Provider selection
-  testSystemContext: boolean; // Added for system context testing
+  setFileContent: boolean;
+  mouseMove: boolean;
+  mouseDown: boolean;
+  mouseUp: boolean;
+  mouseClick: boolean;
+  mouseDoubleClick: boolean;
+  mouseDrag: boolean;
+  testClickVisualization: boolean;
+  setDeveloperPlayback: boolean;
+  playbackAudio: boolean;
+  setTtsProvider: boolean;
+  testSystemContext: boolean;
 };
 
 // Helper type for file listing result (assuming backend sends this structure)
@@ -136,8 +135,8 @@ const initialLoadingStates: LoadingStates = {
   testClickVisualization: false,
   setDeveloperPlayback: false,
   playbackAudio: false,
-  setTtsProvider: false, // Added
-  testSystemContext: false, // Added
+  setTtsProvider: false,
+  testSystemContext: false,
 };
 
 // Type for result data from QA tests
@@ -204,35 +203,35 @@ const DevToolsPanel: React.FC = () => {
   );
   const [selectedTextResult, setSelectedTextResult] = useState<string | null>(
     null
-  ); // Added
-  const [windowListResult, setWindowListResult] = useState<string | null>(null); // Added
-  const [windowIdInput, setWindowIdInput] = useState<string>(""); // Added
-  const [windowInfoResult, setWindowInfoResult] = useState<string | null>(null); // Added
-  const [windowIdFocus, setWindowIdFocus] = useState<string>(""); // Added
-  const [windowIdResize, setWindowIdResize] = useState<string>(""); // Added
-  const [windowWidth, setWindowWidth] = useState<string>("800"); // Added
-  const [windowHeight, setWindowHeight] = useState<string>("600"); // Added
-  const [windowIdMove, setWindowIdMove] = useState<string>(""); // Added
-  const [windowX, setWindowX] = useState<string>("100"); // Added
-  const [windowY, setWindowY] = useState<string>("100"); // Added
-  const [windowIdClose, setWindowIdClose] = useState<string>(""); // Added
-  const [pathToList, setPathToList] = useState<string>("~"); // Added, default to home
-  const [fileListResult, setFileListResult] = useState<string | null>(null); // Added
-  const [pathGetContent, setPathGetContent] = useState<string>(""); // Added
+  );
+  const [windowListResult, setWindowListResult] = useState<string | null>(null);
+  const [windowIdInput, setWindowIdInput] = useState<string>("");
+  const [windowInfoResult, setWindowInfoResult] = useState<string | null>(null);
+  const [windowIdFocus, setWindowIdFocus] = useState<string>("");
+  const [windowIdResize, setWindowIdResize] = useState<string>("");
+  const [windowWidth, setWindowWidth] = useState<string>("800");
+  const [windowHeight, setWindowHeight] = useState<string>("600");
+  const [windowIdMove, setWindowIdMove] = useState<string>("");
+  const [windowX, setWindowX] = useState<string>("100");
+  const [windowY, setWindowY] = useState<string>("100");
+  const [windowIdClose, setWindowIdClose] = useState<string>("");
+  const [pathToList, setPathToList] = useState<string>("~");
+  const [fileListResult, setFileListResult] = useState<string | null>(null);
+  const [pathGetContent, setPathGetContent] = useState<string>("");
   const [fileContentResult, setFileContentResult] = useState<string | null>(
     null
-  ); // Added
-  const [pathSetContent, setPathSetContent] = useState<string>(""); // Added
-  const [fileContentToSet, setFileContentToSet] = useState<string>(""); // Added
-  const [mouseX, setMouseX] = useState<string>("100"); // Added
-  const [mouseY, setMouseY] = useState<string>("100"); // Added
+  );
+  const [pathSetContent, setPathSetContent] = useState<string>("");
+  const [fileContentToSet, setFileContentToSet] = useState<string>("");
+  const [mouseX, setMouseX] = useState<string>("100");
+  const [mouseY, setMouseY] = useState<string>("100");
   const [mouseButton, setMouseButton] = useState<"left" | "right" | "middle">(
     "left"
-  ); // Added
-  const [mouseStartX, setMouseStartX] = useState<string>("100"); // Added for drag
-  const [mouseStartY, setMouseStartY] = useState<string>("100"); // Added for drag
-  const [mouseEndX, setMouseEndX] = useState<string>("200"); // Added for drag
-  const [mouseEndY, setMouseEndY] = useState<string>("200"); // Added for drag
+  );
+  const [mouseStartX, setMouseStartX] = useState<string>("100");
+  const [mouseStartY, setMouseStartY] = useState<string>("100");
+  const [mouseEndX, setMouseEndX] = useState<string>("200");
+  const [mouseEndY, setMouseEndY] = useState<string>("200");
 
   // Results states for QA tests
   const [qaClickResult, setQaClickResult] = useState<ClickQAResult | null>(
@@ -241,8 +240,6 @@ const DevToolsPanel: React.FC = () => {
   const [qaClickSeriesResults, setQaClickSeriesResults] = useState<
     ClickQAResult[] | null
   >(null);
-  // const [coordinateTestResult, setCoordinateTestResult] =
-  //   useState<CoordinateTestResult | null>(null);
   const [visualizationTestResult, setVisualizationTestResult] =
     useState<VisualizationTestResult | null>(null);
 
@@ -252,11 +249,8 @@ const DevToolsPanel: React.FC = () => {
   const [qaClickY, setQaClickY] = useState<number>(300);
 
   // State for coordinate testing
-  const coordTestX = ""; // Removed setCoordTestX
-  const coordTestY = ""; // Removed setCoordTestY
-  // const [toolLog, setToolLog] = useState<ToolUsageEntry[]>([]); // New state for tool logs
-  // const logContainerRef = useRef<HTMLDivElement>(null);
-  // const [coordTestLoading, setCoordTestLoading] = useState(false); // This can stay removed if not used elsewhere
+  const coordTestX = "";
+  const coordTestY = "";
   const [coordTestResult, setCoordTestResult] = useState<any>(null);
 
   // Voice Control Settings
@@ -266,7 +260,7 @@ const DevToolsPanel: React.FC = () => {
   const delayTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Ref to store timeout ID
 
   const [toolHistory, setToolHistory] = useState<ToolUsageEntry[]>([]);
-  const [selectedTtsProvider, setSelectedTtsProvider] = useState<string>("off"); // Added, default to "off"
+  const [selectedTtsProvider, setSelectedTtsProvider] = useState<string>("off");
 
   // Cleanup timeout on component unmount
   useEffect(() => {
@@ -1053,6 +1047,61 @@ const DevToolsPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Sound System Testing */}
+      <div className="border-b pb-3 mb-3">
+        <h3 className="font-medium mb-2">Sound System Testing</h3>
+        <p className="text-sm text-muted-foreground mb-2">
+          Test individual sounds (debounced to prevent overlaps):
+        </p>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const { useSound } = await import("@/hooks/useSound");
+                const sound = useSound();
+                await sound.playNotification();
+              } catch (error) {
+                console.error("Failed to play notification:", error);
+              }
+            }}
+          >
+            Test Notification
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const { useSound } = await import("@/hooks/useSound");
+                const sound = useSound();
+                await sound.playSuccess();
+              } catch (error) {
+                console.error("Failed to play success:", error);
+              }
+            }}
+          >
+            Test Success
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              try {
+                const { useSound } = await import("@/hooks/useSound");
+                const sound = useSound();
+                await sound.playError();
+              } catch (error) {
+                console.error("Failed to play error:", error);
+              }
+            }}
+          >
+            Test Error
+          </Button>
+        </div>
+      </div>
+
       {/* Tool History Section */}
       <div className="space-y-2">
         <h3 className="text-base font-semibold border-b pb-1">
@@ -1320,7 +1369,7 @@ const DevToolsPanel: React.FC = () => {
               variant="outline"
               title="Click Focused Element" // Tooltip
             >
-              <MousePointerClick size={14} className="mr-1" /> {/* Icon */}
+              <MousePointer size={14} className="mr-1" /> {/* Icon */}
               {loadingStates.clickFocus ? "Waiting..." : "Click"}
             </Button>
             <span className="text-xs text-muted-foreground flex-1">
@@ -1561,7 +1610,7 @@ const DevToolsPanel: React.FC = () => {
               variant="outline"
               title="Click Element by Selector"
             >
-              <MousePointerClick size={14} className="mr-1" />
+              <MousePointer size={14} className="mr-1" />
               {loadingStates.clickElement ? "Waiting..." : "Click Element"}
             </Button>
           </div>
@@ -1989,7 +2038,7 @@ const DevToolsPanel: React.FC = () => {
               variant="outline"
               title="Simulate Mouse Click (after 5s delay)"
             >
-              <MousePointerClick size={14} className="mr-1" />
+              <MousePointer size={14} className="mr-1" />
               {loadingStates.mouseClick ? "Waiting..." : "Mouse Click"}
             </Button>
             <span className="text-xs text-muted-foreground flex-1">
@@ -2006,7 +2055,7 @@ const DevToolsPanel: React.FC = () => {
               variant="outline"
               title="Simulate Mouse Double Click (after 5s delay)"
             >
-              <MousePointerClick size={14} className="mr-1" />
+              <MousePointer size={14} className="mr-1" />
               {loadingStates.mouseDoubleClick ? "Waiting..." : "Double Click"}
             </Button>
             <span className="text-xs text-muted-foreground flex-1">
@@ -2081,7 +2130,7 @@ const DevToolsPanel: React.FC = () => {
               variant="outline"
               title="Get Clipboard"
             >
-              <Clipboard size={14} className="mr-1" />
+              <ClipboardPaste size={14} className="mr-1" />
               {loadingStates.getClipboard ? "Getting..." : "Get Clipboard"}
             </Button>
           </div>
@@ -2122,7 +2171,7 @@ const DevToolsPanel: React.FC = () => {
             variant="outline"
             title="Test Click Visualization"
           >
-            <MousePointerClick size={14} className="mr-1" />
+            <MousePointer size={14} className="mr-1" />
             {loadingStates.testClickVisualization
               ? "Testing..."
               : "Test Click Visualization"}
@@ -2338,7 +2387,7 @@ const DevToolsPanel: React.FC = () => {
           variant="outline"
           title="Test Click Visualization"
         >
-          <MousePointerClick size={14} className="mr-1" />
+          <MousePointer size={14} className="mr-1" />
           {loadingStates.testClickVisualization
             ? "Testing..."
             : "Test Click Visualization"}

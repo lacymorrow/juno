@@ -10,6 +10,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"; // Import Resizable components
 import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
+import { useSound, useVoiceSounds } from "@/hooks/useSound"; // Import sound hooks
 import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
@@ -131,6 +132,10 @@ function App() {
     null
   );
 
+  // Sound hooks
+  const sound = useSound();
+  const voiceSounds = useVoiceSounds();
+
   // Permissions state
   const [, setShowPermissionsFlow] = useState(false);
   const [, setPermissionsChecked] = useState(false);
@@ -165,6 +170,12 @@ function App() {
     checkInitialPermissions();
   }, []);
 
+  // Play boot sound on app startup
+  useEffect(() => {
+    // Boot sound is now handled by the backend to avoid duplication
+    // Remove frontend boot sound call
+  }, []);
+
   // Debounced handler function
   const handleBackendResponseDebounced = useCallback(
     debounce((payload: BackendResponsePayload) => {
@@ -193,12 +204,13 @@ function App() {
         playAudioFromBase64(response.audio_base64); // This function already handles stopping previous audio
       }
 
+      // Note: Sound feedback is now handled by the Rust backend based on agent_state
+      // No need for frontend sound calls here to avoid duplicates
+
       // Potentially reset processing state if managed globally here
       setIsProcessing(false); // Assuming Bar.tsx also sets this true
     }, 100), // Debounce for 100ms
-    [] // Dependencies for useCallback
-    // Note: If playAudioFromBase64 relies on state/props, add them here or wrap playAudioFromBase64 in useCallback too.
-    // For now, assuming playAudioFromBase64 is stable or relies only on its arguments and `currentAudio` state/setter.
+    [] // Remove sound from dependencies since we're not using it here anymore
   );
 
   // Submit query using Tauri invoke (primarily for the main input)
@@ -382,6 +394,8 @@ function App() {
 
         if (error) {
           console.error("Dictation error:", error);
+          // Play error sound for failed transcription
+          voiceSounds.playVoiceError().catch(console.error);
           // Optionally, display this error to the user in the chat or via a notification
           setConversation((prev) => [
             ...prev,
@@ -395,7 +409,8 @@ function App() {
         }
 
         if (transcribedText && transcribedText.trim() !== "") {
-          // Automatically submit the transcribed text to the AI agent
+          // Only play sound for successful agent mode transcription (not spacebar dictation)
+          // Spacebar dictation handles its own immediate typing feedback
           console.log(
             "Transcribed text received, automatically submitting to AI agent:",
             transcribedText
@@ -405,6 +420,7 @@ function App() {
           console.log(
             "Received empty, whitespace-only, or null transcription, not submitting."
           );
+          // Note: No need to play notification sound here - let backend handle feedback
         }
       }
     );
@@ -412,7 +428,7 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, [submitQuery]);
+  }, [submitQuery, voiceSounds, sound]);
 
   // Listen for dictation toggle requests
   useEffect(() => {
@@ -421,8 +437,17 @@ function App() {
       try {
         const isNowDictating = await toggleDictation();
         console.log("Toggled dictation, now dictating:", isNowDictating);
+
+        // Play appropriate sound based on dictation state
+        if (isNowDictating) {
+          voiceSounds.playVoiceStart().catch(console.error);
+        } else {
+          voiceSounds.playVoiceEnd().catch(console.error);
+        }
       } catch (error) {
         console.error("Failed to toggle dictation:", error);
+        // Play error sound for failed toggle
+        sound.playError().catch(console.error);
         setConversation((prev) => [
           ...prev,
           {
@@ -436,7 +461,7 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, []);
+  }, [voiceSounds, sound]);
 
   // Check server status on mount
   useEffect(() => {
