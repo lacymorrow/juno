@@ -5,11 +5,12 @@ pub mod controller;
 pub mod commands;
 pub mod error;
 pub mod config;
+pub mod utils;
 
 pub use config::VoiceTranscriptionConfig;
 pub use error::{Error, Result};
-
 pub use controller::VoiceController;
+pub use utils::resolve_model_path;
 
 /// Initialize the Voice Transcription plugin
 pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
@@ -27,11 +28,14 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             // Get model path from config or use default
             let config = VoiceTranscriptionConfig::default();
 
-            // Initialize voice controller with model path from config
-            match VoiceController::new(&config.model_path) {
+            // Resolve the model path relative to the app directory
+            let resolved_model_path = resolve_model_path(app, &config.model_path);
+
+            // Initialize voice controller with resolved model path
+            match VoiceController::new(&resolved_model_path) {
                 Ok(controller) => {
                     app.manage(Arc::new(Mutex::new(controller)));
-                    tracing::info!("Voice transcription plugin initialized with model: {}", config.model_path);
+                    tracing::info!("Voice transcription plugin initialized with model: {}", resolved_model_path);
                 }
                 Err(e) => {
                     tracing::error!("Failed to initialize voice controller: {}. Voice transcription will be unavailable.", e);

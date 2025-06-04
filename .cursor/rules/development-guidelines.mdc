@@ -110,9 +110,28 @@ The system uses a **hierarchical architecture** with clear separation:
 - Implement proper cancellation handling
 - Use background execution for appropriate tools
 
+## Utility Function Implementation ✅
+
+### Leverage Existing MCP Tools
+- Always check [mcp-server-os-level/](mdc:src-tauri/mcp-server-os-level) for existing functionality
+- Use established patterns from [platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos)
+- Avoid creating redundant implementations
+
+### Key Implementation Patterns
+- **Application Detection**: Use NSWorkspace APIs via objc messaging
+- **Screen Resolution**: Use existing screenshot capture and image parsing
+- **System Context**: Gather comprehensive context including focused window, application, and screen info
+- **Platform Compatibility**: Use conditional compilation for macOS-specific features
+
+### Dependencies Management
+- Avoid adding new dependencies when existing ones suffice
+- Leverage existing crates: `objc`, `base64::Engine`, `image`
+- Use conditional compilation `#[cfg(target_os = "macos")]` for platform-specific code
+
 ## Testing Strategy
 - Monitor debug logs during development
 - Test multi-turn conversations for memory persistence
 - Verify tool execution with real desktop interactions
 - Test voice integration end-to-end
 - Validate event flow with browser dev tools
+- Test utility functions with real system context data

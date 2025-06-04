@@ -1,0 +1,137 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Utility Functions - MCP Platform Integration
+
+## Implementation Patterns for System Context Functions
+
+### Overview
+When implementing utility functions that need system information, always leverage existing MCP tools and platform APIs instead of creating redundant implementations.
+
+### Key Files and Modules
+
+#### Core Utility Module
+- [src-tauri/src/utils/mod.rs](mdc:src-tauri/src/utils/mod.rs) - Main utility functions including system context gathering
+
+#### MCP Platform APIs
+- [src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/engine.rs) - NSWorkspace functionality
+- [src-tauri/mcp-server-os-level/src/platforms/macos/element.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/element.rs) - Element detection and focused element APIs
+- [src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs) - Screenshot capture and display utilities
+
+## Implementation Guidelines
+
+### 1. Application Name Detection Pattern
+```rust
+#[cfg(target_os = "macos")]
+fn get_application_name_from_element(element: &computer_use_ai_sdk::UIElement) -> Option<String> {
+    // 1. Extract PID from element properties
+    // 2. Use NSWorkspace to lookup application by PID
+    // 3. Fallback to frontmost application via NSWorkspace
+    // 4. Use objc messaging for NSWorkspace APIs
+}
+```
+
+**Key Functions to Use:**
+- `get_focused_element_ns_workspace()` from [element.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/element.rs)
+- NSWorkspace APIs via objc messaging
+
+### 2. Screen Resolution Detection Pattern
+```rust
+fn get_screen_resolution() -> Option<(u32, u32)> {
+    // 1. Use existing screenshot capture function
+    // 2. Parse base64 PNG to extract dimensions
+    // 3. Return actual resolution instead of placeholder
+}
+```
+
+**Key Functions to Use:**
+- `capture_and_encode_screenshot()` from [utils.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs)
+- `image::load_from_memory()` for dimension extraction
+
+### 3. System Context Gathering
+```rust
+pub async fn gather_system_context(app_state: Option<&crate::state::AppState>) -> Result<SystemContext, String> {
+    // Comprehensive context including:
+    // - Current time and timezone
+    // - Focused window information
+    // - Application context
+    // - Screen resolution
+    // - Text input detection
+}
+```
+
+## Architecture Integration
+
+### Leverage Existing Components
+- **MCP Tools**: Always check [src-tauri/mcp-server-os-level/](mdc:src-tauri/mcp-server-os-level) for existing functionality
+- **Platform APIs**: Use established patterns from [platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos)
+- **Agent Tools**: Reference [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools) for tool integration patterns
+
+### Dependencies Management
+- Avoid adding new dependencies when existing ones suffice
+- Use conditional compilation for platform-specific code
+- Leverage existing crates: `objc`, `base64::Engine`, `image`
+
+### Error Handling Patterns
+```rust
+match existing_function() {
+    Ok(result) => {
+        log::debug!("Success: {:?}", result);
+        Some(result)
+    }
+    Err(e) => {
+        log::debug!("Fallback needed: {}", e);
+        None // or fallback implementation
+    }
+}
+```
+
+## Testing Strategy
+
+### Compilation Verification
+Always run after Rust changes:
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+### Function Testing
+```rust
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_system_functions() {
+        // Test actual functionality
+        // Verify non-None returns
+        // Platform-specific testing
+    }
+}
+```
+
+## Common Patterns
+
+### 1. Finding Existing Implementations
+- Search for similar functionality in MCP tools first
+- Check platform-specific modules for OS APIs
+- Look for NSWorkspace usage patterns in existing code
+
+### 2. Avoiding Redundancy
+- Use existing screenshot capture instead of new display APIs
+- Leverage established objc messaging patterns
+- Reuse existing error handling approaches
+
+### 3. Platform Compatibility
+```rust
+#[cfg(target_os = "macos")]
+{
+    // macOS-specific implementation using MCP tools
+}
+
+#[cfg(not(target_os = "macos"))]
+{
+    // Fallback or unsupported platform handling
+}
+```
+
+This rule ensures utility functions integrate seamlessly with the existing MCP platform architecture while avoiding code duplication.
