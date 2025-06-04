@@ -10,6 +10,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"; // Import Resizable components
 import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
+import { useSound, useVoiceSounds } from "@/hooks/useSound"; // Import sound hooks
 import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
@@ -131,6 +132,10 @@ function App() {
     null
   );
 
+  // Sound hooks
+  const sound = useSound();
+  const voiceSounds = useVoiceSounds();
+
   // Permissions state
   const [, setShowPermissionsFlow] = useState(false);
   const [, setPermissionsChecked] = useState(false);
@@ -164,6 +169,23 @@ function App() {
 
     checkInitialPermissions();
   }, []);
+
+  // Play boot sound on app startup
+  useEffect(() => {
+    const playBootSound = async () => {
+      try {
+        await sound.playSuccess();
+        console.log("Boot sound played successfully");
+      } catch (error) {
+        console.error("Failed to play boot sound:", error);
+      }
+    };
+
+    // Delay boot sound slightly to ensure everything is loaded
+    const bootSoundTimer = setTimeout(playBootSound, 1000);
+
+    return () => clearTimeout(bootSoundTimer);
+  }, [sound]);
 
   // Debounced handler function
   const handleBackendResponseDebounced = useCallback(
@@ -382,6 +404,8 @@ function App() {
 
         if (error) {
           console.error("Dictation error:", error);
+          // Play error sound for failed transcription
+          voiceSounds.playVoiceError().catch(console.error);
           // Optionally, display this error to the user in the chat or via a notification
           setConversation((prev) => [
             ...prev,
@@ -395,6 +419,8 @@ function App() {
         }
 
         if (transcribedText && transcribedText.trim() !== "") {
+          // Play success sound for successful transcription
+          voiceSounds.playVoiceEnd().catch(console.error);
           // Automatically submit the transcribed text to the AI agent
           console.log(
             "Transcribed text received, automatically submitting to AI agent:",
@@ -405,6 +431,8 @@ function App() {
           console.log(
             "Received empty, whitespace-only, or null transcription, not submitting."
           );
+          // Play a gentle notification for empty transcription
+          sound.playNotification().catch(console.error);
         }
       }
     );
@@ -412,7 +440,7 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, [submitQuery]);
+  }, [submitQuery, voiceSounds, sound]);
 
   // Listen for dictation toggle requests
   useEffect(() => {
@@ -421,8 +449,17 @@ function App() {
       try {
         const isNowDictating = await toggleDictation();
         console.log("Toggled dictation, now dictating:", isNowDictating);
+
+        // Play appropriate sound based on dictation state
+        if (isNowDictating) {
+          voiceSounds.playVoiceStart().catch(console.error);
+        } else {
+          voiceSounds.playVoiceEnd().catch(console.error);
+        }
       } catch (error) {
         console.error("Failed to toggle dictation:", error);
+        // Play error sound for failed toggle
+        sound.playError().catch(console.error);
         setConversation((prev) => [
           ...prev,
           {
@@ -436,7 +473,7 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, []);
+  }, [voiceSounds, sound]);
 
   // Check server status on mount
   useEffect(() => {

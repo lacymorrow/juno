@@ -1,3 +1,4 @@
+import { SoundDemo } from "@/components/SoundDemo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1053,6 +1054,16 @@ const DevToolsPanel: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Sound System Demo Section */}
+      <div className="space-y-2">
+        <h3 className="text-base font-semibold border-b pb-1">
+          Sound System Demo
+        </h3>
+        <SoundDemo />
+      </div>
+
+      <Separator className="my-3" />
+
       {/* Tool History Section */}
       <div className="space-y-2">
         <h3 className="text-base font-semibold border-b pb-1">
