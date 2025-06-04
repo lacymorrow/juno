@@ -9,6 +9,7 @@ const HOLD_DURATION_MS: u64 = 500; // Hold spacebar for 500ms to commit dictatio
 const IMMEDIATE_START_MS: u64 = 0; // Start transcription immediately (0ms delay)
 const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds max transcription time
 const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
+const COOLDOWN_AFTER_CANCEL_MS: u64 = 300; // Cooldown period after cancellation to prevent double-tap issues
 
 // State for spacebar monitoring
 #[derive(Debug)]
@@ -19,6 +20,7 @@ pub struct SpacebarMonitorState {
     pub passthrough_scheduled: bool,
     pub transcription_start_time: Option<Instant>, // Track when transcription actually started
     pub force_cleanup_scheduled: bool,
+    pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
 }
 
 impl SpacebarMonitorState {
@@ -30,10 +32,26 @@ impl SpacebarMonitorState {
             passthrough_scheduled: false,
             transcription_start_time: None,
             force_cleanup_scheduled: false,
+            last_cancellation_time: None,
         }
     }
 
-    pub fn start_hold(&mut self) {
+    pub fn start_hold(&mut self) -> bool {
+        // Check if we're already in a transcription state
+        if self.transcription_started {
+            debug!("[SpacebarMonitor] Ignoring spacebar press - transcription already active");
+            return false;
+        }
+
+        // Check if we're in cooldown period after a recent cancellation
+        if let Some(last_cancel) = self.last_cancellation_time {
+            let time_since_cancel = last_cancel.elapsed().as_millis();
+            if time_since_cancel < COOLDOWN_AFTER_CANCEL_MS as u128 {
+                debug!("[SpacebarMonitor] Ignoring spacebar press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
+                return false; // Don't start tracking during cooldown
+            }
+        }
+
         self.hold_start_time = Some(Instant::now());
         self.transcription_started = false;
         self.hold_threshold_reached = false;
@@ -41,6 +59,7 @@ impl SpacebarMonitorState {
         self.transcription_start_time = None;
         self.force_cleanup_scheduled = false;
         debug!("[SpacebarMonitor] Started tracking spacebar hold");
+        true // Successfully started tracking
     }
 
     pub fn end_hold(&mut self) -> (bool, bool, Duration) {
@@ -49,6 +68,12 @@ impl SpacebarMonitorState {
         let duration = self.hold_start_time
             .map(|start| start.elapsed())
             .unwrap_or(Duration::ZERO);
+
+        // If transcription was started but threshold wasn't reached, it means we're cancelling
+        if transcription_was_started && !threshold_was_reached {
+            self.last_cancellation_time = Some(Instant::now());
+            debug!("[SpacebarMonitor] Recording cancellation time for cooldown period");
+        }
 
         self.hold_start_time = None;
         self.transcription_started = false;
@@ -238,15 +263,12 @@ async fn force_stop_voice_controller(app_handle: &AppHandle) {
 // Called when spacebar is pressed down
 pub async fn on_spacebar_pressed() {
     let mut state = SPACEBAR_STATE.lock().await;
-
-    // If we're already in a transcription state, ignore this press
-    if state.transcription_started {
-        warn!("[SpacebarMonitor] Spacebar pressed while transcription already active - ignoring");
-        return;
+    let started = state.start_hold();
+    if started {
+        debug!("[SpacebarMonitor] Spacebar pressed down - starting immediate tracking");
+    } else {
+        debug!("[SpacebarMonitor] Spacebar pressed down - ignored (transcription active or cooldown period)");
     }
-
-    state.start_hold();
-    debug!("[SpacebarMonitor] Spacebar pressed down - starting immediate tracking");
 }
 
 // Called when spacebar is released
