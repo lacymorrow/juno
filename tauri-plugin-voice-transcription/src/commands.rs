@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use crate::controller::VoiceController;
 use crate::error::Error;
 use crate::config::VoiceTranscriptionConfig;
+use crate::utils::resolve_model_path;
 use tracing::{info, error};
 
 #[tauri::command]
@@ -105,16 +106,19 @@ pub async fn set_model_path<R: tauri::Runtime>(
 ) -> Result<(), Error> {
     info!("[Plugin] set_model_path command called with path: {}", path);
 
+    // Resolve the model path relative to the app directory
+    let resolved_model_path = resolve_model_path(&app, &path);
+
     // Update config
     let mut config = VoiceTranscriptionConfig::default();
-    config.model_path = path.clone();
+    config.model_path = resolved_model_path.clone();
     config.save()?;
 
     // Reinitialize the voice controller with the new model
-    match VoiceController::new(&path) {
+    match VoiceController::new(&resolved_model_path) {
         Ok(controller) => {
             app.manage(Arc::new(Mutex::new(controller)));
-            info!("[Plugin] Voice controller reinitialized with new model: {}", path);
+            info!("[Plugin] Voice controller reinitialized with new model: {}", resolved_model_path);
             Ok(())
         }
         Err(e) => {

@@ -1,5 +1,8 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
+
+pub mod desktop_wrapper;
+pub use desktop_wrapper::DesktopWrapper;
 use std::path::PathBuf;
 use std::collections::HashMap;
 use std::any::{Any, TypeId};
@@ -49,7 +52,7 @@ pub type CancelReceiver = watch::Receiver<bool>;
 // Application state structure
 #[derive(Clone)] // AppState needs to be Clone
 pub struct AppState {
-    pub desktop: Arc<Desktop>,
+    pub desktop: DesktopWrapper,
     pub shell_sessions: ShellSessions,
     cancel_tx: Arc<CancelSender>, // Store Sender to signal cancellation
     pub cancel_rx: CancelReceiver, // Store Receiver to check for cancellation
@@ -76,10 +79,10 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(desktop: Arc<Desktop>) -> Self {
+    pub fn new(desktop: Option<Arc<Desktop>>) -> Self {
         let (cancel_tx, cancel_rx) = watch::channel(false); // Initial state: not cancelled
         Self {
-            desktop,
+            desktop: DesktopWrapper::new(desktop),
             shell_sessions: ShellSessions::default(),
             cancel_tx: Arc::new(cancel_tx),
             cancel_rx,
@@ -200,27 +203,42 @@ impl AppState {
     }
 
     // Method to update permissions state
-    pub async fn update_permissions_state(&self, permissions: PermissionsState) {
-        let mut state_guard = self.permissions_state.lock().await;
-        *state_guard = Some(permissions);
-
-        // Mark as checked
-        if let Ok(mut checked) = self.permissions_checked.lock() {
-            *checked = true;
-        }
+    pub async fn update_permissions_state(&self, state: PermissionsState) {
+        let mut permissions_guard = self.permissions_state.lock().await;
+        *permissions_guard = Some(state);
     }
 
     // Method to get permissions state
     pub async fn get_permissions_state(&self) -> Option<PermissionsState> {
-        let state_guard = self.permissions_state.lock().await;
-        state_guard.clone()
+        let permissions_guard = self.permissions_state.lock().await;
+        permissions_guard.clone()
+    }
+
+    // Method to mark permissions as checked
+    pub fn mark_permissions_checked(&self) {
+        let mut checked_guard = self.permissions_checked.lock().unwrap();
+        *checked_guard = true;
     }
 
     // Method to check if permissions have been checked
     pub fn are_permissions_checked(&self) -> bool {
-        self.permissions_checked.lock()
-            .map(|checked| *checked)
-            .unwrap_or(false)
+        let checked_guard = self.permissions_checked.lock().unwrap();
+        *checked_guard
+    }
+
+    // Helper method to get desktop instance or return an error
+    pub fn get_desktop(&self) -> Result<&Arc<Desktop>, String> {
+        self.desktop.get_desktop()
+    }
+
+    // Helper method to check if desktop automation is available
+    pub fn is_desktop_available(&self) -> bool {
+        self.desktop.is_available()
+    }
+
+    // Helper method to get desktop instance for situations where we can handle the error gracefully
+    pub fn try_get_desktop(&self) -> Option<&Arc<Desktop>> {
+        self.desktop.try_get_desktop()
     }
 }
 
@@ -230,3 +248,5 @@ pub(crate) fn update_undo_state(state: &AppState, file_path: PathBuf, previous_c
     *state.last_edited_file.lock().unwrap() = Some(file_path);
     *state.previous_content.lock().unwrap() = Some(previous_content);
 }
+
+// DesktopWrapper implementation moved to desktop_wrapper.rs
