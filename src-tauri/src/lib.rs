@@ -51,7 +51,7 @@ pub mod spacebar_monitor; // New module for intelligent spacebar handling
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, spacebar_reset::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, spacebar_reset::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Added for selector parsing
@@ -97,12 +97,12 @@ pub fn run() {
         tracing::info!("Provider settings initialized from configuration");
     }
 
-    // --- Handle CLI Commands ---
-    // If handle_cli_commands returns true, it means a command was executed
-    // and the application should exit.
-    if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
-        return; // Exit early if a CLI command was handled
-    }
+    // // --- Handle CLI Commands ---
+    // // If handle_cli_commands returns true, it means a command was executed
+    // // and the application should exit.
+    // if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
+    //     return; // Exit early if a CLI command was handled
+    // }
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---
     println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
@@ -230,6 +230,12 @@ pub fn run() {
             // Dictation Settings Commands
             get_spacebar_clipboard_enabled,
             set_spacebar_clipboard_enabled,
+            // Permissions Commands
+            check_permissions_status,
+            request_accessibility_permission,
+            open_system_preferences,
+            start_permissions_monitoring,
+            stop_permissions_monitoring,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,

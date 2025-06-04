@@ -13,6 +13,8 @@ use std::sync::Mutex; // Added for tts_provider
 use crate::agent::tools::browser_controller::BrowserController;
 // Import the memory manager for persistent conversation state
 use crate::agent::implementations::memory_manager::SimpleMemoryManager;
+// Import permissions types
+use crate::commands::permissions::PermissionsState;
 
 /// Timestamp tracking for log grouping (Slack/Apple Messages style)
 #[derive(Debug, Clone)]
@@ -67,6 +69,9 @@ pub struct AppState {
     pub spacebar_dictation_active: Arc<Mutex<bool>>, // Track if spacebar dictation is active
     pub spacebar_clipboard_enabled: Arc<Mutex<bool>>, // Track if spacebar dictation should save to clipboard
     pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
+    // Permissions state tracking
+    pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
+    pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
 }
 
 impl AppState {
@@ -88,6 +93,9 @@ impl AppState {
             spacebar_dictation_active: Arc::new(Mutex::new(false)), // Initialize spacebar dictation as inactive
             spacebar_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
             timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
+            // Initialize permissions state
+            permissions_state: Arc::new(TokioMutex::new(None)),
+            permissions_checked: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -187,6 +195,30 @@ impl AppState {
                 Arc::new(value.clone())
             })
         })
+    }
+
+    // Method to update permissions state
+    pub async fn update_permissions_state(&self, permissions: PermissionsState) {
+        let mut state_guard = self.permissions_state.lock().await;
+        *state_guard = Some(permissions);
+
+        // Mark as checked
+        if let Ok(mut checked) = self.permissions_checked.lock() {
+            *checked = true;
+        }
+    }
+
+    // Method to get permissions state
+    pub async fn get_permissions_state(&self) -> Option<PermissionsState> {
+        let state_guard = self.permissions_state.lock().await;
+        state_guard.clone()
+    }
+
+    // Method to check if permissions have been checked
+    pub fn are_permissions_checked(&self) -> bool {
+        self.permissions_checked.lock()
+            .map(|checked| *checked)
+            .unwrap_or(false)
     }
 }
 
