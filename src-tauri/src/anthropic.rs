@@ -328,18 +328,43 @@ pub async fn submit_query(
 
     // --- Process Agent Result ---
     let mut final_response = match agent_result {
-        Ok(message) => SubmitQueryResult {
-            text: message.clone(),
-            audio_base64: None, // Will be set below if TTS is enabled
-            agent_state: "Finished".to_string(),
-            screenshot_base64: None, // Capture screenshot if needed
+        Ok(message) => {
+            // Play success sound from backend
+            if let Err(e) = crate::commands::sound::play_success_sound(app_handle.clone(), state.clone()).await {
+                warn!("Failed to play success sound: {}", e);
+            }
+
+            SubmitQueryResult {
+                text: message.clone(),
+                audio_base64: None, // Will be set below if TTS is enabled
+                agent_state: "Finished".to_string(),
+                screenshot_base64: None, // Capture screenshot if needed
+            }
         },
         Err(e) => {
             error!("Agent run failed: {}", e);
             let (state_str, msg) = match e {
-                AgentError::Terminated => ("Cancelled".to_string(), "Agent execution was cancelled.".to_string()),
-                AgentError::MaxStepsReached => ("Failed".to_string(), "Agent reached maximum steps.".to_string()),
-                _ => ("Failed".to_string(), format!("Agent error: {}", e)),
+                AgentError::Terminated => {
+                    // Play notification sound for cancellation (less intrusive than error)
+                    if let Err(e) = crate::commands::sound::play_notification_sound(app_handle.clone(), state.clone()).await {
+                        warn!("Failed to play cancellation sound: {}", e);
+                    }
+                    ("Cancelled".to_string(), "Agent execution was cancelled.".to_string())
+                },
+                AgentError::MaxStepsReached => {
+                    // Play error sound for failure
+                    if let Err(e) = crate::commands::sound::play_error_sound(app_handle.clone(), state.clone()).await {
+                        warn!("Failed to play error sound: {}", e);
+                    }
+                    ("Failed".to_string(), "Agent reached maximum steps.".to_string())
+                },
+                _ => {
+                    // Play error sound for other failures
+                    if let Err(e) = crate::commands::sound::play_error_sound(app_handle.clone(), state.clone()).await {
+                        warn!("Failed to play error sound: {}", e);
+                    }
+                    ("Failed".to_string(), format!("Agent error: {}", e))
+                },
             };
             SubmitQueryResult {
                 text: msg.clone(),
