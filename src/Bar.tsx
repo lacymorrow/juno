@@ -569,10 +569,46 @@ export function FloatingBar() {
         }, 500); // Show finishing state briefly
       });
 
+      // Listen for force stop events (emergency cleanup)
+      const unlistenForceStop = await listen(
+        "spacebar-transcription-force-stop",
+        () => {
+          console.warn(
+            "FloatingBar Event: spacebar-transcription-force-stop - emergency cleanup"
+          );
+          setIsSpacebarDictation(false);
+          setBarState("default");
+          setTranscriptionText("");
+
+          if (transitionTimeoutRef.current) {
+            clearTimeout(transitionTimeoutRef.current);
+          }
+        }
+      );
+
+      // Listen for force cleanup events (stuck state recovery)
+      const unlistenForceCleanup = await listen(
+        "spacebar-transcription-force-cleanup",
+        () => {
+          console.warn(
+            "FloatingBar Event: spacebar-transcription-force-cleanup - recovering stuck state"
+          );
+          setIsSpacebarDictation(false);
+          setBarState("default");
+          setTranscriptionText("");
+
+          if (transitionTimeoutRef.current) {
+            clearTimeout(transitionTimeoutRef.current);
+          }
+        }
+      );
+
       // Return cleanup functions for new listeners
       return () => {
         unlistenSpacebarCommitted?.();
         unlistenSpacebarCancel?.();
+        unlistenForceStop?.();
+        unlistenForceCleanup?.();
       };
     };
 

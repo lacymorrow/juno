@@ -1,0 +1,36 @@
+{
+  "name": "tauri-plugin-voice-transcription-api",
+  "version": "0.1.0",
+  "description": "TypeScript bindings for the Tauri voice transcription plugin",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup index.ts react.ts --format cjs,esm --dts --clean",
+    "dev": "tsup index.ts react.ts --format cjs,esm --dts --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "tauri",
+    "plugin",
+    "voice",
+    "transcription",
+    "whisper",
+    "speech-to-text"
+  ],
+  "author": "Juno Contributors",
+  "license": "MIT OR Apache-2.0",
+  "peerDependencies": {
+    "@tauri-apps/api": "^2.0.0-beta",
+    "react": "^16.8.0 || ^17.0.0 || ^18.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.0.0-beta",
+    "@types/react": "^18.2.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3"
+  }
+}

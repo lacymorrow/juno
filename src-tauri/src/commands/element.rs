@@ -117,7 +117,8 @@ pub(crate) async fn dev_click_focused_element(
     #[cfg(target_os = "macos")]
     {
         // Get the focused element first
-        let focused_element = match state.desktop.focused_element() {
+        let desktop = &state.desktop;
+        let focused_element = match desktop.focused_element() {
             Ok(el) => el,
             Err(e) => {
                 let err_msg = format!("Failed to get focused element for click: {}", e);
@@ -156,23 +157,33 @@ pub(crate) async fn dev_find_element_by_selector(
     println!("[DEV_TOOL] Finding element by selector: {}", selector_str);
     let selector: Selector = selector_str.as_str().into(); // Use From<&str> for Selector
 
-    match state.desktop.locator(selector).first() {
-        Ok(Some(element)) => {
-            println!("[DEV_TOOL] Found element: {:?}", element.attributes());
-            let attrs = element.attributes();
-            serde_json::to_string_pretty(&attrs).map_err(|e| {
-                let err_msg = format!("Failed to serialize found element attributes: {}", e);
-                println!("[DEV_TOOL] Error: {}", err_msg);
-                err_msg
-            })
-        }
-        Ok(None) => {
-            let err_msg = format!("Element not found for selector: {}", selector_str);
-            println!("[DEV_TOOL] Info: {}", err_msg);
-            Err(err_msg)
+    let desktop = &state.desktop;
+    match desktop.locator(selector) {
+        Ok(locator) => {
+            match locator.first() {
+                Ok(Some(element)) => {
+                    println!("[DEV_TOOL] Found element: {:?}", element.attributes());
+                    let attrs = element.attributes();
+                    serde_json::to_string_pretty(&attrs).map_err(|e| {
+                        let err_msg = format!("Failed to serialize found element attributes: {}", e);
+                        println!("[DEV_TOOL] Error: {}", err_msg);
+                        err_msg
+                    })
+                }
+                Ok(None) => {
+                    let err_msg = format!("Element not found for selector: {}", selector_str);
+                    println!("[DEV_TOOL] Info: {}", err_msg);
+                    Err(err_msg)
+                }
+                Err(e) => {
+                    let err_msg = format!("Error finding element for selector '{}': {}", selector_str, e);
+                    println!("[DEV_TOOL] Error: {}", err_msg);
+                    Err(err_msg)
+                }
+            }
         }
         Err(e) => {
-            let err_msg = format!("Error finding element for selector '{}': {}", selector_str, e);
+            let err_msg = format!("Error creating locator for selector '{}': {}", selector_str, e);
             println!("[DEV_TOOL] Error: {}", err_msg);
             Err(err_msg)
         }
@@ -189,31 +200,41 @@ pub(crate) async fn dev_click_element_by_selector(
     println!("[DEV_TOOL] Clicking element by selector: {}", selector_str);
     let selector: Selector = selector_str.as_str().into();
 
-    match state.desktop.locator(selector).first() {
-        Ok(Some(element)) => {
-            println!("[DEV_TOOL] Found element, attempting click...");
-            match element.click() {
-                Ok(click_result) => {
-                    println!("[DEV_TOOL] Click successful: {:?}", click_result);
-                     let click_msg = format!("Clicked element matching: {}", selector_str);
-                     send_dev_tool_notification(&app, "Click Element", &click_msg)?;
-                    Ok(())
+    let desktop = &state.desktop;
+    match desktop.locator(selector) {
+        Ok(locator) => {
+            match locator.first() {
+                Ok(Some(element)) => {
+                    println!("[DEV_TOOL] Found element, attempting click...");
+                    match element.click() {
+                        Ok(click_result) => {
+                            println!("[DEV_TOOL] Click successful: {:?}", click_result);
+                             let click_msg = format!("Clicked element matching: {}", selector_str);
+                             send_dev_tool_notification(&app, "Click Element", &click_msg)?;
+                            Ok(())
+                        }
+                        Err(e) => {
+                            let err_msg = format!("Failed to click element found by selector '{}': {}", selector_str, e);
+                            println!("[DEV_TOOL] Error: {}", err_msg);
+                            Err(err_msg)
+                        }
+                    }
+                }
+                Ok(None) => {
+                    let err_msg = format!("Element not found for click selector: {}", selector_str);
+                    println!("[DEV_TOOL] Info: {}", err_msg);
+                    Err(err_msg)
                 }
                 Err(e) => {
-                    let err_msg = format!("Failed to click element found by selector '{}': {}", selector_str, e);
+                    let err_msg = format!("Error finding element for selector '{}': {}", selector_str, e);
                     println!("[DEV_TOOL] Error: {}", err_msg);
                     Err(err_msg)
                 }
             }
         }
-        Ok(None) => {
-            let err_msg = format!("Element not found for click selector: {}", selector_str);
-            println!("[DEV_TOOL] Info: {}", err_msg);
-            Err(err_msg)
-        }
         Err(e) => {
             let err_msg = format!(
-                "Error finding element before click for selector '{}': {}",
+                "Error creating locator for selector '{}': {}",
                 selector_str,
                 e
             );
@@ -232,7 +253,8 @@ pub(crate) async fn dev_get_selected_text(
 
     #[cfg(target_os = "macos")]
     {
-        match state.desktop.focused_element() {
+        let desktop = &state.desktop;
+        match desktop.focused_element() {
             Ok(element) => {
                 let attrs = element.attributes();
                 let selected_text = attrs.value.unwrap_or_else(|| "".to_string()); // Get value, default to empty string
