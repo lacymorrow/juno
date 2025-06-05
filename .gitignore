@@ -36,6 +36,9 @@ pnpm-lock.yaml
 *.sln
 *.sw?
 
-# # Tauri
-# src-tauri/target
-# **/debug/*
+# Tauri
+src-tauri/target
+**/debug/*
+
+# General Rust build artifacts
+target/
