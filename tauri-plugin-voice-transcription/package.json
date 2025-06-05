@@ -1,0 +1,50 @@
+{
+  "name": "tauri-plugin-voice-transcription",
+  "version": "0.1.0",
+  "description": "A Tauri plugin for voice transcription and dictation using Whisper",
+  "main": "api/dist/index.js",
+  "module": "api/dist/index.mjs",
+  "types": "api/dist/index.d.ts",
+  "scripts": {
+    "build": "cargo build --release && npm run build:api",
+    "build:api": "cd api && npm run build",
+    "dev": "npm run dev:api",
+    "dev:api": "cd api && npm run dev",
+    "install:api": "cd api && npm install",
+    "clean": "cargo clean && rm -rf api/dist api/node_modules",
+    "test": "cargo test",
+    "prepublishOnly": "npm run build"
+  },
+  "workspaces": [
+    "api"
+  ],
+  "files": [
+    "src/**/*",
+    "models/**/*",
+    "api/dist/**/*",
+    "Cargo.toml",
+    "build.rs",
+    "README.md"
+  ],
+  "keywords": [
+    "tauri",
+    "plugin",
+    "voice",
+    "transcription",
+    "whisper",
+    "speech-to-text"
+  ],
+  "author": "Juno Contributors",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/juno-app/tauri-plugin-voice-transcription"
+  },
+  "homepage": "https://github.com/juno-app/tauri-plugin-voice-transcription",
+  "devDependencies": {
+    "@tauri-apps/api": "^2.0.0-beta",
+    "@types/react": "^18.2.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,4 +1,4 @@
-# Juno AI Computer Use Agent - Cursor Rules ✅
+# Juno Cursor Rules Documentation
 
 This directory contains **consolidated cursor rules** for the Juno AI Computer Use Agent project - a complete implementation of Anthropic's Computer Use API with hierarchical agent architecture and advanced voice transcription.
 
@@ -18,6 +18,29 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 
 ### [backend-event-coordination.mdc](backend-event-coordination.mdc) ✅
 **Backend-frontend coordination patterns** preventing duplicate triggers, ensuring clean separation of concerns, and establishing single sources of truth.
+
+## Additional Rules (Permission Handling & State Management)
+
+### [macos-permission-handling.mdc](macos-permission-handling.mdc) ✅ **NEW**
+**Comprehensive guide for graceful permission management** including:
+- Graceful degradation architecture
+- Permission request patterns
+- Safe desktop access methods
+- Error handling for permission failures
+
+### [error-handling-patterns.mdc](error-handling-patterns.mdc) ✅ **NEW**
+**Complete error handling strategy** including:
+- Graceful degradation philosophy
+- Logging strategies and best practices
+- Error recovery mechanisms
+- Testing error scenarios
+
+### [app-state-management.mdc](app-state-management.mdc) ✅ **NEW**
+**Centralized state management** including:
+- Safe desktop access patterns
+- Memory manager integration
+- Timer management
+- Command integration patterns
 
 ## Implementation Status ✅ PRODUCTION READY
 
@@ -61,20 +84,27 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **Voice**: Custom Whisper.cpp-based transcription plugin  
 - **AI**: Multi-provider support (Anthropic, OpenAI, Gemini)
 
-## Benefits of Consolidation
+## Usage Guidelines
 
-✅ **Reduced Context Usage**: 3 focused rules instead of 25+ overlapping documents  
-✅ **Essential Information**: Only critical guidance for effective development  
-✅ **Clear Organization**: Logical separation of concerns (essentials, development, UI)  
-✅ **Comprehensive Coverage**: All important patterns and requirements included  
-✅ **Easy Maintenance**: Single source of truth for each topic area  
+### For New Features
+1. Check [02-development-guidelines.mdc](02-development-guidelines.mdc) for basic requirements
+2. Follow [app-state-management.mdc](app-state-management.mdc) for state integration
+3. Implement [error-handling-patterns.mdc](error-handling-patterns.mdc) consistently
+4. Use [macos-permission-handling.mdc](macos-permission-handling.mdc) for system permissions
 
-## Development Workflow
-
+### Development Workflow
 1. **Start with essentials** - Understand project status and architecture
 2. **Follow development guidelines** - Use established patterns and requirements  
 3. **Apply UI patterns** - Implement consistent frontend components and interactions
 4. **Test thoroughly** - Voice modes, computer use actions, and agent delegation
 5. **Always run cargo check** - Ensure compilation success before changes
 
-This consolidated structure provides all essential guidance for maintaining and extending the production-ready AI Computer Use implementation while dramatically reducing context window usage. 
+## Benefits of Consolidation
+
+✅ **Reduced Context Usage**: Focused rules instead of overlapping documents  
+✅ **Essential Information**: Only critical guidance for effective development  
+✅ **Clear Organization**: Logical separation of concerns (essentials, development, UI)  
+✅ **Comprehensive Coverage**: All important patterns and requirements included  
+✅ **Easy Maintenance**: Single source of truth for each topic area  
+
+This consolidated structure provides all essential guidance for maintaining and extending the production-ready AI Computer Use implementation while dramatically reducing context window usage.

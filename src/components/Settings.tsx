@@ -49,6 +49,21 @@ interface ProviderSettings {
   system_prompt?: string;
 }
 
+interface ToolConfig {
+  name: string;
+  category: string;
+  enabled: boolean;
+  description?: string;
+  required: boolean;
+}
+
+interface ToolCategory {
+  name: string;
+  description: string;
+  enabled: boolean;
+  tools: ToolConfig[];
+}
+
 interface SettingsProps {
   onNavigateToDevTools?: () => void;
   onNavigateToChat?: () => void;
@@ -79,6 +94,12 @@ const Settings: React.FC<SettingsProps> = ({
 
   // Sound Settings
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Tool Configuration Settings
+  const [toolConfigurations, setToolConfigurations] = useState<
+    Record<string, ToolCategory>
+  >({});
+  const [toolConfigLoading, setToolConfigLoading] = useState<boolean>(false);
 
   // Form state for provider settings
   const [formData, setFormData] = useState<{
@@ -159,6 +180,9 @@ const Settings: React.FC<SettingsProps> = ({
 
       // Load permissions status
       await loadPermissionsStatus();
+
+      // Load tool configurations
+      await loadToolConfigurations();
     } catch (error) {
       console.error("Failed to load settings:", error);
       toast.error("Failed to load settings");
@@ -333,6 +357,94 @@ const Settings: React.FC<SettingsProps> = ({
     } catch (error) {
       console.error("Failed to set agent mode:", error);
       toast.error("Failed to set agent mode");
+    }
+  };
+
+  const loadToolConfigurations = async () => {
+    try {
+      setToolConfigLoading(true);
+      const configurations = await invoke<Record<string, ToolCategory>>(
+        "get_tool_configurations"
+      );
+      setToolConfigurations(configurations);
+    } catch (error) {
+      console.error("Failed to load tool configurations:", error);
+      toast.error("Failed to load tool configurations");
+    } finally {
+      setToolConfigLoading(false);
+    }
+  };
+
+  const handleToggleCategory = async (
+    categoryName: string,
+    enabled: boolean
+  ) => {
+    try {
+      setToolConfigLoading(true);
+      await invoke("set_tool_category_enabled", {
+        category: categoryName,
+        enabled,
+      });
+
+      // Update local state
+      setToolConfigurations((prev) => ({
+        ...prev,
+        [categoryName]: {
+          ...prev[categoryName],
+          enabled,
+        },
+      }));
+
+      toast.success(
+        `${categoryName} category ${enabled ? "enabled" : "disabled"}`
+      );
+    } catch (error) {
+      console.error("Failed to toggle category:", error);
+      toast.error("Failed to update category setting");
+    } finally {
+      setToolConfigLoading(false);
+    }
+  };
+
+  const handleToggleTool = async (toolName: string, enabled: boolean) => {
+    try {
+      await invoke("set_tool_enabled", {
+        toolName,
+        enabled,
+      });
+
+      // Update local state
+      setToolConfigurations((prev) => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach((categoryName) => {
+          const category = updated[categoryName];
+          if (category.tools) {
+            category.tools = category.tools.map((tool) =>
+              tool.name === toolName ? { ...tool, enabled } : tool
+            );
+          }
+        });
+        return updated;
+      });
+
+      toast.success(`${toolName} tool ${enabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      console.error("Failed to toggle tool:", error);
+      toast.error("Failed to update tool setting");
+    }
+  };
+
+  const handleResetToolConfiguration = async () => {
+    try {
+      setToolConfigLoading(true);
+      await invoke("reset_tool_configuration");
+      await loadToolConfigurations();
+      toast.success("Tool configuration reset to defaults");
+    } catch (error) {
+      console.error("Failed to reset tool configuration:", error);
+      toast.error("Failed to reset tool configuration");
+    } finally {
+      setToolConfigLoading(false);
     }
   };
 
@@ -633,6 +745,150 @@ const Settings: React.FC<SettingsProps> = ({
                 Save Provider Settings
               </Button>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Tool Configuration Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Terminal size={20} />
+            Tool Configuration
+          </CardTitle>
+          <CardDescription>
+            Enable or disable specific tools and tool categories for the AI
+            agent
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {toolConfigLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Loading tool configurations...
+            </div>
+          ) : (
+            <>
+              {Object.entries(toolConfigurations).length === 0 ? (
+                <div className="text-center p-4 text-muted-foreground">
+                  <Terminal className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>Tool configuration will be available soon</p>
+                  <p className="text-sm">
+                    The system is being prepared for tool management
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {Object.entries(toolConfigurations).map(
+                    ([categoryName, category]) => (
+                      <div key={categoryName} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <h4 className="font-medium">{categoryName}</h4>
+                            <p className="text-sm text-muted-foreground">
+                              {category.description}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              handleToggleCategory(
+                                categoryName,
+                                !category.enabled
+                              )
+                            }
+                            className="flex items-center gap-2"
+                          >
+                            {category.enabled ? (
+                              <>
+                                <div className="w-4 h-4 bg-green-500 rounded-full"></div>
+                                Enabled
+                              </>
+                            ) : (
+                              <>
+                                <div className="w-4 h-4 bg-gray-400 rounded-full"></div>
+                                Disabled
+                              </>
+                            )}
+                          </Button>
+                        </div>
+
+                        {category.tools && category.tools.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              Tools (
+                              {category.tools.filter((t) => t.enabled).length}/
+                              {category.tools.length})
+                            </div>
+                            <div className="grid gap-2">
+                              {category.tools.map((tool) => (
+                                <div
+                                  key={tool.name}
+                                  className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded"
+                                >
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-medium">
+                                        {tool.name}
+                                      </span>
+                                      {tool.required && (
+                                        <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                          Required
+                                        </span>
+                                      )}
+                                    </div>
+                                    {tool.description && (
+                                      <p className="text-xs text-muted-foreground mt-1">
+                                        {tool.description}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleToggleTool(tool.name, !tool.enabled)
+                                    }
+                                    disabled={tool.required && tool.enabled}
+                                    className="ml-2"
+                                  >
+                                    {tool.enabled ? (
+                                      <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                                    ) : (
+                                      <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
+                                    )}
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  )}
+
+                  <div className="flex gap-2 pt-4">
+                    <Button
+                      variant="outline"
+                      onClick={handleResetToolConfiguration}
+                      className="flex items-center gap-2"
+                    >
+                      <RefreshCw size={16} />
+                      Reset to Defaults
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={loadToolConfigurations}
+                      className="flex items-center gap-2"
+                    >
+                      <RefreshCw size={16} />
+                      Refresh
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

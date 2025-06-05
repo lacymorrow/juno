@@ -22,8 +22,8 @@ pub async fn open_application_handler(
     State(state): State<Arc<AppState>>,
     Json(request): Json<OpenApplicationRequest>,
 ) -> Result<JsonResponse<OpenApplicationWithElementsResponse>, (StatusCode, JsonResponse<serde_json::Value>)> {
-    // Create Desktop automation instance
-    let desktop = match Desktop::new(false, true) {
+    // Create Desktop automation instance with auto-redirect for better UX
+    let desktop = match Desktop::new_with_auto_redirect(false, true, true) {
         Ok(desktop) => desktop,
         Err(err) => {
             return Err((
@@ -41,21 +41,21 @@ pub async fn open_application_handler(
                 success: true,
                 message: format!("successfully opened application: {}", request.app_name),
             };
-            
+
             // Get refreshed elements using the helper function - use a longer delay for app startup
             let mut elements_response = refresh_elements_and_attributes_after_action(state.clone(), request.app_name.clone(), 1000).await;
-            
+
             // If elements retrieval failed, wait 500ms and retry once
             if elements_response.is_none() {
                 log::info!("elements retrieval failed for {}, retrying after 500ms", request.app_name);
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 elements_response = refresh_elements_and_attributes_after_action(state, request.app_name.clone(), 500).await;
-                
+
                 if elements_response.is_none() {
                     log::warn!("elements retrieval failed for {} even after retry", request.app_name);
                 }
             }
-            
+
             // Return combined response
             Ok(JsonResponse(OpenApplicationWithElementsResponse {
                 application: app_response,

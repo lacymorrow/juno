@@ -1,6 +1,6 @@
 # Tauri Plugin Voice Transcription
 
-A Tauri plugin that provides voice transcription and dictation capabilities using OpenAI's Whisper model through the `whisper-rs` crate.
+A unified Tauri plugin that provides voice transcription and dictation capabilities using OpenAI's Whisper model through the `whisper-rs` crate.
 
 ## Features
 
@@ -10,15 +10,28 @@ A Tauri plugin that provides voice transcription and dictation capabilities usin
 - **Automatic audio resampling** to match Whisper requirements
 - **Event-based API** for seamless frontend integration
 - **Configurable model paths** and settings
-- **TypeScript/JavaScript bindings** for easy use
+- **TypeScript/JavaScript bindings** with React hooks included
+- **Co-located structure** - Both Rust backend and TypeScript API in one package
 
 ## Installation
 
+### Rust Plugin
 Add the plugin to your Tauri project:
 
 ```toml
 [dependencies]
 tauri-plugin-voice-transcription = "0.1.0"
+```
+
+### JavaScript/TypeScript API
+The TypeScript bindings are included in the same package:
+
+```json
+{
+  "dependencies": {
+    "tauri-plugin-voice-transcription": "file:path/to/tauri-plugin-voice-transcription/api"
+  }
+}
 ```
 
 ## Usage
@@ -57,6 +70,8 @@ Add plugin configuration to your `tauri.conf.json`:
 
 ### Frontend Usage
 
+#### Basic TypeScript API
+
 ```typescript
 import { 
   startDictation, 
@@ -64,7 +79,7 @@ import {
   toggleDictation, 
   getDictationStatus,
   transcribeFile 
-} from 'tauri-plugin-voice-transcription-api';
+} from 'tauri-plugin-voice-transcription';
 import { listen } from '@tauri-apps/api/event';
 
 // Start dictation
@@ -85,6 +100,32 @@ await stopDictation();
 
 // Transcribe a file
 const transcription = await transcribeFile('/path/to/audio.wav');
+```
+
+#### React Hook Usage
+
+```tsx
+import { useVoiceTranscription } from 'tauri-plugin-voice-transcription/react';
+
+function VoiceComponent() {
+  const { 
+    isListening, 
+    transcript, 
+    partialTranscript, 
+    startListening, 
+    stopListening 
+  } = useVoiceTranscription();
+
+  return (
+    <div>
+      <button onClick={isListening ? stopListening : startListening}>
+        {isListening ? 'Stop' : 'Start'} Dictation
+      </button>
+      <p>Partial: {partialTranscript}</p>
+      <p>Final: {transcript}</p>
+    </div>
+  );
+}
 ```
 
 ## Events

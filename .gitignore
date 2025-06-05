@@ -39,3 +39,6 @@ pnpm-lock.yaml
 # Tauri
 src-tauri/target
 **/debug/*
+
+# General Rust build artifacts
+target/

@@ -36,7 +36,8 @@ pub(crate) async fn capture_screenshot_command(_app: DummyAppHandle) -> Result<S
 
 #[tauri::command]
 pub(crate) async fn list_apps(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    match state.desktop.applications() {
+    let desktop = state.get_desktop()?;
+    match desktop.applications() {
         Ok(apps) => {
             let app_names = apps
                 .into_iter()
@@ -54,29 +55,31 @@ pub(crate) async fn list_apps(state: State<'_, AppState>) -> Result<Vec<String>,
 
 #[tauri::command]
 pub(crate) fn check_server_status(state: State<'_, AppState>) -> bool {
-    let _ = state.desktop;
-    true
+    state.is_desktop_available()
 }
 
 #[tauri::command]
 pub(crate) async fn dev_wait(duration_sec: f64, state: State<'_, AppState>) -> Result<(), String> {
     let duration_ms = (duration_sec * 1000.0).max(0.0) as u64; // Convert seconds to ms, ensure non-negative
     info!("Executing dev_wait for {} seconds ({} ms)", duration_sec, duration_ms);
-    state.desktop.wait(duration_ms)
+    let desktop = state.get_desktop()?;
+    desktop.wait(duration_ms)
         .map_err(|e| format!("Error during wait: {}", e))
 }
 
 #[tauri::command]
 pub(crate) async fn dev_get_clipboard(state: State<'_, AppState>) -> Result<String, String> {
     info!("Executing dev_get_clipboard");
-    state.desktop.get_clipboard_content()
+    let desktop = state.get_desktop()?;
+    desktop.get_clipboard_content()
         .map_err(|e| format!("Error getting clipboard content: {}", e))
 }
 
 #[tauri::command]
 pub(crate) async fn dev_set_clipboard(content: String, state: State<'_, AppState>) -> Result<(), String> {
     info!("Executing dev_set_clipboard {}", content);
-    state.desktop.set_clipboard_content(&content)
+    let desktop = state.get_desktop()?;
+    desktop.set_clipboard_content(&content)
         .map_err(|e| format!("Error setting clipboard content: {}", e))
 }
 

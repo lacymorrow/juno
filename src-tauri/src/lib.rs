@@ -19,7 +19,7 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
-use tracing::{info, warn}; // Import the info and warn macros
+use tracing::{info, warn, error}; // Import logging macros
 use serde::Deserialize; // Added for deserializing payload struct
 use std::sync::Mutex; // Added for VoiceController state access
 
@@ -54,6 +54,18 @@ const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
+// Import tool configuration commands explicitly
+use crate::commands::{
+    get_tool_configurations,
+    get_tool_config,
+    set_tool_enabled,
+    set_tool_category_enabled,
+    get_enabled_tools,
+    is_tool_enabled,
+    reset_tool_configuration,
+    get_tool_configuration_summary,
+};
+
 // Added for selector parsing
 
 // Define a struct for the expected payload of bar-state-changed event
@@ -79,13 +91,17 @@ pub fn run() {
     let cli = cli::Cli::parse();
 
     // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
-    let desktop_instance_result = Desktop::new(false, true);
+    let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, true);
     let desktop_instance = match desktop_instance_result {
-        Ok(instance) => instance,
+        Ok(instance) => {
+            tracing::info!("Desktop Automation Engine initialized successfully with auto-redirect");
+            Some(instance)
+        },
         Err(e) => {
-            eprintln!("FATAL: Failed to initialize Desktop Automation Engine: {}", e);
-            tracing::error!("Failed to initialize Desktop Automation Engine: {}", e);
-            std::process::exit(1);
+            tracing::warn!("Failed to initialize Desktop Automation Engine: {}", e);
+            tracing::info!("App will start with limited functionality - desktop automation features will be disabled");
+            tracing::info!("System Settings should have opened automatically if permissions are needed");
+            None
         }
     };
 
@@ -106,10 +122,12 @@ pub fn run() {
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---
     println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
-    let desktop_arc = Arc::new(desktop_instance);
 
-    // Create the AppState
-    let app_state = state::AppState::new(desktop_arc.clone());
+    // Create desktop_arc only if we have a valid instance
+    let desktop_arc = desktop_instance.map(|instance| Arc::new(instance));
+
+    // Create the AppState with optional desktop instance
+    let app_state = state::AppState::new(desktop_arc);
 
     // Initialize shell state
     commands::shell::init_shell_state(&app_state);
@@ -119,6 +137,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
+        .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
             println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
@@ -236,6 +255,13 @@ pub fn run() {
             open_system_preferences,
             start_permissions_monitoring,
             stop_permissions_monitoring,
+            // Enhanced Permissions Commands with Auto-Redirect
+            check_permissions_status_with_auto_redirect,
+            request_accessibility_permission_with_auto_redirect,
+            open_system_settings_enhanced,
+            restart_app_after_permissions,
+            prompt_app_restart_after_permissions,
+            check_restart_needed_after_permissions,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,
@@ -253,6 +279,15 @@ pub fn run() {
             get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
+            // Tool Configuration Commands
+            get_tool_configurations,
+            get_tool_config,
+            set_tool_enabled,
+            set_tool_category_enabled,
+            get_enabled_tools,
+            is_tool_enabled,
+            reset_tool_configuration,
+            get_tool_configuration_summary,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -679,6 +714,20 @@ pub fn run() {
                         }
                         Err(e) => {
                             tracing::error!("[Spacebar Dictation] Failed to start transcription: {}", e);
+
+                            // Clean up state if start failed
+                            let app_state = app_handle_clone.state::<state::AppState>();
+                            if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
+                                *spacebar_active = false;
+                            }
+
+                            // Reset spacebar monitor state
+                            crate::spacebar_monitor::force_reset_spacebar_state().await;
+
+                            // Emit failure event to UI
+                            if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
+                                tracing::error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event after start failure: {}", e);
+                            }
                         }
                     }
                 });
@@ -708,18 +757,19 @@ pub fn run() {
                     ).await {
                         Ok(_) => {
                             info!("[Spacebar Dictation] Cancelled transcription successfully");
-                            // Mark spacebar dictation as inactive in AppState
-                            let app_state = app_handle_clone.state::<state::AppState>();
-                            if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                                *spacebar_active = false;
-                            }
-                            if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                                tracing::error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event: {}", e);
-                            }
                         }
                         Err(e) => {
                             tracing::error!("[Spacebar Dictation] Failed to cancel transcription: {}", e);
                         }
+                    }
+
+                    // Always clean up state regardless of stop_dictation result
+                    let app_state = app_handle_clone.state::<state::AppState>();
+                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
+                        *spacebar_active = false;
+                    }
+                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
+                        tracing::error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event: {}", e);
                     }
                 });
             });
@@ -739,19 +789,84 @@ pub fn run() {
                     ).await {
                         Ok(_) => {
                             info!("[Spacebar Dictation] Completed dictation successfully");
-                            // Mark spacebar dictation as inactive in AppState
-                            let app_state = app_handle_clone.state::<state::AppState>();
-                            if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                                *spacebar_active = false;
-                            }
-                            if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                                tracing::error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event: {}", e);
-                            }
                         }
                         Err(e) => {
                             tracing::error!("[Spacebar Dictation] Failed to stop dictation: {}", e);
                         }
                     }
+
+                    // Always clean up state regardless of stop_dictation result
+                    let app_state = app_handle_clone.state::<state::AppState>();
+                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
+                        *spacebar_active = false;
+                    }
+                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
+                        tracing::error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event: {}", e);
+                    }
+                });
+            });
+
+            // Listen for force stop events (timeout/stuck transcription)
+            let app_handle_for_force_stop = app.handle().clone();
+            app.listen("spacebar-transcription-force-stop", move |_event| {
+                warn!("[Event] Received spacebar-transcription-force-stop event - emergency cleanup");
+
+                let app_handle_clone = app_handle_for_force_stop.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Force stop the voice controller with timeout
+                    let stop_with_timeout = tokio::time::timeout(
+                        std::time::Duration::from_secs(2),
+                        tauri_plugin_voice_transcription::commands::stop_dictation(
+                            app_handle_clone.clone(),
+                            app_handle_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
+                        )
+                    );
+
+                    match stop_with_timeout.await {
+                        Ok(Ok(_)) => {
+                            info!("[Spacebar Dictation] Force stop completed successfully");
+                        }
+                        Ok(Err(e)) => {
+                            error!("[Spacebar Dictation] Force stop failed: {}", e);
+                        }
+                        Err(_) => {
+                            error!("[Spacebar Dictation] Force stop timed out - controller may be deadlocked");
+                        }
+                    }
+
+                    // Force clean up state
+                    let app_state = app_handle_clone.state::<state::AppState>();
+                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
+                        *spacebar_active = false;
+                    }
+                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
+                        error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event: {}", e);
+                    }
+                });
+            });
+
+            // Listen for force cleanup events (stuck state recovery)
+            let app_handle_for_force_cleanup = app.handle().clone();
+            app.listen("spacebar-transcription-force-cleanup", move |_event| {
+                warn!("[Event] Received spacebar-transcription-force-cleanup event - recovering stuck state");
+
+                let app_handle_clone = app_handle_for_force_cleanup.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Reset spacebar monitor state
+                    crate::spacebar_monitor::force_reset_spacebar_state().await;
+
+                    // Force clean up app state
+                    let app_state = app_handle_clone.state::<state::AppState>();
+                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
+                        *spacebar_active = false;
+                    }
+
+                    // Emit cleanup complete event
+                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
+                        error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event: {}", e);
+                    }
+
+                    info!("[Spacebar Dictation] Force cleanup completed");
                 });
             });
 
@@ -828,6 +943,11 @@ pub fn run() {
                         // Reset spacebar dictation state after processing
                         if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
                             *spacebar_active = false;
+                        }
+
+                        // Emit state change event for UI
+                        if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
+                            error!("[Spacebar Dictation] Failed to emit spacebar-dictation-active event after final result: {}", e);
                         }
                     }
                 });

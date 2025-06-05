@@ -23,13 +23,14 @@ pub async fn list_elements_and_attributes_handler(
 ) -> Result<JsonResponse<ListElementsAndAttributesResponse>, (StatusCode, JsonResponse<serde_json::Value>)> {
     // Record start time at the beginning of the handler
     let start_time = std::time::Instant::now();
-    
+
     info!("listing all elements and attributes for app: {}", request.app_name);
-    
-    // Create desktop automation engine
-    let desktop = match Desktop::new(
+
+    // Create desktop automation engine with auto-redirect for better UX
+    let desktop = match Desktop::new_with_auto_redirect(
         request.use_background_apps.unwrap_or(false),
         request.activate_app.unwrap_or(false),
+        true, // Enable auto-redirect to System Settings
     ) {
         Ok(d) => d,
         Err(e) => {
@@ -88,7 +89,7 @@ pub async fn list_elements_and_attributes_handler(
 
     // Define non-interactable roles
     let non_interactable_roles = [
-        "AXGroup", "AXStaticText", "AXUnknown", "AXSeparator", 
+        "AXGroup", "AXStaticText", "AXUnknown", "AXSeparator",
         "AXHeading", "AXLayoutArea", "AXHelpTag", "AXGrowArea"
     ];
 
@@ -97,21 +98,21 @@ pub async fn list_elements_and_attributes_handler(
     let mut excluded_count = 0;
     let mut excluded_non_interactable_count = 0;
     let mut excluded_no_text_count = 0;
-    
+
     for (i, element) in elements.iter().enumerate() {
         // Extract complete attributes from element
         let attrs = element.attributes();
-        
+
         // Create a complete attributes object - removed id field
         let mut element_data = json!({
             "index": i,
             "role": attrs.role,
             // "id" field removed as requested
         });
-        
+
         // Check if we have role description in properties and modify role field
         let role_without_ax = attrs.role.trim_start_matches("AX");
-        
+
         if let Some(props) = attrs.properties.get("AXRoleDescription") {
             // First check if the property exists, then if it's a string value
             if let Some(role_desc) = props.as_ref().and_then(|v| v.as_str()) {
@@ -121,41 +122,41 @@ pub async fn list_elements_and_attributes_handler(
                 }
             }
         }
-        
+
         // Collect all text content for the combined field
         let mut text_parts = Vec::new();
-        
+
         // Collect value, label, description for text_parts
         if let Some(value) = &attrs.value {
             if !value.is_empty() {
                 text_parts.push(value.clone());
             }
         }
-        
+
         if let Some(label) = &attrs.label {
             if !label.is_empty() {
                 text_parts.push(label.clone());
             }
         }
-        
+
         if let Some(desc) = &attrs.description {
             if !desc.is_empty() {
                 text_parts.push(desc.clone());
             }
         }
-        
+
         // Add text values from properties if they exist
         for (key, value_opt) in &attrs.properties {
             // Skip properties that are likely to be non-human-readable
-            if key.contains("Parent") || 
-               key.contains("Children") || 
-               key == "AXRoleDescription" || 
-               key == "AXRole" || 
-               key == "AXTopLevelUIElement" || 
+            if key.contains("Parent") ||
+               key.contains("Children") ||
+               key == "AXRoleDescription" ||
+               key == "AXRole" ||
+               key == "AXTopLevelUIElement" ||
                key == "AXWindow" {
                 continue;
             }
-            
+
             if let Some(value) = value_opt {
                 if let Some(text_value) = value.as_str() {
                     if !text_value.is_empty() {
@@ -164,23 +165,23 @@ pub async fn list_elements_and_attributes_handler(
                 }
             }
         }
-        
+
         // Create the text field with all content
         let has_text = !text_parts.is_empty();
         if has_text {
             let combined_text = text_parts.join(" ");
-            
-            if i < 5 {  
+
+            if i < 5 {
                 info!("element {}: text field created: '{}'", i, &combined_text);
             }
-            
+
             element_data["text"] = Value::String(combined_text);
         }
-        
+
         // Check if element is non-interactable based on its role
         let role = attrs.role.as_str();
         let is_non_interactable = non_interactable_roles.contains(&role);
-        
+
         // Include element if it's either interactable OR has text
         if !is_non_interactable || has_text {
             // Add element to result
@@ -188,19 +189,19 @@ pub async fn list_elements_and_attributes_handler(
         } else {
             // Count excluded elements
             excluded_count += 1;
-            
+
             // Count by exclusion criteria
             if is_non_interactable {
                 excluded_non_interactable_count += 1;
             }
-            
+
             if !has_text {
                 excluded_no_text_count += 1;
             }
         }
     }
 
-    info!("excluded {} elements (non-interactable: {}, no text: {})", 
+    info!("excluded {} elements (non-interactable: {}, no text: {})",
           excluded_count, excluded_non_interactable_count, excluded_no_text_count);
 
     // Apply max_elements limit if specified
@@ -211,7 +212,7 @@ pub async fn list_elements_and_attributes_handler(
     }
 
     // Generate element statistics
-    let element_stats = generate_element_statistics(&result_elements, excluded_count, 
+    let element_stats = generate_element_statistics(&result_elements, excluded_count,
                                                    excluded_non_interactable_count, excluded_no_text_count);
     info!("generated statistics: {} different roles found", element_stats.top_roles.len());
 
@@ -240,9 +241,9 @@ pub async fn list_elements_and_attributes_handler(
     // Calculate elapsed time before returning response
     let elapsed_time = start_time.elapsed().as_secs_f64();
     let elapsed_formatted = format!("{:.2}", elapsed_time);
-    
+
     info!("processed request in {} seconds", elapsed_formatted);
-    
+
     Ok(JsonResponse(ListElementsAndAttributesResponse {
         elements: result_elements,
         cache_info,
@@ -253,24 +254,24 @@ pub async fn list_elements_and_attributes_handler(
 
 // Function to generate statistics about the elements
 fn generate_element_statistics(
-    elements: &[serde_json::Value], 
+    elements: &[serde_json::Value],
     excluded_count: usize,
     excluded_non_interactable: usize,
     excluded_no_text: usize
 ) -> ElementStatistics {
     let mut roles_count: HashMap<String, u32> = HashMap::new();
     let mut property_counts: HashMap<String, u32> = HashMap::new();
-    
+
     // Add counters for specific AX properties
     let mut ax_enabled_true = 0;
     let mut ax_enabled_false = 0;
     let mut ax_focused_true = 0;
     let mut ax_focused_false = 0;
-    
+
     // Track elements with and without text
     let mut with_text_count = 0;
     let mut without_text_count = 0;
-    
+
     for element in elements {
         // Count elements with/without text
         if element.get("text").is_some() {
@@ -278,37 +279,37 @@ fn generate_element_statistics(
         } else {
             without_text_count += 1;
         }
-        
+
         // Count by role
         if let Some(role) = element.get("role").and_then(|r| r.as_str()) {
             *roles_count.entry(role.to_string()).or_insert(0) += 1;
         }
-        
+
         // Count elements with various properties (only track non-zero counts)
         if element.get("description").is_some() {
             *property_counts.entry("with_description".to_string()).or_insert(0) += 1;
         }
-        
+
         if element.get("value").is_some() {
             *property_counts.entry("with_value".to_string()).or_insert(0) += 1;
         }
-        
+
         if element.get("label").is_some() {
             *property_counts.entry("with_label".to_string()).or_insert(0) += 1;
         }
-        
+
         if element.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false) {
             *property_counts.entry("enabled".to_string()).or_insert(0) += 1;
         }
-        
+
         if element.get("focused").and_then(|f| f.as_bool()).unwrap_or(false) {
             *property_counts.entry("focused".to_string()).or_insert(0) += 1;
         }
-        
+
         // Count elements with properties field
         if element.get("properties").is_some() {
             *property_counts.entry("with_properties".to_string()).or_insert(0) += 1;
-            
+
             // Check for specific AX properties
             if let Some(props) = element.get("properties") {
                 if let Some(enabled) = props.get("AXEnabled") {
@@ -318,7 +319,7 @@ fn generate_element_statistics(
                         ax_enabled_false += 1;
                     }
                 }
-                
+
                 if let Some(focused) = props.get("AXFocused") {
                     if focused.as_bool().unwrap_or(false) {
                         ax_focused_true += 1;
@@ -329,7 +330,7 @@ fn generate_element_statistics(
             }
         }
     }
-    
+
     // Add AX property counts to the property_counts map
     if ax_enabled_true > 0 {
         property_counts.insert("AXEnabled_true".to_string(), ax_enabled_true);
@@ -343,20 +344,20 @@ fn generate_element_statistics(
     if ax_focused_false > 0 {
         property_counts.insert("AXFocused_false".to_string(), ax_focused_false);
     }
-    
+
     // Sort roles by count (descending)
     let mut roles: Vec<(String, u32)> = roles_count.into_iter().collect();
     roles.sort_by(|a, b| b.1.cmp(&a.1));
-    
+
     // Limit to top roles (e.g., 5) for conciseness
     let top_limit = 5;
     let top_roles: HashMap<String, u32> = roles.into_iter()
         .take(top_limit)
         .collect();
-    
+
     // Filter out zero counts from property_counts (already handled with conditionals)
     let properties = property_counts;
-    
+
     ElementStatistics {
         count: elements.len(),
         excluded_count,
