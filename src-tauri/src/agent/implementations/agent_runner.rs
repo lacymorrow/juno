@@ -262,6 +262,14 @@ where
                          return Err(AgentError::Terminated);
                      }
 
+                    // Emit tool call request event
+                    tool_logger::log_tool_call_request(
+                        &self.app_handle,
+                        &tool_call.name,
+                        tool_call.input.clone(),
+                        Some(format!("Executing tool: {}", tool_call.name))
+                    );
+
                     log::info!(
                         "Executing tool: {} with ID: {}",
                         tool_call.name,
@@ -281,6 +289,23 @@ where
                         Ok(result) => {
                             let mut mem = self.memory.lock().await;
                             log::debug!("Tool {} finished successfully.", tool_call.name);
+
+                                                        // Emit tool call result event
+                            let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "screenshot" {
+                                result.output.as_str().map(|s| s.to_string())
+                            } else {
+                                None
+                            };
+
+                            tool_logger::log_tool_call_result(
+                                &self.app_handle,
+                                &tool_call.name,
+                                result.output.clone(),
+                                true, // success
+                                Some(format!("Tool {} executed successfully", tool_call.name)),
+                                screenshot_base64
+                            );
+
                             mem.add_message(Message {
                                 role: Role::Tool,
                                 // Prefer JSON string if possible, fallback to debug representation
@@ -296,20 +321,29 @@ where
                             .await?;
                         }
                         Err(e) => {
-                            // If a tool fails, add an error message to memory
-                            // and let the brain decide the next step.
-                            log::error!("Tool {} failed: {}", tool_call.name, e);
                             let mut mem = self.memory.lock().await;
-                             // Store the error message as the tool's content
+                            log::warn!("Tool {} failed with error: {}", tool_call.name, e);
+
+                            // Emit tool call result event for failure
+                            tool_logger::log_tool_call_result(
+                                &self.app_handle,
+                                &tool_call.name,
+                                serde_json::json!({"error": e.to_string()}),
+                                false, // success = false
+                                Some(format!("Tool {} failed: {}", tool_call.name, e)),
+                                None
+                            );
+
+                            // Create error result message
+                            let error_message = format!("Error: {}", e);
                             mem.add_message(Message {
                                 role: Role::Tool,
-                                content: format!("Error executing tool: {}", e),
+                                content: error_message,
                                 tool_calls: None,
-                                tool_call_id: Some(tool_call.id.clone()), // Use original call ID
+                                tool_call_id: Some(tool_call.id.clone()),
                                 name: Some(tool_call.name.clone()),
                             })
                             .await?;
-                            // Let the LLM handle the tool error, continue thinking
                         }
                     }
                 }
