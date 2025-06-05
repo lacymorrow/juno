@@ -324,9 +324,11 @@ const Settings: React.FC<SettingsProps> = ({
       await invoke("set_spacebar_clipboard_enabled", { enabled });
       setSpacebarClipboardEnabled(enabled);
       toast.success(
-        `Spacebar dictation clipboard saving ${
+        `Dictation Mode clipboard saving ${
           enabled ? "enabled" : "disabled"
-        }`
+        } - ${enabled ? "✓" : "✗"} Transcriptions will ${
+          enabled ? "" : "not "
+        }be saved to clipboard`
       );
     } catch (error) {
       console.error("Failed to set spacebar clipboard setting:", error);
@@ -513,9 +515,7 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="spacebar-clipboard">
-              Spacebar Dictation Clipboard
-            </Label>
+            <Label htmlFor="spacebar-clipboard">Dictation Mode Clipboard</Label>
             <div className="flex items-center gap-3">
               <Button
                 variant={spacebarClipboardEnabled ? "default" : "outline"}
@@ -528,13 +528,13 @@ const Settings: React.FC<SettingsProps> = ({
                 {spacebarClipboardEnabled ? "Enabled" : "Disabled"}
               </Button>
               <span className="text-sm text-muted-foreground">
-                Save transcribed text to clipboard when using spacebar dictation
+                Save transcribed text to clipboard when using Dictation Mode
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              When enabled, text transcribed via spacebar dictation (hold
-              Spacebar) will be saved to the system clipboard in addition to
-              being typed directly.
+              When enabled, text transcribed via Dictation Mode (hold Spacebar)
+              will be saved to the system clipboard in addition to being typed
+              directly.
             </p>
           </div>
 

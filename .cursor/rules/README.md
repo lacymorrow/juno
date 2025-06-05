@@ -19,6 +19,9 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 ### [backend-event-coordination.mdc](backend-event-coordination.mdc) ✅
 **Backend-frontend coordination patterns** preventing duplicate triggers, ensuring clean separation of concerns, and establishing single sources of truth.
 
+### [voice-modes-clarification.mdc](voice-modes-clarification.mdc) ✅ **NEW**
+**Complete voice mode documentation** distinguishing Dictation Mode (voice typing) from Agent Mode (AI conversations), including terminology standards and implementation patterns.
+
 ### [chat-event-handling.mdc](chat-event-handling.mdc) ✅ **NEW**
 **Chat event handling and message flow patterns** including TypeScript type safety, duplicate prevention, proper event listener management, and clean conversation display.
 
@@ -54,8 +57,9 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 - Timer system for long-running tasks
 
 ### Voice Interaction (Advanced Implementation)  
-- **Agent Mode (Alt+D)**: Voice queries for AI agent processing
-- **Dictation Mode (Spacebar)**: Immediate voice-to-text typing
+- **Agent Mode (Alt+D)**: Voice input for AI agent conversations and task execution
+- **Dictation Mode (Configurable Key)**: Immediate voice-to-text typing at cursor location
+- Two distinct workflows sharing voice transcription infrastructure
 - Intelligent timing with 0ms transcription start, 500ms commitment threshold
 
 ### Hierarchical Agent System (Production Ready)
@@ -72,14 +76,14 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
 ### Key Voice Modes
-- **Alt+D**: Toggle voice input for AI agent conversations
-- **Spacebar**: Hold for immediate voice-to-text typing at cursor
+- **Alt+D**: Toggle Agent Mode for AI conversations and task execution
+- **Configurable Key (Default Spacebar)**: Hold for Dictation Mode - immediate voice typing
 - **Escape**: Cancel current AI agent operation
 
 ### Essential Files
 - [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application setup and event handling
 - [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent implementation
-- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Intelligent spacebar timing
+- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Dictation mode key handling
 - [src/Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI with state management
 
 ### Platform Requirements

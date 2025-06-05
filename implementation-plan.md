@@ -19,7 +19,7 @@ Created Tauri v2 project structure with React frontend and established basic win
 - Created comprehensive plugin API with TypeScript bindings (tauri-plugin-voice-transcription-api)
 - Integrated the plugin into the main Juno app, replacing the embedded voice control implementation
 - Maintained backward compatibility by rebroadcasting plugin events (dictation-started, partial-result, dictation-finished) as app events
-- Added global shortcut handler (Alt+D) that emits toggle-dictation-request event for frontend handling
+- Added global shortcut handler (Alt+D) for Agent Mode that emits toggle-dictation-request event for frontend handling
 - Fixed missing import of `toggleDictation` function in App.tsx from the plugin API package
 
 ### Task 1.4: Anthropic Claude Integration ✅ DONE
@@ -221,7 +221,7 @@ Created Tauri v2 project structure with React frontend and established basic win
 - **Plugin Architecture**: Reusable voice transcription plugin
 - **Real-time Processing**: Streaming audio capture and transcription
 - **Event System**: Plugin events rebroadcast for compatibility
-- **Global Shortcuts**: Alt+D for voice activation
+- **Global Shortcuts**: Alt+D for Agent Mode activation, configurable key for Dictation Mode
 
 ## Known Limitations
 1. Currently macOS only (Windows/Linux support planned)
