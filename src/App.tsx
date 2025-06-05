@@ -246,24 +246,18 @@ function App() {
   const handleBackendResponseDebounced = useCallback(
     debounce((payload: BackendResponsePayload) => {
       console.log("Debounced handler executing for:", payload.query);
-      const { query, response } = payload;
+      const { response } = payload; // Remove query from destructuring since we won't use it
 
-      // Add user query message with timestamp
-      const currentTime = Date.now();
-      const userMessage: ChatMessage = {
-        role: "user",
-        content: query,
-        timestamp: currentTime,
-      };
-      // Add assistant response message with screenshot if available
+      // Only add assistant response message with screenshot if available
+      // User query is now added immediately in submitQuery
       const assistantMessage: ChatMessage = {
         role: "assistant",
         content: response.text,
         screenshot_base64: response.screenshot_base64,
-        timestamp: currentTime + 100, // Slight offset to ensure ordering
+        timestamp: Date.now(),
       };
 
-      setConversation((prev) => [...prev, userMessage, assistantMessage]);
+      setConversation((prev) => [...prev, assistantMessage]);
 
       // Play audio if available
       if (response.audio_base64) {
@@ -273,8 +267,8 @@ function App() {
       // Note: Sound feedback is now handled by the Rust backend based on agent_state
       // No need for frontend sound calls here to avoid duplicates
 
-      // Potentially reset processing state if managed globally here
-      setIsProcessing(false); // Assuming Bar.tsx also sets this true
+      // Reset processing state
+      setIsProcessing(false);
     }, 100), // Debounce for 100ms
     [] // Remove sound from dependencies since we're not using it here anymore
   );
@@ -332,6 +326,14 @@ function App() {
         return;
       }
       // For dictated queries, we proceed even if isProcessing is true.
+
+      // Add user query immediately to conversation
+      const userMessage: ChatMessage = {
+        role: "user",
+        content: text,
+        timestamp: Date.now(),
+      };
+      setConversation((prev) => [...prev, userMessage]);
 
       // If we reach here for dictation:
       // - text is not empty.
@@ -553,6 +555,47 @@ function App() {
             "[Agent Event Processor] Created thinking newMessage:",
             newMessage
           );
+        } else if (type === "tool_call_request" && "tool_name" in payload) {
+          console.log(
+            "[Agent Event Processor] Processing tool_call_request. Payload:",
+            payload
+          );
+          const requestPayload = payload as ToolCallRequestPayload;
+          newMessage = {
+            role: "tool_call_request",
+            tool_name: requestPayload.tool_name,
+            tool_args: requestPayload.tool_args,
+            content:
+              requestPayload.content ||
+              `Using tool: ${requestPayload.tool_name}`,
+            timestamp: currentTime,
+          };
+          console.log(
+            "[Agent Event Processor] Created tool_call_request newMessage:",
+            newMessage
+          );
+        } else if (type === "tool_call_result" && "tool_name" in payload) {
+          console.log(
+            "[Agent Event Processor] Processing tool_call_result. Payload:",
+            payload
+          );
+          const resultPayload = payload as ToolCallResultPayload;
+          newMessage = {
+            role: "tool_call_result",
+            tool_name: resultPayload.tool_name,
+            tool_output: resultPayload.tool_output,
+            content:
+              resultPayload.content ||
+              (resultPayload.success
+                ? `Tool ${resultPayload.tool_name} executed successfully.`
+                : `Tool ${resultPayload.tool_name} failed.`),
+            screenshot_base64: resultPayload.screenshot_base64,
+            timestamp: currentTime,
+          };
+          console.log(
+            "[Agent Event Processor] Created tool_call_result newMessage:",
+            newMessage
+          );
         } else if (type === "generic_content" && "content" in payload) {
           console.log(
             "[Agent Event Processor] Processing generic_content. Payload:",
@@ -592,42 +635,6 @@ function App() {
       unlistenPromise.then((unlistenFn) => unlistenFn());
     };
   }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
-
-  // Listen for detailed tool usage events
-  useEffect(() => {
-    const unlistenPromise = listen<ToolUsageEntry>("tool-usage", (event) => {
-      console.log("Received tool-usage event:", event.payload);
-      const { tool, inputs, result, success, timestamp, screenshot_base64 } =
-        event.payload;
-
-      setConversation((prev) => {
-        const toolRequestMessage: ChatMessage = {
-          role: "tool_call_request",
-          tool_name: tool,
-          tool_args: inputs,
-          content: `Using tool: ${tool}`,
-          timestamp: timestamp,
-        };
-
-        const toolResultMessage: ChatMessage = {
-          role: "tool_call_result",
-          tool_name: tool,
-          tool_output: result,
-          content: success
-            ? `Tool ${tool} executed successfully.`
-            : `Tool ${tool} failed.`,
-          screenshot_base64: screenshot_base64, // Attach screenshot to the result message
-          timestamp: timestamp + 1, // Ensure it appears after the request
-        };
-
-        return [...prev, toolRequestMessage, toolResultMessage];
-      });
-    });
-
-    return () => {
-      unlistenPromise.then((unlistenFn) => unlistenFn());
-    };
-  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

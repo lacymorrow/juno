@@ -19,6 +19,9 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 ### [backend-event-coordination.mdc](backend-event-coordination.mdc) ✅
 **Backend-frontend coordination patterns** preventing duplicate triggers, ensuring clean separation of concerns, and establishing single sources of truth.
 
+### [chat-event-handling.mdc](chat-event-handling.mdc) ✅ **NEW**
+**Chat event handling and message flow patterns** including TypeScript type safety, duplicate prevention, proper event listener management, and clean conversation display.
+
 ## Additional Rules (Permission Handling & State Management)
 
 ### [macos-permission-handling.mdc](macos-permission-handling.mdc) ✅ **NEW**
