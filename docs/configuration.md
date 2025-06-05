@@ -106,7 +106,7 @@ update_provider_temperature("anthropic", 0.7)
 ```rust
 // Default shortcuts (configurable)
 "Escape"    // Cancel agent execution (dynamic)
-"Alt+D"     // Toggle dictation (macOS: Option+D)
+"Alt+D"     // Toggle Agent Mode (macOS: Option+D)
 ```
 
 ### Agent Configuration
