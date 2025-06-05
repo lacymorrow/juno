@@ -71,8 +71,8 @@ pub struct AppState {
     state_components: Arc<std::sync::Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
     pub tts_provider: Arc<Mutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
     pub bar_ui_state: Arc<Mutex<String>>, // Added to store the current UI state of the floating bar
-    pub spacebar_dictation_active: Arc<Mutex<bool>>, // Track if Dictation Mode is active
-    pub spacebar_clipboard_enabled: Arc<Mutex<bool>>, // Track if Dictation Mode should save to clipboard
+    pub dictation_active: Arc<Mutex<bool>>, // Track if Dictation Mode is active
+    pub dictation_clipboard_enabled: Arc<Mutex<bool>>, // Track if Dictation Mode should save to clipboard
     pub sound_enabled: Arc<Mutex<bool>>, // Track if sound effects are enabled
     pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
     // Permissions state tracking
@@ -98,8 +98,8 @@ impl AppState {
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tts_provider: Arc::new(Mutex::new("off".to_string())), // Initialize TTS provider to "off"
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
-            spacebar_dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
-            spacebar_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
+            dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
+            dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
             sound_enabled: Arc::new(Mutex::new(true)), // Initialize sound effects as enabled by default
             timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
             // Initialize permissions state
