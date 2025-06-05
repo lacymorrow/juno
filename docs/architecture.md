@@ -76,7 +76,7 @@
 
 ### Event System
 - **Tauri Events**: Bidirectional communication between frontend/backend
-- **Global Shortcuts**: System-wide key bindings (Escape, Alt+D)
+- **Global Shortcuts**: System-wide key bindings (Escape for cancellation, Alt+D for Agent Mode)
 - **Voice Events**: Speech recognition state changes
 
 ## Key Design Patterns

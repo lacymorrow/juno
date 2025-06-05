@@ -29,7 +29,7 @@ type BarState =
   | "error"
   | "transcribing"
   | "speaking"
-  | "dictating"; // New state for spacebar dictation
+  | "dictating"; // New state for Dictation Mode
 
 export function FloatingBar() {
   const [barState, setBarState] = useState<BarState>("default");
@@ -44,7 +44,7 @@ export function FloatingBar() {
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const isPreparingToDrag = useRef(false); // Added: Flag for drag operation
   const [isAnimatingSize, setIsAnimatingSize] = useState(false); // For conditional backdrop-blur
-  const [isSpacebarDictation, setIsSpacebarDictation] = useState(false); // Track spacebar vs AI agent mode
+  const [isDictationMode, setIsDictationMode] = useState(false); // Track Dictation Mode vs AI Agent Mode
 
   // For debugging - log state changes
   useEffect(() => {
@@ -382,7 +382,7 @@ export function FloatingBar() {
     };
   }, [barState, inputRef]); // barState needed for the conditional in unlistenDidSubmit
 
-  // Effect to listen for dictation lifecycle events
+  // Effect to listen for Dictation Mode events to differentiate from AI Agent Mode
   useEffect(() => {
     let unlistenDictationStarted: (() => void) | undefined;
     let unlistenDictationFinished: (() => void) | undefined;
@@ -416,9 +416,9 @@ export function FloatingBar() {
             barState === "dictating"
           ) {
             setTranscriptionText(event.payload.partial);
-            // Update state to show transcribing unless we're in spacebar dictation mode
+            // Update state to show transcribing unless we're in Dictation Mode
             if (barState === "listening") {
-              setBarState(isSpacebarDictation ? "dictating" : "transcribing");
+              setBarState(isDictationMode ? "dictating" : "transcribing");
             }
           }
         }
@@ -441,9 +441,9 @@ export function FloatingBar() {
             clearTimeout(transitionTimeoutRef.current);
           if (event.payload.query) {
             // A query was successfully dictated.
-            // For spacebar dictation, we don't show input field, just process directly
-            if (isSpacebarDictation) {
-              // Spacebar dictation is handled differently - text is typed directly
+            // For Dictation Mode, we don't show input field, just process directly
+            if (isDictationMode) {
+              // Dictation Mode is handled differently - text is typed directly
               setBarState("finishing");
               transitionTimeoutRef.current = setTimeout(() => {
                 setBarState("default");
@@ -482,7 +482,7 @@ export function FloatingBar() {
     };
   }, [barState, inputRef]); // barState needed for conditional, inputRef for focus attempt
 
-  // Effect to listen for spacebar dictation events to differentiate from AI agent mode
+  // Effect to listen for Dictation Mode events to differentiate from AI Agent Mode
   useEffect(() => {
     let unlistenSpacebarActive: (() => void) | undefined;
     let unlistenSpacebarStart: (() => void) | undefined;
@@ -496,9 +496,9 @@ export function FloatingBar() {
             "FloatingBar Event: spacebar-dictation-active",
             event.payload
           );
-          setIsSpacebarDictation(event.payload);
+          setIsDictationMode(event.payload);
 
-          // Set visual state based on spacebar dictation status
+          // Set visual state based on Dictation Mode status
           if (event.payload) {
             setBarState("dictating");
             if (transitionTimeoutRef.current) {
@@ -515,7 +515,7 @@ export function FloatingBar() {
           console.log(
             "FloatingBar Event: spacebar-transcription-start (immediate)"
           );
-          setIsSpacebarDictation(true);
+          setIsDictationMode(true);
           setBarState("dictating");
           setTranscriptionText(""); // Clear any previous transcription
           if (transitionTimeoutRef.current) {
@@ -541,7 +541,7 @@ export function FloatingBar() {
         "spacebar-transcription-cancel",
         () => {
           console.log("FloatingBar Event: spacebar-transcription-cancel");
-          setIsSpacebarDictation(false);
+          setIsDictationMode(false);
 
           // Quickly return to default state since this was cancelled
           setBarState("default");
@@ -553,12 +553,12 @@ export function FloatingBar() {
         }
       );
 
-      // Listen for spacebar dictation stop events (normal completion)
+      // Listen for Dictation Mode stop events (normal completion)
       unlistenSpacebarStop = await listen("spacebar-dictation-stop", () => {
         console.log(
           "FloatingBar Event: spacebar-dictation-stop (normal completion)"
         );
-        setIsSpacebarDictation(false);
+        setIsDictationMode(false);
 
         // Briefly show a completion state, then return to default
         setBarState("finishing");
@@ -576,7 +576,7 @@ export function FloatingBar() {
           console.warn(
             "FloatingBar Event: spacebar-transcription-force-stop - emergency cleanup"
           );
-          setIsSpacebarDictation(false);
+          setIsDictationMode(false);
           setBarState("default");
           setTranscriptionText("");
 
@@ -593,7 +593,7 @@ export function FloatingBar() {
           console.warn(
             "FloatingBar Event: spacebar-transcription-force-cleanup - recovering stuck state"
           );
-          setIsSpacebarDictation(false);
+          setIsDictationMode(false);
           setBarState("default");
           setTranscriptionText("");
 
