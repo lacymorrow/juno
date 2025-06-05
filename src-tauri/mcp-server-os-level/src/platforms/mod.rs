@@ -186,3 +186,37 @@ pub fn create_engine(
         ))
     }
 }
+
+/// Create the appropriate engine for the current platform with auto-redirect permission handling
+pub fn create_engine_with_auto_redirect(
+    use_background_apps: bool,
+    activate_app: bool,
+    auto_open_settings: bool,
+) -> Result<Box<dyn AccessibilityEngine>, AutomationError> {
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(Box::new(macos::MacOSEngine::new_with_auto_redirect(
+            use_background_apps,
+            activate_app,
+            auto_open_settings,
+        )?));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return Err(AutomationError::UnsupportedPlatform(
+            "Windows not yet supported".to_string(),
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return Err(AutomationError::UnsupportedPlatform(
+            "Linux not yet supported".to_string(),
+        ));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        Err(AutomationError::UnsupportedPlatform(
+            "Unsupported operating system".to_string(),
+        ))
+    }
+}
