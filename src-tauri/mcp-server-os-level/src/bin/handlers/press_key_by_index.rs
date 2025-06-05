@@ -23,7 +23,7 @@ pub async fn press_key_by_index_handler(
     State(state): State<Arc<AppState>>,
     Json(request): Json<PressKeyByIndexRequest>,
 ) -> Result<JsonResponse<PressKeyByIndexWithElementsResponse>, (StatusCode, JsonResponse<serde_json::Value>)> {
-    debug!("pressing key combination by index: element_index={}, key_combo={}", 
+    debug!("pressing key combination by index: element_index={}, key_combo={}",
         request.element_index, request.key_combo);
 
     // Get elements from cache
@@ -46,7 +46,7 @@ pub async fn press_key_by_index_handler(
         Some((elements, timestamp, app_name)) if timestamp.elapsed() < std::time::Duration::from_secs(30) => {
             // Activate the app first
             debug!("activating app: {}", app_name);
-            let desktop = match Desktop::new(false, true) {
+            let desktop = match Desktop::new_with_auto_redirect(false, true, true) {
                 Ok(d) => d,
                 Err(e) => {
                     error!("failed to initialize desktop automation: {}", e);
@@ -76,24 +76,24 @@ pub async fn press_key_by_index_handler(
             // Use element_index directly
             if request.element_index < elements.len() {
                 let element = &elements[request.element_index];
-                
+
                 // Step 1: Try to click the element first to focus it
                 if let Err(e) = element.click() {
                     debug!("failed to click element before key press: {}", e);
                     // Continue anyway
                 }
-                
+
                 // Small delay to ensure element is focused
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                
+
                 // Step 2: Try inputControl first (AppleScript)
                 debug!("attempting to press key '{}' using inputControl (AppleScript)", request.key_combo);
-                
+
                 use std::process::Command;
-                
+
                 // Convert key combo to AppleScript format
                 let key_script = convert_key_combo_to_applescript(&request.key_combo);
-                
+
                 let input_control_success = match Command::new("osascript").arg("-e").arg(key_script).output() {
                     Ok(_) => {
                         debug!("successfully pressed key '{}' using inputControl", request.key_combo);
@@ -104,7 +104,7 @@ pub async fn press_key_by_index_handler(
                         false
                     }
                 };
-                
+
                 // Step 3: If inputControl failed, use accessibility API as fallback
                 if !input_control_success {
                     debug!("falling back to accessibility API for key press");
@@ -123,7 +123,7 @@ pub async fn press_key_by_index_handler(
                         }
                     }
                 }
-                
+
                 // Create the success response based on which method worked
                 let method_used = if input_control_success { "AppleScript" } else { "Accessibility API" };
                 let press_key_response = PressKeyByIndexResponse {
@@ -135,10 +135,10 @@ pub async fn press_key_by_index_handler(
                         method_used
                     ),
                 };
-                
+
                 // Get refreshed elements using the helper function
                 let elements_response = refresh_elements_and_attributes_after_action(state, app_name.clone(), 500).await;
-                
+
                 // Return combined response
                 Ok(JsonResponse(PressKeyByIndexWithElementsResponse {
                     press_key: press_key_response,
@@ -184,16 +184,16 @@ pub async fn press_key_by_index_handler(
 fn convert_key_combo_to_applescript(key_combo: &str) -> String {
     // Split the key combo by "+" to handle modifiers
     let parts: Vec<&str> = key_combo.split('+').collect();
-    
+
     // Last part is usually the main key
     let main_key = parts.last().unwrap_or(&"").trim();
-    
+
     // Check for modifiers
     let has_command = parts.iter().any(|p| p.trim().eq_ignore_ascii_case("command") || p.trim().eq_ignore_ascii_case("cmd"));
     let has_shift = parts.iter().any(|p| p.trim().eq_ignore_ascii_case("shift"));
-    let has_option = parts.iter().any(|p| p.trim().eq_ignore_ascii_case("option") || p.trim().eq_ignore_ascii_case("alt")); 
+    let has_option = parts.iter().any(|p| p.trim().eq_ignore_ascii_case("option") || p.trim().eq_ignore_ascii_case("alt"));
     let has_control = parts.iter().any(|p| p.trim().eq_ignore_ascii_case("control") || p.trim().eq_ignore_ascii_case("ctrl"));
-    
+
     // For special keys like Return, Tab, etc.
     let special_key_mapping = match main_key.to_lowercase().as_str() {
         "return" | "enter" => "return",
@@ -207,17 +207,17 @@ fn convert_key_combo_to_applescript(key_combo: &str) -> String {
         "right" | "rightarrow" => "right arrow",
         _ => main_key,  // use as is for regular keys
     };
-    
+
     // Build the AppleScript
     let mut script = String::from("tell application \"System Events\" to ");
-    
+
     // For simple one-character keys
     if special_key_mapping.len() == 1 && !has_command && !has_shift && !has_option && !has_control {
         script.push_str(&format!("keystroke \"{}\"", special_key_mapping));
     } else {
         // For key combinations or special keys
         script.push_str("key code ");
-        
+
         // Map the key to AppleScript key code or use the name for special keys
         match special_key_mapping {
             "return" => script.push_str("36"),
@@ -250,7 +250,7 @@ fn convert_key_combo_to_applescript(key_combo: &str) -> String {
                 }
             }
         }
-        
+
         // Add modifiers
         if has_command || has_shift || has_option || has_control {
             script.push_str(" using {");
@@ -263,7 +263,7 @@ fn convert_key_combo_to_applescript(key_combo: &str) -> String {
             script.push_str("}");
         }
     }
-    
+
     debug!("generated applescript: {}", script);
     script
 }

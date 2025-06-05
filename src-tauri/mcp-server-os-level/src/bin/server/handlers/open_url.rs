@@ -39,8 +39,8 @@ pub async fn open_url_handler(
 {
     info!("handling request to open url: {}", request.url);
 
-    // Create Desktop automation instance
-    let desktop = match Desktop::new(false, true) {
+    // Create Desktop automation instance with auto-redirect for better UX
+    let desktop = match Desktop::new_with_auto_redirect(false, true, true) {
         Ok(desktop) => desktop,
         Err(err) => {
             error!("failed to initialize automation: {}", err);

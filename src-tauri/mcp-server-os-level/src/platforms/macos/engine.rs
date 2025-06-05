@@ -48,6 +48,17 @@ impl MacOSEngine {
         })
     }
 
+    pub fn new_with_auto_redirect(use_background_apps: bool, activate_app: bool, auto_open_settings: bool) -> Result<Self, AutomationError> {
+        use super::permissions::check_accessibility_permissions_with_auto_redirect;
+        check_accessibility_permissions_with_auto_redirect(false, auto_open_settings)?;
+
+        Ok(Self {
+            system_wide: ThreadSafeAXUIElement::system_wide(),
+            use_background_apps,
+            activate_app,
+        })
+    }
+
     pub(crate) fn wrap_element(
         &self,
         ax_element: ThreadSafeAXUIElement,
