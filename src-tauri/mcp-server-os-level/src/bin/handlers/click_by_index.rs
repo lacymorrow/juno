@@ -44,16 +44,16 @@ pub async fn click_by_index_handler(
             // Use element_index directly
             if request.element_index < elements.len() {
                 let element = &elements[request.element_index];
-                
+
                 // Step 1: Try inputControl first (AppleScript) if bounds are available
                 let bounds = element.bounds();
                 let input_control_success = if let Ok((x, y, width, height)) = bounds {
-                    debug!("attempting to click element at position [{}, {}] using inputControl", 
+                    debug!("attempting to click element at position [{}, {}] using inputControl",
                           x + width/2.0, y + height/2.0);
-                    
+
                     // Activate the app first
                     debug!("activating app: {}", app_name);
-                    let desktop = match Desktop::new(false, true) {
+                    let desktop = match Desktop::new_with_auto_redirect(false, true, true) {
                         Ok(d) => d,
                         Err(e) => {
                             error!("failed to initialize desktop automation: {}", e);
@@ -79,19 +79,19 @@ pub async fn click_by_index_handler(
                             ));
                         }
                     };
-                    
+
                     // Calculate center of element
                     let center_x = x + width/2.0;
                     let center_y = y + height/2.0;
-                    
+
                     use std::process::Command;
-                    
+
                     // Use AppleScript to click at position
                     let script = format!(
                         "tell application \"System Events\" to click at {{round {}, round {}}}",
                         center_x, center_y
                     );
-                    
+
                     match Command::new("osascript").arg("-e").arg(script).output() {
                         Ok(_) => {
                             debug!("successfully clicked element using inputControl at [{}, {}]",
@@ -107,7 +107,7 @@ pub async fn click_by_index_handler(
                     debug!("could not get element bounds - skipping inputControl approach");
                     false
                 };
-                
+
                 // Step 2: If inputControl failed, use accessibility API as fallback
                 if !input_control_success {
                     debug!("using accessibility API for clicking");
@@ -126,7 +126,7 @@ pub async fn click_by_index_handler(
                         }
                     }
                 }
-                
+
                 // Create the success response based on which method worked
                 let method_used = if input_control_success { "AppleScript" } else { "Accessibility API" };
                 let click_response = ClickByIndexResponse {
@@ -137,10 +137,10 @@ pub async fn click_by_index_handler(
                     ),
                     elements: None,  // add the missing field
                 };
-                
+
                 // Get refreshed elements using the helper function
                 let elements_response = refresh_elements_and_attributes_after_action(state, app_name.clone(), 500).await;
-                
+
                 // Return combined response
                 Ok(JsonResponse(ClickByIndexWithElementsResponse {
                     click: click_response,

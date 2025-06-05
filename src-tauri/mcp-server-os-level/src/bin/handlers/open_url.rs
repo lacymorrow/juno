@@ -37,9 +37,9 @@ pub async fn open_url_handler(
     Json(request): Json<OpenUrlRequest>,
 ) -> Result<JsonResponse<OpenUrlWithElementsResponse>, (StatusCode, JsonResponse<serde_json::Value>)> {
     info!("handling request to open url: {}", request.url);
-    
-    // Create Desktop automation instance
-    let desktop = match Desktop::new(false, true) {
+
+    // Create Desktop automation instance with auto-redirect for better UX
+    let desktop = match Desktop::new_with_auto_redirect(false, true, true) {
         Ok(desktop) => desktop,
         Err(err) => {
             error!("failed to initialize automation: {}", err);
@@ -52,32 +52,32 @@ pub async fn open_url_handler(
 
     // Open the URL
     let browser_ref = request.browser.as_deref();
-    
+
     if let Some(browser) = browser_ref {
         debug!("opening url {} in specified browser: {}", request.url, browser);
     } else {
         debug!("opening url {} in system default browser", request.url);
     }
-    
+
     match desktop.open_url(&request.url, browser_ref) {
         Ok(_) => {
             // Wait for browser to start/activate
             tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-            
+
             // Determine which browser to use for refreshing elements
             let browser_for_refresh: Option<String> = if let Some(browser) = &request.browser {
                 // If user specified a browser, use that
                 info!("using specified browser for refresh: {}", browser);
-                
+
                 // Map common browser names to possible variations
                 let browser_search = match browser.as_str() {
                     "Google Chrome" => "Chrome",
                     "Microsoft Edge" => "Edge",
                     _ => browser.as_str(),
                 };
-                
+
                 debug!("searching for browser as: {}", browser_search);
-                
+
                 if desktop.application(browser_search).is_ok() {
                     info!("found browser with name: {}", browser_search);
                     Some(browser_search.to_string())
@@ -89,7 +89,7 @@ pub async fn open_url_handler(
                 // Try to detect which browser is running
                 let likely_browsers = ["Arc", "Safari", "Chrome", "Firefox", "Edge", "Opera", "Brave"];
                 let mut detected = None;
-                
+
                 for browser in likely_browsers.iter() {
                     match desktop.application(browser) {
                         Ok(_) => {
@@ -100,17 +100,17 @@ pub async fn open_url_handler(
                         Err(_) => continue,
                     }
                 }
-                
+
                 // If we couldn't detect a specific browser, we don't do element refresh
                 if detected.is_none() {
                     info!("could not detect which browser was used - skipping element refresh");
                 }
-                
+
                 detected
             };
-            
+
             info!("successfully opened url: {}", request.url);
-            
+
             // Create success response
             let url_response = OpenUrlResponse {
                 success: true,
@@ -120,7 +120,7 @@ pub async fn open_url_handler(
                     format!("successfully opened URL: {} in default browser (unknown)", request.url)
                 },
             };
-            
+
             // Only attempt to refresh elements if we know which browser to target
             let elements_response = if let Some(browser) = browser_for_refresh {
                 refresh_elements_and_attributes_after_action(state, browser, 2000).await
@@ -128,7 +128,7 @@ pub async fn open_url_handler(
                 // If we don't know which browser was used, don't try to refresh elements
                 None
             };
-            
+
             // Return combined response
             Ok(JsonResponse(OpenUrlWithElementsResponse {
                 url: url_response,
@@ -173,5 +173,5 @@ curl -X POST http://localhost:8080/api/open-url \
     else
       "\n  no stats available"
     end)"'
-  
+
 */

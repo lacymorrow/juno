@@ -32,7 +32,7 @@ use handlers::mcp::{handle_initialize, handle_execute_tool_function, mcp_error_r
 async fn main() -> anyhow::Result<()> {
     // Check if we should use STDIO mode
     let use_stdio = std::env::args().any(|arg| arg == "--stdio");
-    
+
     // initialize tracing with different settings based on mode
     if use_stdio {
         // For STDIO mode, disable colors and only log to stderr
@@ -47,12 +47,12 @@ async fn main() -> anyhow::Result<()> {
             .with_max_level(LevelFilter::DEBUG)
             .init();
     }
-    
+
     info!("starting ui automation server");
-    
+
     // Check permissions early - add this line
     check_os_permissions();
-    
+
     // Create app state
     let app_state = Arc::new(AppState {
         element_cache: Arc::new(Mutex::new(None)),
@@ -65,14 +65,14 @@ async fn main() -> anyhow::Result<()> {
         info!("running in HTTP mode on port 8080");
         run_http_server(app_state).await?;
     }
-    
+
     Ok(())
 }
 
 async fn run_http_server(app_state: Arc<AppState>) -> anyhow::Result<()> {
     // Create CORS layer
     let cors = CorsLayer::very_permissive();
-    
+
     // Create router with both existing and MCP endpoints plus new endpoints
     let app = Router::new()
         .route("/mcp", post(mcp_handler))
@@ -86,16 +86,16 @@ async fn run_http_server(app_state: Arc<AppState>) -> anyhow::Result<()> {
         .with_state(app_state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
-    
+
     // Get the address to bind to
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     info!("listening on {}", addr);
-    
+
     // Start the server
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await?;
-    
+
     Ok(())
 }
 
@@ -104,24 +104,35 @@ fn check_os_permissions() {
     // Only check on macOS
     #[cfg(target_os = "macos")]
     {
-        use computer_use_ai_sdk::platforms::macos::check_accessibility_permissions;
-        
-        match check_accessibility_permissions(true) {
+        use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions_with_auto_redirect;
+
+        match check_accessibility_permissions_with_auto_redirect(true, true) {
             Ok(granted) => {
                 if !granted {
-                    info!("accessibility permissions: prompt shown to user");
-                    // Sleep to give user time to respond to the prompt
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                    
-                    // Check again without prompt
-                    match check_accessibility_permissions(false) {
-                        Ok(_) => info!("accessibility permissions now granted"),
+                    info!("accessibility permissions: prompt shown to user with auto-redirect to System Settings");
+                    // Sleep to give user time to respond to the prompt and open settings
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+
+                    // Check again without prompt or auto-redirect
+                    match check_accessibility_permissions_with_auto_redirect(false, false) {
+                        Ok(now_granted) => {
+                            if now_granted {
+                                info!("accessibility permissions now granted");
+                            } else {
+                                info!("**************************************************************");
+                                info!("* ACCESSIBILITY PERMISSIONS STILL REQUIRED                   *");
+                                info!("* System Settings has been opened for you automatically.     *");
+                                info!("* Please grant accessibility permissions to this app.        *");
+                                info!("* Without this permission, UI automation will not function.   *");
+                                info!("**************************************************************");
+                            }
+                        },
                         Err(e) => {
-                            error!("accessibility permissions check failed: {}", e);
+                            error!("accessibility permissions check failed after auto-redirect: {}", e);
                             info!("**************************************************************");
                             info!("* ACCESSIBILITY PERMISSIONS REQUIRED                          *");
-                            info!("* Go to System Preferences > Security & Privacy > Privacy >   *");
-                            info!("* Accessibility and add this application.                     *");
+                            info!("* System Settings should have opened automatically.           *");
+                            info!("* Please grant accessibility permissions to this app.        *");
                             info!("* Without this permission, UI automation will not function.   *");
                             info!("**************************************************************");
                         }
@@ -134,8 +145,10 @@ fn check_os_permissions() {
                 error!("accessibility permissions check failed: {}", e);
                 info!("**************************************************************");
                 info!("* ACCESSIBILITY PERMISSIONS REQUIRED                          *");
-                info!("* Go to System Preferences > Security & Privacy > Privacy >   *");
-                info!("* Accessibility and add this application.                     *");
+                info!("* System Settings should have opened automatically.           *");
+                info!("* Please grant accessibility permissions to this app.        *");
+                info!("* If System Settings didn't open, go to:                     *");
+                info!("* System Settings > Privacy & Security > Accessibility       *");
                 info!("* Without this permission, UI automation will not function.   *");
                 info!("**************************************************************");
             }

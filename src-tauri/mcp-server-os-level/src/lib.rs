@@ -122,6 +122,45 @@ impl Desktop {
         }
     }
 
+    /// Initializes the Desktop environment with auto-redirect permission handling.
+    /// When permissions are denied, automatically opens System Settings for the user.
+    pub fn new_with_auto_redirect(use_background_apps: bool, activate_app: bool, auto_open_settings: bool) -> Result<Self, AutomationError> {
+        let engine_result = if cfg!(target_os = "macos") {
+            info!("Initializing macOS engine with auto-redirect...");
+            platforms::macos::MacOSEngine::new_with_auto_redirect(use_background_apps, activate_app, auto_open_settings)
+                .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
+        } else if cfg!(target_os = "windows") {
+            info!("Initializing Windows engine...");
+            #[cfg(target_os = "windows")]
+            {
+                platforms::windows::WindowsEngine::new()
+                    .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                 // Ensure the Err type matches the other branches
+                 Err(AutomationError::UnsupportedPlatform("Windows engine not supported on this platform".to_string()))
+            }
+        } else {
+            Err(AutomationError::UnsupportedPlatform("Platform not supported".to_string()))
+        };
+
+        match engine_result {
+            Ok(engine) => {
+                info!("Desktop engine with auto-redirect initialized successfully.");
+                Ok(Self {
+                    engine,
+                    use_background_apps,
+                    activate_app,
+                })
+            }
+            Err(e) => {
+                error!("Failed to initialize desktop engine with auto-redirect: {}", e);
+                Err(e)
+            }
+        }
+    }
+
     /// Returns a reference to the underlying accessibility engine.
     pub fn engine(&self) -> Arc<dyn platforms::AccessibilityEngine + Send + Sync> {
         self.engine.clone()

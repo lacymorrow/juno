@@ -34,10 +34,11 @@ pub async fn list_elements_and_attributes_handler(
         request.app_name
     );
 
-    // Create desktop automation engine
-    let desktop = match Desktop::new(
+    // Create desktop automation engine with auto-redirect for better UX
+    let desktop = match Desktop::new_with_auto_redirect(
         request.use_background_apps.unwrap_or(false),
         request.activate_app.unwrap_or(false),
+        true, // Enable auto-redirect to System Settings
     ) {
         Ok(d) => d,
         Err(e) => {

@@ -44,13 +44,13 @@ pub async fn type_by_index_handler(
             // Use element_index directly
             if request.element_index < elements.len() {
                 let element = &elements[request.element_index];
-                
+
                 // Step 1: Try inputControl first
                 debug!("attempting to type text '{}' using inputControl (AppleScript)", request.text);
 
                 // Activate the app first
                 debug!("activating app: {}", app_name);
-                let desktop = match Desktop::new(false, true) {
+                let desktop = match Desktop::new_with_auto_redirect(false, true, true) {
                     Ok(d) => d,
                     Err(e) => {
                         error!("failed to initialize desktop automation: {}", e);
@@ -109,12 +109,12 @@ pub async fn type_by_index_handler(
                     debug!("falling back to AXValue for typing");
                     match element.type_text(&request.text) {
                         Ok(_) => {
-                            debug!("successfully typed text '{}' into element with role: {} using AXValue", 
+                            debug!("successfully typed text '{}' into element with role: {} using AXValue",
                                   request.text, element.role());
-                            
+
                             // Add a small delay to ensure UI updates
                             std::thread::sleep(std::time::Duration::from_millis(100));
-                            
+
                             // Verify text was actually set by reading it back
                             let verification = match element.text(1) {
                                 Ok(actual_text) => {
@@ -123,7 +123,7 @@ pub async fn type_by_index_handler(
                                         debug!("verified text was set correctly: '{}'", actual_text);
                                         true
                                     } else {
-                                        debug!("verification failed: expected '{}' but got '{}'", 
+                                        debug!("verification failed: expected '{}' but got '{}'",
                                               request.text, actual_text);
                                         false
                                     }
@@ -133,7 +133,7 @@ pub async fn type_by_index_handler(
                                     false
                                 }
                             };
-                            
+
                             if !verification {
                                 error!("failed to verify text was set with AXValue after inputControl failure");
                                 return Err((
@@ -165,10 +165,10 @@ pub async fn type_by_index_handler(
                         element.role(), method_used
                     ),
                 };
-                
+
                 // Get refreshed elements using the helper function
                 let elements_response = refresh_elements_and_attributes_after_action(state, app_name.clone(), 500).await;
-                
+
                 // Return combined response
                 Ok(JsonResponse(TypeByIndexWithElementsResponse {
                     type_action: type_response,
