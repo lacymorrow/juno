@@ -1,14 +1,13 @@
-use crate::element::{UIElement, UIElementImpl, UIElementAttributes};
-use crate::platforms::AccessibilityEngine;
-use crate::{AutomationError, Selector, ClickResult, Locator, ElementTreeNode};
+use crate::operator::element::UIElementImpl;
+use crate::operator::platforms::AccessibilityEngine;
+use crate::operator::ClickResult;
+use crate::operator::{AutomationError, Locator, Selector, UIElement, UIElementAttributes};
 use std::fmt::Debug;
-use std::any::Any;
-use serde_json::Value as JsonValue;
 
 pub struct LinuxEngine;
 
 impl LinuxEngine {
-    pub fn new(_use_background_apps: bool, _activate_app: bool) -> Result<Self, AutomationError> {
+    pub fn new(use_background_apps: bool, activate_app: bool) -> Result<Self, AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
@@ -40,8 +39,8 @@ impl AccessibilityEngine for LinuxEngine {
 
     fn find_element(
         &self,
-        _selector: &Selector,
-        _root: Option<&UIElement>,
+        selector: &Selector,
+        root: Option<&UIElement>,
     ) -> Result<UIElement, AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
@@ -68,122 +67,6 @@ impl AccessibilityEngine for LinuxEngine {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn scroll_at_position(&self, _x: f64, _y: f64, _direction: &str, _amount: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn scroll_at_current_position(&self, _direction: &str, _amount: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn type_text(&self, _text: &str) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn get_clipboard_content(&self) -> Result<String, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn set_clipboard_content(&self, _content: &str) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn hold_key(&self, _key: &str, _duration_ms: Option<u64>) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn release_key(&self, _key: &str) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn wait(&self, _duration_ms: u64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn press_key(&self, _key_name: &str, _modifier: Option<&str>) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn get_ui_tree(&self, _app_name: Option<&str>) -> Result<JsonValue, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn cursor_position(&self) -> Result<(f64, f64), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn mouse_move(&self, _x: f64, _y: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn left_mouse_down(&self, _x: f64, _y: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn left_mouse_up(&self, _x: f64, _y: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn left_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn right_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn middle_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn double_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn triple_click(&self, _x: f64, _y: f64, _modifiers: Option<&str>) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn left_click_drag(&self, _start_x: f64, _start_y: f64, _end_x: f64, _end_y: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn get_window_title(&self) -> Result<String, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn list_windows(&self) -> Result<Vec<UIElement>, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn close_window(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn maximize_window(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn minimize_window(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn resize_window(&self, _width: f64, _height: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn move_window(&self, _x: f64, _y: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
-    }
-
-    fn get_element_tree(&self, _element: &UIElement) -> Result<ElementTreeNode, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform("Linux implementation is not yet available".to_string()))
     }
 }
 
@@ -279,7 +162,7 @@ impl UIElementImpl for LinuxUIElement {
         ))
     }
 
-    fn get_text(&self, _max_depth: usize) -> Result<String, AutomationError> {
+    fn get_text(&self, max_depth: usize) -> Result<String, AutomationError> {
         Err(AutomationError::UnsupportedPlatform(
             "Linux implementation is not yet available".to_string(),
         ))
@@ -327,35 +210,5 @@ impl UIElementImpl for LinuxUIElement {
 
     fn clone_box(&self) -> Box<dyn UIElementImpl> {
         Box::new(LinuxUIElement)
-    }
-
-    fn scroll(&self, _direction: &str, _amount: f64) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform(
-            "Linux implementation is not yet available".to_string(),
-        ))
-    }
-
-    fn screenshot(&self) -> Result<String, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform(
-            "Linux implementation is not yet available".to_string(),
-        ))
-    }
-
-    fn select_text(&self) -> Result<(), AutomationError> {
-        Err(AutomationError::UnsupportedPlatform(
-            "Linux implementation is not yet available".to_string(),
-        ))
-    }
-
-    fn get_all_attributes(&self) -> Result<UIElementAttributes, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform(
-            "Linux implementation is not yet available".to_string(),
-        ))
-    }
-
-    fn get_tree(&self) -> Result<ElementTreeNode, AutomationError> {
-        Err(AutomationError::UnsupportedPlatform(
-            "Linux implementation is not yet available".to_string(),
-        ))
     }
 }
