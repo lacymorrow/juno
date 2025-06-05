@@ -230,7 +230,7 @@ impl VoiceController {
         Ok(())
     }
 
-        fn audio_thread_worker<R: Runtime + 'static>(
+    fn audio_thread_worker<R: Runtime + 'static>(
         model_path: String,
         last_buffer_arc: Arc<Mutex<Option<Vec<f32>>>>,
         actual_rate: u32,
@@ -332,6 +332,10 @@ impl VoiceController {
               partial_buffer_capacity_samples as f32 / actual_rate as f32,
               actual_rate);
 
+        // Audio level calculation variables
+        let mut audio_level_buffer: Vec<f32> = Vec::new();
+        let audio_level_chunk_size = (actual_rate as f32 * 0.1) as usize; // 100ms chunks for visualization
+
         loop {
             // Check for control messages
             match control_rx.try_recv() {
@@ -367,6 +371,26 @@ impl VoiceController {
                 Ok(audio_chunk) => {
                     raw_full_session_audio.extend_from_slice(&audio_chunk);
                     audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
+
+                    // Add to audio level buffer for real-time visualization
+                    audio_level_buffer.extend_from_slice(&audio_chunk);
+
+                    // Calculate and emit audio levels for visualization
+                    if audio_level_buffer.len() >= audio_level_chunk_size {
+                        let rms_level = Self::calculate_rms_level(&audio_level_buffer);
+                        let db_level = Self::rms_to_db(rms_level);
+                        
+                        // Normalize to 0-100 range for visualization (assuming -60dB to 0dB range)
+                        let normalized_level = ((db_level + 60.0) / 60.0).clamp(0.0, 1.0) * 100.0;
+                        
+                        // Emit audio level event
+                        if let Err(e) = app_handle.emit("voice-transcription:audio-level", 
+                            serde_json::json!({ "level": normalized_level, "db": db_level })) {
+                            tracing::debug!("Failed to emit audio level: {:?}", e);
+                        }
+                        
+                        audio_level_buffer.clear();
+                    }
 
                     // Process partial transcriptions
                     if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
@@ -588,6 +612,25 @@ impl VoiceController {
         let buffer = self.last_processed_audio_buffer.lock().ok()?.clone()?;
         let rate = self.actual_recording_sample_rate.lock().ok()?.clone()?;
         Some((buffer, rate))
+    }
+
+    // Helper function to calculate RMS (Root Mean Square) level
+    fn calculate_rms_level(audio_samples: &[f32]) -> f32 {
+        if audio_samples.is_empty() {
+            return 0.0;
+        }
+        
+        let sum_of_squares: f32 = audio_samples.iter().map(|&sample| sample * sample).sum();
+        (sum_of_squares / audio_samples.len() as f32).sqrt()
+    }
+    
+    // Helper function to convert RMS to decibels
+    fn rms_to_db(rms: f32) -> f32 {
+        if rms <= 0.0 {
+            -60.0 // Silence threshold
+        } else {
+            20.0 * rms.log10()
+        }
     }
 }
 

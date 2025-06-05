@@ -1,4 +1,5 @@
 import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
+import AudioVisualizer from "@/components/AudioVisualizer"; // Import the AudioVisualizer
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
 import { PermissionsFlow } from "@/components/PermissionsFlow"; // Import the PermissionsFlow component
 import Settings from "@/components/Settings"; // Import the Settings component
@@ -127,6 +128,7 @@ function App() {
   >("checking");
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false); // State for collapsible panel
   const [currentView, setCurrentView] = useState<AppView>("chat"); // State for current view
+  const [isDictating, setIsDictating] = useState(false); // State for dictation status
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
@@ -521,6 +523,33 @@ function App() {
     };
   }, [handleBackendResponseDebounced]); // Add debounced handler to dependency array
 
+  // Listen for dictation state changes
+  useEffect(() => {
+    const setupDictationListeners = async () => {
+      // Listen for dictation started
+      const unlistenStarted = await listen("voice-transcription:dictation-started", () => {
+        setIsDictating(true);
+      });
+
+      // Listen for dictation stopped
+      const unlistenStopped = await listen("voice-transcription:dictation-stopped", () => {
+        setIsDictating(false);
+      });
+
+      return () => {
+        unlistenStarted();
+        unlistenStopped();
+      };
+    };
+
+    let cleanup: (() => void) | undefined;
+    setupDictationListeners().then(fn => cleanup = fn);
+
+    return () => {
+      cleanup?.();
+    };
+  }, []);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     submitQuery(query);
@@ -615,6 +644,17 @@ function App() {
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
       <ClickVisualizer />
+
+      {/* Audio Visualizer - shows when dictating */}
+      {isDictating && (
+        <div className="fixed top-4 right-4 z-50">
+          <AudioVisualizer 
+            isActive={isDictating} 
+            variant="bars"
+            className="bg-white/90 backdrop-blur-sm"
+          />
+        </div>
+      )}
 
       <div className="w-screen h-screen bg-background text-foreground">
         <div className="container mx-auto p-4 h-full flex flex-col">

@@ -88,8 +88,15 @@ impl Desktop {
     pub fn new(use_background_apps: bool, activate_app: bool) -> Result<Self, AutomationError> {
         let engine_result = if cfg!(target_os = "macos") {
             info!("Initializing macOS engine...");
-            platforms::macos::MacOSEngine::new(use_background_apps, activate_app)
-                .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
+            #[cfg(target_os = "macos")]
+            {
+                platforms::macos::MacOSEngine::new(use_background_apps, activate_app)
+                    .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err(AutomationError::UnsupportedPlatform("macOS engine not supported on this platform".to_string()))
+            }
         } else if cfg!(target_os = "windows") {
             info!("Initializing Windows engine...");
             #[cfg(target_os = "windows")]
