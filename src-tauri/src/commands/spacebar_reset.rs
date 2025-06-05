@@ -39,7 +39,7 @@ pub async fn force_reset_spacebar_transcription(
     if let Ok(mut spacebar_active) = state.spacebar_dictation_active.lock() {
         *spacebar_active = false;
     } else {
-        error!("[Command] Failed to lock spacebar_dictation_active during force reset");
+        error!("[Command] Failed to lock Dictation Mode active during force reset");
     }
 
     // Emit state change events
