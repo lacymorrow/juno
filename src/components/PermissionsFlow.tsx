@@ -6,6 +6,7 @@ import {
   ExternalLink,
   RefreshCw,
   Settings,
+  Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -40,6 +41,7 @@ interface PermissionsFlowProps {
   onSkip?: () => void;
   showSkipOption?: boolean;
   className?: string;
+  autoRedirectEnabled?: boolean;
 }
 
 export function PermissionsFlow({
@@ -47,6 +49,7 @@ export function PermissionsFlow({
   onSkip,
   showSkipOption = false,
   className = "",
+  autoRedirectEnabled = true,
 }: PermissionsFlowProps) {
   const [permissions, setPermissions] = useState<PermissionsState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -55,12 +58,20 @@ export function PermissionsFlow({
   >(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Check permissions status
-  const checkPermissions = async () => {
+  // Check permissions status with optional auto-redirect
+  const checkPermissions = async (useAutoRedirect = false) => {
     try {
       setIsLoading(true);
       setError(null);
-      const result = await invoke<PermissionsState>("check_permissions_status");
+
+      const result =
+        useAutoRedirect && autoRedirectEnabled
+          ? await invoke<PermissionsState>(
+              "check_permissions_status_with_auto_redirect",
+              { autoOpenSettings: true }
+            )
+          : await invoke<PermissionsState>("check_permissions_status");
+
       setPermissions(result);
 
       // Auto-complete if all permissions are granted
@@ -75,7 +86,38 @@ export function PermissionsFlow({
     }
   };
 
-  // Request accessibility permission with system prompt
+  // Enhanced accessibility permission request with auto-redirect
+  const requestAccessibilityPermissionEnhanced = async (
+    withAutoRedirect = true
+  ) => {
+    try {
+      setIsRequestingPermission("accessibility");
+
+      const granted =
+        withAutoRedirect && autoRedirectEnabled
+          ? await invoke<boolean>(
+              "request_accessibility_permission_with_auto_redirect",
+              { autoOpenSettings: true }
+            )
+          : await invoke<boolean>("request_accessibility_permission");
+
+      if (granted) {
+        // Refresh permissions status
+        await checkPermissions();
+      } else if (!withAutoRedirect) {
+        // If not using auto-redirect and not granted, offer manual opening
+        await openSystemPreferences("accessibility");
+      }
+      // If using auto-redirect, the system settings should already be open
+    } catch (err) {
+      setError(err as string);
+      console.error("Error requesting accessibility permission:", err);
+    } finally {
+      setIsRequestingPermission(null);
+    }
+  };
+
+  // Original accessibility permission request (for backward compatibility)
   const requestAccessibilityPermission = async () => {
     try {
       setIsRequestingPermission("accessibility");
@@ -96,7 +138,19 @@ export function PermissionsFlow({
     }
   };
 
-  // Open System Preferences
+  // Enhanced system preferences opening
+  const openSystemPreferencesEnhanced = async (preferencePane: string) => {
+    try {
+      await invoke("open_system_settings_enhanced", {
+        permissionType: preferencePane,
+      });
+    } catch (err) {
+      setError(err as string);
+      console.error("Error opening enhanced System Settings:", err);
+    }
+  };
+
+  // Open System Preferences (original method)
   const openSystemPreferences = async (preferencePane: string) => {
     try {
       await invoke("open_system_preferences", { preferencePane });
@@ -136,8 +190,8 @@ export function PermissionsFlow({
       // Start monitoring
       await startMonitoring();
 
-      // Initial check
-      await checkPermissions();
+      // Initial check with auto-redirect if enabled
+      await checkPermissions(autoRedirectEnabled);
     };
 
     setupListeners();
@@ -145,7 +199,7 @@ export function PermissionsFlow({
     return () => {
       unlistenPermissions?.();
     };
-  }, [onComplete]);
+  }, [onComplete, autoRedirectEnabled]);
 
   const getPermissionIcon = (permission: PermissionStatus) => {
     if (permission.granted) {
@@ -173,7 +227,8 @@ export function PermissionsFlow({
 
   const renderPermissionCard = (
     permission: PermissionStatus,
-    onRequest?: () => void
+    onRequest?: () => void,
+    onRequestEnhanced?: () => void
   ) => (
     <Card key={permission.permissionType} className="transition-colors">
       <CardHeader className="pb-3">
@@ -194,7 +249,34 @@ export function PermissionsFlow({
             <p className="text-sm text-muted-foreground">
               {permission.instructions}
             </p>
-            <div className="flex space-x-2">
+            <div className="flex flex-wrap gap-2">
+              {/* Enhanced auto-redirect button for accessibility */}
+              {onRequestEnhanced &&
+                autoRedirectEnabled &&
+                permission.permissionType === "accessibility" && (
+                  <Button
+                    onClick={onRequestEnhanced}
+                    disabled={
+                      isRequestingPermission === permission.permissionType
+                    }
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {isRequestingPermission === permission.permissionType ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Opening Settings...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-4 w-4 mr-2" />
+                        Auto-Grant Permission
+                      </>
+                    )}
+                  </Button>
+                )}
+
+              {/* Standard request button */}
               {onRequest && (
                 <Button
                   onClick={onRequest}
@@ -202,6 +284,12 @@ export function PermissionsFlow({
                     isRequestingPermission === permission.permissionType
                   }
                   size="sm"
+                  variant={
+                    autoRedirectEnabled &&
+                    permission.permissionType === "accessibility"
+                      ? "outline"
+                      : "default"
+                  }
                 >
                   {isRequestingPermission === permission.permissionType ? (
                     <>
@@ -213,16 +301,34 @@ export function PermissionsFlow({
                   )}
                 </Button>
               )}
+
+              {/* Manual settings button */}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => openSystemPreferences(permission.permissionType)}
+                onClick={() =>
+                  autoRedirectEnabled
+                    ? openSystemPreferencesEnhanced(permission.permissionType)
+                    : openSystemPreferences(permission.permissionType)
+                }
               >
                 <Settings className="h-4 w-4 mr-2" />
                 Open Settings
                 <ExternalLink className="h-4 w-4 ml-2" />
               </Button>
             </div>
+
+            {/* Auto-redirect feature notice */}
+            {autoRedirectEnabled &&
+              permission.permissionType === "accessibility" && (
+                <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200">
+                  <p className="text-xs text-blue-700">
+                    <Zap className="h-3 w-3 inline mr-1" />
+                    Auto-redirect enabled: System Settings will open
+                    automatically when needed
+                  </p>
+                </div>
+              )}
           </div>
         )}
         {permission.granted && (
@@ -245,7 +351,9 @@ export function PermissionsFlow({
               <span>Checking Permissions</span>
             </CardTitle>
             <CardDescription>
-              Verifying macOS permissions for Juno...
+              {autoRedirectEnabled
+                ? "Verifying macOS permissions for Juno with auto-redirect..."
+                : "Verifying macOS permissions for Juno..."}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -262,10 +370,22 @@ export function PermissionsFlow({
             Error checking permissions: {error}
           </AlertDescription>
         </Alert>
-        <Button onClick={checkPermissions} className="w-full">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Try Again
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => checkPermissions()} className="flex-1">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Try Again
+          </Button>
+          {autoRedirectEnabled && (
+            <Button
+              onClick={() => checkPermissions(true)}
+              variant="outline"
+              className="flex-1"
+            >
+              <Zap className="h-4 w-4 mr-2" />
+              Retry with Auto-Open
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -280,72 +400,103 @@ export function PermissionsFlow({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
-            <Settings className="h-6 w-6" />
-            <span>Permissions Setup</span>
+            {permissions.allGranted ? (
+              <CheckCircle className="h-5 w-5 text-green-500" />
+            ) : (
+              <AlertCircle className="h-5 w-5 text-red-500" />
+            )}
+            <span>macOS Permissions for {permissions.appName}</span>
           </CardTitle>
           <CardDescription>
-            {permissions.appName} needs certain macOS permissions to provide AI
-            computer use features.
             {permissions.allGranted
-              ? " All permissions are configured!"
-              : " Please grant the required permissions below."}
+              ? "All required permissions are granted. Juno is ready to use!"
+              : autoRedirectEnabled
+              ? "Some permissions are missing. Use Auto-Grant for the easiest setup, or grant them manually."
+              : "Some permissions are missing. Please grant the required permissions to use Juno."}
           </CardDescription>
         </CardHeader>
+        {!permissions.allGranted && (
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => checkPermissions(true)}
+                size="sm"
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh Status
+              </Button>
+              {autoRedirectEnabled && (
+                <Button
+                  onClick={() => checkPermissions(true)}
+                  size="sm"
+                  variant="outline"
+                >
+                  <Zap className="h-4 w-4 mr-2" />
+                  Check with Auto-Open
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        )}
       </Card>
-
-      {/* All permissions granted success */}
-      {permissions.allGranted && (
-        <Alert>
-          <CheckCircle className="h-4 w-4" />
-          <AlertDescription>
-            🎉 All permissions granted! {permissions.appName} is ready to use.
-          </AlertDescription>
-        </Alert>
-      )}
 
       {/* Permission Cards */}
       <div className="space-y-4">
+        {/* Accessibility Permission */}
         {renderPermissionCard(
           permissions.accessibility,
-          requestAccessibilityPermission
+          requestAccessibilityPermission,
+          autoRedirectEnabled
+            ? () => requestAccessibilityPermissionEnhanced(true)
+            : undefined
         )}
-        {renderPermissionCard(permissions.screenRecording)}
-        {renderPermissionCard(permissions.microphone)}
+
+        {/* Screen Recording Permission */}
+        {renderPermissionCard(
+          permissions.screenRecording,
+          undefined // No enhanced version yet for screen recording
+        )}
+
+        {/* Microphone Permission */}
+        {renderPermissionCard(
+          permissions.microphone,
+          undefined // No enhanced version yet for microphone
+        )}
       </div>
 
-      {/* Action Buttons */}
-      <div className="flex justify-between space-x-3">
-        <Button
-          variant="outline"
-          onClick={checkPermissions}
-          disabled={isLoading}
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh Status
-        </Button>
+      {/* Footer */}
+      {permissions.allGranted && (
+        <Card className="border-green-200 bg-green-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                <span className="text-green-800 font-medium">
+                  All permissions granted!
+                </span>
+              </div>
+              {onComplete && (
+                <Button
+                  onClick={onComplete}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  Continue
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-        <div className="flex space-x-3">
-          {showSkipOption && onSkip && (
-            <Button variant="outline" onClick={onSkip}>
-              Skip for Now
-            </Button>
-          )}
-
-          {permissions.allGranted && onComplete && (
-            <Button onClick={onComplete}>Continue</Button>
-          )}
+      {/* Skip Option */}
+      {showSkipOption && !permissions.allGranted && onSkip && (
+        <div className="text-center">
+          <Button variant="ghost" onClick={onSkip} size="sm">
+            Skip for now (some features may not work)
+          </Button>
         </div>
-      </div>
-
-      {/* Help Text */}
-      <Alert>
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>
-          <strong>Having trouble?</strong> After granting permissions in System
-          Preferences, you may need to restart {permissions.appName} for changes
-          to take effect.
-        </AlertDescription>
-      </Alert>
+      )}
     </div>
   );
 }

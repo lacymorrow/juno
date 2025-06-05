@@ -2,7 +2,7 @@
 
 use tauri::{AppHandle, Emitter};
 use serde::{Deserialize, Serialize};
-use tracing::{info, error, debug};
+use tracing::{info, error, debug, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +51,34 @@ pub async fn check_permissions_status(app: AppHandle) -> Result<PermissionsState
     };
 
     debug!("Permissions state: {:?}", permissions_state);
+    Ok(permissions_state)
+}
+
+/// Enhanced permission checking with automatic system settings redirection
+#[tauri::command]
+pub async fn check_permissions_status_with_auto_redirect(app: AppHandle, auto_open_settings: bool) -> Result<PermissionsState, String> {
+    info!("Checking macOS permissions status with auto-redirect: {}", auto_open_settings);
+
+    let app_name = app.package_info().name.clone();
+
+    // Check accessibility permissions with auto-redirect
+    let accessibility = check_accessibility_permission_with_auto_redirect(auto_open_settings).await?;
+
+    // Check other permissions (for now using standard checking, but could be enhanced similarly)
+    let screen_recording = check_screen_recording_permission().await?;
+    let microphone = check_microphone_permission().await?;
+
+    let all_granted = accessibility.granted && screen_recording.granted && microphone.granted;
+
+    let permissions_state = PermissionsState {
+        accessibility,
+        screen_recording,
+        microphone,
+        all_granted,
+        app_name,
+    };
+
+    debug!("Enhanced permissions state: {:?}", permissions_state);
     Ok(permissions_state)
 }
 
@@ -106,6 +134,63 @@ pub async fn request_accessibility_permission() -> Result<bool, String> {
     }
 }
 
+/// Enhanced accessibility permission request with automatic system settings redirection
+#[tauri::command]
+pub async fn request_accessibility_permission_with_auto_redirect(auto_open_settings: bool) -> Result<bool, String> {
+    info!("Requesting accessibility permissions with auto-redirect: {}", auto_open_settings);
+
+    #[cfg(target_os = "macos")]
+    {
+        use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions_with_auto_redirect;
+
+        // First try with prompt and auto-redirect
+        match check_accessibility_permissions_with_auto_redirect(true, auto_open_settings) {
+            Ok(granted) => {
+                if granted {
+                    info!("Accessibility permissions already granted");
+                    Ok(true)
+                } else {
+                    info!("Accessibility permissions prompt shown to user with auto-redirect");
+
+                    // Wait a moment and check again
+                    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+                    match check_accessibility_permissions_with_auto_redirect(false, false) {
+                        Ok(now_granted) => {
+                            if now_granted {
+                                info!("Accessibility permissions now granted");
+                                Ok(true)
+                            } else {
+                                info!("Accessibility permissions still not granted - settings opened for user");
+                                Ok(false)
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Error checking accessibility permissions after auto-redirect: {}", e);
+                            Ok(false)
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Error requesting accessibility permissions with auto-redirect: {}", e);
+                // Even if there's an error, if auto_open_settings is true, we've likely opened settings
+                if auto_open_settings {
+                    Ok(false) // Return false but don't error since settings were opened
+                } else {
+                    Err(format!("Failed to request accessibility permissions: {}", e))
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        warn!("Accessibility permissions are only available on macOS");
+        Ok(true) // Return true on non-macOS platforms
+    }
+}
+
 /// Open macOS System Preferences to Privacy & Security section
 #[tauri::command]
 pub async fn open_system_preferences(preference_pane: String) -> Result<(), String> {
@@ -113,27 +198,13 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
 
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
+        use computer_use_ai_sdk::platforms::macos::permissions::open_system_settings_for_permission;
 
-        let url = match preference_pane.as_str() {
-            "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            "screen_recording" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-            "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
-            "privacy" => "x-apple.systempreferences:com.apple.preference.security",
-            _ => return Err(format!("Unknown preference pane: {}", preference_pane)),
-        };
+        // Use the enhanced function that tries multiple URL schemes
+        open_system_settings_for_permission(&preference_pane)
+            .map_err(|e| format!("Failed to open System Settings: {}", e))?;
 
-        let output = Command::new("open")
-            .arg(url)
-            .output()
-            .map_err(|e| format!("Failed to open System Preferences: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Failed to open System Preferences: {}", stderr));
-        }
-
-        info!("Successfully opened System Preferences for {}", preference_pane);
+        info!("Successfully opened System Settings for {}", preference_pane);
         Ok(())
     }
 
@@ -141,6 +212,34 @@ pub async fn open_system_preferences(preference_pane: String) -> Result<(), Stri
     {
         warn!("System Preferences is only available on macOS");
         Err("System Preferences is only available on macOS".to_string())
+    }
+}
+
+/// Enhanced system preferences opening with fallback support
+#[tauri::command]
+pub async fn open_system_settings_enhanced(permission_type: String) -> Result<(), String> {
+    info!("Opening enhanced System Settings for: {}", permission_type);
+
+    #[cfg(target_os = "macos")]
+    {
+        use computer_use_ai_sdk::platforms::macos::permissions::open_system_settings_for_permission;
+
+        match open_system_settings_for_permission(&permission_type) {
+            Ok(()) => {
+                info!("Successfully opened System Settings for {}", permission_type);
+                Ok(())
+            }
+            Err(e) => {
+                error!("Failed to open System Settings for {}: {}", permission_type, e);
+                Err(format!("Failed to open System Settings for {}: {}", permission_type, e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        warn!("System Settings is only available on macOS");
+        Err("System Settings is only available on macOS".to_string())
     }
 }
 
@@ -197,6 +296,87 @@ pub async fn stop_permissions_monitoring() -> Result<(), String> {
     Ok(())
 }
 
+/// Restart the application after permissions are granted
+/// This is necessary because macOS requires an app restart for accessibility permissions to take effect
+#[tauri::command]
+pub async fn restart_app_after_permissions(app: AppHandle) -> Result<(), String> {
+    info!("Restarting application after permissions were granted");
+
+    #[cfg(target_os = "macos")]
+    {
+        // Add a small delay to ensure any ongoing operations complete
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        // Use the Tauri AppHandle restart method
+        app.restart();
+        info!("App restart initiated successfully");
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        info!("App restart not required on this platform");
+        Ok(())
+    }
+}
+
+/// Prompt the user to restart the application after permissions are granted
+/// Shows a notification or dialog to indicate restart is needed
+#[tauri::command]
+pub async fn prompt_app_restart_after_permissions(app: AppHandle) -> Result<String, String> {
+    info!("Prompting user to restart application after permissions were granted");
+
+    #[cfg(target_os = "macos")]
+    {
+        // Emit an event to the frontend to show restart prompt
+        if let Err(e) = app.emit("permissions-restart-required", ()) {
+            error!("Failed to emit restart required event: {}", e);
+        }
+
+        Ok("Restart required for permissions to take effect. Please restart the application manually or use the restart button.".to_string())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok("Restart not required on this platform".to_string())
+    }
+}
+
+/// Check if a restart is needed after permissions are granted
+/// Returns true if restart is needed (mainly on macOS for accessibility permissions)
+#[tauri::command]
+pub async fn check_restart_needed_after_permissions() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, always need restart after accessibility permission changes
+        Ok(true)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // On other platforms, restart usually not needed
+        Ok(false)
+    }
+}
+
+/// Helper function to check if restart is needed and either restart automatically or prompt user
+pub async fn handle_restart_after_permissions(app: AppHandle, auto_restart: bool) -> Result<String, String> {
+    let restart_needed = check_restart_needed_after_permissions().await?;
+
+    if !restart_needed {
+        return Ok("No restart required".to_string());
+    }
+
+    if auto_restart {
+        info!("Auto-restarting application after permissions granted");
+        restart_app_after_permissions(app).await?;
+        Ok("Application restarting automatically".to_string())
+    } else {
+        info!("Prompting user to restart application after permissions granted");
+        prompt_app_restart_after_permissions(app).await
+    }
+}
+
 // Helper functions for individual permission checks
 
 async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
@@ -213,6 +393,50 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
             required: true,
             description: "Required for desktop automation, clicking, and typing".to_string(),
             instructions: "Go to System Preferences > Privacy & Security > Accessibility and add Juno".to_string(),
+        })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(PermissionStatus {
+            permission_type: "accessibility".to_string(),
+            granted: true,
+            required: false,
+            description: "Not required on this platform".to_string(),
+            instructions: "".to_string(),
+        })
+    }
+}
+
+async fn check_accessibility_permission_with_auto_redirect(auto_open_settings: bool) -> Result<PermissionStatus, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions_with_auto_redirect;
+
+        let granted = match check_accessibility_permissions_with_auto_redirect(false, auto_open_settings) {
+            Ok(granted) => granted,
+            Err(_) => {
+                // If permission check fails and auto_open_settings is true,
+                // the settings have been opened automatically
+                if auto_open_settings {
+                    info!("Accessibility permission denied, System Settings opened automatically");
+                }
+                false
+            }
+        };
+
+        let instructions = if auto_open_settings && !granted {
+            "System Settings has been opened automatically. Please grant accessibility permissions to Juno and try again.".to_string()
+        } else {
+            "Go to System Preferences > Privacy & Security > Accessibility and add Juno".to_string()
+        };
+
+        Ok(PermissionStatus {
+            permission_type: "accessibility".to_string(),
+            granted,
+            required: true,
+            description: "Required for desktop automation, clicking, and typing".to_string(),
+            instructions,
         })
     }
 
