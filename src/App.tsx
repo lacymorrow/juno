@@ -21,6 +21,7 @@ import {
   DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Send,
   Server,
   Trash2,
@@ -698,6 +699,25 @@ function App() {
     }
   };
 
+  // Start a new agent chat
+  const startNewChat = async () => {
+    try {
+      await invoke("clear_conversation_history");
+      setConversation([]);
+      setQuery("");
+      console.log("New chat started successfully");
+    } catch (error) {
+      console.error("Failed to start new chat:", error);
+      setConversation([
+        {
+          role: "system",
+          content: `Error starting new chat: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  };
+
   // Cleanup effect for audio
   useEffect(() => {
     return () => {
@@ -955,6 +975,15 @@ function App() {
                       disabled={isProcessing || serverStatus !== "connected"}
                       className="flex-grow"
                     />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={startNewChat}
+                      disabled={isProcessing}
+                      title="Start new agent chat"
+                    >
+                      <Plus size={18} />
+                    </Button>
                     <Button
                       type="button"
                       variant="outline"
