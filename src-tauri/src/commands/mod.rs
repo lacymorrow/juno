@@ -19,6 +19,7 @@ pub mod text_editor;
 pub mod window;
 pub mod orchestrator;
 pub mod sound;
+pub mod tools;
 
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;
@@ -28,6 +29,19 @@ pub use self::permissions::*;
 pub use self::shell::*;
 pub use self::orchestrator::*;
 pub use self::sound::*;
+pub use self::tools::*;
+
+// Explicitly re-export tool functions to ensure they're available
+pub use self::tools::{
+    get_tool_configurations,
+    get_tool_config,
+    set_tool_enabled,
+    set_tool_category_enabled,
+    get_enabled_tools,
+    is_tool_enabled,
+    reset_tool_configuration,
+    get_tool_configuration_summary,
+};
 
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::
