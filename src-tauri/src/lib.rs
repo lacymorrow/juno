@@ -54,6 +54,18 @@ const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
+// Import tool configuration commands explicitly
+use crate::commands::{
+    get_tool_configurations,
+    get_tool_config,
+    set_tool_enabled,
+    set_tool_category_enabled,
+    get_enabled_tools,
+    is_tool_enabled,
+    reset_tool_configuration,
+    get_tool_configuration_summary,
+};
+
 // Added for selector parsing
 
 // Define a struct for the expected payload of bar-state-changed event
@@ -259,6 +271,15 @@ pub fn run() {
             get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
+            // Tool Configuration Commands
+            get_tool_configurations,
+            get_tool_config,
+            set_tool_enabled,
+            set_tool_category_enabled,
+            get_enabled_tools,
+            is_tool_enabled,
+            reset_tool_configuration,
+            get_tool_configuration_summary,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

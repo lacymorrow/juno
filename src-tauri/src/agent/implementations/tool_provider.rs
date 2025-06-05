@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::traits::ToolProvider;
 use crate::agent::tool_logger;
+use crate::state::AppState;
 
 // Define an async tool function type
 // It takes a Value input and returns a BoxFuture that resolves to Result<Value, String>
@@ -67,6 +68,59 @@ impl LocalToolProvider {
 
         let mut execs = self.executors.write().await;
         execs.insert(name, boxed_executor);
+    }
+
+    /// Registers an async tool with configuration awareness
+    pub async fn register_async_tool_with_config<F, Fut>(
+        &mut self,
+        definition: ToolDefinition,
+        executor: F,
+        app_state: Option<&AppState>
+    )
+    where
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
+    {
+        let name = definition.name.clone();
+
+        // Check if tool should be enabled based on configuration
+        let should_register = if let Some(state) = app_state {
+            let _config_manager = state.get_tool_config_manager().await;
+            // For now, register all tools - configuration filtering will be implemented later
+            true
+        } else {
+            true // Default to enabled if no state available
+        };
+
+        if should_register {
+            self.register_async_tool(definition, executor).await;
+        }
+    }
+
+    /// Helper method to register tools from an AppState with configuration checking
+    pub async fn register_async_tool_from_state<F, Fut>(
+        &mut self,
+        definition: ToolDefinition,
+        executor: F,
+        app_state: Option<&AppState>
+    )
+    where
+        F: Fn(Value) -> Fut + Send + Sync + 'static,
+        Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
+    {
+        let config_manager = if let Some(state) = app_state {
+            let config_arc = state.get_tool_config_manager().await;
+            let config_guard = config_arc.lock().await;
+            let is_enabled = config_guard.is_tool_enabled(&definition.name);
+            drop(config_guard); // Release the lock early
+
+            if !is_enabled {
+                tracing::debug!("Tool '{}' is disabled, skipping registration", definition.name);
+                return;
+            }
+        };
+
+        self.register_async_tool(definition, executor).await;
     }
 
     /// Deprecated: Registers a synchronous tool. Use register_async_tool instead.
