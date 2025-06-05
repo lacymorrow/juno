@@ -54,8 +54,8 @@ async fn main() -> anyhow::Result<()> {
     check_os_permissions();
 
     // Create app state using the type from the server module
-    // Initialize the Desktop engine here
-    let desktop_engine = Desktop::new(false, true)
+    // Initialize the Desktop engine here with auto-redirect for better UX
+    let desktop_engine = Desktop::new_with_auto_redirect(false, true, true)
         .map_err(|e| anyhow::anyhow!("Failed to initialize desktop engine: {}", e))?;
 
     let app_state = Arc::new(AppState {
@@ -200,34 +200,37 @@ fn check_os_permissions() {
     // Only check on macOS
     #[cfg(target_os = "macos")]
     {
-        // Use correct path for permissions check
-        use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions;
+        // Use enhanced permission checking with auto-redirect
+        use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions_with_auto_redirect;
 
-        match check_accessibility_permissions(true) {
+        match check_accessibility_permissions_with_auto_redirect(true, true) {
             Ok(granted) => {
                 if !granted {
-                    info!("accessibility permissions: prompt shown to user");
-                    // Sleep to give user time to respond to the prompt
-                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    info!("accessibility permissions: prompt shown to user with auto-redirect to System Settings");
+                    // Sleep to give user time to respond to the prompt and open settings
+                    std::thread::sleep(std::time::Duration::from_secs(3));
 
-                    // Check again without prompt
-                    match check_accessibility_permissions(false) {
-                        Ok(_) => info!("accessibility permissions now granted"),
+                    // Check again without prompt or auto-redirect
+                    match check_accessibility_permissions_with_auto_redirect(false, false) {
+                        Ok(now_granted) => {
+                            if now_granted {
+                                info!("accessibility permissions now granted");
+                            } else {
+                                info!("**************************************************************");
+                                info!("* ACCESSIBILITY PERMISSIONS STILL REQUIRED                   *");
+                                info!("* System Settings has been opened for you automatically.     *");
+                                info!("* Please grant accessibility permissions to this app.        *");
+                                info!("* Without this permission, UI automation will not function.   *");
+                                info!("**************************************************************");
+                            }
+                        },
                         Err(e) => {
-                            error!("accessibility permissions check failed: {}", e);
+                            error!("accessibility permissions check failed after auto-redirect: {}", e);
                             info!("**************************************************************");
-                            info!(
-                                "* ACCESSIBILITY PERMISSIONS REQUIRED                          *"
-                            );
-                            info!(
-                                "* Go to System Preferences > Security & Privacy > Privacy >   *"
-                            );
-                            info!(
-                                "* Accessibility and add this application.                     *"
-                            );
-                            info!(
-                                "* Without this permission, UI automation will not function.   *"
-                            );
+                            info!("* ACCESSIBILITY PERMISSIONS REQUIRED                          *");
+                            info!("* System Settings should have opened automatically.           *");
+                            info!("* Please grant accessibility permissions to this app.        *");
+                            info!("* Without this permission, UI automation will not function.   *");
                             info!("**************************************************************");
                         }
                     }
@@ -239,8 +242,10 @@ fn check_os_permissions() {
                 error!("accessibility permissions check failed: {}", e);
                 info!("**************************************************************");
                 info!("* ACCESSIBILITY PERMISSIONS REQUIRED                          *");
-                info!("* Go to System Preferences > Security & Privacy > Privacy >   *");
-                info!("* Accessibility and add this application.                     *");
+                info!("* System Settings should have opened automatically.           *");
+                info!("* Please grant accessibility permissions to this app.        *");
+                info!("* If System Settings didn't open, go to:                     *");
+                info!("* System Settings > Privacy & Security > Accessibility       *");
                 info!("* Without this permission, UI automation will not function.   *");
                 info!("**************************************************************");
             }

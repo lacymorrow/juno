@@ -79,16 +79,16 @@ pub fn run() {
     let cli = cli::Cli::parse();
 
     // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
-    let desktop_instance_result = Desktop::new(false, true);
+    let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, true);
     let desktop_instance = match desktop_instance_result {
         Ok(instance) => {
-            tracing::info!("Desktop Automation Engine initialized successfully");
+            tracing::info!("Desktop Automation Engine initialized successfully with auto-redirect");
             Some(instance)
         },
         Err(e) => {
             tracing::warn!("Failed to initialize Desktop Automation Engine: {}", e);
             tracing::info!("App will start with limited functionality - desktop automation features will be disabled");
-            tracing::info!("To enable full functionality, please grant accessibility permissions in System Preferences");
+            tracing::info!("System Settings should have opened automatically if permissions are needed");
             None
         }
     };
@@ -125,6 +125,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
+        .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
             println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
@@ -242,6 +243,13 @@ pub fn run() {
             open_system_preferences,
             start_permissions_monitoring,
             stop_permissions_monitoring,
+            // Enhanced Permissions Commands with Auto-Redirect
+            check_permissions_status_with_auto_redirect,
+            request_accessibility_permission_with_auto_redirect,
+            open_system_settings_enhanced,
+            restart_app_after_permissions,
+            prompt_app_restart_after_permissions,
+            check_restart_needed_after_permissions,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,
