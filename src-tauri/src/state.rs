@@ -18,6 +18,8 @@ use crate::agent::tools::browser_controller::BrowserController;
 use crate::agent::implementations::memory_manager::SimpleMemoryManager;
 // Import permissions types
 use crate::commands::permissions::PermissionsState;
+// Import tool configuration manager
+use crate::agent::tools::tool_config::ToolConfigManager;
 
 /// Timestamp tracking for log grouping (Slack/Apple Messages style)
 #[derive(Debug, Clone)]
@@ -76,6 +78,8 @@ pub struct AppState {
     // Permissions state tracking
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
     pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
+    // Tool configuration manager
+    pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
 }
 
 impl AppState {
@@ -101,6 +105,8 @@ impl AppState {
             // Initialize permissions state
             permissions_state: Arc::new(TokioMutex::new(None)),
             permissions_checked: Arc::new(Mutex::new(false)),
+            // Initialize tool configuration manager
+            tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
         }
     }
 
@@ -239,6 +245,29 @@ impl AppState {
     // Helper method to get desktop instance for situations where we can handle the error gracefully
     pub fn try_get_desktop(&self) -> Option<&Arc<Desktop>> {
         self.desktop.try_get_desktop()
+    }
+
+    // Method to get tool configuration manager
+    pub async fn get_tool_config_manager(&self) -> Arc<TokioMutex<ToolConfigManager>> {
+        self.tool_config_manager.clone()
+    }
+
+    // Method to load tool configuration from file
+    pub async fn load_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        let config_path = ToolConfigManager::get_config_path(app_handle)?;
+        let loaded_config = ToolConfigManager::load_from_file(&config_path)?;
+
+        let mut config_guard = self.tool_config_manager.lock().await;
+        *config_guard = loaded_config;
+
+        Ok(())
+    }
+
+    // Method to save tool configuration to file
+    pub async fn save_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        let config_path = ToolConfigManager::get_config_path(app_handle)?;
+        let config_guard = self.tool_config_manager.lock().await;
+        config_guard.save_to_file(&config_path)
     }
 }
 
