@@ -2,6 +2,8 @@ import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickV
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
 import { PermissionsFlow } from "@/components/PermissionsFlow"; // Import the PermissionsFlow component
 import Settings from "@/components/Settings"; // Import the Settings component
+import { ThinkingMessage } from "@/components/ThinkingMessage"; // Import the ThinkingMessage component
+import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage"; // Import the ToolCall components
 import { Button } from "@/components/ui/button"; // Shadcn Button
 import { Input } from "@/components/ui/input"; // Shadcn Input
 import {
@@ -40,6 +42,7 @@ type ChatMessage = {
   tool_name?: string;
   tool_args?: any;
   tool_output?: any;
+  success?: boolean; // For tool call results - indicates if the tool call was successful
   timestamp?: number; // Add timestamp field for message grouping
 };
 
@@ -58,16 +61,7 @@ type BackendResponsePayload = {
 };
 
 // --- Tool Usage Event Type ---
-interface ToolUsageEntry {
-  timestamp: number;
-  tool: string;
-  inputs: any;
-  result?: any;
-  success: boolean;
-  screenshot_base64?: string;
-  show_timestamp: boolean;
-  formatted_time?: string;
-}
+// Note: ToolUsageEntry is defined in DevToolsPanel.tsx where it's actually used
 
 // --- Agent Event Types (mirroring tool_logger.rs) ---
 interface ThinkingPayload {
@@ -97,12 +91,7 @@ interface GenericContentPayload {
   content: string;
 }
 
-type AgentEventPayload =
-  | { type: "thinking"; payload: ThinkingPayload }
-  | { type: "tool_call_request"; payload: ToolCallRequestPayload }
-  | { type: "tool_call_result"; payload: ToolCallResultPayload }
-  | { type: "screenshot"; payload: ScreenshotPayload }
-  | { type: "generic_content"; payload: GenericContentPayload };
+// Note: AgentEventPayload union type removed as it's not used - individual payload types are used directly
 
 // This is the structure expected from the `agent-event` emitted by tool_logger.rs
 // It matches the Rust `AgentEvent` struct where `event_type` is the `type` field here
@@ -584,6 +573,7 @@ function App() {
             role: "tool_call_result",
             tool_name: resultPayload.tool_name,
             tool_output: resultPayload.tool_output,
+            success: resultPayload.success,
             content:
               resultPayload.content ||
               (resultPayload.success
@@ -870,103 +860,81 @@ function App() {
                             </div>
                           )}
 
-                          <div
-                            className={`mb-3 flex ${
-                              msg.role === "user"
-                                ? "justify-end"
-                                : "justify-start"
-                            }`}
-                          >
-                            <span
-                              className={cn(
-                                "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
+                          {/* Handle thinking messages with special component */}
+                          {msg.role === "thinking" ? (
+                            <div className="flex justify-start">
+                              <ThinkingMessage
+                                content={msg.content}
+                                timestamp={msg.timestamp}
+                              />
+                            </div>
+                          ) : msg.role === "tool_call_request" ? (
+                            <div className="flex justify-start">
+                              <ToolCallRequest
+                                toolName={msg.tool_name || "unknown"}
+                                toolArgs={msg.tool_args}
+                                content={msg.content}
+                                timestamp={msg.timestamp}
+                              />
+                            </div>
+                          ) : msg.role === "tool_call_result" ? (
+                            <div className="flex justify-start">
+                              <ToolCallResult
+                                toolName={msg.tool_name || "unknown"}
+                                toolOutput={msg.tool_output}
+                                success={msg.success ?? true} // Default to true if not specified
+                                content={msg.content}
+                                screenshot_base64={msg.screenshot_base64}
+                                timestamp={msg.timestamp}
+                              />
+                            </div>
+                          ) : (
+                            <div
+                              className={`mb-3 flex ${
                                 msg.role === "user"
-                                  ? "bg-primary text-primary-foreground"
-                                  : msg.role === "assistant"
-                                  ? "bg-muted"
-                                  : (msg.role === "system" ||
-                                      msg.role === "thinking" ||
-                                      msg.role === "tool_call_request" ||
-                                      msg.role === "tool_call_result") &&
-                                    msg.screenshot_base64
-                                  ? "bg-muted/80 border border-primary/20 p-2"
-                                  : msg.role === "thinking"
-                                  ? "bg-blue-100 text-blue-800 text-xs italic opacity-90"
-                                  : msg.role === "tool_call_request"
-                                  ? "bg-purple-100 text-purple-800 text-xs"
-                                  : msg.role === "tool_call_result"
-                                  ? "bg-green-100 text-green-800 text-xs"
-                                  : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
-                              )}
+                                  ? "justify-end"
+                                  : "justify-start"
+                              }`}
                             >
-                              {msg.role === "thinking" && (
-                                <div className="font-semibold mb-1">
-                                  Thinking...
-                                </div>
-                              )}
-                              {msg.role === "tool_call_request" &&
-                                msg.tool_name && (
-                                  <div className="font-semibold mb-1">
-                                    Tool Call:{" "}
-                                    <code className="font-mono bg-purple-200 px-1 rounded">
-                                      {msg.tool_name}
-                                    </code>
+                              <span
+                                className={cn(
+                                  "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
+                                  msg.role === "user"
+                                    ? "bg-primary text-primary-foreground"
+                                    : msg.role === "assistant"
+                                    ? "bg-muted"
+                                    : msg.role === "system" &&
+                                      msg.screenshot_base64
+                                    ? "bg-muted/80 border border-primary/20 p-2"
+                                    : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
+                                )}
+                              >
+                                {msg.content}
+                                {msg.screenshot_base64 && (
+                                  <div
+                                    className={cn(
+                                      "mt-2",
+                                      msg.role !== "system" && "border-t pt-2"
+                                    )}
+                                  >
+                                    <div className="text-xs text-muted-foreground mb-1">
+                                      {msg.role === "system"
+                                        ? "Screenshot captured by AI:"
+                                        : "Screenshot:"}
+                                    </div>
+                                    <div className="relative">
+                                      <img
+                                        src={`data:image/png;base64,${msg.screenshot_base64}`}
+                                        alt="Screenshot"
+                                        className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                                      />
+                                      <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+                                    </div>
                                   </div>
                                 )}
-                              {msg.role === "tool_call_result" &&
-                                msg.tool_name && (
-                                  <div className="font-semibold mb-1">
-                                    Tool Result:{" "}
-                                    <code className="font-mono bg-green-200 px-1 rounded">
-                                      {msg.tool_name}
-                                    </code>
-                                  </div>
-                                )}
-                              {msg.content}
-                              {msg.role === "tool_call_request" &&
-                                msg.tool_args && (
-                                  <pre className="mt-1 p-1.5 bg-purple-50 text-xs rounded overflow-x-auto">
-                                    Args:{" "}
-                                    {JSON.stringify(msg.tool_args, null, 2)}
-                                  </pre>
-                                )}
-                              {msg.role === "tool_call_result" &&
-                                msg.tool_output && (
-                                  <pre className="mt-1 p-1.5 bg-green-50 text-xs rounded overflow-x-auto">
-                                    Output:{" "}
-                                    {typeof msg.tool_output === "string"
-                                      ? msg.tool_output
-                                      : JSON.stringify(
-                                          msg.tool_output,
-                                          null,
-                                          2
-                                        )}
-                                  </pre>
-                                )}
-                              {msg.screenshot_base64 && (
-                                <div
-                                  className={cn(
-                                    "mt-2",
-                                    msg.role !== "system" && "border-t pt-2"
-                                  )}
-                                >
-                                  <div className="text-xs text-muted-foreground mb-1">
-                                    {msg.role === "system"
-                                      ? "Screenshot captured by AI:"
-                                      : "Screenshot:"}
-                                  </div>
-                                  <div className="relative">
-                                    <img
-                                      src={`data:image/png;base64,${msg.screenshot_base64}`}
-                                      alt="Screenshot"
-                                      className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-                                    />
-                                    <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-                                  </div>
-                                </div>
-                              )}
-                            </span>
-                          </div>
+                              </span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
