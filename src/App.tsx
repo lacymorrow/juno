@@ -57,6 +57,72 @@ type BackendResponsePayload = {
   response: SubmitQueryResult;
 };
 
+// --- Tool Usage Event Type ---
+interface ToolUsageEntry {
+  timestamp: number;
+  tool: string;
+  inputs: any;
+  result?: any;
+  success: boolean;
+  screenshot_base64?: string;
+  show_timestamp: boolean;
+  formatted_time?: string;
+}
+
+// --- Agent Event Types (mirroring tool_logger.rs) ---
+interface ThinkingPayload {
+  content: string;
+}
+
+interface ToolCallRequestPayload {
+  tool_name: string;
+  tool_args: any; // Corresponds to serde_json::Value
+  content?: string;
+}
+
+interface ToolCallResultPayload {
+  tool_name: string;
+  tool_output: any; // Corresponds to serde_json::Value
+  success: boolean;
+  content?: string;
+  screenshot_base64?: string;
+}
+
+interface ScreenshotPayload {
+  screenshot_base64: string;
+  content?: string;
+}
+
+interface GenericContentPayload {
+  content: string;
+}
+
+type AgentEventPayload =
+  | { type: "thinking"; payload: ThinkingPayload }
+  | { type: "tool_call_request"; payload: ToolCallRequestPayload }
+  | { type: "tool_call_result"; payload: ToolCallResultPayload }
+  | { type: "screenshot"; payload: ScreenshotPayload }
+  | { type: "generic_content"; payload: GenericContentPayload };
+
+// This is the structure expected from the `agent-event` emitted by tool_logger.rs
+// It matches the Rust `AgentEvent` struct where `event_type` is the `type` field here
+// and `payload` is the `payload` field.
+// Note: The Rust `AgentEvent` has `event_type` and `payload` as direct fields.
+// The `listen` function in Tauri might give us the deserialized payload directly.
+// Let's assume the event payload from `listen<AgentEventPayloadTauri>` will be an object
+// with `type` and `payload` properties, matching the conceptual structure of Rust's AgentEvent.
+
+interface AgentEventTauri {
+  type: string; // "thinking", "tool_call_request", "tool_call_result", "screenshot", "generic_content"
+  payload: // This will be one of the specific payload types based on `type`
+  | ThinkingPayload
+    | ToolCallRequestPayload
+    | ToolCallResultPayload
+    | ScreenshotPayload
+    | GenericContentPayload;
+}
+// --- End Agent Event Types ---
+
 // Type for view state
 type AppView = "chat" | "settings" | "devtools" | "permissions";
 
@@ -295,68 +361,6 @@ function App() {
     [isProcessing, serverStatus, setConversation, setQuery, setIsProcessing]
   );
 
-  // Add tool usage event listener to update the conversation with screenshots
-  useEffect(() => {
-    const unlisten = listen<any>("agent-event", (event) => {
-      console.log("Received agent-event:", event.payload);
-      const { type, payload } = event.payload;
-
-      let newMessage: ChatMessage | null = null;
-
-      const eventTimestamp = Date.now();
-
-      if (type === "thinking" && payload.content) {
-        newMessage = {
-          role: "thinking",
-          content: payload.content,
-          timestamp: eventTimestamp,
-        };
-      } else if (
-        type === "tool_call_request" &&
-        payload.tool_name &&
-        payload.tool_args
-      ) {
-        newMessage = {
-          role: "tool_call_request",
-          content: payload.content || `Calling tool: ${payload.tool_name}`,
-          tool_name: payload.tool_name,
-          tool_args: payload.tool_args,
-          timestamp: eventTimestamp,
-        };
-      } else if (
-        type === "tool_call_result" &&
-        payload.tool_name &&
-        payload.tool_output
-      ) {
-        newMessage = {
-          role: "tool_call_result",
-          content: payload.content || `Result from ${payload.tool_name}`,
-          tool_name: payload.tool_name,
-          tool_output: payload.tool_output,
-          screenshot_base64: payload.screenshot_base64, // Include screenshot if part of tool result
-          timestamp: eventTimestamp,
-        };
-      } else if (type === "screenshot" && payload.screenshot_base64) {
-        // This can also be a specific type of tool_call_result if a screenshot tool was called
-        // Or a general system message if the AI decides to capture one proactively.
-        newMessage = {
-          role: "system", // Or could be 'tool_call_result' if tied to a specific tool action
-          content: payload.content || "The AI captured a screenshot.",
-          screenshot_base64: payload.screenshot_base64,
-          timestamp: eventTimestamp,
-        };
-      }
-
-      if (newMessage) {
-        setConversation((prev) => [...prev, newMessage!]);
-      }
-    });
-
-    return () => {
-      unlisten.then((unlistenFn) => unlistenFn());
-    };
-  }, []);
-
   // Listen for settings menu requests from native menu
   useEffect(() => {
     const unlisten = listen<string>("settings-requested", (event) => {
@@ -520,6 +524,110 @@ function App() {
       unlisten?.();
     };
   }, [handleBackendResponseDebounced]); // Add debounced handler to dependency array
+
+  // Listen for agent events (thinking, tool calls, etc.)
+  useEffect(() => {
+    const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
+      console.log("Received agent-event (RAW):", event); // Log the entire event object
+      const { type, payload } = event.payload;
+      const currentTime = Date.now();
+
+      setConversation((prev) => {
+        let newMessage: ChatMessage | null = null;
+        console.log(
+          `[Agent Event Processor] Event type: ${type}, Payload:`,
+          payload
+        ); // Log type and payload
+
+        if (type === "thinking" && "content" in payload) {
+          console.log(
+            "[Agent Event Processor] Processing thinking. Payload:",
+            payload
+          );
+          newMessage = {
+            role: "thinking",
+            content: payload.content || "Thinking...",
+            timestamp: currentTime,
+          };
+          console.log(
+            "[Agent Event Processor] Created thinking newMessage:",
+            newMessage
+          );
+        } else if (type === "generic_content" && "content" in payload) {
+          console.log(
+            "[Agent Event Processor] Processing generic_content. Payload:",
+            payload
+          );
+          newMessage = {
+            role: "system",
+            content: payload.content || "System message",
+            timestamp: currentTime,
+          };
+          console.log(
+            "[Agent Event Processor] Created generic_content newMessage:",
+            newMessage
+          );
+        } else {
+          console.log(
+            `[Agent Event Processor] Unhandled/unsupported event type for this listener: ${type}`
+          );
+        }
+
+        if (newMessage) {
+          console.log(
+            "[Agent Event Processor] Adding newMessage to conversation:",
+            newMessage
+          );
+          return [...prev, newMessage];
+        } else {
+          console.log(
+            "[Agent Event Processor] No newMessage created, conversation unchanged."
+          );
+          return prev;
+        }
+      });
+    });
+
+    return () => {
+      unlistenPromise.then((unlistenFn) => unlistenFn());
+    };
+  }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
+
+  // Listen for detailed tool usage events
+  useEffect(() => {
+    const unlistenPromise = listen<ToolUsageEntry>("tool-usage", (event) => {
+      console.log("Received tool-usage event:", event.payload);
+      const { tool, inputs, result, success, timestamp, screenshot_base64 } =
+        event.payload;
+
+      setConversation((prev) => {
+        const toolRequestMessage: ChatMessage = {
+          role: "tool_call_request",
+          tool_name: tool,
+          tool_args: inputs,
+          content: `Using tool: ${tool}`,
+          timestamp: timestamp,
+        };
+
+        const toolResultMessage: ChatMessage = {
+          role: "tool_call_result",
+          tool_name: tool,
+          tool_output: result,
+          content: success
+            ? `Tool ${tool} executed successfully.`
+            : `Tool ${tool} failed.`,
+          screenshot_base64: screenshot_base64, // Attach screenshot to the result message
+          timestamp: timestamp + 1, // Ensure it appears after the request
+        };
+
+        return [...prev, toolRequestMessage, toolResultMessage];
+      });
+    });
+
+    return () => {
+      unlistenPromise.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
