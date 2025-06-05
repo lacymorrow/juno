@@ -404,8 +404,7 @@ function App() {
         }
 
         if (transcribedText && transcribedText.trim() !== "") {
-          // Only play sound for successful agent mode transcription (not spacebar dictation)
-          // Spacebar dictation handles its own immediate typing feedback
+          // Only play sound for successful Agent Mode transcription (not Dictation Mode)
           console.log(
             "Transcribed text received, automatically submitting to AI agent:",
             transcribedText

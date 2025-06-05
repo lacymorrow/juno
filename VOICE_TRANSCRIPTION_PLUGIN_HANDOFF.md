@@ -29,12 +29,12 @@ The system now uses a dual-event architecture:
 - **Plugin Events**: `plugin:voice-transcription:*` (internal)
 - **App Events**: `app-dictation-*` (for UI compatibility)
 
-Event flow: Alt+D → `toggle-dictation-request` → `toggleDictation()` → Plugin → Events
+Event flow: Alt+D (Agent Mode) → `toggle-dictation-request` → `toggleDictation()` → Plugin → Events
 
 ## Current State
 
 ### Working Features
-- ✅ Voice dictation via Alt+D shortcut
+- ✅ Voice input for Agent Mode via Alt+D shortcut
 - ✅ Real-time partial transcription results
 - ✅ Final transcription delivery
 - ✅ Error handling and reporting
@@ -113,7 +113,7 @@ listen('toggle-dictation-request', async () => {
 4. **Language Detection**: Automatic language detection support
 
 ### Testing Recommendations
-1. Test global shortcut (Alt+D) functionality
+1. Test global shortcut (Alt+D) functionality for Agent Mode
 2. Verify UI state updates during recording
 3. Test error scenarios (no microphone, model loading failure)
 4. Verify transcription accuracy with various audio inputs
