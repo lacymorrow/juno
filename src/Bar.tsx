@@ -382,7 +382,7 @@ export function FloatingBar() {
     };
   }, [barState, inputRef]); // barState needed for the conditional in unlistenDidSubmit
 
-  // Effect to listen for Dictation Mode events to differentiate from AI Agent Mode
+  // Effect to listen for dictation events (listening/transcribing/dictated states)
   useEffect(() => {
     let unlistenDictationStarted: (() => void) | undefined;
     let unlistenDictationFinished: (() => void) | undefined;
@@ -427,9 +427,8 @@ export function FloatingBar() {
       unlistenDictationFinished = await listen<{
         query: string | null;
         error?: string;
-      }>("app-dictation-finished", (event) => {
+      }>("app-dictation-finished", async (event) => {
         console.log("FloatingBar Event: app-dictation-finished", event.payload);
-        setTranscriptionText(""); // Clear transcription on finish
 
         if (
           barState === "listening" ||
@@ -439,32 +438,81 @@ export function FloatingBar() {
           // Only act if we were in a dictation state
           if (transitionTimeoutRef.current)
             clearTimeout(transitionTimeoutRef.current);
+
           if (event.payload.query) {
             // A query was successfully dictated.
-            // For Dictation Mode, we don't show input field, just process directly
-            if (isDictationMode) {
-              // Dictation Mode is handled differently - text is typed directly
-              setBarState("finishing");
-              transitionTimeoutRef.current = setTimeout(() => {
-                setBarState("default");
-              }, 500);
-            } else {
-              // Regular dictation - Display the transcribed text in the input field
-              setInputValue(event.payload.query);
-              setBarState("input");
-              requestAnimationFrame(() => {
-                if (inputRef.current && event.payload.query) {
-                  inputRef.current.focus();
-                  // Place cursor at the end of the transcribed text
-                  inputRef.current.setSelectionRange(
-                    event.payload.query.length,
-                    event.payload.query.length
+            const transcribedText = event.payload.query;
+
+            // For both AI Mode and Dictation Mode, trigger the same submission loading sequence
+            setLastSubmittedValue(transcribedText);
+            setTranscriptionText(""); // Clear transcription on finish
+            setCurrentError(null); // Clear any previous error
+
+            // Emit the same events that typed messages use for loading states
+            try {
+              await emit("will-submit-query", { query: transcribedText });
+              console.log(
+                "FloatingBar: Emitted will-submit-query for dictated text:",
+                transcribedText
+              );
+
+              if (isDictationMode) {
+                // For Dictation Mode - no AI processing, just direct typing
+                // Note: The backend will handle the actual typing
+                console.log(
+                  "FloatingBar: Dictation Mode - text will be typed directly"
+                );
+
+                // Simulate successful submission for UI feedback
+                setTimeout(async () => {
+                  await emit("did-submit-query", { success: true });
+                  console.log(
+                    "FloatingBar: Emitted did-submit-query (success) for Dictation Mode"
                   );
-                }
+
+                  // Simulate backend response for UI completion
+                  setTimeout(async () => {
+                    const mockResponse = {
+                      query: transcribedText,
+                      response: {
+                        text: `Typed: "${transcribedText}"`,
+                        agent_state: "Finished",
+                        audio_base64: undefined,
+                        screenshot_base64: undefined,
+                      },
+                    };
+                    await emit("backend-response", mockResponse);
+                    console.log(
+                      "FloatingBar: Emitted mock backend-response for Dictation Mode"
+                    );
+                  }, 800); // Short delay to show loading
+                }, 100);
+              } else {
+                // For AI Agent Mode - normal AI processing
+                // The backend will process this and emit backend-response when done
+                await invoke("submit_query", { query: transcribedText });
+                console.log(
+                  "FloatingBar: Invoked submit_query for AI Agent Mode:",
+                  transcribedText
+                );
+                await emit("did-submit-query", { success: true });
+                console.log(
+                  "FloatingBar: Emitted did-submit-query (success) for AI Agent Mode"
+                );
+              }
+            } catch (error) {
+              console.error(
+                "FloatingBar: Error in dictation submission flow:",
+                error
+              );
+              await emit("did-submit-query", {
+                success: false,
+                error: String(error),
               });
             }
           } else {
             // No query from dictation (e.g., cancelled, error). Revert to default.
+            setTranscriptionText(""); // Clear transcription on finish
             setBarState("shrinking");
             transitionTimeoutRef.current = setTimeout(() => {
               setBarState("default");
@@ -480,7 +528,7 @@ export function FloatingBar() {
       unlistenDictationFinished?.();
       unlistenDictationPartialResult?.(); // Cleanup partial result listener
     };
-  }, [barState, inputRef]); // barState needed for conditional, inputRef for focus attempt
+  }, [barState, inputRef, isDictationMode]); // Added isDictationMode to dependencies
 
   // Effect to listen for Dictation Mode events to differentiate from AI Agent Mode
   useEffect(() => {
