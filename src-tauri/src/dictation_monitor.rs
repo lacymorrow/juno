@@ -5,15 +5,15 @@ use tokio::sync::Mutex;
 use tracing::{info, error, debug, warn};
 
 // Configuration constants
-const HOLD_DURATION_MS: u64 = 500; // Hold spacebar for 500ms to commit dictation
+const HOLD_DURATION_MS: u64 = 500; // Hold dictation input key for 500ms to commit dictation
 const IMMEDIATE_START_MS: u64 = 0; // Start transcription immediately (0ms delay)
 const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds max transcription time
 const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
 const COOLDOWN_AFTER_CANCEL_MS: u64 = 300; // Cooldown period after cancellation to prevent double-tap issues
 
-// State for spacebar monitoring
+// State for dictation input monitoring
 #[derive(Debug)]
-pub struct SpacebarMonitorState {
+pub struct DictationInputMonitorState {
     pub hold_start_time: Option<Instant>,
     pub transcription_started: bool,
     pub hold_threshold_reached: bool,
@@ -23,7 +23,7 @@ pub struct SpacebarMonitorState {
     pub last_cancellation_time: Option<Instant>, // Track when last cancellation occurred
 }
 
-impl SpacebarMonitorState {
+impl DictationInputMonitorState {
     pub fn new() -> Self {
         Self {
             hold_start_time: None,
@@ -39,7 +39,7 @@ impl SpacebarMonitorState {
     pub fn start_hold(&mut self) -> bool {
         // Check if we're already in a transcription state
         if self.transcription_started {
-            debug!("[SpacebarMonitor] Ignoring spacebar press - transcription already active");
+            debug!("[DictationMonitor] Ignoring dictation input press - transcription already active");
             return false;
         }
 
@@ -47,7 +47,7 @@ impl SpacebarMonitorState {
         if let Some(last_cancel) = self.last_cancellation_time {
             let time_since_cancel = last_cancel.elapsed().as_millis();
             if time_since_cancel < COOLDOWN_AFTER_CANCEL_MS as u128 {
-                debug!("[SpacebarMonitor] Ignoring spacebar press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
+                debug!("[DictationMonitor] Ignoring dictation input press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
                 return false; // Don't start tracking during cooldown
             }
         }
@@ -58,7 +58,7 @@ impl SpacebarMonitorState {
         self.passthrough_scheduled = false;
         self.transcription_start_time = None;
         self.force_cleanup_scheduled = false;
-        debug!("[SpacebarMonitor] Started tracking spacebar hold");
+        debug!("[DictationMonitor] Started tracking dictation input hold");
         true // Successfully started tracking
     }
 
@@ -72,7 +72,7 @@ impl SpacebarMonitorState {
         // If transcription was started but threshold wasn't reached, it means we're cancelling
         if transcription_was_started && !threshold_was_reached {
             self.last_cancellation_time = Some(Instant::now());
-            debug!("[SpacebarMonitor] Recording cancellation time for cooldown period");
+            debug!("[DictationMonitor] Recording cancellation time for cooldown period");
         }
 
         self.hold_start_time = None;
@@ -83,7 +83,7 @@ impl SpacebarMonitorState {
         self.force_cleanup_scheduled = false;
 
         debug!(
-            "[SpacebarMonitor] Ended spacebar hold tracking, duration: {:?}ms, transcription_started: {}, threshold_reached: {}",
+            "[DictationMonitor] Ended dictation input hold tracking, duration: {:?}ms, transcription_started: {}, threshold_reached: {}",
             duration.as_millis(), transcription_was_started, threshold_was_reached
         );
         (transcription_was_started, threshold_was_reached, duration)
@@ -99,7 +99,7 @@ impl SpacebarMonitorState {
             if duration.as_millis() >= IMMEDIATE_START_MS as u128 {
                 self.transcription_started = true;
                 self.transcription_start_time = Some(Instant::now());
-                info!("[SpacebarMonitor] Spacebar held for {}ms - starting immediate transcription", duration.as_millis());
+                info!("[DictationMonitor] Dictation input held for {}ms - starting immediate transcription", duration.as_millis());
                 return true;
             }
         }
@@ -115,7 +115,7 @@ impl SpacebarMonitorState {
             let duration = start_time.elapsed();
             if duration.as_millis() >= HOLD_DURATION_MS as u128 {
                 self.hold_threshold_reached = true;
-                info!("[SpacebarMonitor] Spacebar held for {}ms - threshold reached, committing to Dictation Mode", duration.as_millis());
+                info!("[DictationMonitor] Dictation input held for {}ms - threshold reached, committing to Dictation Mode", duration.as_millis());
                 return true;
             }
         }
@@ -127,7 +127,7 @@ impl SpacebarMonitorState {
         if let Some(start_time) = self.transcription_start_time {
             let duration = start_time.elapsed();
             if duration.as_millis() >= MAX_TRANSCRIPTION_DURATION_MS as u128 {
-                warn!("[SpacebarMonitor] Transcription has been running for {}ms - forcing cleanup", duration.as_millis());
+                warn!("[DictationMonitor] Transcription has been running for {}ms - forcing cleanup", duration.as_millis());
                 return true;
             }
         }
@@ -136,13 +136,13 @@ impl SpacebarMonitorState {
 
     // Check if we need to force cleanup due to stuck state
     pub fn should_force_cleanup(&mut self) -> bool {
-        // If transcription started but spacebar was released and enough time has passed
+        // If transcription started but dictation input was released and enough time has passed
         if self.transcription_started && self.hold_start_time.is_none() && !self.force_cleanup_scheduled {
             if let Some(start_time) = self.transcription_start_time {
                 let duration = start_time.elapsed();
                 if duration.as_millis() >= FORCE_CLEANUP_TIMEOUT_MS as u128 {
                     self.force_cleanup_scheduled = true;
-                    warn!("[SpacebarMonitor] Scheduling force cleanup - transcription stuck for {}ms", duration.as_millis());
+                    warn!("[DictationMonitor] Scheduling force cleanup - transcription stuck for {}ms", duration.as_millis());
                     return true;
                 }
             }
@@ -152,7 +152,7 @@ impl SpacebarMonitorState {
 
     // Force reset all state - use when stuck
     pub fn force_reset(&mut self) {
-        warn!("[SpacebarMonitor] Force resetting all spacebar state");
+        warn!("[DictationMonitor] Force resetting all dictation input state");
         self.hold_start_time = None;
         self.transcription_started = false;
         self.hold_threshold_reached = false;
@@ -162,60 +162,60 @@ impl SpacebarMonitorState {
     }
 }
 
-// Global state for the spacebar monitor
-static SPACEBAR_STATE: once_cell::sync::Lazy<Arc<Mutex<SpacebarMonitorState>>> =
-    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(SpacebarMonitorState::new())));
+// Global state for the dictation input monitor
+static DICTATION_INPUT_STATE: once_cell::sync::Lazy<Arc<Mutex<DictationInputMonitorState>>> =
+    once_cell::sync::Lazy::new(|| Arc::new(Mutex::new(DictationInputMonitorState::new())));
 
-// Initialize spacebar monitoring for the application
-pub async fn init_spacebar_monitoring(app_handle: AppHandle) -> Result<(), String> {
-    info!("[SpacebarMonitor] Initializing spacebar monitoring system with immediate transcription start");
+// Initialize dictation input monitoring for the application
+pub async fn init_dictation_input_monitoring(app_handle: AppHandle) -> Result<(), String> {
+    info!("[DictationMonitor] Initializing dictation input monitoring system with immediate transcription start");
 
-    // Start the monitoring task that checks for held spacebar
+    // Start the monitoring task that checks for held dictation input
     let app_handle_clone = app_handle.clone();
     tokio::spawn(async move {
-        spacebar_monitoring_task(app_handle_clone).await;
+        dictation_input_monitoring_task(app_handle_clone).await;
     });
 
-    info!("[SpacebarMonitor] Spacebar monitoring system initialized successfully");
+    info!("[DictationMonitor] Dictation input monitoring system initialized successfully");
     Ok(())
 }
 
 // Monitoring task that checks hold duration and triggers events
-async fn spacebar_monitoring_task(app_handle: AppHandle) {
+async fn dictation_input_monitoring_task(app_handle: AppHandle) {
     let mut interval = tokio::time::interval(Duration::from_millis(50)); // Check every 50ms for better responsiveness
 
     loop {
         interval.tick().await;
 
-        let mut state = SPACEBAR_STATE.lock().await;
+        let mut state = DICTATION_INPUT_STATE.lock().await;
 
         // Check if we should start transcription immediately
         if state.check_and_start_transcription() {
             // Emit event to start transcription immediately
-            if let Err(e) = app_handle.emit("spacebar-transcription-start", ()) {
-                error!("[SpacebarMonitor] Failed to emit spacebar-transcription-start: {}", e);
+            if let Err(e) = app_handle.emit("dictation-transcription-start", ()) {
+                error!("[DictationMonitor] Failed to emit dictation-transcription-start: {}", e);
             }
         }
 
         // Check if we've reached the hold threshold (commit to dictation)
         if state.check_and_reach_threshold() {
             // Emit event to confirm dictation commitment
-            if let Err(e) = app_handle.emit("spacebar-dictation-committed", ()) {
-                error!("[SpacebarMonitor] Failed to emit spacebar-dictation-committed: {}", e);
+            if let Err(e) = app_handle.emit("dictation-committed", ()) {
+                error!("[DictationMonitor] Failed to emit dictation-committed: {}", e);
             }
         }
 
         // Check for transcription timeout (safety mechanism)
         if state.check_transcription_timeout() {
-            warn!("[SpacebarMonitor] Transcription timeout detected - forcing stop");
-            if let Err(e) = app_handle.emit("spacebar-transcription-force-stop", ()) {
-                error!("[SpacebarMonitor] Failed to emit spacebar-transcription-force-stop: {}", e);
+            warn!("[DictationMonitor] Transcription timeout detected - forcing stop");
+            if let Err(e) = app_handle.emit("dictation-transcription-force-stop", ()) {
+                error!("[DictationMonitor] Failed to emit dictation-transcription-force-stop: {}", e);
             }
 
             // Force cleanup of app state
             let app_state = app_handle.state::<crate::state::AppState>();
-            if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                *spacebar_active = false;
+            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                *dictation_active = false;
             }
 
             state.force_reset();
@@ -223,15 +223,15 @@ async fn spacebar_monitoring_task(app_handle: AppHandle) {
 
         // Check if we need to force cleanup due to stuck state
         if state.should_force_cleanup() {
-            warn!("[SpacebarMonitor] Force cleanup triggered");
-            if let Err(e) = app_handle.emit("spacebar-transcription-force-cleanup", ()) {
-                error!("[SpacebarMonitor] Failed to emit spacebar-transcription-force-cleanup: {}", e);
+            warn!("[DictationMonitor] Force cleanup triggered");
+            if let Err(e) = app_handle.emit("dictation-transcription-force-cleanup", ()) {
+                error!("[DictationMonitor] Failed to emit dictation-transcription-force-cleanup: {}", e);
             }
 
             // Force cleanup of app state
             let app_state = app_handle.state::<crate::state::AppState>();
-            if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                *spacebar_active = false;
+            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                *dictation_active = false;
             }
 
             // Try to force stop the voice controller
@@ -244,7 +244,7 @@ async fn spacebar_monitoring_task(app_handle: AppHandle) {
 
 // Helper function to force stop the voice controller
 async fn force_stop_voice_controller(app_handle: &AppHandle) {
-    warn!("[SpacebarMonitor] Attempting to force stop voice controller");
+    warn!("[DictationMonitor] Attempting to force stop voice controller");
 
     // Try to stop the voice transcription plugin
     match tauri_plugin_voice_transcription::commands::stop_dictation(
@@ -252,46 +252,46 @@ async fn force_stop_voice_controller(app_handle: &AppHandle) {
         app_handle.state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
     ).await {
         Ok(_) => {
-            info!("[SpacebarMonitor] Successfully force stopped voice controller");
+            info!("[DictationMonitor] Successfully force stopped voice controller");
         }
         Err(e) => {
-            error!("[SpacebarMonitor] Failed to force stop voice controller: {}", e);
+            error!("[DictationMonitor] Failed to force stop voice controller: {}", e);
         }
     }
 }
 
-// Called when spacebar is pressed down
-pub async fn on_spacebar_pressed() {
-    let mut state = SPACEBAR_STATE.lock().await;
+// Called when dictation input key is pressed down
+pub async fn on_dictation_input_pressed() {
+    let mut state = DICTATION_INPUT_STATE.lock().await;
     let started = state.start_hold();
     if started {
-        debug!("[SpacebarMonitor] Spacebar pressed down - starting immediate tracking");
+        debug!("[DictationMonitor] Dictation input pressed down - starting immediate tracking");
     } else {
-        debug!("[SpacebarMonitor] Spacebar pressed down - ignored (transcription active or cooldown period)");
+        debug!("[DictationMonitor] Dictation input pressed down - ignored (transcription active or cooldown period)");
     }
 }
 
-// Called when spacebar is released
-pub async fn on_spacebar_released(app_handle: &AppHandle) {
-    let mut state = SPACEBAR_STATE.lock().await;
+// Called when dictation input key is released
+pub async fn on_dictation_input_released(app_handle: &AppHandle) {
+    let mut state = DICTATION_INPUT_STATE.lock().await;
     let (transcription_started, threshold_reached, duration) = state.end_hold();
 
     if threshold_reached {
-        info!("[SpacebarMonitor] Spacebar released after threshold reached - completing Dictation Mode normally");
+        info!("[DictationMonitor] Dictation input released after threshold reached - completing Dictation Mode normally");
 
         // Emit event to stop dictation normally
-        if let Err(e) = app_handle.emit("spacebar-dictation-stop", ()) {
-            error!("[SpacebarMonitor] Failed to emit spacebar-dictation-stop: {}", e);
+        if let Err(e) = app_handle.emit("dictation-stop", ()) {
+            error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
         }
     } else if transcription_started {
         info!(
-            "[SpacebarMonitor] Spacebar released before threshold ({}ms) - cancelling transcription",
+            "[DictationMonitor] Dictation input released before threshold ({}ms) - cancelling transcription",
             duration.as_millis()
         );
 
         // Emit event to cancel transcription and do passthrough
-        if let Err(e) = app_handle.emit("spacebar-transcription-cancel", ()) {
-            error!("[SpacebarMonitor] Failed to emit spacebar-transcription-cancel: {}", e);
+        if let Err(e) = app_handle.emit("dictation-transcription-cancel", ()) {
+            error!("[DictationMonitor] Failed to emit dictation-transcription-cancel: {}", e);
         }
 
         // Attempt passthrough space typing
@@ -301,7 +301,7 @@ pub async fn on_spacebar_released(app_handle: &AppHandle) {
         }
     } else {
         debug!(
-            "[SpacebarMonitor] Spacebar released without starting transcription ({}ms)",
+            "[DictationMonitor] Dictation input released without starting transcription ({}ms)",
             duration.as_millis()
         );
 
@@ -313,17 +313,17 @@ pub async fn on_spacebar_released(app_handle: &AppHandle) {
     }
 }
 
-// Public function to force reset the spacebar state (for emergency cleanup)
-pub async fn force_reset_spacebar_state() {
-    let mut state = SPACEBAR_STATE.lock().await;
+// Public function to force reset the dictation input state (for emergency cleanup)
+pub async fn force_reset_dictation_input_state() {
+    let mut state = DICTATION_INPUT_STATE.lock().await;
     state.force_reset();
-    info!("[SpacebarMonitor] Spacebar state force reset completed");
+    info!("[DictationMonitor] Dictation input state force reset completed");
 }
 
 // Attempt to pass through a space character to the currently focused application
 #[cfg(target_os = "macos")]
 async fn attempt_space_passthrough(app_handle: &AppHandle) {
-    debug!("[SpacebarMonitor] Attempting to type space character for passthrough");
+    debug!("[DictationMonitor] Attempting to type space character for passthrough");
 
     // Get the app state to access the desktop automation
     let app_state = app_handle.state::<crate::state::AppState>();
@@ -331,10 +331,10 @@ async fn attempt_space_passthrough(app_handle: &AppHandle) {
     // Use the global type text function to insert a space
     match crate::commands::keyboard::dev_global_type_text(" ".to_string(), app_state.clone()).await {
         Ok(()) => {
-            debug!("[SpacebarMonitor] Successfully typed space character for passthrough");
+            debug!("[DictationMonitor] Successfully typed space character for passthrough");
         }
         Err(e) => {
-            error!("[SpacebarMonitor] Failed to type space character for passthrough: {}", e);
+            error!("[DictationMonitor] Failed to type space character for passthrough: {}", e);
         }
     }
 }

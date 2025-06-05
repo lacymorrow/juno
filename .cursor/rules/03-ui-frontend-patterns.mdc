@@ -25,12 +25,12 @@ const [currentView, setCurrentView] = useState<AppView>("chat");
 ### Bar State Management
 ```typescript
 // Voice mode differentiation
-const [isSpacebarDictation, setIsSpacebarDictation] = useState(false);
+const [isDictationMode, setIsDictationMode] = useState(false);
 const [barState, setBarState] = useState<BarState>("default");
 
 // State mappings:
-// "dictating" - Orange microphone (spacebar mode)
-// "listening" - Blue microphone (agent mode)
+// "dictating" - Orange microphone (Dictation Mode)
+// "listening" - Blue microphone (Agent Mode)
 // "transcribing" - Green microphone (processing)
 // "speaking" - TTS playback
 ```
@@ -39,15 +39,15 @@ const [barState, setBarState] = useState<BarState>("default");
 ```typescript
 useEffect(() => {
     const setupListeners = async () => {
-        // Spacebar dictation events
-        unlistenSpacebarStart = await listen("spacebar-transcription-start", () => {
-            setIsSpacebarDictation(true);
+        // Dictation Mode events
+        unlistenDictationStart = await listen("dictation-transcription-start", () => {
+            setIsDictationMode(true);
             setBarState("dictating");
         });
 
         // Agent mode events
         unlistenAgentStart = await listen("app-dictation-started", () => {
-            setIsSpacebarDictation(false);
+            setIsDictationMode(false);
             setBarState("listening");
         });
     };
@@ -176,7 +176,8 @@ const handleSave = async () => {
 ### Keyboard Shortcuts Display
 ```typescript
 const shortcuts = [
-  { key: "Alt+D", description: "Toggle Voice Input" },
+  { key: "Alt+D", description: "Toggle Agent Mode (AI Conversations)" },
+  { key: "Spacebar", description: "Hold for Dictation Mode (Voice Typing)" },
   { key: "Escape", description: "Stop Current Task" },
   { key: "Cmd+,", description: "Open Settings" }
 ];

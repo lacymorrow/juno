@@ -89,7 +89,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [agentMode, setAgentMode] = useState<string>("multi");
 
   // Dictation Settings
-  const [spacebarClipboardEnabled, setSpacebarClipboardEnabled] =
+  const [dictationClipboardEnabled, setDictationClipboardEnabled] =
     useState<boolean>(true);
 
   // Sound Settings
@@ -153,9 +153,9 @@ const Settings: React.FC<SettingsProps> = ({
 
       // Load dictation settings
       const currentClipboardEnabled = await invoke<boolean>(
-        "get_spacebar_clipboard_enabled"
+        "get_dictation_clipboard_enabled"
       );
-      setSpacebarClipboardEnabled(currentClipboardEnabled);
+      setDictationClipboardEnabled(currentClipboardEnabled);
 
       // Load sound settings
       const currentSoundEnabled = await invoke<boolean>("get_sound_enabled");
@@ -319,10 +319,10 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const handleSpacebarClipboardChange = async (enabled: boolean) => {
+  const handleDictationClipboardChange = async (enabled: boolean) => {
     try {
-      await invoke("set_spacebar_clipboard_enabled", { enabled });
-      setSpacebarClipboardEnabled(enabled);
+      await invoke("set_dictation_clipboard_enabled", { enabled });
+      setDictationClipboardEnabled(enabled);
       toast.success(
         `Dictation Mode clipboard saving ${
           enabled ? "enabled" : "disabled"
@@ -331,8 +331,8 @@ const Settings: React.FC<SettingsProps> = ({
         }be saved to clipboard`
       );
     } catch (error) {
-      console.error("Failed to set spacebar clipboard setting:", error);
-      toast.error("Failed to set spacebar clipboard setting");
+      console.error("Failed to set dictation clipboard setting:", error);
+      toast.error("Failed to set dictation clipboard setting");
     }
   };
 
@@ -510,31 +510,33 @@ const Settings: React.FC<SettingsProps> = ({
             </Select>
             <p className="text-sm text-muted-foreground">
               Choose how AI responses should be spoken aloud. Use Alt+D for AI
-              agent dictation or hold Spacebar for direct voice typing.
+              agent dictation or hold the dictation key for direct voice typing.
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="spacebar-clipboard">Dictation Mode Clipboard</Label>
+            <Label htmlFor="dictation-clipboard">
+              Dictation Mode Clipboard
+            </Label>
             <div className="flex items-center gap-3">
               <Button
-                variant={spacebarClipboardEnabled ? "default" : "outline"}
+                variant={dictationClipboardEnabled ? "default" : "outline"}
                 size="sm"
                 onClick={() =>
-                  handleSpacebarClipboardChange(!spacebarClipboardEnabled)
+                  handleDictationClipboardChange(!dictationClipboardEnabled)
                 }
                 className="min-w-[80px]"
               >
-                {spacebarClipboardEnabled ? "Enabled" : "Disabled"}
+                {dictationClipboardEnabled ? "Enabled" : "Disabled"}
               </Button>
               <span className="text-sm text-muted-foreground">
                 Save transcribed text to clipboard when using Dictation Mode
               </span>
             </div>
             <p className="text-sm text-muted-foreground">
-              When enabled, text transcribed via Dictation Mode (hold Spacebar)
-              will be saved to the system clipboard in addition to being typed
-              directly.
+              When enabled, text transcribed via Dictation Mode (hold dictation
+              key) will be saved to the system clipboard in addition to being
+              typed directly.
             </p>
           </div>
 

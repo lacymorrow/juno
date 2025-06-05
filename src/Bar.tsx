@@ -484,18 +484,15 @@ export function FloatingBar() {
 
   // Effect to listen for Dictation Mode events to differentiate from AI Agent Mode
   useEffect(() => {
-    let unlistenSpacebarActive: (() => void) | undefined;
-    let unlistenSpacebarStart: (() => void) | undefined;
-    let unlistenSpacebarStop: (() => void) | undefined;
+    let unlistenDictationActive: (() => void) | undefined;
+    let unlistenDictationStart: (() => void) | undefined;
+    let unlistenDictationStop: (() => void) | undefined;
 
-    const setupSpacebarListeners = async () => {
-      unlistenSpacebarActive = await listen<boolean>(
-        "spacebar-dictation-active",
+    const setupDictationListeners = async () => {
+      unlistenDictationActive = await listen<boolean>(
+        "dictation-active",
         (event) => {
-          console.log(
-            "FloatingBar Event: spacebar-dictation-active",
-            event.payload
-          );
+          console.log("FloatingBar Event: dictation-active", event.payload);
           setIsDictationMode(event.payload);
 
           // Set visual state based on Dictation Mode status
@@ -509,11 +506,11 @@ export function FloatingBar() {
       );
 
       // Listen for immediate transcription start events
-      unlistenSpacebarStart = await listen(
-        "spacebar-transcription-start",
+      unlistenDictationStart = await listen(
+        "dictation-transcription-start",
         () => {
           console.log(
-            "FloatingBar Event: spacebar-transcription-start (immediate)"
+            "FloatingBar Event: dictation-transcription-start (immediate)"
           );
           setIsDictationMode(true);
           setBarState("dictating");
@@ -525,11 +522,11 @@ export function FloatingBar() {
       );
 
       // Listen for dictation commitment (threshold reached)
-      const unlistenSpacebarCommitted = await listen(
-        "spacebar-dictation-committed",
+      const unlistenDictationCommitted = await listen(
+        "dictation-committed",
         () => {
           console.log(
-            "FloatingBar Event: spacebar-dictation-committed (threshold reached)"
+            "FloatingBar Event: dictation-committed (threshold reached)"
           );
           // User has committed to dictation - we can show additional UI feedback here if desired
           // The "dictating" state is already set, so this is just for additional feedback
@@ -537,10 +534,10 @@ export function FloatingBar() {
       );
 
       // Listen for transcription cancellation events
-      const unlistenSpacebarCancel = await listen(
-        "spacebar-transcription-cancel",
+      const unlistenDictationCancel = await listen(
+        "dictation-transcription-cancel",
         () => {
-          console.log("FloatingBar Event: spacebar-transcription-cancel");
+          console.log("FloatingBar Event: dictation-transcription-cancel");
           setIsDictationMode(false);
 
           // Quickly return to default state since this was cancelled
@@ -554,10 +551,8 @@ export function FloatingBar() {
       );
 
       // Listen for Dictation Mode stop events (normal completion)
-      unlistenSpacebarStop = await listen("spacebar-dictation-stop", () => {
-        console.log(
-          "FloatingBar Event: spacebar-dictation-stop (normal completion)"
-        );
+      unlistenDictationStop = await listen("dictation-stop", () => {
+        console.log("FloatingBar Event: dictation-stop (normal completion)");
         setIsDictationMode(false);
 
         // Briefly show a completion state, then return to default
@@ -571,10 +566,10 @@ export function FloatingBar() {
 
       // Listen for force stop events (emergency cleanup)
       const unlistenForceStop = await listen(
-        "spacebar-transcription-force-stop",
+        "dictation-transcription-force-stop",
         () => {
           console.warn(
-            "FloatingBar Event: spacebar-transcription-force-stop - emergency cleanup"
+            "FloatingBar Event: dictation-transcription-force-stop - emergency cleanup"
           );
           setIsDictationMode(false);
           setBarState("default");
@@ -588,10 +583,10 @@ export function FloatingBar() {
 
       // Listen for force cleanup events (stuck state recovery)
       const unlistenForceCleanup = await listen(
-        "spacebar-transcription-force-cleanup",
+        "dictation-transcription-force-cleanup",
         () => {
           console.warn(
-            "FloatingBar Event: spacebar-transcription-force-cleanup - recovering stuck state"
+            "FloatingBar Event: dictation-transcription-force-cleanup - recovering stuck state"
           );
           setIsDictationMode(false);
           setBarState("default");
@@ -605,19 +600,19 @@ export function FloatingBar() {
 
       // Return cleanup functions for new listeners
       return () => {
-        unlistenSpacebarCommitted?.();
-        unlistenSpacebarCancel?.();
+        unlistenDictationCommitted?.();
+        unlistenDictationCancel?.();
         unlistenForceStop?.();
         unlistenForceCleanup?.();
       };
     };
 
-    const spacebarCleanup = setupSpacebarListeners();
+    const dictationCleanup = setupDictationListeners();
     return () => {
-      unlistenSpacebarActive?.();
-      unlistenSpacebarStart?.();
-      unlistenSpacebarStop?.();
-      spacebarCleanup?.then((cleanup) => cleanup?.());
+      unlistenDictationActive?.();
+      unlistenDictationStart?.();
+      unlistenDictationStop?.();
+      dictationCleanup?.then((cleanup) => cleanup?.());
     };
   }, []);
 
@@ -1014,7 +1009,7 @@ export function FloatingBar() {
             </div>
           )}
 
-          {/* Dictating State Content - Spacebar hold-to-dictate */}
+          {/* Dictating State Content - Hold dictation key to dictate */}
           {barState === "dictating" && (
             <div className="w-full h-full flex items-center justify-start overflow-hidden px-3 animate-pulse">
               <div className="mr-2 flex-shrink-0 relative">
@@ -1022,7 +1017,7 @@ export function FloatingBar() {
                 <div className="absolute -top-1 -right-1 w-2 h-2 bg-orange-400 rounded-full animate-ping"></div>
               </div>
               <span className="text-sm text-orange-200 truncate font-medium">
-                {transcriptionText || "Hold spacebar to dictate..."}
+                {transcriptionText || "Hold dictation key to dictate..."}
               </span>
             </div>
           )}
