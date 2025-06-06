@@ -158,7 +158,7 @@
   }
 }
 
-/* New Loading Bar Animation */
+/* Loading Bar Animation */
 .loading-bar-thin {
   width: 80%; /* Adjust width relative to its container */
   height: 2px; /* Make it thin */
@@ -179,5 +179,44 @@
   100% {
     transform: translateX(-99%);
     opacity: 0.7;
+  }
+}
+
+/* Enhanced Floating Bar Animations */
+.animate-fade-in {
+  animation: fade-in 0.3s ease-in-out;
+}
+
+@keyframes fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-success-fade {
+  animation: success-fade 2s ease-in-out;
+}
+
+@keyframes success-fade {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0.8;
+    transform: scale(0.98);
   }
 }
