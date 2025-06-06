@@ -289,27 +289,16 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
             duration.as_millis()
         );
 
-        // Emit event to cancel transcription and do passthrough
+        // Emit event to cancel transcription - no passthrough needed since we use Option+Space now
         if let Err(e) = app_handle.emit("dictation-transcription-cancel", ()) {
             error!("[DictationMonitor] Failed to emit dictation-transcription-cancel: {}", e);
         }
-
-        // Attempt passthrough space typing
-        #[cfg(target_os = "macos")]
-        {
-            attempt_space_passthrough(app_handle).await;
-        }
     } else {
         debug!(
-            "[DictationMonitor] Dictation input released without starting transcription ({}ms)",
+            "[DictationMonitor] Dictation input released without starting transcription ({}ms) - no action needed",
             duration.as_millis()
         );
-
-        // Very short press - just do passthrough
-        #[cfg(target_os = "macos")]
-        {
-            attempt_space_passthrough(app_handle).await;
-        }
+        // No passthrough needed since we're using Option+Space, not intercepting normal spacebar
     }
 }
 
@@ -318,23 +307,4 @@ pub async fn force_reset_dictation_input_state() {
     let mut state = DICTATION_INPUT_STATE.lock().await;
     state.force_reset();
     info!("[DictationMonitor] Dictation input state force reset completed");
-}
-
-// Attempt to pass through a space character to the currently focused application
-#[cfg(target_os = "macos")]
-async fn attempt_space_passthrough(app_handle: &AppHandle) {
-    debug!("[DictationMonitor] Attempting to type space character for passthrough");
-
-    // Get the app state to access the desktop automation
-    let app_state = app_handle.state::<crate::state::AppState>();
-
-    // Use the global type text function to insert a space
-    match crate::commands::keyboard::dev_global_type_text(" ".to_string(), app_state.clone()).await {
-        Ok(()) => {
-            debug!("[DictationMonitor] Successfully typed space character for passthrough");
-        }
-        Err(e) => {
-            error!("[DictationMonitor] Failed to type space character for passthrough: {}", e);
-        }
-    }
 }
