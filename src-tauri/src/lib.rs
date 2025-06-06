@@ -458,6 +458,18 @@ pub fn run() {
             set_keyboard_shortcut,
             set_keyboard_shortcuts,
             reset_keyboard_shortcuts,
+            // MCP Server Management Commands
+            add_mcp_server,
+            remove_mcp_server,
+            start_mcp_server,
+            stop_mcp_server,
+            get_mcp_servers,
+            get_mcp_server_statuses,
+            get_mcp_tools,
+            update_mcp_server,
+            set_mcp_server_enabled,
+            test_mcp_server_connection,
+            initialize_mcp_servers,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
