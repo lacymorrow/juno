@@ -232,8 +232,46 @@ function App() {
     // Remove frontend boot sound call
   }, []);
 
-  // Debounced handler function
-  const handleBackendResponseDebounced = useCallback(
+  // Clear conversation and reset app state
+  const clearConversation = async () => {
+    try {
+      await invoke("clear_conversation_history");
+      setConversation([]);
+      setQuery("");
+      console.log("Conversation cleared successfully");
+    } catch (error) {
+      console.error("Failed to clear conversation:", error);
+      setConversation([
+        {
+          role: "system",
+          content: `Error clearing conversation: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  };
+
+  // Start a new agent chat
+  const startNewChat = useCallback(async () => {
+    try {
+      await invoke("clear_conversation_history");
+      setConversation([]);
+      setQuery("");
+      console.log("New chat started successfully");
+    } catch (error) {
+      console.error("Failed to start new chat:", error);
+      setConversation([
+        {
+          role: "system",
+          content: `Error starting new chat: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  }, []);
+
+  // Handle backend responses via event listener
+  const handleBackendResponse = useCallback(
     debounce((payload: BackendResponsePayload) => {
       console.log("Debounced handler executing for:", payload.query);
       const { response } = payload; // Remove query from destructuring since we won't use it
@@ -383,7 +421,7 @@ function App() {
     const unlisten = listen<string>("help-requested", (event) => {
       console.log("Help requested from menu:", event.payload);
       const helpType = event.payload;
-      
+
       if (helpType === "shortcuts") {
         // Show keyboard shortcuts - could navigate to settings or show modal
         setCurrentView("settings");
@@ -409,7 +447,7 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, []);
+  }, [startNewChat]);
 
   // Listen for clear history requests
   useEffect(() => {
@@ -465,7 +503,7 @@ function App() {
     const unlisten = listen<string>("feedback-requested", (event) => {
       console.log("Feedback requested from menu:", event.payload);
       const feedbackType = event.payload;
-      
+
       // TODO: Implement feedback modal or form
       if (feedbackType === "issue") {
         console.log("Issue report requested");
@@ -654,7 +692,7 @@ function App() {
         (event) => {
           console.log("Received backend-response event (raw):", event.payload);
           // Call the debounced handler
-          handleBackendResponseDebounced(event.payload);
+          handleBackendResponse(event.payload);
         }
       );
     };
@@ -665,7 +703,7 @@ function App() {
     return () => {
       unlisten?.();
     };
-  }, [handleBackendResponseDebounced]); // Add debounced handler to dependency array
+  }, [handleBackendResponse]); // Add debounced handler to dependency array
 
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
@@ -821,51 +859,6 @@ function App() {
     } catch (error) {
       console.error("Error processing or playing audio:", error);
       setCurrentAudio(null);
-    }
-  };
-
-  // Clear conversation history
-  const clearConversation = async () => {
-    try {
-      await invoke("clear_conversation_history");
-      setConversation([
-        {
-          role: "system",
-          content:
-            "Conversation history cleared. You can start a new conversation.",
-          timestamp: Date.now(),
-        },
-      ]);
-      console.log("Conversation history cleared successfully");
-    } catch (error) {
-      console.error("Failed to clear conversation history:", error);
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Error clearing conversation: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-  };
-
-  // Start a new agent chat
-  const startNewChat = async () => {
-    try {
-      await invoke("clear_conversation_history");
-      setConversation([]);
-      setQuery("");
-      console.log("New chat started successfully");
-    } catch (error) {
-      console.error("Failed to start new chat:", error);
-      setConversation([
-        {
-          role: "system",
-          content: `Error starting new chat: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
     }
   };
 
