@@ -20,7 +20,6 @@ use tauri::{
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::{info, warn, error}; // Import logging macros
-use serde::Deserialize; // Added for deserializing payload struct
 use std::sync::Mutex; // Added for VoiceController state access
 
 // macOS specific imports
@@ -51,7 +50,7 @@ pub mod dictation_monitor; // Module for intelligent dictation input handling
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
@@ -71,12 +70,7 @@ use crate::commands::{
 
 // Added for selector parsing
 
-// Define a struct for the expected payload of bar-state-changed event
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct BarStateChangeEventPayload {
-    new_state: String,
-}
+// Old BarStateChangeEventPayload removed - now using floating bar manager
 
 
 
@@ -294,6 +288,12 @@ pub fn run() {
             is_tool_enabled,
             reset_tool_configuration,
             get_tool_configuration_summary,
+            // Floating Bar Commands
+            floating_bar_click,
+            floating_bar_focus_change,
+            floating_bar_input_blur,
+            floating_bar_input_change,
+            floating_bar_submit,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -484,41 +484,7 @@ pub fn run() {
             });
             // --- End of Tray Icon Setup ---
 
-            // --- Setup Floating Bar State Listener ---
-            if let Some(floating_bar_window) = app.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                let app_handle_for_listener = app.handle().clone(); // Clone AppHandle for the listener
-                floating_bar_window.listen(constants::events::BAR_STATE_CHANGED, move |event| {
-                    info!("[Event: {}] Received raw: {:?}", constants::events::BAR_STATE_CHANGED, event.payload());
-                    let payload_str = event.payload(); // Assuming this is &str as per compiler error
-                    match serde_json::from_str::<BarStateChangeEventPayload>(payload_str) {
-                        Ok(parsed_payload) => {
-                            let new_state_str = &parsed_payload.new_state;
-                            // Get AppState from the AppHandle inside the closure
-                            let app_state = app_handle_for_listener.state::<state::AppState>();
-                            // Clone the Arc for the bar_ui_state to extend its lifetime
-                            let bar_ui_state_arc = app_state.bar_ui_state.clone();
-                            let lock_result = bar_ui_state_arc.lock(); // Assign lock result to a variable
-                            match lock_result { // Match on the result
-                                Ok(mut bar_state_guard) => {
-                                    *bar_state_guard = new_state_str.to_string();
-                                    info!("[AppState Update] bar_ui_state updated to: {}", new_state_str);
-                                }
-                                Err(e) => {
-                                    tracing::error!("[Event: {}] Failed to lock AppState.bar_ui_state: {}", constants::events::BAR_STATE_CHANGED, e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("[Event: {}] Failed to parse payload into BarStateChangeEventPayload: {}. Payload: {}", constants::events::BAR_STATE_CHANGED, e, payload_str);
-                        }
-                    }
-                });
-                info!("[Setup] Listener for '{}' event attached to floating-bar window.", constants::events::BAR_STATE_CHANGED);
-            } else {
-                tracing::error!("[Setup] Floating-bar window not found, cannot listen for {} event.", constants::events::BAR_STATE_CHANGED);
-            }
-
-            // --- End of Floating Bar State Listener Setup ---
+            // --- Old bar-state-changed listener removed - now handled by floating bar manager ---
 
             // --- macOS Specific Setup for Floating Bar ---
             #[cfg(target_os = "macos")]
@@ -595,6 +561,13 @@ pub fn run() {
                 }
             });
 
+            // --- Initialize Floating Bar Manager ---
+            let app_handle_for_bar_manager = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                commands::floating_bar::initialize_bar_manager(app_handle_for_bar_manager).await;
+                tracing::info!("[Setup] Floating bar manager initialized successfully");
+            });
+
             let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {
                 // Note: Escape shortcut is now registered dynamically only when AI agent is running
@@ -626,6 +599,13 @@ pub fn run() {
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:dictation-started", move |event| {
                 info!("[Event] Received voice-transcription:dictation-started event");
+
+                // Update floating bar manager
+                let app_handle_clone = app_handle_for_listener.clone();
+                tauri::async_runtime::spawn(async move {
+                    commands::floating_bar::handle_dictation_started(&app_handle_clone).await;
+                });
+
                 // Rebroadcast the event as app-dictation-started for backward compatibility
                 if let Err(e) = app_handle_for_listener.emit("app-dictation-started", event.payload()) {
                     tracing::error!("[Event] Failed to rebroadcast dictation-started event: {}", e);
@@ -636,6 +616,21 @@ pub fn run() {
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:partial-result", move |event| {
                 info!("[Event] Received voice-transcription:partial-result event: {:?}", event.payload());
+
+                // Extract partial text and update floating bar manager
+                let payload_str = event.payload();
+                if let Ok(payload_json) = serde_json::from_str::<serde_json::Value>(payload_str) {
+                    if let Some(text_value) = payload_json.get("text") {
+                        if let Some(text) = text_value.as_str() {
+                            let app_handle_clone = app_handle_for_listener.clone();
+                            let partial_text = text.to_string();
+                            tauri::async_runtime::spawn(async move {
+                                commands::floating_bar::handle_dictation_partial(&app_handle_clone, partial_text).await;
+                            });
+                        }
+                    }
+                }
+
                 // Rebroadcast the event as app-dictation-partial-result for backward compatibility
                 if let Err(e) = app_handle_for_listener.emit("app-dictation-partial-result", event.payload()) {
                     tracing::error!("[Event] Failed to rebroadcast partial-result event: {}", e);
@@ -654,15 +649,38 @@ pub fn run() {
                     .map(|active| *active)
                     .unwrap_or(false);
 
+                // Extract text from payload for floating bar manager
+                let payload_str = event.payload();
+                let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
+                    Ok(payload_json) => {
+                        payload_json.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                    }
+                    Err(_) => None,
+                };
+
                 if is_dictation_active {
-                    info!("[Event] Skipping AI agent processing - Dictation Mode is active");
+                    info!("[Event] Processing final result for Dictation Mode");
+
+                    // Update floating bar manager for dictation mode completion
+                    let app_handle_clone = app_handle_for_listener.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, None).await;
+                    });
                     return; // Exit early, let dictation handler process this
                 }
 
                 info!("[Event] Processing final result for AI Agent Mode");
 
+                // Update floating bar manager for agent mode query
+                if let Some(text) = &extracted_text {
+                    let app_handle_clone = app_handle_for_listener.clone();
+                    let query_text = text.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(query_text)).await;
+                    });
+                }
+
                 // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
-                let payload_str = event.payload();
                 match serde_json::from_str::<serde_json::Value>(payload_str) {
                     Ok(payload_json) => {
                         if let Some(text_value) = payload_json.get("text") {
@@ -697,7 +715,7 @@ pub fn run() {
                 }
             });
 
-                        // Listen for dictation transcription start events (immediate)
+            // Listen for dictation transcription start events (immediate)
             let app_handle_for_dictation_start = app.handle().clone();
             app.listen("dictation-transcription-start", move |_event| {
                 info!("[Event] Received dictation-transcription-start event - starting immediate transcription");
@@ -705,6 +723,43 @@ pub fn run() {
                 // Start dictation using the voice transcription plugin command
                 let app_handle_clone = app_handle_for_dictation_start.clone();
                 tauri::async_runtime::spawn(async move {
+<<<<<<< HEAD
+                    // Use the plugin command to start dictation only if controller exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::start_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(()) => {
+                                    info!("[Dictation Mode] Started immediate transcription successfully");
+                                    // Mark this as Dictation Mode in AppState
+                                    let app_state = app_handle_clone.state::<state::AppState>();
+                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                                        *dictation_active = true;
+                                    }
+                                    if let Err(e) = app_handle_clone.emit("dictation-active", true) {
+                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
+
+                                    // Clean up state if start failed
+                                    let app_state = app_handle_clone.state::<state::AppState>();
+                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                                        *dictation_active = false;
+                                    }
+
+                                    // Reset dictation input monitor state
+                                    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+                                    // Emit failure event to UI
+                                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
+                                    }
+                                }
+=======
                     // Use the plugin command to start dictation
                     match tauri_plugin_voice_transcription::commands::start_dictation(
                         app_handle_clone.clone(),
@@ -717,25 +772,39 @@ pub fn run() {
                             if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
                                 *dictation_active = true;
                             }
+
+                            // Update floating bar manager
+                            let app_handle_for_bar = app_handle_clone.clone();
+                            tauri::async_runtime::spawn(async move {
+                                commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
+                            });
+
                             if let Err(e) = app_handle_clone.emit("dictation-active", true) {
                                 tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
+>>>>>>> origin/main
                             }
                         }
-                        Err(e) => {
-                            tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
-
-                            // Clean up state if start failed
+                        None => {
+                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot start transcription");
+                            
+                            // Clean up state since start failed
                             let app_state = app_handle_clone.state::<state::AppState>();
                             if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
                                 *dictation_active = false;
                             }
+
+                            // Update floating bar manager
+                            let app_handle_for_bar = app_handle_clone.clone();
+                            tauri::async_runtime::spawn(async move {
+                                commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+                            });
 
                             // Reset dictation input monitor state
                             crate::dictation_monitor::force_reset_dictation_input_state().await;
 
                             // Emit failure event to UI
                             if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
+                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after unavailable voice controller: {}", e);
                             }
                         }
                     }
@@ -751,7 +820,7 @@ pub fn run() {
                 // The transcription is already running, so we just acknowledge the commitment
             });
 
-                        // Listen for dictation transcription cancellation events (released before threshold)
+            // Listen for dictation transcription cancellation events (released before threshold)
             let app_handle_for_dictation_cancel = app.handle().clone();
             app.listen("dictation-transcription-cancel", move |_event| {
                 info!("[Event] Received dictation-transcription-cancel event - cancelling transcription");
@@ -759,16 +828,23 @@ pub fn run() {
                 // Stop dictation and discard results
                 let app_handle_clone = app_handle_for_dictation_cancel.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Use the plugin command to stop dictation
-                    match tauri_plugin_voice_transcription::commands::stop_dictation(
-                        app_handle_clone.clone(),
-                        app_handle_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                    ).await {
-                        Ok(_) => {
-                            info!("[Dictation Mode] Cancelled transcription successfully");
+                    // Use the plugin command to stop dictation only if controller exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(_) => {
+                                    info!("[Dictation Mode] Cancelled transcription successfully");
+                                }
+                                Err(e) => {
+                                    tracing::error!("[Dictation Mode] Failed to cancel transcription: {}", e);
+                                }
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!("[Dictation Mode] Failed to cancel transcription: {}", e);
+                        None => {
+                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot cancel transcription");
                         }
                     }
 
@@ -777,6 +853,13 @@ pub fn run() {
                     if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
                         *dictation_active = false;
                     }
+
+                    // Update floating bar manager
+                    let app_handle_for_bar = app_handle_clone.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+                    });
+
                     if let Err(e) = app_handle_clone.emit("dictation-active", false) {
                         tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
@@ -791,16 +874,23 @@ pub fn run() {
                 // Stop dictation using the voice transcription plugin command
                 let app_handle_clone = app_handle_for_dictation_stop.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Use the plugin command to stop dictation
-                    match tauri_plugin_voice_transcription::commands::stop_dictation(
-                        app_handle_clone.clone(),
-                        app_handle_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                    ).await {
-                        Ok(_) => {
-                            info!("[Dictation Mode] Completed dictation successfully");
+                    // Use the plugin command to stop dictation only if controller exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(_) => {
+                                    info!("[Dictation Mode] Completed dictation successfully");
+                                }
+                                Err(e) => {
+                                    tracing::error!("[Dictation Mode] Failed to stop dictation: {}", e);
+                                }
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!("[Dictation Mode] Failed to stop dictation: {}", e);
+                        None => {
+                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot stop dictation");
                         }
                     }
 
@@ -809,6 +899,13 @@ pub fn run() {
                     if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
                         *dictation_active = false;
                     }
+
+                    // Update floating bar manager
+                    let app_handle_for_bar = app_handle_clone.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+                    });
+
                     if let Err(e) = app_handle_clone.emit("dictation-active", false) {
                         tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
@@ -822,24 +919,31 @@ pub fn run() {
 
                 let app_handle_clone = app_handle_for_force_stop.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Force stop the voice controller with timeout
-                    let stop_with_timeout = tokio::time::timeout(
-                        std::time::Duration::from_secs(2),
-                        tauri_plugin_voice_transcription::commands::stop_dictation(
-                            app_handle_clone.clone(),
-                            app_handle_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                        )
-                    );
+                    // Force stop the voice controller with timeout only if it exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            let stop_with_timeout = tokio::time::timeout(
+                                std::time::Duration::from_secs(2),
+                                tauri_plugin_voice_transcription::commands::stop_dictation(
+                                    app_handle_clone.clone(),
+                                    controller_state
+                                )
+                            );
 
-                    match stop_with_timeout.await {
-                        Ok(Ok(_)) => {
-                            info!("[Dictation Mode] Force stop completed successfully");
+                            match stop_with_timeout.await {
+                                Ok(Ok(_)) => {
+                                    info!("[Dictation Mode] Force stop completed successfully");
+                                }
+                                Ok(Err(e)) => {
+                                    error!("[Dictation Mode] Force stop failed: {}", e);
+                                }
+                                Err(_) => {
+                                    error!("[Dictation Mode] Force stop timed out - controller may be deadlocked");
+                                }
+                            }
                         }
-                        Ok(Err(e)) => {
-                            error!("[Dictation Mode] Force stop failed: {}", e);
-                        }
-                        Err(_) => {
-                            error!("[Dictation Mode] Force stop timed out - controller may be deadlocked");
+                        None => {
+                            warn!("[Dictation Mode] Voice controller not available - cannot force stop");
                         }
                     }
 
@@ -848,6 +952,13 @@ pub fn run() {
                     if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
                         *dictation_active = false;
                     }
+
+                    // Update floating bar manager
+                    let app_handle_for_bar = app_handle_clone.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+                    });
+
                     if let Err(e) = app_handle_clone.emit("dictation-active", false) {
                         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
@@ -870,6 +981,12 @@ pub fn run() {
                         *dictation_active = false;
                     }
 
+                    // Update floating bar manager
+                    let app_handle_for_bar = app_handle_clone.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+                    });
+
                     // Emit cleanup complete event
                     if let Err(e) = app_handle_clone.emit("dictation-active", false) {
                         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
@@ -879,7 +996,7 @@ pub fn run() {
                 });
             });
 
-                                    // Listen for voice transcription final results specifically for Dictation Mode
+            // Listen for voice transcription final results specifically for Dictation Mode
             let app_handle_for_dictation_result = app.handle().clone();
             app.listen("voice-transcription:final-result", move |event| {
                 // Check if we're in Dictation Mode and handle immediate typing
@@ -905,9 +1022,9 @@ pub fn run() {
                                         let trimmed_text = text.trim();
                                         if !trimmed_text.is_empty() {
                                             // Check if clipboard saving is enabled
-                                                                        let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                .map(|enabled| *enabled)
-                                .unwrap_or(true); // Default to true if lock fails
+                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
+                                                .map(|enabled| *enabled)
+                                                .unwrap_or(true); // Default to true if lock fails
 
                                             // Store to clipboard if enabled
                                             if clipboard_enabled {

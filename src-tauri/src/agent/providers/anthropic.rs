@@ -94,7 +94,7 @@ impl AnthropicBrain {
         max_tokens: Option<u32>,
         system_prompt: Option<String>,
     ) -> Result<Self, AgentError> {
-        Ok(AnthropicBrain {
+        Ok(Self {
             client: Client::new(),
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
@@ -178,64 +178,109 @@ impl AgentBrain for AnthropicBrain {
         // --- 1. Prepare API Request ---
         let mut api_messages = Vec::new();
 
+        // Track tool calls that need results to validate message ordering
+        let mut pending_tool_calls: Vec<String> = Vec::new();
+
         for message in messages {
-            // Special handling for Tool messages which need to be converted to Anthropic's tool_result format
-            if message.role == Role::Tool {
-                let tool_call_id = message.tool_call_id.as_ref().ok_or_else(||
-                    AgentError::LlmError("Tool result message missing tool_call_id".to_string())
-                )?.clone();
-                let tool_result_content = message.content.clone();
+            match message.role {
+                Role::Assistant => {
+                    // Convert assistant message normally
+                    match Self::convert_message_to_api(message) {
+                        Ok(api_msg) => {
+                            api_messages.push(api_msg);
 
-                // Parse the tool result content to extract just the text that needs to be passed
-                let formatted_content = match serde_json::from_str::<serde_json::Value>(&tool_result_content) {
-                    Ok(json_value) => {
-                        // Extract stdout for command results
-                        if let Some(stdout) = json_value.get("stdout").and_then(|v| v.as_str()) {
-                            stdout.trim().to_string()
+                            // Track tool calls from this assistant message
+                            if let Some(tool_calls) = &message.tool_calls {
+                                for tool_call in tool_calls {
+                                    pending_tool_calls.push(tool_call.id.clone());
+                                }
+                            }
                         }
-                        // Extract content for file reads
-                        else if let Some(content) = json_value.get("content").and_then(|v| v.as_str()) {
-                            content.trim().to_string()
-                        }
-                        // For error messages
-                        else if let Some(error) = json_value.get("error").and_then(|v| v.as_str()) {
-                            format!("Error: {}", error.trim())
-                        }
-                        // If we can't extract a specific field, return a simplified string
-                        else {
-                            // Anthropic requires simple string content for tool_result
-                            // We'll use a fallback to the first string value we can find
-                            let simplified = json_value.as_object().and_then(|obj| {
-                                obj.values().find_map(|v| v.as_str().map(|s| s.trim().to_string()))
-                            });
-
-                            simplified.unwrap_or_else(|| "Command executed successfully".to_string())
-                        }
-                    },
-                    Err(_) => {
-                        // If content is not JSON, use it directly (trimmed)
-                        tool_result_content.trim().to_string()
+                        Err(e) => log::warn!("Skipping assistant message conversion due to error: {}", e),
                     }
-                };
+                }
+                Role::Tool => {
+                    // Handle tool result messages with proper formatting and ordering validation
+                    let tool_call_id = message.tool_call_id.as_ref().ok_or_else(||
+                        AgentError::LlmError("Tool result message missing tool_call_id".to_string())
+                    )?.clone();
 
-                api_messages.push(ApiMessage {
-                    role: "user".to_string(), // Tool results have role "user"
-                    content: ApiContent::Blocks(vec![ApiContentBlock {
-                        block_type: "tool_result".to_string(),
-                        tool_use_id: Some(tool_call_id), // Use tool_use_id instead of id
-                        text: None, // Remove text field
-                        id: None, // Not used for tool_result
-                        name: None,
-                        input: None,
-                        content: Some(formatted_content), // Add content field
-                    }]),
-                });
-            } else if message.role != Role::System { // Skip system messages here
-                match Self::convert_message_to_api(message) {
-                    Ok(api_msg) => api_messages.push(api_msg),
-                    Err(e) => log::warn!("Skipping message conversion due to error: {}", e),
+                    // Check if this tool call ID is expected
+                    if !pending_tool_calls.contains(&tool_call_id) {
+                        log::warn!("Received tool result for unexpected tool call ID: {}. This may cause API ordering issues.", tool_call_id);
+                    } else {
+                        // Remove from pending list
+                        pending_tool_calls.retain(|id| id != &tool_call_id);
+                    }
+
+                    let tool_result_content = message.content.clone();
+
+                    // Parse the tool result content to extract just the text that needs to be passed
+                    let formatted_content = match serde_json::from_str::<serde_json::Value>(&tool_result_content) {
+                        Ok(json_value) => {
+                            // Extract stdout for command results
+                            if let Some(stdout) = json_value.get("stdout").and_then(|v| v.as_str()) {
+                                stdout.trim().to_string()
+                            }
+                            // Extract content for file reads
+                            else if let Some(content) = json_value.get("content").and_then(|v| v.as_str()) {
+                                content.trim().to_string()
+                            }
+                            // For error messages
+                            else if let Some(error) = json_value.get("error").and_then(|v| v.as_str()) {
+                                format!("Error: {}", error.trim())
+                            }
+                            // If we can't extract a specific field, return a simplified string
+                            else {
+                                // Anthropic requires simple string content for tool_result
+                                // We'll use a fallback to the first string value we can find
+                                let simplified = json_value.as_object().and_then(|obj| {
+                                    obj.values().find_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                                });
+
+                                simplified.unwrap_or_else(|| "Tool executed successfully".to_string())
+                            }
+                        },
+                        Err(_) => {
+                            // If content is not JSON, use it directly (trimmed)
+                            tool_result_content.trim().to_string()
+                        }
+                    };
+
+                    api_messages.push(ApiMessage {
+                        role: "user".to_string(), // Tool results have role "user"
+                        content: ApiContent::Blocks(vec![ApiContentBlock {
+                            block_type: "tool_result".to_string(),
+                            tool_use_id: Some(tool_call_id), // Use tool_use_id instead of id
+                            text: None, // Remove text field
+                            id: None, // Not used for tool_result
+                            name: None,
+                            input: None,
+                            content: Some(formatted_content), // Add content field
+                        }]),
+                    });
+                }
+                Role::User => {
+                    // Convert user message normally
+                    match Self::convert_message_to_api(message) {
+                        Ok(api_msg) => api_messages.push(api_msg),
+                        Err(e) => log::warn!("Skipping user message conversion due to error: {}", e),
+                    }
+                }
+                Role::System => {
+                    // Skip system messages - they should be handled via the system parameter
+                    log::debug!("Skipping system message in conversion (should be handled via system parameter)");
                 }
             }
+        }
+
+        // Validate that all tool calls have corresponding results
+        if !pending_tool_calls.is_empty() {
+            log::error!("Found tool calls without corresponding results: {:?}. This will cause API errors.", pending_tool_calls);
+            return Err(AgentError::LlmError(format!(
+                "Tool calls without results detected: {:?}. Each tool_use must have a corresponding tool_result.",
+                pending_tool_calls
+            )));
         }
 
         let api_tools = if available_tools.is_empty() {
