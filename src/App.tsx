@@ -18,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
 import {
   ArrowLeft,
+  Brain,
   DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -25,6 +26,7 @@ import {
   Send,
   Server,
   Trash2,
+  Type,
 } from "lucide-react"; // Icons
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api"; // Import toggleDictation from plugin API
@@ -778,6 +780,17 @@ function App() {
               </div>
             </div>
 
+            {/* Voice Status Indicator - only show in chat view */}
+            {currentView === "chat" && (
+              <div className="flex-1 flex justify-center mx-4">
+                <VoiceStatusIndicator
+                  variant="compact"
+                  className="max-w-md"
+                  showText={true}
+                />
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               {/* Back Button - show for settings and devtools views */}
               {(currentView === "settings" ||
@@ -857,108 +870,194 @@ function App() {
                 <div className="flex flex-col h-full p-4">
                   {/* Conversation Area */}
                   <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
-                    {conversation.map((msg, index) => {
-                      const previousMsg =
-                        index > 0 ? conversation[index - 1] : null;
-                      const showTimestamp = shouldShowTimestamp(
-                        msg,
-                        previousMsg
-                      );
-
-                      return (
-                        <div key={index}>
-                          {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
-                          {showTimestamp && msg.timestamp && (
-                            <div className="flex justify-center my-4">
-                              <span
-                                className="text-xs text-muted-foreground bg-background px-3 py-1 border rounded-full shadow-sm cursor-default"
-                                title={formatFullTimestamp(msg.timestamp)}
-                              >
-                                {formatMessageTimestamp(msg.timestamp)}
-                              </span>
-                            </div>
-                          )}
-
-                          {/* Handle thinking messages with special component */}
-                          {msg.role === "thinking" ? (
-                            <div className="flex justify-start">
-                              <ThinkingMessage
-                                content={msg.content}
-                                timestamp={msg.timestamp}
-                              />
-                            </div>
-                          ) : msg.role === "tool_call_request" ? (
-                            <div className="flex justify-start">
-                              <ToolCallRequest
-                                toolName={msg.tool_name || "unknown"}
-                                toolArgs={msg.tool_args}
-                                content={msg.content}
-                                timestamp={msg.timestamp}
-                              />
-                            </div>
-                          ) : msg.role === "tool_call_result" ? (
-                            <div className="flex justify-start">
-                              <ToolCallResult
-                                toolName={msg.tool_name || "unknown"}
-                                toolOutput={msg.tool_output}
-                                success={msg.success ?? true} // Default to true if not specified
-                                content={msg.content}
-                                screenshot_base64={msg.screenshot_base64}
-                                timestamp={msg.timestamp}
-                              />
-                            </div>
-                          ) : (
-                            <div
-                              className={`mb-3 flex ${
-                                msg.role === "user"
-                                  ? "justify-end"
-                                  : "justify-start"
-                              }`}
-                            >
-                              <span
-                                className={cn(
-                                  "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
-                                  msg.role === "user"
-                                    ? "bg-primary text-primary-foreground"
-                                    : msg.role === "assistant"
-                                    ? "bg-muted"
-                                    : msg.role === "system" &&
-                                      msg.screenshot_base64
-                                    ? "bg-muted/80 border border-primary/20 p-2"
-                                    : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
-                                )}
-                              >
-                                {msg.content}
-                                {msg.screenshot_base64 && (
-                                  <div
-                                    className={cn(
-                                      "mt-2",
-                                      msg.role !== "system" && "border-t pt-2"
-                                    )}
-                                  >
-                                    <div className="text-xs text-muted-foreground mb-1">
-                                      {msg.role === "system"
-                                        ? "Screenshot captured by AI:"
-                                        : "Screenshot:"}
-                                    </div>
-                                    <div className="relative">
-                                      <img
-                                        src={`data:image/png;base64,${msg.screenshot_base64}`}
-                                        alt="Screenshot"
-                                        className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-                                      />
-                                      <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-                                    </div>
-                                  </div>
-                                )}
-                              </span>
-                            </div>
-                          )}
+                    {conversation.length === 0 ? (
+                      /* Welcome message when conversation is empty */
+                      <div className="flex flex-col items-center justify-center h-full text-center space-y-6 p-8">
+                        <div className="space-y-4">
+                          <DogIcon
+                            size={64}
+                            className="text-blue-500 mx-auto"
+                          />
+                          <div>
+                            <h2 className="text-2xl font-bold mb-2">
+                              Welcome to Juno AI Assistant
+                            </h2>
+                            <p className="text-muted-foreground">
+                              Your intelligent desktop companion with advanced
+                              voice capabilities
+                            </p>
+                          </div>
                         </div>
-                      );
-                    })}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+                          <div className="p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                            <div className="flex items-center gap-3 mb-2">
+                              <Type className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                              <span className="font-semibold text-orange-900 dark:text-orange-100">
+                                Quick Dictation
+                              </span>
+                            </div>
+                            <p className="text-sm text-orange-700 dark:text-orange-300 mb-2">
+                              Hold{" "}
+                              <kbd className="px-1 py-0.5 bg-orange-200 dark:bg-orange-800 rounded text-xs">
+                                ⌥+Space
+                              </kbd>{" "}
+                              to instantly type your speech anywhere
+                            </p>
+                            <p className="text-xs text-orange-600 dark:text-orange-400">
+                              Perfect for emails, documents, and quick text
+                              input
+                            </p>
+                          </div>
+
+                          <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                            <div className="flex items-center gap-3 mb-2">
+                              <Brain className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                              <span className="font-semibold text-blue-900 dark:text-blue-100">
+                                AI Conversations
+                              </span>
+                            </div>
+                            <p className="text-sm text-blue-700 dark:text-blue-300 mb-2">
+                              Press{" "}
+                              <kbd className="px-1 py-0.5 bg-blue-200 dark:bg-blue-800 rounded text-xs">
+                                ⌥+D
+                              </kbd>{" "}
+                              to chat with your AI assistant
+                            </p>
+                            <p className="text-xs text-blue-600 dark:text-blue-400">
+                              Get help with tasks, research, and complex
+                              questions
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-xs text-muted-foreground">
+                          <p>
+                            💡 <strong>Pro tip:</strong> The floating status bar
+                            shows real-time voice feedback
+                          </p>
+                          <p>
+                            Use the input field below or try the voice shortcuts
+                            to get started
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      conversation.map((msg, index) => {
+                        const previousMsg =
+                          index > 0 ? conversation[index - 1] : null;
+                        const showTimestamp = shouldShowTimestamp(
+                          msg,
+                          previousMsg
+                        );
+
+                        return (
+                          <div key={index}>
+                            {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
+                            {showTimestamp && msg.timestamp && (
+                              <div className="flex justify-center my-4">
+                                <span
+                                  className="text-xs text-muted-foreground bg-background px-3 py-1 border rounded-full shadow-sm cursor-default"
+                                  title={formatFullTimestamp(msg.timestamp)}
+                                >
+                                  {formatMessageTimestamp(msg.timestamp)}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Handle thinking messages with special component */}
+                            {msg.role === "thinking" ? (
+                              <div className="flex justify-start">
+                                <ThinkingMessage
+                                  content={msg.content}
+                                  timestamp={msg.timestamp}
+                                />
+                              </div>
+                            ) : msg.role === "tool_call_request" ? (
+                              <div className="flex justify-start">
+                                <ToolCallRequest
+                                  toolName={msg.tool_name || "unknown"}
+                                  toolArgs={msg.tool_args}
+                                  content={msg.content}
+                                  timestamp={msg.timestamp}
+                                />
+                              </div>
+                            ) : msg.role === "tool_call_result" ? (
+                              <div className="flex justify-start">
+                                <ToolCallResult
+                                  toolName={msg.tool_name || "unknown"}
+                                  toolOutput={msg.tool_output}
+                                  success={msg.success ?? true} // Default to true if not specified
+                                  content={msg.content}
+                                  screenshot_base64={msg.screenshot_base64}
+                                  timestamp={msg.timestamp}
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                className={`mb-3 flex ${
+                                  msg.role === "user"
+                                    ? "justify-end"
+                                    : "justify-start"
+                                }`}
+                              >
+                                <span
+                                  className={cn(
+                                    "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
+                                    msg.role === "user"
+                                      ? "bg-primary text-primary-foreground"
+                                      : msg.role === "assistant"
+                                      ? "bg-muted"
+                                      : msg.role === "system" &&
+                                        msg.screenshot_base64
+                                      ? "bg-muted/80 border border-primary/20 p-2"
+                                      : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
+                                  )}
+                                >
+                                  {msg.content}
+                                  {msg.screenshot_base64 && (
+                                    <div
+                                      className={cn(
+                                        "mt-2",
+                                        msg.role !== "system" && "border-t pt-2"
+                                      )}
+                                    >
+                                      <div className="text-xs text-muted-foreground mb-1">
+                                        {msg.role === "system"
+                                          ? "Screenshot captured by AI:"
+                                          : "Screenshot:"}
+                                      </div>
+                                      <div className="relative">
+                                        <img
+                                          src={`data:image/png;base64,${msg.screenshot_base64}`}
+                                          alt="Screenshot"
+                                          className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                                        />
+                                        <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
                     <div ref={conversationEndRef} />
                   </ScrollArea>
+
+                  {/* Voice Shortcuts Helper - only show when there's a conversation */}
+                  {conversation.length > 0 && (
+                    <div className="flex justify-center mb-3">
+                      <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-1 rounded-full border">
+                        <span className="font-medium">Voice Shortcuts:</span>
+                        <span className="mx-2">⌥+D for AI Agent</span>
+                        <span className="mx-2">⌥+Space for Dictation</span>
+                        <span className="mx-2">Esc to Cancel</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Input Form */}
                   <form
