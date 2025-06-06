@@ -21,6 +21,8 @@ use crate::agent::implementations::memory_manager::SimpleMemoryManager;
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
 use crate::agent::tools::tool_config::ToolConfigManager;
+// Import MCP manager for external MCP server support
+use crate::agent::tools::mcp_integration::MCPManager;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +105,8 @@ pub struct AppState {
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
     // Keyboard shortcuts configuration
     pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
+    // MCP manager for external MCP server support
+    pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
 }
 
 impl AppState {
@@ -132,6 +136,8 @@ impl AppState {
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
             // Initialize keyboard shortcuts configuration
             keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
+            // Initialize MCP manager
+            mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
         }
     }
 
@@ -293,6 +299,63 @@ impl AppState {
         let config_path = ToolConfigManager::get_config_path(app_handle)?;
         let config_guard = self.tool_config_manager.lock().await;
         config_guard.save_to_file(&config_path)
+    }
+
+    // MCP Manager Methods
+
+    /// Get the MCP manager
+    pub async fn get_mcp_manager(&self) -> Arc<TokioMutex<MCPManager>> {
+        self.mcp_manager.clone()
+    }
+
+    /// Initialize MCP servers from configuration
+    pub async fn initialize_mcp_servers(&self) -> Result<(), String> {
+        let config_guard = self.tool_config_manager.lock().await;
+        let mcp_configs = config_guard.get_mcp_servers();
+        drop(config_guard);
+
+        let mcp_manager = self.get_mcp_manager().await;
+        let mut manager_guard = mcp_manager.lock().await;
+
+        for config in mcp_configs {
+            if let Err(e) = manager_guard.add_server(config.clone()).await {
+                log::error!("Failed to add MCP server '{}': {}", config.name, e);
+            }
+        }
+
+        // Start all enabled servers
+        if let Err(e) = manager_guard.start_all_enabled_servers().await {
+            log::error!("Failed to start MCP servers: {}", e);
+        }
+
+        drop(manager_guard);
+        Ok(())
+    }
+
+    /// Sync MCP tools with tool configuration
+    pub async fn sync_mcp_tools(&self) -> Result<(), String> {
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        let all_tools = manager_guard.get_all_tools().await;
+        drop(manager_guard);
+
+        let mut config_guard = self.tool_config_manager.lock().await;
+        
+        // Group tools by server
+        let mut tools_by_server: HashMap<String, Vec<_>> = HashMap::new();
+        for tool_info in all_tools {
+            tools_by_server.entry(tool_info.server_id.clone())
+                .or_insert_with(Vec::new)
+                .push(tool_info);
+        }
+
+        // Add tools to configuration
+        for (server_id, tools) in tools_by_server {
+            config_guard.add_mcp_tools(&server_id, tools);
+        }
+
+        drop(config_guard);
+        Ok(())
     }
 }
 

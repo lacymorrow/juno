@@ -402,17 +402,42 @@ impl BrainFactory {
     ) -> Result<(), String> {
         info!("Registering all Computer Use tools...");
 
+        // Get the app state for MCP manager integration
+        let state_manager = app_handle.state::<AppState>();
+
+        // Set up MCP manager in the tool provider
+        let mcp_manager = state_manager.get_mcp_manager().await;
+        provider.set_mcp_manager(mcp_manager);
+
         // Register the official Anthropic Computer Use tools
         register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
 
         // Register additional desktop automation tools (your existing ones)
-        let state_manager = app_handle.state::<AppState>();
         crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager, app_handle.clone()).await;
 
         // Register timer tools for agent task scheduling and resumption
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
-        info!("All Computer Use tools registered successfully");
+        // Initialize MCP servers and sync tools
+        if let Err(e) = state_manager.initialize_mcp_servers().await {
+            warn!("Failed to initialize MCP servers: {}", e);
+        } else {
+            info!("MCP servers initialized successfully");
+        }
+
+        // Refresh MCP tools to include them in the provider
+        if let Err(e) = provider.refresh_mcp_tools().await {
+            warn!("Failed to refresh MCP tools: {}", e);
+        } else {
+            info!("MCP tools refreshed and available");
+        }
+
+        // Sync MCP tools with configuration
+        if let Err(e) = state_manager.sync_mcp_tools().await {
+            warn!("Failed to sync MCP tools with configuration: {}", e);
+        }
+
+        info!("All Computer Use tools registered successfully (including MCP tools)");
         Ok(())
     }
 }
