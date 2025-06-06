@@ -1,4 +1,5 @@
-use accessibility::{AXAttribute, AXUIElement};
+use accessibility::{AXAttribute, AXUIElement, Error as AXError};
+use accessibility_sys::kAXErrorNoValue;
 use super::constants::*;
 use super::engine::MacOSEngine;
 use super::ffi::AXValueGetValue;
@@ -284,6 +285,25 @@ pub fn get_focused_element_ns_workspace(
                  }
             }
             Err(e) => {
+                // Check if the error is kAXErrorNoValue (-25212)
+                if let AXError::Ax(err_num) = e {
+                    if err_num == kAXErrorNoValue {
+                        warn!(
+                            "Frontmost application has no specific focused UI element (kAXErrorNoValue). Returning the application element itself."
+                        );
+                        // Return the application element we found earlier
+                        return Ok(UIElement::new(Box::new(MacOSUIElement {
+                            element: ThreadSafeAXUIElement::new(app_element_ref),
+                            use_background_apps,
+                            activate_app,
+                            cached_role: String::new(),
+                            cached_label: None,
+                            cached_description: None,
+                            cached_value: None,
+                        })));
+                    }
+                }
+                // For any other error, report it as before
                 let error_msg = format!("Failed to get AXFocusedUIElement attribute for PID {}: {:?}", pid, e);
                  warn!("{}", error_msg);
                 Err(AutomationError::NoFocusedElement(error_msg))

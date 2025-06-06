@@ -1,0 +1,285 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Timer System Usage Patterns & Best Practices
+
+## Quick Reference for Common Scenarios
+
+### Gaming & Interactive Applications
+
+#### Wait for UI Elements to Appear
+```rust
+// Monitor specific button/UI region
+set_screen_monitor(
+    region: { x: 800, y: 600, width: 100, height: 50 },
+    threshold: 0.15,  // 15% change threshold
+    check_interval_seconds: 1,
+    max_duration_seconds: 300,  // 5 minute timeout
+    context: { action: "click_button", ui_element: "start_game" }
+)
+```
+
+#### Monitor Health/Status Bars
+```rust
+// Health bar monitoring (smaller threshold for subtle changes)
+set_screen_monitor(
+    region: { x: 50, y: 50, width: 200, height: 20 },
+    threshold: 0.05,  // Sensitive to small health changes
+    check_interval_seconds: 2,
+    context: { action: "use_healing_item", health_critical: true }
+)
+```
+
+#### Combat Detection
+```rust
+// Large region monitoring for enemies/combat
+set_screen_monitor(
+    region: { x: 400, y: 200, width: 400, height: 400 },
+    threshold: 0.2,   // Higher threshold for significant movement
+    check_interval_seconds: 0.5,  // Fast response time
+    max_duration_seconds: 1800,
+    context: { action: "combat_response", weapon_ready: true }
+)
+```
+
+### File Processing & Automation
+
+#### Download Completion Detection
+```rust
+// Monitor Downloads folder for new files
+set_file_monitor(
+    file_path: "/Users/username/Downloads/report.pdf",
+    monitor_type: "Created",
+    check_interval_seconds: 3,
+    max_duration_seconds: 7200,  // 2 hours max wait
+    context: {
+        workflow: "process_download",
+        file_type: "pdf",
+        next_action: "extract_data"
+    }
+)
+```
+
+#### Configuration File Changes
+```rust
+// Watch config file for external changes
+set_file_monitor(
+    file_path: "/app/config/settings.json",
+    monitor_type: "Modified",
+    check_interval_seconds: 5,
+    context: { action: "reload_config", restart_services: true }
+)
+```
+
+#### Log File Monitoring
+```rust
+// Monitor log file size changes for new entries
+set_file_monitor(
+    file_path: "/var/log/application.log",
+    monitor_type: "SizeChanged",
+    check_interval_seconds: 10,
+    context: { action: "parse_new_logs", alert_on_errors: true }
+)
+```
+
+### Workflow & Productivity
+
+#### Meeting/Calendar Integration
+```rust
+// 15-minute meeting reminder
+set_timer(
+    delay_seconds: 900,
+    context: {
+        meeting_type: "standup",
+        attendees: ["team_lead", "developers"],
+        preparation_needed: true
+    }
+)
+```
+
+#### Focus/Break Timers
+```rust
+// Pomodoro technique - 25 minute work session
+set_timer(
+    delay_seconds: 1500,
+    context: {
+        activity: "focused_work",
+        break_type: "short",
+        session_number: 3
+    }
+)
+```
+
+#### Application Focus Workflows
+```rust
+// Trigger when user switches to specific app
+set_app_monitor(
+    app_name: "Slack",
+    monitor_state: "BecameFocused",
+    context: {
+        action: "check_unread_messages",
+        auto_respond: true,
+        priority_keywords: ["urgent", "asap"]
+    }
+)
+```
+
+## Performance Optimization Patterns
+
+### Resource-Efficient Monitoring
+
+#### Staggered Check Intervals
+```rust
+// High priority: 1-2 seconds (gaming, critical alerts)
+// Medium priority: 5-10 seconds (file processing)
+// Low priority: 30+ seconds (background monitoring)
+```
+
+#### Regional Screen Monitoring
+```rust
+// Instead of full screen (1920x1080):
+set_screen_monitor(region: None)  // ~2MB per check
+
+// Use targeted regions (100x100):
+set_screen_monitor(
+    region: { x: 100, y: 100, width: 100, height: 100 }
+)  // ~40KB per check
+```
+
+#### Maximum Duration Limits
+```rust
+// Always set reasonable limits to prevent resource leaks
+max_duration_seconds: 1800   // 30 minutes - standard
+max_duration_seconds: 3600   // 1 hour - extended tasks
+max_duration_seconds: 7200   // 2 hours - maximum recommended
+```
+
+### Threshold Selection Guidelines
+
+#### Screen Monitor Thresholds
+```rust
+threshold: 0.01  // Extremely sensitive (mouse cursor movement)
+threshold: 0.05  // High sensitivity (text changes, small UI updates)
+threshold: 0.10  // Medium sensitivity (button state changes)
+threshold: 0.20  // Low sensitivity (major scene changes)
+threshold: 0.50  // Very low sensitivity (complete screen changes)
+```
+
+#### Context-Specific Thresholds
+```rust
+// Gaming UI elements
+threshold: 0.15  // Good balance for UI state changes
+
+// Dashboard monitoring
+threshold: 0.08  // Catch metric updates
+
+// Video/animation detection
+threshold: 0.30  // Avoid triggering on normal playback
+```
+
+## Error Recovery & Debugging
+
+### Common Issue Patterns
+
+#### Screen Monitoring Not Triggering
+```rust
+// Debug approach: Start with full screen, low threshold
+set_screen_monitor(
+    // region: None,  // Comment out region first
+    threshold: 0.05,  // Lower threshold
+    check_interval_seconds: 1,
+    max_duration_seconds: 60,  // Short test duration
+    context: { debug: true }
+)
+```
+
+#### File Monitoring Issues
+```rust
+// Try different monitor types if one fails
+monitor_type: "SizeChanged"  // Instead of "Modified"
+
+// Verify file path is absolute
+file_path: "/full/absolute/path/to/file.txt"  // Not relative
+
+// More frequent checks for debugging
+check_interval_seconds: 1  // Temporary for testing
+```
+
+### Resource Monitoring
+```rust
+// Check active timer count
+let timers = await invoke('list_timers');
+console.log(`Active timers: ${timers.active_timers.length}`);
+
+// Cancel all timers for cleanup
+for (const timer of timers.active_timers) {
+    await invoke('cancel_timer', { timer_id: timer.id });
+}
+```
+
+## Integration with Agent Architecture
+
+### Context Preservation Patterns
+```rust
+// Gaming context
+context: {
+    game_state: "combat",
+    player_position: { x: 100, y: 200 },
+    inventory: ["sword", "potion"],
+    health: 75,
+    next_objective: "defeat_boss"
+}
+
+// File processing context
+context: {
+    workflow_step: "data_import",
+    file_format: "csv",
+    user_session: "session_123",
+    processing_options: {
+        skip_header: true,
+        delimiter: ",",
+        encoding: "utf-8"
+    }
+}
+
+// UI automation context
+context: {
+    automation_step: 3,
+    form_data: { name: "John", email: "john@example.com" },
+    retry_count: 0,
+    fallback_action: "manual_intervention"
+}
+```
+
+### Multi-Timer Coordination
+```rust
+// Set multiple related timers
+// 1. Warning timer (5 minutes before)
+set_timer(delay_seconds: 300, context: { type: "warning", main_task: "backup" });
+
+// 2. Main action timer (10 minutes)
+set_timer(delay_seconds: 600, context: { type: "execute", task: "backup" });
+
+// 3. Cleanup timer (15 minutes)
+set_timer(delay_seconds: 900, context: { type: "cleanup", task: "backup" });
+```
+
+## Best Practices Summary
+
+1. **Always set max_duration_seconds** to prevent runaway tasks
+2. **Use smallest possible screen regions** for better performance
+3. **Choose appropriate check intervals** based on urgency
+4. **Include rich context** for proper agent state restoration
+5. **Cancel timers when no longer needed** to free resources
+6. **Test with debug settings** before production use
+7. **Monitor system performance** with many concurrent timers
+8. **Use descriptive names** for easier debugging and logs
+
+## Tools Integration Reference
+
+**Primary File**: [src-tauri/src/agent/tools/timer_tools.rs](mdc:src-tauri/src/agent/tools/timer_tools.rs)
+**Registration**: [src-tauri/src/agent/tools/mod.rs](mdc:src-tauri/src/agent/tools/mod.rs)
+**State Management**: [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)
+**macOS Screen Utils**: [src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs)

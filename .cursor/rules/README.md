@@ -48,13 +48,27 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 - Timer management
 - Command integration patterns
 
+### [04-enhanced-timer-system.mdc](04-enhanced-timer-system.mdc) ✅ **NEW**
+**Enhanced Timer System - Agent pause/resume capabilities** including:
+- Screen monitoring for visual change detection
+- File monitoring for filesystem events
+- Application monitoring for app lifecycle events
+- Background task management and event emission
+
+### [05-timer-usage-patterns.mdc](05-timer-usage-patterns.mdc) ✅ **NEW**
+**Timer System usage patterns and best practices** including:
+- Gaming and interactive application scenarios
+- File processing and automation workflows
+- Performance optimization guidelines
+- Error recovery and debugging techniques
+
 ## Implementation Status ✅ PRODUCTION READY
 
 ### AI Computer Use (100% Complete)
 - All 17 Anthropic Computer Use actions implemented
 - File operations with str_replace_based_edit_tool
 - Shell command execution with session management
-- Timer system for long-running tasks
+- Enhanced timer system with monitoring capabilities (screen/file/app)
 
 ### Voice Interaction (Advanced Implementation)  
 - **Agent Mode (Alt+D)**: Voice input for AI agent conversations and task execution

@@ -11,24 +11,31 @@ pub async fn force_reset_dictation_transcription(
 ) -> Result<String, String> {
     warn!("[Command] force_reset_dictation_transcription called - performing emergency cleanup");
 
-    // Force stop the voice controller with timeout
-    let stop_result = tokio::time::timeout(
-        std::time::Duration::from_secs(3),
-        tauri_plugin_voice_transcription::commands::stop_dictation(
-            app.clone(),
-            app.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-        )
-    ).await;
+    // Force stop the voice controller with timeout only if it exists
+    match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+        Some(controller_state) => {
+            let stop_result = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                tauri_plugin_voice_transcription::commands::stop_dictation(
+                    app.clone(),
+                    controller_state
+                )
+            ).await;
 
-    match stop_result {
-        Ok(Ok(_)) => {
-            info!("[Command] Voice controller stopped successfully during force reset");
+            match stop_result {
+                Ok(Ok(_)) => {
+                    info!("[Command] Voice controller stopped successfully during force reset");
+                }
+                Ok(Err(e)) => {
+                    error!("[Command] Voice controller stop failed during force reset: {}", e);
+                }
+                Err(_) => {
+                    error!("[Command] Voice controller stop timed out during force reset - may be deadlocked");
+                }
+            }
         }
-        Ok(Err(e)) => {
-            error!("[Command] Voice controller stop failed during force reset: {}", e);
-        }
-        Err(_) => {
-            error!("[Command] Voice controller stop timed out during force reset - may be deadlocked");
+        None => {
+            warn!("[Command] Voice controller not available - skipping voice controller stop during force reset");
         }
     }
 
