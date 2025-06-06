@@ -13,7 +13,6 @@ use core_graphics::event::{
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
 use clipboard_macos::Clipboard; // Import clipboard_macos
-// use pasteboard_macos::Pasteboard; // Ensure this import is removed or commented out
 use std::collections::HashMap;
 use tracing::{debug, warn};
 use std::thread;

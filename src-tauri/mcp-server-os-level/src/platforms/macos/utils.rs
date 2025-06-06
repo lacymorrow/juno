@@ -1,10 +1,5 @@
-// Removed unused import use super::wrappers::ThreadSafeAXUIElement;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes}; // Import AXUIElementAttributes trait
-// Removed unused import use accessibility_sys::AXUIElementGetTypeID;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-// Removed unused import use core_foundation::base::TCFType;
-// Removed unused import use core_foundation::boolean::CFBoolean;
-// Removed unused import use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::{CGDisplay, CGDisplayBounds, CGMainDisplayID, CGGetActiveDisplayList, CGDirectDisplayID}; // Use CGGetActiveDisplayList
 use core_graphics::geometry::{CGRect, CGPoint}; // Removed CGPointMake, CGRectContainsPoint

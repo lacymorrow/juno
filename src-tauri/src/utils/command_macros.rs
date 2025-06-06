@@ -1,14 +1,12 @@
 //! Utility macros for reducing boilerplate in Tauri commands
-//! 
+//!
 //! These macros provide consistent patterns for:
 //! - Error handling and logging
 //! - Dev tool notifications
 //! - Command result processing
 //! - State management
 
-use tauri::{AppHandle, State, Emitter};
-use tracing::{info, error};
-use crate::state::AppState;
+use tauri::{AppHandle, Emitter};
 
 /// Sends a notification to the frontend dev tools
 pub fn send_dev_notification(
@@ -47,9 +45,9 @@ macro_rules! dev_command {
             $($param: $param_type),*
         ) -> Result<$return_type, String> {
             info!("[DEV_TOOL] {} with params: {}", $action, format!($operation, $($param),*));
-            
+
             let result: Result<$return_type, String> = async move $body.await;
-            
+
             match &result {
                 Ok(_) => {
                     let success_msg = format!("{} successful", $action);
@@ -65,7 +63,7 @@ macro_rules! dev_command {
                     }
                 }
             }
-            
+
             result
         }
     };
@@ -96,19 +94,19 @@ macro_rules! qa_test_command {
         ) -> Result<$return_type, String> {
             info!("[QA_TOOL] Starting {}: {}", $test_name, format!($operation, $($param),*));
             let start_time = std::time::Instant::now();
-            
+
             let result: Result<$return_type, String> = async move $body.await;
-            
+
             let duration = start_time.elapsed();
             let latency_ms = duration.as_secs_f64() * 1000.0;
-            
+
             let status = if result.is_ok() { "Success" } else { "Failed" };
             let notification_msg = format!("{}: {} - Latency: {:.2}ms", status, format!($operation, $($param),*), latency_ms);
-            
+
             if let Err(e) = $crate::utils::command_macros::send_dev_notification(&$app, &format!("QA {}", $test_name), &notification_msg) {
                 error!("[QA_TOOL] Failed to send test notification: {}", e);
             }
-            
+
             result
         }
     };
