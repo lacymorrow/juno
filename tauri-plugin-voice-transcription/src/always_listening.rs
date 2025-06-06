@@ -31,7 +31,6 @@ pub enum AlwaysListeningState {
 }
 
 pub struct AlwaysListeningController {
-    ctx: WhisperContext,
     model_path: String,
     is_active: bool,
     state: AlwaysListeningState,
@@ -48,12 +47,7 @@ impl AlwaysListeningController {
             return Err(Error::ModelNotFound(model_path_str.to_string()));
         }
 
-        let context_params = WhisperContextParameters::default();
-        let ctx = WhisperContext::new_with_params(model_path_str, context_params)
-            .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
-
         Ok(Self {
-            ctx,
             model_path: model_path_str.to_string(),
             is_active: false,
             state: AlwaysListeningState::Monitoring,
@@ -246,7 +240,7 @@ impl AlwaysListeningController {
                             // Check for intent to activate
                             if volume > VOLUME_THRESHOLD * sensitivity {
                                 debug!("[AlwaysListening] Volume threshold exceeded: {} (threshold: {})", volume, VOLUME_THRESHOLD * sensitivity);
-                                
+
                                 // Keep a rolling buffer for intent detection
                                 if audio_buffer.len() > buffer_capacity {
                                     audio_buffer.drain(0..audio_buffer.len() - buffer_capacity);
@@ -256,7 +250,7 @@ impl AlwaysListeningController {
                                 if Self::detect_intent(&mut whisper_state, &audio_buffer, sample_rate, resampler.as_mut(), &wake_words, &app_handle) {
                                     current_state = AlwaysListeningState::Activated;
                                     info!("[AlwaysListening] Intent detected - activating transcription");
-                                    
+
                                     // Update last activity
                                     if let Ok(mut activity) = last_activity.lock() {
                                         *activity = Some(Instant::now());
@@ -285,12 +279,12 @@ impl AlwaysListeningController {
                                         if last_time.elapsed().as_millis() > SILENCE_TIMEOUT_MS as u128 {
                                             current_state = AlwaysListeningState::Monitoring;
                                             info!("[AlwaysListening] Silence timeout - returning to monitoring");
-                                            
+
                                             // Emit deactivation event
                                             if let Err(e) = app_handle.emit("always-listening:deactivated", ()) {
                                                 error!("[AlwaysListening] Failed to emit deactivation event: {}", e);
                                             }
-                                            
+
                                             audio_buffer.clear();
                                             continue;
                                         }
@@ -328,7 +322,7 @@ impl AlwaysListeningController {
         if audio_chunk.is_empty() {
             return 0.0;
         }
-        
+
         let sum_of_squares: f32 = audio_chunk.iter().map(|&sample| sample * sample).sum();
         (sum_of_squares / audio_chunk.len() as f32).sqrt()
     }
@@ -339,7 +333,7 @@ impl AlwaysListeningController {
         sample_rate: u32,
         resampler: Option<&mut SincFixedIn<f32>>,
         wake_words: &[String],
-        app_handle: &AppHandle<R>,
+        _app_handle: &AppHandle<R>,
     ) -> bool {
         if audio_buffer.is_empty() {
             return false;
@@ -371,7 +365,7 @@ impl AlwaysListeningController {
             Ok(_) => {
                 let num_segments = whisper_state.full_n_segments().unwrap_or(0);
                 let mut transcribed_text = String::new();
-                
+
                 for i in 0..num_segments {
                     if let Ok(segment) = whisper_state.full_get_segment_text(i) {
                         transcribed_text.push_str(&segment);
@@ -439,7 +433,7 @@ impl AlwaysListeningController {
             Ok(_) => {
                 let num_segments = whisper_state.full_n_segments().unwrap_or(0);
                 let mut transcribed_text = String::new();
-                
+
                 for i in 0..num_segments {
                     if let Ok(segment) = whisper_state.full_get_segment_text(i) {
                         transcribed_text.push_str(&segment);
@@ -448,9 +442,9 @@ impl AlwaysListeningController {
 
                 if !transcribed_text.trim().is_empty() {
                     info!("[AlwaysListening] Active transcription result: '{}'", transcribed_text);
-                    
+
                     // Emit the transcription result
-                    if let Err(e) = app_handle.emit("always-listening:transcription", 
+                    if let Err(e) = app_handle.emit("always-listening:transcription",
                         serde_json::json!({ "text": transcribed_text })) {
                         error!("[AlwaysListening] Failed to emit transcription event: {}", e);
                     }
@@ -499,12 +493,12 @@ impl AlwaysListeningController {
 
     pub fn set_sensitivity(&mut self, sensitivity: f32) -> Result<()> {
         self.sensitivity = sensitivity.clamp(0.1, 2.0);
-        
+
         if let Some((_, control_tx)) = &self.audio_thread {
             control_tx.send(AlwaysListeningMessage::UpdateSensitivity(self.sensitivity))
                 .map_err(|e| Error::ControlError(format!("Failed to update sensitivity: {:?}", e)))?;
         }
-        
+
         Ok(())
     }
 
@@ -514,12 +508,12 @@ impl AlwaysListeningController {
 
     pub fn set_wake_words(&mut self, wake_words: Vec<String>) -> Result<()> {
         self.wake_words = wake_words.clone();
-        
+
         if let Some((_, control_tx)) = &self.audio_thread {
             control_tx.send(AlwaysListeningMessage::UpdateWakeWords(wake_words))
                 .map_err(|e| Error::ControlError(format!("Failed to update wake words: {:?}", e)))?;
         }
-        
+
         Ok(())
     }
 
