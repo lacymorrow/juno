@@ -20,7 +20,7 @@ impl CursorIntegration {
 
     /// Open a file in Cursor IDE at a specific line
     pub async fn open_file_in_cursor(&self, file_path: &str, line_number: Option<u64>) -> Result<Value, AgentError> {
-        info!("🔍 [CURSOR] Opening file: {} {}", file_path, 
+        info!("🔍 [CURSOR] Opening file: {} {}", file_path,
             line_number.map(|l| format!("at line {}", l)).unwrap_or_default());
 
         // First, try to use the 'cursor' command line tool
@@ -57,7 +57,7 @@ impl CursorIntegration {
     async fn open_file_via_gui(&self, file_path: &str, line_number: Option<u64>) -> Result<Value, AgentError> {
         // Use keyboard shortcut to open file dialog (Cmd+O on macOS)
         let mut steps = Vec::new();
-        
+
         // Step 1: Focus Cursor (click on it or use Cmd+Tab)
         steps.push(json!({
             "action": "focus_application",
@@ -66,7 +66,7 @@ impl CursorIntegration {
 
         // Step 2: Open file dialog with Cmd+O
         steps.push(json!({
-            "action": "key_combination", 
+            "action": "key_combination",
             "keys": "cmd+o"
         }));
 
@@ -89,7 +89,7 @@ impl CursorIntegration {
                 "keys": "cmd+g"
             }));
             steps.push(json!({
-                "action": "type_text", 
+                "action": "type_text",
                 "text": line.to_string()
             }));
             steps.push(json!({
@@ -138,9 +138,9 @@ impl CursorIntegration {
 
     /// Navigate to a specific location in Cursor
     pub async fn navigate_to_location(&self, file_path: &str, line_number: Option<u64>, column: Option<u64>) -> Result<Value, AgentError> {
-        info!("📍 [CURSOR] Navigating to: {} {}:{}", 
-            file_path, 
-            line_number.unwrap_or(1), 
+        info!("📍 [CURSOR] Navigating to: {} {}:{}",
+            file_path,
+            line_number.unwrap_or(1),
             column.unwrap_or(1)
         );
 
@@ -152,7 +152,7 @@ impl CursorIntegration {
             if line_number.is_some() {
                 // Use Ctrl+G (or Cmd+G) to go to specific line:column
                 let goto_command = format!("{}:{}", line_number.unwrap(), col);
-                
+
                 let navigation_steps = vec![
                     json!({
                         "action": "key_combination",
@@ -163,7 +163,7 @@ impl CursorIntegration {
                         "text": goto_command
                     }),
                     json!({
-                        "action": "key_press", 
+                        "action": "key_press",
                         "key": "Return"
                     })
                 ];
@@ -187,7 +187,7 @@ impl CursorIntegration {
         // This would use the existing bash command execution capability
         // For now, return a mock result
         debug!("🔧 [CURSOR] Would execute bash command: {}", command);
-        
+
         Ok(json!({
             "stdout": "Command executed successfully",
             "stderr": "",
@@ -216,7 +216,7 @@ impl CursorIntegration {
 
 #[async_trait]
 impl ToolProvider for CursorIntegration {
-    async fn execute_tool(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
+    async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         match tool_call.name.as_str() {
             "cursor_open_file" => {
                 let file_path = tool_call.input.get("file_path")

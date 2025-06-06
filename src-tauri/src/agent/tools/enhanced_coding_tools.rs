@@ -72,10 +72,11 @@ impl EnhancedCodingToolProvider {
         let description = tool_call.input.get("description")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentError::InputError("Missing 'description' parameter".to_string()))?;
-        
+
+        let default_files = vec![];
         let files = tool_call.input.get("files")
             .and_then(|v| v.as_array())
-            .unwrap_or(&vec![]);
+            .unwrap_or(&default_files);
 
         info!("🎯 [CODING EXPERT] Planning multi-file changes: {}", description);
 
@@ -125,7 +126,7 @@ impl EnhancedCodingToolProvider {
         let message_type = tool_call.input.get("type")
             .and_then(|v| v.as_str())
             .unwrap_or("info");
-        
+
         let message = tool_call.input.get("message")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentError::InputError("Missing 'message' parameter".to_string()))?;
@@ -139,7 +140,7 @@ impl EnhancedCodingToolProvider {
         info!("💬 [CODING EXPERT] Communicating with Cursor: {} - {}", message_type, message);
 
         let mut cursor_command = HashMap::new();
-        
+
         match message_type {
             "open_file" => {
                 if let Some(path) = file_path {
@@ -148,7 +149,7 @@ impl EnhancedCodingToolProvider {
                     if let Some(line) = line_number {
                         cursor_command.insert("line", json!(line));
                     }
-                    
+
                     // Use computer use to open file in Cursor
                     let computer_use_result = self.open_file_in_cursor(path, line_number).await?;
                     cursor_command.insert("execution_result", json!(computer_use_result));
@@ -188,13 +189,13 @@ impl EnhancedCodingToolProvider {
         // Generate user-visible intent
         let intent_display = match message_type {
             "open_file" => format!("🔍 **Opening in Cursor**: {}", file_path.unwrap_or("file")),
-            "navigate_to" => format!("📍 **Navigating to**: {} {}", 
-                file_path.unwrap_or("location"), 
+            "navigate_to" => format!("📍 **Navigating to**: {} {}",
+                file_path.unwrap_or("location"),
                 line_number.map(|l| format!("(line {})", l)).unwrap_or_default()
             ),
             "show_suggestion" => format!("💡 **Suggestion**: {}", message),
-            "highlight_code" => format!("✨ **Highlighting**: {} {}", 
-                file_path.unwrap_or("code"), 
+            "highlight_code" => format!("✨ **Highlighting**: {} {}",
+                file_path.unwrap_or("code"),
                 line_number.map(|l| format!("at line {}", l)).unwrap_or_default()
             ),
             _ => format!("📢 **IDE Message**: {}", message),
@@ -210,13 +211,15 @@ impl EnhancedCodingToolProvider {
 
     /// Generate comprehensive code review
     async fn generate_code_review(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
+        let default_files = vec![];
         let file_paths = tool_call.input.get("files")
             .and_then(|v| v.as_array())
-            .unwrap_or(&vec![]);
+            .unwrap_or(&default_files);
 
+        let default_focus_areas = vec![];
         let focus_areas = tool_call.input.get("focus_areas")
             .and_then(|v| v.as_array())
-            .unwrap_or(&vec![]);
+            .unwrap_or(&default_focus_areas);
 
         info!("🔍 [CODING EXPERT] Generating code review for {} files", file_paths.len());
 
@@ -231,7 +234,7 @@ impl EnhancedCodingToolProvider {
         }
 
         review.insert("file_reviews", json!(file_reviews));
-        
+
         // Generate overall assessment
         let overall_score = self.calculate_overall_score(&file_reviews);
         review.insert("overall_score", json!(overall_score));
@@ -312,11 +315,11 @@ impl EnhancedCodingToolProvider {
 
     async fn scan_directory_structure(&self, path: &str) -> Result<Value, AgentError> {
         let mut structure = HashMap::new();
-        
+
         if let Ok(entries) = fs::read_dir(path) {
             let mut directories = Vec::new();
             let mut files = Vec::new();
-            
+
             for entry in entries.flatten() {
                 let file_name = entry.file_name().to_string_lossy().to_string();
                 if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
@@ -325,17 +328,17 @@ impl EnhancedCodingToolProvider {
                     files.push(file_name);
                 }
             }
-            
+
             structure.insert("directories", json!(directories));
             structure.insert("files", json!(files));
         }
-        
+
         Ok(json!(structure))
     }
 
     async fn detect_project_type(&self, path: &str) -> Result<Value, AgentError> {
         let mut project_info = HashMap::new();
-        
+
         // Check for common project files
         let project_files = [
             ("package.json", "Node.js/JavaScript"),
@@ -367,7 +370,7 @@ impl EnhancedCodingToolProvider {
 
     async fn find_key_files(&self, path: &str) -> Result<Vec<String>, AgentError> {
         let mut key_files = Vec::new();
-        
+
         // Common important files
         let important_files = [
             "README.md", "README.txt", "README.rst",
@@ -388,12 +391,12 @@ impl EnhancedCodingToolProvider {
 
     async fn analyze_file_dependencies(&self, file_path: &str) -> Result<Vec<String>, AgentError> {
         let mut dependencies = Vec::new();
-        
+
         if let Ok(content) = fs::read_to_string(file_path) {
             // Simple dependency analysis based on import/include statements
             for line in content.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with("import ") || 
+                if trimmed.starts_with("import ") ||
                    trimmed.starts_with("from ") ||
                    trimmed.starts_with("use ") ||
                    trimmed.starts_with("#include") ||
@@ -402,27 +405,27 @@ impl EnhancedCodingToolProvider {
                 }
             }
         }
-        
+
         Ok(dependencies)
     }
 
     async fn determine_change_order(&self, files: &[Value]) -> Result<Vec<String>, AgentError> {
         // Simple ordering: dependencies first, then implementations
         let mut ordered = Vec::new();
-        
+
         for file_value in files {
             if let Some(file_path) = file_value.as_str() {
                 ordered.push(file_path.to_string());
             }
         }
-        
+
         // Sort by file type priority (headers/interfaces first, implementations last)
         ordered.sort_by(|a, b| {
             let a_priority = self.get_file_priority(a);
             let b_priority = self.get_file_priority(b);
             a_priority.cmp(&b_priority)
         });
-        
+
         Ok(ordered)
     }
 
@@ -444,43 +447,43 @@ impl EnhancedCodingToolProvider {
         let mut command = HashMap::new();
         command.insert("action", json!("open_in_cursor"));
         command.insert("file_path", json!(file_path));
-        
+
         if let Some(line) = line_number {
             command.insert("line_number", json!(line));
             command.insert("command", json!(format!("cursor {} --goto {}", file_path, line)));
         } else {
             command.insert("command", json!(format!("cursor {}", file_path)));
         }
-        
+
         Ok(json!(command))
     }
 
-    async fn review_single_file(&self, file_path: &str, focus_areas: &[Value]) -> Result<Value, AgentError> {
+    async fn review_single_file(&self, file_path: &str, _focus_areas: &[Value]) -> Result<Value, AgentError> {
         let mut review = HashMap::new();
         review.insert("file", json!(file_path));
-        
+
         if let Ok(content) = fs::read_to_string(file_path) {
             let lines = content.lines().count();
             review.insert("lines_of_code", json!(lines));
-            
+
             // Basic analysis
             let mut issues = Vec::new();
             let mut suggestions = Vec::new();
-            
+
             // Check for common issues
             if content.contains("TODO") || content.contains("FIXME") {
                 issues.push("Contains TODO or FIXME comments");
             }
-            
+
             if lines > 500 {
                 suggestions.push("Consider breaking this file into smaller modules");
             }
-            
+
             review.insert("issues", json!(issues));
             review.insert("suggestions", json!(suggestions));
             review.insert("score", json!(8)); // Basic scoring
         }
-        
+
         Ok(json!(review))
     }
 
@@ -488,17 +491,17 @@ impl EnhancedCodingToolProvider {
         if file_reviews.is_empty() {
             return 0;
         }
-        
+
         let total_score: u64 = file_reviews.iter()
             .map(|review| review.get("score").and_then(|s| s.as_u64()).unwrap_or(5))
             .sum();
-            
+
         ((total_score / file_reviews.len() as u64) as u8).min(10)
     }
 
     fn generate_recommendations(&self, file_reviews: &[Value], _focus_areas: &[Value]) -> Vec<String> {
         let mut recommendations = Vec::new();
-        
+
         for review in file_reviews {
             if let Some(suggestions) = review.get("suggestions").and_then(|s| s.as_array()) {
                 for suggestion in suggestions {
@@ -508,7 +511,7 @@ impl EnhancedCodingToolProvider {
                 }
             }
         }
-        
+
         recommendations.dedup();
         recommendations
     }
@@ -518,7 +521,7 @@ impl EnhancedCodingToolProvider {
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("");
-            
+
         match extension {
             "rs" => "Rust".to_string(),
             "py" => "Python".to_string(),
@@ -558,7 +561,7 @@ impl EnhancedCodingToolProvider {
                 )
             },
             ("TypeScript", "component") => {
-                format!("import React from 'react';\n\ninterface {}Props {{\n  // TODO: Define component props\n}}\n\n/**\n * {} - {}\n */\nexport const {}: React.FC<{}Props> = (props) => {{\n  return (\n    <div>\n      {/* TODO: Implement component */}\n      <h1>{}</h1>\n    </div>\n  );\n}};\n\nexport default {};\n",
+                format!("import React from 'react';\n\ninterface {}Props {{\n  // TODO: Define component props\n}}\n\n/**\n * {} - {}\n */\nexport const {}: React.FC<{}Props> = (props) => {{\n  return (\n    <div>\n      {{/* TODO: Implement component */}}\n      <h1>{}</h1>\n    </div>\n  );\n}};\n\nexport default {};\n",
                     purpose.replace(" ", ""),
                     purpose,
                     purpose,
@@ -572,7 +575,7 @@ impl EnhancedCodingToolProvider {
                 format!("// {}\n// \n// Purpose: {}\n// Created by: Enhanced Coding Agent\n// \n// TODO: Implement functionality\n\n", purpose, purpose)
             }
         };
-        
+
         Ok(template)
     }
 
@@ -595,13 +598,13 @@ impl EnhancedCodingToolProvider {
 
 #[async_trait]
 impl ToolProvider for EnhancedCodingToolProvider {
-    async fn execute_tool(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
+    async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         match tool_call.name.as_str() {
-            "analyze_project_structure" => self.analyze_project_structure(tool_call).await,
-            "plan_multi_file_changes" => self.plan_multi_file_changes(tool_call).await,
-            "communicate_with_cursor" => self.communicate_with_cursor(tool_call).await,
-            "generate_code_review" => self.generate_code_review(tool_call).await,
-            "smart_create_file" => self.smart_create_file(tool_call).await,
+            "analyze_project_structure" => self.analyze_project_structure(&tool_call).await,
+            "plan_multi_file_changes" => self.plan_multi_file_changes(&tool_call).await,
+            "communicate_with_cursor" => self.communicate_with_cursor(&tool_call).await,
+            "generate_code_review" => self.generate_code_review(&tool_call).await,
+            "smart_create_file" => self.smart_create_file(&tool_call).await,
             _ => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }
     }
