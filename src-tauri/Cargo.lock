@@ -2947,6 +2947,7 @@ dependencies = [
  "log",
  "objc",
  "once_cell",
+ "open",
  "playwright",
  "reqwest 0.12.18",
  "rig-core",
