@@ -56,7 +56,8 @@ const initialLoadingStates: LoadingStates = {
 };
 
 const DevToolsPanel: React.FC = () => {
-  const [loadingStates, setLoadingStates] = useState<LoadingStates>(initialLoadingStates);
+  // Loading states for potential future use with operation status tracking
+  const [, ] = useState<LoadingStates>(initialLoadingStates);
   const [appToOpen, setAppToOpen] = useState<string>('TextEdit');
   const [urlToOpen, setUrlToOpen] = useState<string>('https://www.google.com');
   const [waitDuration, setWaitDuration] = useState<string>('1000');
