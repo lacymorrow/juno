@@ -2,42 +2,60 @@
 
 ## Overview
 
-This document summarizes the implementation of filtering functionality to remove capital text markers in brackets from the user display while preserving complete transcription context for the AI agent.
+This document summarizes the implementation of filtering functionality to remove capital text markers in brackets from user-facing experiences while preserving complete transcription context for the AI agent.
 
 ## Problem Statement
 
-The voice transcription system was producing sequences like `[BLANK AUDIO]`, `[SILENCE]`, `[NOISE]`, and other capital text markers in brackets that should not be displayed to users during dictation. However, these markers might provide useful context to the AI agent for understanding the transcription environment.
+The voice transcription system was producing sequences like `[BLANK AUDIO]`, `[SILENCE]`, `[NOISE]`, and other capital text markers in brackets that would get typed directly to users in dictation mode or displayed during dictation. However, these markers provide useful context to the AI agent for understanding the transcription environment.
 
 ## Solution Implementation
 
-### Approach: Display Filtering Only
+### Approach: Strategic Filtering
 
-The solution filters capital bracket sequences **only for user display** while preserving the complete, unfiltered transcription for AI agent processing. This provides:
-- Clean user experience without distracting markers
-- Complete context for AI agent understanding
-- Flexibility for AI to interpret transcription environment
+The solution filters capital bracket sequences **only where they would directly impact the user** while preserving complete context for AI agent processing:
 
-### 1. Backend: Unfiltered AI Processing
+- **AI Agent Processing**: Receives complete unfiltered transcription for full context
+- **User Direct Typing**: Filters before typing to user's cursor (dictation mode)
+- **User Display**: Filters partial results during dictation for clean UI
 
-**Final Results**: AI agent receives complete transcription including all markers
-- `voice-transcription:final-result` - unfiltered
-- `app-dictation-finished` - unfiltered
-- File transcription - unfiltered
+### 1. Backend: Targeted Filtering Implementation
 
-**Partial Results**: User display gets filtered text during dictation
-- `voice-transcription:partial-result` - filtered for display
-- `app-dictation-partial-result` - filtered for display
+**AI Agent Mode (Unfiltered)**:
+- `voice-transcription:final-result` → AI agent processing → complete transcription with all markers
+- Provides full environmental context for optimal AI understanding
 
-### 2. Frontend: Display Filtering
+**Dictation Mode (Filtered)**:
+- `voice-transcription:final-result` → dictation mode processing → filtered before typing
+- Uses `filter_transcription_for_dictation()` function before `dev_global_type_text`
+- Stores filtered text to clipboard with `dev_set_clipboard`
 
-Created `filterTranscriptionForDisplay()` utility in `src/lib/transcriptionFilter.ts`:
+**Display (Filtered)**:
+- `voice-transcription:partial-result` → filtered before UI display
+- Frontend `filterTranscriptionForDisplay()` function for clean real-time display
 
+### 2. Filtering Implementation Details
+
+#### Backend Filtering (Rust)
+```rust
+fn filter_transcription_for_dictation(text: &str) -> String {
+    // Remove any text in capital letters between brackets
+    let re = Regex::new(r"\[\s*[A-Z][A-Z\s]*\]").unwrap();
+    let filtered = re.replace_all(text, "");
+    
+    // Clean up multiple spaces and trim
+    filtered
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+```
+
+#### Frontend Filtering (TypeScript)
 ```typescript
 export function filterTranscriptionForDisplay(text: string): string {
-  // Remove any text in capital letters between brackets
   const filtered = text.replace(/\[\s*[A-Z][A-Z\s]*\]/g, '');
-  
-  // Clean up multiple spaces and trim
   return filtered
     .split(/\s+/)
     .filter(word => word.length > 0)
@@ -46,15 +64,9 @@ export function filterTranscriptionForDisplay(text: string): string {
 }
 ```
 
-Applied to partial transcription display in `Bar.tsx`:
-```typescript
-const filteredText = filterTranscriptionForDisplay(event.payload.partial);
-setTranscriptionText(filteredText);
-```
-
 ### 3. Filtering Patterns
 
-**Removed from Display**:
+**Removed from User Experience**:
 - `[BLANK AUDIO]` ✅
 - `[SILENCE]` ✅
 - `[NOISE]` ✅
@@ -63,7 +75,7 @@ setTranscriptionText(filteredText);
 - `[ BLANK AUDIO ]` (with extra spaces) ✅
 - Any other capital text patterns ✅
 
-**Preserved in Display**:
+**Preserved in User Experience**:
 - `[this text]` → kept (lowercase)
 - `[This Too]` → kept (mixed case)
 - `[some notes]` → kept (not all capitals)
@@ -74,54 +86,78 @@ setTranscriptionText(filteredText);
 ## Files Modified
 
 ### Backend (Rust)
-1. **`tauri-plugin-voice-transcription/src/controller.rs`**
-   - Kept filtering for partial results (user display)
+1. **`src-tauri/src/lib.rs`**
+   - Added `filter_transcription_for_dictation()` function
+   - Updated dictation mode listener to filter before typing with `dev_global_type_text`
+   - Preserved unfiltered AI agent processing path
+   - Added regex import for pattern matching
+
+2. **`tauri-plugin-voice-transcription/src/controller.rs`**
+   - Kept filtering for partial results (display only)
    - Removed filtering from final results (AI processing)
    - Updated comments and tests
 
-2. **`src-tauri/src/voice_control.rs`**
-   - Kept filtering for partial results (user display)  
+3. **`src-tauri/src/voice_control.rs`**
+   - Kept filtering for partial results (display only)  
    - Removed filtering from final results (AI processing)
    - Updated comments and tests
 
 ### Frontend (TypeScript)
-3. **`src/lib/transcriptionFilter.ts`** (new file)
-   - Created display filtering utility
+4. **`src/lib/transcriptionFilter.ts`** (new file)
+   - Created display filtering utility for real-time UI
    - Regex-based pattern matching for capital brackets
 
-4. **`src/Bar.tsx`**
+5. **`src/Bar.tsx`**
    - Applied display filtering to partial transcription results
-   - Imported filtering utility
+   - Imported filtering utility for clean UI display
 
 ### Dependencies
-5. **`tauri-plugin-voice-transcription/Cargo.toml`**
+6. **`tauri-plugin-voice-transcription/Cargo.toml`**
    - Added `regex = "1.0"` dependency
 
-6. **`src-tauri/Cargo.toml`**
+7. **`src-tauri/Cargo.toml`**
    - Added `regex = "1.0"` dependency
 
 ## Implementation Flow
 
 ```
-Voice Input → Transcription
+Voice Input → Transcription: "Hello [SILENCE] world"
     ↓
-Partial Result [SILENCE] → Filter for Display → User sees clean text
-    ↓
-Final Result [SILENCE] → No Filter → AI gets complete context
+├─ Partial Result → Filter for Display → User sees: "Hello world"
+├─ Final Result (AI Mode) → No Filter → AI gets: "Hello [SILENCE] world"  
+└─ Final Result (Dictation Mode) → Filter → Types: "Hello world"
 ```
+
+## Key Features
+
+### Smart Context Preservation
+- **AI Agent**: Receives full environmental context including silence markers, background noise indicators, etc.
+- **User Experience**: Clean, professional output without technical distractions
+- **Flexibility**: AI can interpret audio environment for better responses
+
+### Comprehensive Coverage
+- **Real-time Display**: Partial results filtered during dictation
+- **Direct Typing**: Dictation mode filters before keyboard output
+- **Clipboard Integration**: Filtered text saved to clipboard when enabled
+- **Error Handling**: Graceful handling of empty results after filtering
+
+### Performance
+- **Efficient Regex**: Single pattern matches all capital bracket variations
+- **Minimal Overhead**: Filtering only applied where user-facing
+- **No AI Latency**: AI processing remains unfiltered for speed
 
 ## Benefits
 
-- **User Experience**: Clean, professional transcription display without technical markers
-- **AI Context**: Complete transcription environment information for better understanding
-- **Flexibility**: AI can interpret silence patterns, background noise, etc.
-- **Performance**: Minimal filtering overhead only for display
-- **Maintainability**: Clear separation between display and processing concerns
+- **User Experience**: Professional, clean transcription output without technical markers
+- **AI Context**: Complete environmental information for optimal understanding
+- **Flexibility**: AI can interpret silence patterns, background noise, audio quality, etc.
+- **Maintainability**: Clear separation between user experience and AI processing
+- **Robustness**: Handles various capital bracket patterns automatically
 
 ## Testing
 
-- **Backend**: Unit tests verify filtering logic for partial results
-- **Frontend**: Display filtering utility handles all capital bracket patterns
-- **Integration**: Partial results filtered for display, final results preserved for AI
+- **Backend**: Unit tests verify filtering logic for dictation typing
+- **Frontend**: Display filtering handles all capital bracket patterns  
+- **Integration**: Complete flow tested - partial display filtered, final AI processing preserved, dictation typing filtered
 
-The implementation ensures users see clean transcription text while providing the AI agent with complete environmental context for optimal understanding and response generation.
+The implementation ensures users receive clean, professional transcription output while providing AI agents with complete environmental context for optimal understanding and response generation.

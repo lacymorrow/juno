@@ -22,6 +22,8 @@ use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::{info, warn, error}; // Import logging macros
 use serde::Deserialize; // Added for deserializing payload struct
 use std::sync::Mutex; // Added for VoiceController state access
+use std::collections::HashMap;
+use regex::Regex;
 
 // macOS specific imports
 #[cfg(target_os = "macos")]
@@ -78,7 +80,20 @@ struct BarStateChangeEventPayload {
     new_state: String,
 }
 
-
+/// Filters out unwanted sequences from transcription text for dictation mode
+fn filter_transcription_for_dictation(text: &str) -> String {
+    // Remove any text in capital letters between brackets (e.g., [BLANK AUDIO], [SILENCE], [NOISE], etc.)
+    let re = Regex::new(r"\[\s*[A-Z][A-Z\s]*\]").unwrap();
+    let filtered = re.replace_all(text, "");
+    
+    // Clean up multiple spaces and trim
+    filtered
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -659,9 +674,7 @@ pub fn run() {
 
                 info!("[Event] Processing final result for AI Agent Mode");
 
-                // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
-                let payload_str = event.payload();
-                match serde_json::from_str::<serde_json::Value>(payload_str) {
+                match serde_json::from_str::<serde_json::Value>(event.payload()) {
                     Ok(payload_json) => {
                         if let Some(text_value) = payload_json.get("text") {
                             // Transform { "text": "..." } to { "query": "..." }
@@ -672,11 +685,11 @@ pub fn run() {
                                 tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
                             }
                         } else {
-                            tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
+                            tracing::error!("[Event] No 'text' field found in final-result payload: {}", event.payload());
                         }
                     }
                     Err(e) => {
-                        tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
+                        tracing::error!("[Event] Failed to parse final-result payload: {}", e);
                         // Fallback: emit with original payload
                         if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
                             tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
@@ -899,13 +912,15 @@ pub fn run() {
                             Ok(payload_json) => {
                                 if let Some(text_value) = payload_json.get("text") {
                                     if let Some(text) = text_value.as_str() {
-                                        // Only type if the text is not empty and not just whitespace
-                                        let trimmed_text = text.trim();
+                                        // Filter out capital bracket sequences before typing
+                                        let filtered_text = filter_transcription_for_dictation(text);
+                                        let trimmed_text = filtered_text.trim();
+                                        
                                         if !trimmed_text.is_empty() {
                                             // Check if clipboard saving is enabled
-                                                                        let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                .map(|enabled| *enabled)
-                                .unwrap_or(true); // Default to true if lock fails
+                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
+                                                .map(|enabled| *enabled)
+                                                .unwrap_or(true); // Default to true if lock fails
 
                                             // Store to clipboard if enabled
                                             if clipboard_enabled {
@@ -937,9 +952,11 @@ pub fn run() {
                                                 }
                                             }
                                         } else {
-                                            info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
+                                            info!("[Dictation Mode] Transcribed text was empty or whitespace only after filtering, skipping typing");
                                         }
                                     }
+                                } else {
+                                    tracing::error!("[Dictation Mode] No 'text' field found in final-result payload: {}", payload_str);
                                 }
                             }
                             Err(e) => {
