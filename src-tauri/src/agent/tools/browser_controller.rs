@@ -122,11 +122,26 @@ impl BrowserController {
             Err(_) => "unknown".to_string(),
         });
 
-        let context = browser.context_builder()
-            .accept_downloads(true)
-            .build()
-            .await
-            .map_err(|e| AgentError::ToolError(format!("Failed to create browser context: {}", e)))?;
+        // Get existing contexts or create a new one
+        let context = match browser.contexts() {
+            Ok(contexts) if !contexts.is_empty() => {
+                log::info!("Using existing browser context with {} contexts", contexts.len());
+                // Create a new context since BrowserContext doesn't implement Clone
+                browser.context_builder()
+                    .accept_downloads(true)
+                    .build()
+                    .await
+                    .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
+            },
+            _ => {
+                log::info!("Creating new context in existing browser");
+                browser.context_builder()
+                    .accept_downloads(true)
+                    .build()
+                    .await
+                    .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
+            }
+        };
         log::info!("Browser context created.");
 
         // Create a test page to verify everything is working - retry multiple times if needed
