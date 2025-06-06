@@ -42,4 +42,4 @@ src-tauri/target
 
 # General Rust build artifacts
 target/
-.rustc_info.json
+**/.rustc_info.json
