@@ -3668,6 +3668,7 @@ dependencies = [
  "crossbeam-channel",
  "hound",
  "once_cell",
+ "regex",
  "rubato",
  "serde",
  "serde_json",

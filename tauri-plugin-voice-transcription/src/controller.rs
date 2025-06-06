@@ -10,6 +10,7 @@ use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationPar
 use hound;
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::info;
+use regex::Regex;
 
 use crate::error::{Error, Result};
 
@@ -17,14 +18,9 @@ const WHISPER_SAMPLE_RATE: u32 = 16000;
 
 /// Filters out unwanted sequences from transcription text
 fn filter_transcription_text(text: &str) -> String {
-    // Remove [BLANK AUDIO] sequences and any variations
-    let filtered = text
-        .replace("[BLANK AUDIO]", "")
-        .replace("[blank audio]", "")
-        .replace("[Blank Audio]", "")
-        .replace("[ BLANK AUDIO ]", "")
-        .replace("[ blank audio ]", "")
-        .replace("[ Blank Audio ]", "");
+    // Remove any text in capital letters between brackets (e.g., [BLANK AUDIO], [SILENCE], [NOISE], etc.)
+    let re = Regex::new(r"\[\s*[A-Z][A-Z\s]*\]").unwrap();
+    let filtered = re.replace_all(text, "");
     
     // Clean up multiple spaces and trim
     let cleaned = filtered
@@ -623,32 +619,36 @@ mod tests {
 
     #[test]
     fn test_filter_transcription_text() {
-        // Test basic [BLANK AUDIO] removal
+        // Test basic capital text removal
         assert_eq!(filter_transcription_text("Hello [BLANK AUDIO] world"), "Hello world");
+        assert_eq!(filter_transcription_text("Test [SILENCE] case"), "Test case");
+        assert_eq!(filter_transcription_text("Music [NOISE] playing"), "Music playing");
         
-        // Test multiple [BLANK AUDIO] sequences
-        assert_eq!(filter_transcription_text("Start [BLANK AUDIO] middle [BLANK AUDIO] end"), "Start middle end");
+        // Test multiple sequences
+        assert_eq!(filter_transcription_text("Start [BLANK AUDIO] middle [SILENCE] end"), "Start middle end");
         
-        // Test different case variations
-        assert_eq!(filter_transcription_text("Test [blank audio] case"), "Test case");
-        assert_eq!(filter_transcription_text("Test [Blank Audio] case"), "Test case");
-        
-        // Test with spaces around brackets
+        // Test with spaces inside brackets
         assert_eq!(filter_transcription_text("Test [ BLANK AUDIO ] spaces"), "Test spaces");
-        assert_eq!(filter_transcription_text("Test [ blank audio ] spaces"), "Test spaces");
+        assert_eq!(filter_transcription_text("Test [ MUSIC PLAYING ] spaces"), "Test spaces");
         
-        // Test text with only [BLANK AUDIO]
+        // Test text with only capital sequences
         assert_eq!(filter_transcription_text("[BLANK AUDIO]"), "");
-        assert_eq!(filter_transcription_text("[BLANK AUDIO] [blank audio]"), "");
+        assert_eq!(filter_transcription_text("[SILENCE] [NOISE]"), "");
         
         // Test text with extra whitespace that should be cleaned up
         assert_eq!(filter_transcription_text("  Multiple   spaces  "), "Multiple spaces");
         
         // Test mixed scenarios
-        assert_eq!(filter_transcription_text("  Start [BLANK AUDIO]   middle   [blank audio]  end  "), "Start middle end");
+        assert_eq!(filter_transcription_text("  Start [BACKGROUND NOISE]   middle   [SILENCE]  end  "), "Start middle end");
         
-        // Test normal text without [BLANK AUDIO]
+        // Test normal text without capital sequences
         assert_eq!(filter_transcription_text("Normal transcription text"), "Normal transcription text");
+        
+        // Test lowercase/mixed case in brackets should NOT be removed
+        assert_eq!(filter_transcription_text("Keep [this text] and [This Too]"), "Keep [this text] and [This Too]");
+        
+        // Test single capital letters
+        assert_eq!(filter_transcription_text("Remove [A] single letters"), "Remove single letters");
         
         // Test empty string
         assert_eq!(filter_transcription_text(""), "");
