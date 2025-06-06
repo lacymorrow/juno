@@ -123,7 +123,7 @@ impl AppState {
             browser_controller: Arc::new(TokioMutex::new(None)),
             memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            tts_provider: Arc::new(Mutex::new("off".to_string())), // Initialize TTS provider to "off"
+            tts_provider: Arc::new(Mutex::new("system".to_string())), // Initialize TTS provider to "system" (was "off")
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
             dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
             dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
