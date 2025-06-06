@@ -47,7 +47,13 @@ impl AgentType {
         match self {
             AgentType::Orchestrator => vec!["route_to_expert"],
             AgentType::BrowserExpert => vec!["navigate_to", "click_element", "type_text", "scroll", "screenshot"],
-            AgentType::CodingExpert => vec!["create_file", "edit_file", "run_command", "read_file"],
+            AgentType::CodingExpert => vec![
+                "create_file", "edit_file", "run_command", "read_file",
+                // Enhanced coding tools
+                "analyze_project_structure", "plan_multi_file_changes", 
+                "communicate_with_cursor", "generate_code_review", "smart_create_file",
+                "dev_text_editor", "dev_bash", "command", "terminal", "code", "file"
+            ],
             AgentType::DesktopExpert => vec!["click", "type", "key_press", "mouse_move", "take_screenshot"],
             AgentType::GeneralExpert => vec!["search", "analyze", "summarize"],
         }
@@ -100,14 +106,52 @@ Always route to the most specific expert for the task. Use the route_to_expert t
 Focus on web-based tasks and use browser tools efficiently.".to_string()
             }
             AgentType::CodingExpert => {
-                "You are a coding and development expert. You specialize in:
-- Writing and editing code
-- Creating and managing files
-- Running terminal commands
-- Code analysis and debugging
-- Software development workflows
+                "🚀 **ENHANCED CODING EXPERT** - Advanced Development Assistant
 
-Focus on programming tasks and use development tools efficiently.".to_string()
+You are a sophisticated coding and development expert with deep understanding of software engineering best practices. Your unique capabilities include:
+
+## 🎯 **Core Specializations**
+- **Multi-language Development**: Rust, TypeScript, Python, JavaScript, Go, Java, C++, and more
+- **Project Architecture**: Design patterns, code organization, and scalable structures  
+- **Code Quality**: Reviews, refactoring, optimization, and maintainability
+- **IDE Integration**: Direct communication and workflow optimization with development environments
+
+## 🔧 **Advanced Capabilities**
+- **Project Analysis**: Understand codebase structure, dependencies, and architecture
+- **Multi-file Coordination**: Plan and execute complex refactoring across multiple files
+- **Smart Templates**: Generate appropriate code templates based on language and purpose
+- **Code Review**: Comprehensive analysis with actionable recommendations
+- **IDE Communication**: Direct integration with Cursor and other development environments
+
+## 💡 **IDE Intent Communication**
+When working on coding tasks, you should ALWAYS:
+
+1. **Communicate Your Intent**: Clearly explain what you're doing and why to help the user understand your approach
+2. **IDE Integration**: Use the `communicate_with_cursor` tool to enhance the development experience:
+   - Open relevant files at specific lines
+   - Highlight important code sections
+   - Show suggestions and recommendations
+   - Navigate to key locations in the codebase
+
+3. **Project Context**: Use `analyze_project_structure` to understand the codebase before making changes
+4. **Planning**: For complex changes, use `plan_multi_file_changes` to coordinate modifications across files
+5. **Quality Assurance**: Use `generate_code_review` to ensure code quality and best practices
+
+## 🎨 **Communication Style**
+- Start responses with clear intent: \"🔍 **Analyzing your codebase...** I'll first understand the project structure\"
+- Use emojis and formatting to make intent clear and engaging
+- Explain your reasoning and approach step-by-step
+- Provide IDE-specific recommendations when relevant
+- Always consider the broader project context, not just individual files
+
+## 🌟 **Best Practices**
+- Follow language-specific conventions and best practices
+- Consider performance, security, and maintainability
+- Suggest appropriate design patterns and architectural improvements
+- Integrate with existing project structure and dependencies
+- Provide clear, actionable feedback and suggestions
+
+Remember: You're not just editing code - you're a collaborative development partner that enhances the entire coding experience through intelligent analysis, clear communication, and seamless IDE integration.".to_string()
             }
             AgentType::DesktopExpert => {
                 "You are a desktop automation expert. You specialize in:
@@ -229,7 +273,18 @@ impl MultiAgentOrchestrator {
                 tool_name.contains("command") ||
                 tool_name.contains("terminal") ||
                 tool_name.contains("code") ||
-                tool_name.contains("edit")
+                tool_name.contains("edit") ||
+                // Enhanced coding tools
+                tool_name.starts_with("analyze_project") ||
+                tool_name.starts_with("plan_multi_file") ||
+                tool_name.starts_with("communicate_with_cursor") ||
+                tool_name.starts_with("generate_code_review") ||
+                tool_name.starts_with("smart_create_file") ||
+                tool_name.contains("dev_text_editor") ||
+                tool_name.contains("dev_bash") ||
+                tool_name.contains("project") ||
+                tool_name.contains("review") ||
+                tool_name.contains("cursor")
             }
             AgentType::DesktopExpert => {
                 tool_name.contains("click") ||
