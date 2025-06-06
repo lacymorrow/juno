@@ -378,6 +378,157 @@ function App() {
     };
   }, []);
 
+  // Listen for help menu requests
+  useEffect(() => {
+    const unlisten = listen<string>("help-requested", (event) => {
+      console.log("Help requested from menu:", event.payload);
+      const helpType = event.payload;
+      
+      if (helpType === "shortcuts") {
+        // Show keyboard shortcuts - could navigate to settings or show modal
+        setCurrentView("settings");
+      } else {
+        // General help - could open documentation or show help modal
+        console.log("General help requested");
+        // TODO: Implement help modal or navigate to help section
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for new chat requests
+  useEffect(() => {
+    const unlisten = listen("new-chat-requested", () => {
+      console.log("New chat requested from menu");
+      startNewChat();
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for clear history requests
+  useEffect(() => {
+    const unlisten = listen("clear-history-requested", () => {
+      console.log("Clear history requested from menu");
+      clearConversation();
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [clearConversation]);
+
+  // Listen for toggle floating bar requests
+  useEffect(() => {
+    const unlisten = listen("toggle-floating-bar-requested", () => {
+      console.log("Toggle floating bar requested from menu");
+      // This could emit a command to toggle the floating bar
+      // For now, we'll just log it as the floating bar is managed by backend
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for toggle dev panel requests
+  useEffect(() => {
+    const unlisten = listen("toggle-dev-panel-requested", () => {
+      console.log("Toggle dev panel requested from menu");
+      setIsDevPanelOpen(!isDevPanelOpen);
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [isDevPanelOpen]);
+
+  // Listen for permissions requests
+  useEffect(() => {
+    const unlisten = listen("permissions-requested", () => {
+      console.log("Permissions requested from menu");
+      setCurrentView("permissions");
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for feedback requests
+  useEffect(() => {
+    const unlisten = listen<string>("feedback-requested", (event) => {
+      console.log("Feedback requested from menu:", event.payload);
+      const feedbackType = event.payload;
+      
+      // TODO: Implement feedback modal or form
+      if (feedbackType === "issue") {
+        console.log("Issue report requested");
+        // Could open GitHub issues page or feedback form
+      } else {
+        console.log("General feedback requested");
+        // Could open feedback form
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for import/export chat requests
+  useEffect(() => {
+    const unlistenImport = listen("import-chat-requested", () => {
+      console.log("Import chat requested from menu");
+      // TODO: Implement chat import functionality
+    });
+
+    const unlistenExport = listen("export-chat-requested", () => {
+      console.log("Export chat requested from menu");
+      // TODO: Implement chat export functionality
+    });
+
+    return () => {
+      unlistenImport.then((unlistenFn) => unlistenFn());
+      unlistenExport.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for window management requests
+  useEffect(() => {
+    const unlistenMinimize = listen("minimize-window-requested", () => {
+      console.log("Minimize window requested from menu");
+      // TODO: Implement window minimize
+    });
+
+    const unlistenZoom = listen("zoom-window-requested", () => {
+      console.log("Zoom window requested from menu");
+      // TODO: Implement window zoom
+    });
+
+    const unlistenFullscreen = listen("toggle-fullscreen-requested", () => {
+      console.log("Toggle fullscreen requested from menu");
+      // TODO: Implement fullscreen toggle
+    });
+
+    const unlistenUpdate = listen("update-check-requested", () => {
+      console.log("Update check requested from menu");
+      // TODO: Implement update check functionality
+    });
+
+    return () => {
+      unlistenMinimize.then((unlistenFn) => unlistenFn());
+      unlistenZoom.then((unlistenFn) => unlistenFn());
+      unlistenFullscreen.then((unlistenFn) => unlistenFn());
+      unlistenUpdate.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Listen for transcription results from dictation
   useEffect(() => {
     const unlisten = listen<{ query?: string | null; error?: string | null }>( // Define the expected payload structure
