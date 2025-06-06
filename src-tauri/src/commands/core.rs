@@ -1,7 +1,6 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
 use crate::state::AppState;
-// Removed unused: use tauri::{AppHandle, State};
 use tracing::{info};
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};

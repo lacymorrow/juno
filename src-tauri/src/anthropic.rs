@@ -20,41 +20,12 @@ use crate::agent::providers::config::AgentMode;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 
-// use crate::tools::{list_tools, handle_tool_call}; // Removed unused
-// use reqwest::Client; // Removed unused
-// use image::{GenericImageView, ImageFormat}; // Removed unused
-// use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Removed unused
-// use std::io::Cursor; // Removed unused
-// use tauri::{Manager, Emitter}; // Import Manager and Emitter
-// use futures::future; // Removed unused
-
-// --- Agent Integration ---
-// use crate::agent::{
-//     implementations::{
-//         // Correct path based on resolved structure
-//         memory_manager::SimpleMemoryManager,
-//         tool_provider::LocalToolProvider,
-//         agent_runner::DefaultAgentRunner,
-//         // AnthropicBrain is now selected via the factory
-//         // agent_brain::AnthropicBrain, // Remove direct import
-//     },
-//     traits::AgentRunnable, // Import the trait for the run method
-//     // tools::{ // Remove this entire block as it's redundant/incorrect
-//     //     basic_tools::register_basic_tools,
-//     //     desktop_tools::register_desktop_tools,
-//     //     browser_tools::get_browser_tool_definitions,
-//     //     browser_controller::BrowserController,
-//     // },
-//      providers::factory::BrainFactory, // Keep BrainFactory import
-// };
 
 // --- Agent State ---
 
-// Removed unused enum AgentState
 
 // --- Anthropic API Structs ---
 
-// Removed unused struct AnthropicMessage
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -72,7 +43,6 @@ pub(crate) struct AnthropicContentBlock {
     // Fields related to tool_result (we create these, don't expect from API)
 }
 
-// Removed unused struct ToolResultBlock
 
 // Keep this for payload structure, ensure Clone is derived
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -92,7 +62,6 @@ struct BackendResponsePayload {
 
 // Removed AnthropicThinkingBudget as it was commented out
 
-// Removed unused struct AnthropicRequest
 
 #[derive(Deserialize, Debug)]
 struct AnthropicUsage {
@@ -117,7 +86,6 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
-// Removed unused function process_screenshot
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
 
