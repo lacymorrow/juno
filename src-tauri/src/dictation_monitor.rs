@@ -246,16 +246,23 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 async fn force_stop_voice_controller(app_handle: &AppHandle) {
     warn!("[DictationMonitor] Attempting to force stop voice controller");
 
-    // Try to stop the voice transcription plugin
-    match tauri_plugin_voice_transcription::commands::stop_dictation(
-        app_handle.clone(),
-        app_handle.state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-    ).await {
-        Ok(_) => {
-            info!("[DictationMonitor] Successfully force stopped voice controller");
+    // Try to stop the voice transcription plugin only if the controller exists
+    match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                app_handle.clone(),
+                controller_state
+            ).await {
+                Ok(_) => {
+                    info!("[DictationMonitor] Successfully force stopped voice controller");
+                }
+                Err(e) => {
+                    error!("[DictationMonitor] Failed to force stop voice controller: {}", e);
+                }
+            }
         }
-        Err(e) => {
-            error!("[DictationMonitor] Failed to force stop voice controller: {}", e);
+        None => {
+            warn!("[DictationMonitor] Voice controller not available - cannot force stop");
         }
     }
 }
@@ -289,27 +296,16 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
             duration.as_millis()
         );
 
-        // Emit event to cancel transcription and do passthrough
+        // Emit event to cancel transcription - no passthrough needed since we use Option+Space now
         if let Err(e) = app_handle.emit("dictation-transcription-cancel", ()) {
             error!("[DictationMonitor] Failed to emit dictation-transcription-cancel: {}", e);
         }
-
-        // Attempt passthrough space typing
-        #[cfg(target_os = "macos")]
-        {
-            attempt_space_passthrough(app_handle).await;
-        }
     } else {
         debug!(
-            "[DictationMonitor] Dictation input released without starting transcription ({}ms)",
+            "[DictationMonitor] Dictation input released without starting transcription ({}ms) - no action needed",
             duration.as_millis()
         );
-
-        // Very short press - just do passthrough
-        #[cfg(target_os = "macos")]
-        {
-            attempt_space_passthrough(app_handle).await;
-        }
+        // No passthrough needed since we're using Option+Space, not intercepting normal spacebar
     }
 }
 
@@ -318,23 +314,4 @@ pub async fn force_reset_dictation_input_state() {
     let mut state = DICTATION_INPUT_STATE.lock().await;
     state.force_reset();
     info!("[DictationMonitor] Dictation input state force reset completed");
-}
-
-// Attempt to pass through a space character to the currently focused application
-#[cfg(target_os = "macos")]
-async fn attempt_space_passthrough(app_handle: &AppHandle) {
-    debug!("[DictationMonitor] Attempting to type space character for passthrough");
-
-    // Get the app state to access the desktop automation
-    let app_state = app_handle.state::<crate::state::AppState>();
-
-    // Use the global type text function to insert a space
-    match crate::commands::keyboard::dev_global_type_text(" ".to_string(), app_state.clone()).await {
-        Ok(()) => {
-            debug!("[DictationMonitor] Successfully typed space character for passthrough");
-        }
-        Err(e) => {
-            error!("[DictationMonitor] Failed to type space character for passthrough: {}", e);
-        }
-    }
 }
