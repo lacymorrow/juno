@@ -193,17 +193,34 @@ pub(crate) fn element_contains_text(e: &AXUIElement, text: &str) -> bool {
     contains_in_title || contains_in_desc
 }
 
-/// Captures a screenshot of the main display and encodes it as base64 PNG.
-pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
+/// Screenshot result with display context information
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ScreenshotWithContext {
+    pub base64_image: String,
+    pub display_bounds: DisplayBounds,
+    pub cursor_position: (f64, f64),
+    pub is_primary_display: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DisplayBounds {
+    pub origin_x: f64,
+    pub origin_y: f64, 
+    pub width: f64,
+    pub height: f64,
+    pub display_id: u32,
+}
+
+/// Captures a screenshot with full display context for multi-monitor setups
+pub fn capture_screenshot_with_context() -> Result<ScreenshotWithContext, AutomationError> {
     // 1. Get current cursor position
     let cursor_point = {
-        // Use kCGEventSourceStateHIDSystemState to get the event source for system events
         let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
             .map_err(|_| AutomationError::PlatformError("Failed to create HID event source".to_string()))?;
         let event = CGEvent::new(event_source).map_err(|_| {
             AutomationError::PlatformError("Failed to create null CGEvent to get location".to_string())
         })?;
-        event.location() // This returns CGPoint in global coordinates
+        event.location()
     };
     debug!("Current cursor position: ({}, {})", cursor_point.x, cursor_point.y);
 
@@ -215,18 +232,47 @@ pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
         },
         Err(e) => {
             warn!("Failed to find display for cursor at ({}, {}): {}. Falling back to main display.", cursor_point.x, cursor_point.y, e);
-            unsafe { CGMainDisplayID() } // Fallback to main display
+            unsafe { CGMainDisplayID() }
         }
     };
 
-    // 3. Capture the specific display containing the cursor
+    // 3. Get display bounds
+    let display_bounds_rect = unsafe { CGDisplayBounds(target_display_id) };
+    let is_primary = unsafe { target_display_id == CGMainDisplayID() };
+    
+    let display_bounds = DisplayBounds {
+        origin_x: display_bounds_rect.origin.x,
+        origin_y: display_bounds_rect.origin.y,
+        width: display_bounds_rect.size.width,
+        height: display_bounds_rect.size.height,
+        display_id: target_display_id,
+    };
+
+    debug!("Display bounds: origin=({}, {}), size={}x{}, primary={}", 
+           display_bounds.origin_x, display_bounds.origin_y, 
+           display_bounds.width, display_bounds.height, is_primary);
+
+    // 4. Capture the specific display
     let cg_image = capture_screenshot_cgimage(Some(target_display_id))?;
     debug!("Captured screenshot for display ID: {}", target_display_id);
 
-    // 4. Convert CGImage to buffer first
+    // 5. Convert and encode
     let buffer = cgimage_to_imagebuffer(cg_image)?;
-    // 5. Encode
-    encode_imagebuffer_to_base64_png(&buffer)
+    let base64_image = encode_imagebuffer_to_base64_png(&buffer)?;
+
+    Ok(ScreenshotWithContext {
+        base64_image,
+        display_bounds,
+        cursor_position: (cursor_point.x, cursor_point.y),
+        is_primary_display: is_primary,
+    })
+}
+
+/// Captures a screenshot of the main display and encodes it as base64 PNG.
+/// Legacy function for backward compatibility - use capture_screenshot_with_context for new code
+pub fn capture_and_encode_screenshot() -> Result<String, AutomationError> {
+    let screenshot_context = capture_screenshot_with_context()?;
+    Ok(screenshot_context.base64_image)
 }
 
 /// Captures a screenshot of a specific UI element and encodes it as base64 PNG.

@@ -5,6 +5,7 @@ use crate::state::AppState;
 use tracing::{info};
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
+use crate::utils::coordinates;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -18,11 +19,37 @@ use tauri::State; // State is needed for several commands
 #[cfg(target_os = "macos")]
 #[tauri::command]
 pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String, String> {
-    match macos_utils::capture_and_encode_screenshot() {
-        Ok(base64_string) => {
+    match macos_utils::capture_screenshot_with_context() {
+        Ok(screenshot_context) => {
+            // Update coordinate transformation system with display context
+            coordinates::update_display_context(
+                screenshot_context.display_bounds.width as u32,
+                screenshot_context.display_bounds.height as u32,
+                screenshot_context.display_bounds.width as u32, // No scaling applied by default
+                screenshot_context.display_bounds.height as u32,
+                1.0, // No scaling factor by default
+                screenshot_context.display_bounds.origin_x,
+                screenshot_context.display_bounds.origin_y,
+                screenshot_context.display_bounds.display_id,
+                screenshot_context.is_primary_display,
+            );
+
+            info!("Screenshot captured with display context: origin=({}, {}), size={}x{}, display_id={}, primary={}",
+                  screenshot_context.display_bounds.origin_x,
+                  screenshot_context.display_bounds.origin_y,
+                  screenshot_context.display_bounds.width,
+                  screenshot_context.display_bounds.height,
+                  screenshot_context.display_bounds.display_id,
+                  screenshot_context.is_primary_display);
+
             // Send notification on success
-            send_dev_tool_notification(&app, "Screenshot", "Screenshot captured successfully.")?;
-            Ok(base64_string)
+            send_dev_tool_notification(&app, "Screenshot", 
+                &format!("Screenshot captured from display {} at ({}, {})", 
+                        screenshot_context.display_bounds.display_id,
+                        screenshot_context.display_bounds.origin_x,
+                        screenshot_context.display_bounds.origin_y))?;
+            
+            Ok(screenshot_context.base64_image)
         }
         Err(e) => Err(format!("Failed to capture screenshot: {}", e)),
     }
@@ -100,4 +127,88 @@ pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
 
     tracing::info!("Set AI provider to: {}", provider_id);
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) async fn get_display_info(app: AppHandle) -> Result<serde_json::Value, String> {
+    match macos_utils::capture_screenshot_with_context() {
+        Ok(screenshot_context) => {
+            let display_info = serde_json::json!({
+                "display_bounds": {
+                    "origin_x": screenshot_context.display_bounds.origin_x,
+                    "origin_y": screenshot_context.display_bounds.origin_y,
+                    "width": screenshot_context.display_bounds.width,
+                    "height": screenshot_context.display_bounds.height,
+                    "display_id": screenshot_context.display_bounds.display_id
+                },
+                "cursor_position": {
+                    "x": screenshot_context.cursor_position.0,
+                    "y": screenshot_context.cursor_position.1
+                },
+                "is_primary_display": screenshot_context.is_primary_display,
+                "current_coordinate_context": coordinates::get_display_context()
+            });
+            
+            send_dev_tool_notification(&app, "Display Info", 
+                &format!("Display {}: {}x{} at ({}, {})", 
+                        screenshot_context.display_bounds.display_id,
+                        screenshot_context.display_bounds.width,
+                        screenshot_context.display_bounds.height,
+                        screenshot_context.display_bounds.origin_x,
+                        screenshot_context.display_bounds.origin_y))?;
+            
+            Ok(display_info)
+        }
+        Err(e) => Err(format!("Failed to get display info: {}", e)),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub(crate) async fn get_display_info(_app: DummyAppHandle) -> Result<serde_json::Value, String> {
+    Err("Display info is only supported on macOS currently.".to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) async fn test_coordinate_transformation(
+    app: AppHandle, 
+    screenshot_x: f64, 
+    screenshot_y: f64
+) -> Result<serde_json::Value, String> {
+    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+    let (back_to_screenshot_x, back_to_screenshot_y) = coordinates::transform_to_scaled_coordinates(global_x, global_y);
+    
+    let context = coordinates::get_display_context();
+    
+    let result = serde_json::json!({
+        "input_screenshot_coords": { "x": screenshot_x, "y": screenshot_y },
+        "transformed_global_coords": { "x": global_x, "y": global_y },
+        "roundtrip_screenshot_coords": { "x": back_to_screenshot_x, "y": back_to_screenshot_y },
+        "transformation_error": {
+            "x": (screenshot_x - back_to_screenshot_x).abs(),
+            "y": (screenshot_y - back_to_screenshot_y).abs()
+        },
+        "display_context": context,
+        "is_accurate": (screenshot_x - back_to_screenshot_x).abs() < 1.0 && (screenshot_y - back_to_screenshot_y).abs() < 1.0
+    });
+    
+    send_dev_tool_notification(&app, "Coordinate Test", 
+        &format!("Screenshot ({}, {}) → Global ({}, {}) | Error: ({:.2}, {:.2})", 
+                screenshot_x, screenshot_y, global_x, global_y,
+                (screenshot_x - back_to_screenshot_x).abs(),
+                (screenshot_y - back_to_screenshot_y).abs()))?;
+    
+    Ok(result)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub(crate) async fn test_coordinate_transformation(
+    _app: DummyAppHandle, 
+    _screenshot_x: f64, 
+    _screenshot_y: f64
+) -> Result<serde_json::Value, String> {
+    Err("Coordinate transformation testing is only supported on macOS currently.".to_string())
 }

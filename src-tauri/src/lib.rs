@@ -258,6 +258,8 @@ pub fn run() {
             tts::set_tts_provider_command, // Added for TTS provider selection
             tts::get_tts_provider_command, // Added for TTS provider selection
             capture_screenshot_command,
+            get_display_info,
+            test_coordinate_transformation,
             dev_get_focused_element_info,
             capture_element_screenshot_command,
             dev_click_focused_element,

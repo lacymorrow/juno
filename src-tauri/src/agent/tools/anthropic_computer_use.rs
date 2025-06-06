@@ -1,6 +1,7 @@
 use crate::agent::structs::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
+use crate::utils::coordinates;
 use serde_json::{json, Value};
 use tauri::Manager;
 use tracing::info;
@@ -18,7 +19,7 @@ pub async fn register_anthropic_computer_use_tools(
     // Computer Tool (computer_20250124) - Enhanced version for Claude 4 & Sonnet 3.7
     let computer_tool_def = ToolDefinition {
         name: "computer".to_string(),
-        description: "Use a mouse and keyboard to interact with a computer, and take screenshots.".to_string(),
+        description: "Use a mouse and keyboard to interact with a computer, and take screenshots with display context.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -46,7 +47,7 @@ pub async fn register_anthropic_computer_use_tools(
                 },
                 "coordinate": {
                     "type": "array",
-                    "description": "(x, y): The x (pixels from the left edge) and y (pixels from the top edge) coordinates to move the mouse to. Required only by action=mouse_move and action=left_click_drag.",
+                    "description": "(x, y): The x (pixels from the left edge) and y (pixels from the top edge) coordinates within the screenshot. These will be automatically converted to global screen coordinates.",
                     "items": {"type": "number"}
                 },
                 "start_coordinate": {
@@ -96,11 +97,31 @@ pub async fn register_anthropic_computer_use_tools(
                     });
 
                     match screenshot_result {
-                        Ok(base64_image) => Ok(json!({
-                            "type": "image",
-                            "data": base64_image,
-                            "format": "png"
-                        })),
+                        Ok(base64_image) => {
+                            // Get the current display context to provide to the AI
+                            let display_context = coordinates::get_display_context();
+                            
+                            let mut result = json!({
+                                "type": "image",
+                                "data": base64_image,
+                                "format": "png"
+                            });
+
+                            // Add display context information for multi-monitor awareness
+                            if let Some(context) = display_context {
+                                result["display_info"] = json!({
+                                    "origin_x": context.display_origin_x,
+                                    "origin_y": context.display_origin_y,
+                                    "width": context.original_width,
+                                    "height": context.original_height,
+                                    "display_id": context.display_id,
+                                    "is_primary_display": context.is_primary_display,
+                                    "note": "Coordinates in this screenshot are relative to the captured display. When clicking, provide coordinates as they appear in the image - they will be automatically converted to the correct global screen coordinates."
+                                });
+                            }
+
+                            Ok(result)
+                        },
                         Err(e) => Err(format!("Screenshot failed: {}", e))
                     }
                 },
@@ -117,10 +138,13 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
 
-                    state_manager.desktop.mouse_move(x, y)
+                    // Transform from screenshot coordinates to global screen coordinates
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.mouse_move(global_x, global_y)
                         .map_err(|e| format!("Mouse move failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -131,10 +155,12 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
 
-                    state_manager.desktop.left_mouse_down(x, y)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.left_mouse_down(global_x, global_y)
                         .map_err(|e| format!("Left mouse down failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -145,10 +171,12 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
 
-                    state_manager.desktop.left_mouse_up(x, y)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.left_mouse_up(global_x, global_y)
                         .map_err(|e| format!("Left mouse up failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -159,11 +187,13 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
 
-                    state_manager.desktop.left_click(x, y, modifiers)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.left_click(global_x, global_y, modifiers)
                         .map_err(|e| format!("Left click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -174,11 +204,13 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
 
-                    state_manager.desktop.right_click(x, y, modifiers)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.right_click(global_x, global_y, modifiers)
                         .map_err(|e| format!("Right click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -189,11 +221,13 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
 
-                    state_manager.desktop.middle_click(x, y, modifiers)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.middle_click(global_x, global_y, modifiers)
                         .map_err(|e| format!("Middle click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -204,11 +238,13 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
 
-                    state_manager.desktop.double_click(x, y, modifiers)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.double_click(global_x, global_y, modifiers)
                         .map_err(|e| format!("Double click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -219,11 +255,13 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
 
-                    state_manager.desktop.triple_click(x, y, modifiers)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.triple_click(global_x, global_y, modifiers)
                         .map_err(|e| format!("Triple click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -239,12 +277,15 @@ pub async fn register_anthropic_computer_use_tools(
                         return Err("coordinates must be arrays of [x, y]".to_string());
                     }
 
-                    let start_x = start_coord[0].as_f64().ok_or("Invalid start_x coordinate")?;
-                    let start_y = start_coord[1].as_f64().ok_or("Invalid start_y coordinate")?;
-                    let end_x = end_coord[0].as_f64().ok_or("Invalid end_x coordinate")?;
-                    let end_y = end_coord[1].as_f64().ok_or("Invalid end_y coordinate")?;
+                    let start_screenshot_x = start_coord[0].as_f64().ok_or("Invalid start_x coordinate")?;
+                    let start_screenshot_y = start_coord[1].as_f64().ok_or("Invalid start_y coordinate")?;
+                    let end_screenshot_x = end_coord[0].as_f64().ok_or("Invalid end_x coordinate")?;
+                    let end_screenshot_y = end_coord[1].as_f64().ok_or("Invalid end_y coordinate")?;
 
-                    state_manager.desktop.left_click_drag(start_x, start_y, end_x, end_y)
+                    let (start_global_x, start_global_y) = coordinates::transform_to_screen_coordinates(start_screenshot_x, start_screenshot_y);
+                    let (end_global_x, end_global_y) = coordinates::transform_to_screen_coordinates(end_screenshot_x, end_screenshot_y);
+
+                    state_manager.desktop.left_click_drag(start_global_x, start_global_y, end_global_x, end_global_y)
                         .map_err(|e| format!("Left click drag failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
@@ -255,8 +296,8 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
 
                     let direction = input["scroll_direction"]
                         .as_str()
@@ -265,7 +306,9 @@ pub async fn register_anthropic_computer_use_tools(
                         .as_i64()
                         .ok_or_else(|| "Missing or invalid 'scroll_amount' parameter".to_string())? as f64;
 
-                    state_manager.desktop.scroll_at_position(x, y, direction, amount)
+                    let (global_x, global_y) = coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
+                    state_manager.desktop.scroll_at_position(global_x, global_y, direction, amount)
                         .map_err(|e| format!("Scroll failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
