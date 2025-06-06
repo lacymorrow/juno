@@ -86,31 +86,13 @@ pub struct Desktop {
 impl Desktop {
     /// Initializes the Desktop environment.
     pub fn new(use_background_apps: bool, activate_app: bool) -> Result<Self, AutomationError> {
-        let engine_result = if cfg!(target_os = "macos") {
-            info!("Initializing macOS engine...");
-            platforms::macos::MacOSEngine::new(use_background_apps, activate_app)
-                .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
-        } else if cfg!(target_os = "windows") {
-            info!("Initializing Windows engine...");
-            #[cfg(target_os = "windows")]
-            {
-                platforms::windows::WindowsEngine::new()
-                    .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                 // Ensure the Err type matches the other branches
-                 Err(AutomationError::UnsupportedPlatform("Windows engine not supported on this platform".to_string()))
-            }
-        } else {
-            Err(AutomationError::UnsupportedPlatform("Platform not supported".to_string()))
-        };
+        let engine_result = platforms::create_engine(use_background_apps, activate_app);
 
         match engine_result {
             Ok(engine) => {
                 info!("Desktop engine initialized successfully.");
                 Ok(Self {
-                    engine,
+                    engine: Arc::from(engine) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>,
                     use_background_apps,
                     activate_app,
                 })
@@ -125,31 +107,13 @@ impl Desktop {
     /// Initializes the Desktop environment with auto-redirect permission handling.
     /// When permissions are denied, automatically opens System Settings for the user.
     pub fn new_with_auto_redirect(use_background_apps: bool, activate_app: bool, auto_open_settings: bool) -> Result<Self, AutomationError> {
-        let engine_result = if cfg!(target_os = "macos") {
-            info!("Initializing macOS engine with auto-redirect...");
-            platforms::macos::MacOSEngine::new_with_auto_redirect(use_background_apps, activate_app, auto_open_settings)
-                .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
-        } else if cfg!(target_os = "windows") {
-            info!("Initializing Windows engine...");
-            #[cfg(target_os = "windows")]
-            {
-                platforms::windows::WindowsEngine::new()
-                    .map(|e| Arc::new(e) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>)
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                 // Ensure the Err type matches the other branches
-                 Err(AutomationError::UnsupportedPlatform("Windows engine not supported on this platform".to_string()))
-            }
-        } else {
-            Err(AutomationError::UnsupportedPlatform("Platform not supported".to_string()))
-        };
+        let engine_result = platforms::create_engine_with_auto_redirect(use_background_apps, activate_app, auto_open_settings);
 
         match engine_result {
             Ok(engine) => {
                 info!("Desktop engine with auto-redirect initialized successfully.");
                 Ok(Self {
-                    engine,
+                    engine: Arc::from(engine) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>,
                     use_background_apps,
                     activate_app,
                 })

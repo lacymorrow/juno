@@ -14,6 +14,11 @@ pub mod events {
     pub const AGENT_STOPPING: &str = "agent-stopping";
     pub const AGENT_STATUS_UPDATE: &str = "agent-status-update";
 
+    // Streaming Events
+    pub const AGENT_TEXT_STREAM: &str = "agent-text-stream";
+    pub const AGENT_STREAM_START: &str = "agent-stream-start";
+    pub const AGENT_STREAM_END: &str = "agent-stream-end";
+
     // Window/UI events
     pub const BAR_STATE_CHANGED: &str = "bar-state-changed";
 
@@ -36,8 +41,6 @@ pub mod events {
     pub const TOGGLE_FULLSCREEN_REQUESTED: &str = "toggle-fullscreen-requested";
     pub const MINIMIZE_WINDOW_REQUESTED: &str = "minimize-window-requested";
     pub const ZOOM_WINDOW_REQUESTED: &str = "zoom-window-requested";
-    pub const PERMISSIONS_REQUESTED: &str = "permissions-requested";
-    pub const FEEDBACK_REQUESTED: &str = "feedback-requested";
     pub const UPDATE_CHECK_REQUESTED: &str = "update-check-requested";
 }
 

@@ -48,6 +48,8 @@ type ChatMessage = {
   tool_output?: any;
   success?: boolean; // For tool call results - indicates if the tool call was successful
   timestamp?: number; // Add timestamp field for message grouping
+  isStreaming?: boolean; // Indicates if this message is currently being streamed
+  messageId?: string; // Unique identifier for streaming messages
 };
 
 // Type for the result from submit_query
@@ -62,6 +64,21 @@ type SubmitQueryResult = {
 type BackendResponsePayload = {
   query: string;
   response: SubmitQueryResult;
+};
+
+// Streaming event types
+type StreamingTextEvent = {
+  chunk: string;
+  message_id?: string;
+};
+
+type StreamStartEvent = {
+  message_id: string;
+};
+
+type StreamEndEvent = {
+  message_id: string;
+  complete_text: string;
 };
 
 // --- Tool Usage Event Type ---
@@ -279,16 +296,23 @@ function App() {
       console.log("Debounced handler executing for:", payload.query);
       const { response } = payload; // Remove query from destructuring since we won't use it
 
-      // Only add assistant response message with screenshot if available
-      // User query is now added immediately in submitQuery
-      const assistantMessage: ChatMessage = {
-        role: "assistant",
-        content: response.text,
-        screenshot_base64: response.screenshot_base64,
-        timestamp: Date.now(),
-      };
+      // Check if we have any streaming assistant messages in progress
+      const hasStreamingMessage = conversation.some((msg: ChatMessage) => msg.isStreaming && msg.role === "assistant");
+      
+      // Only add assistant response message if we're not currently streaming
+      // (streaming handles the assistant message creation and updates)
+      if (!hasStreamingMessage) {
+        const assistantMessage: ChatMessage = {
+          role: "assistant",
+          content: response.text,
+          screenshot_base64: response.screenshot_base64,
+          timestamp: Date.now(),
+        };
 
-      setConversation((prev) => [...prev, assistantMessage]);
+        setConversation((prev) => [...prev, assistantMessage]);
+      } else {
+        console.log("Skipping assistant message addition - streaming in progress");
+      }
 
       // Play audio if available
       if (response.audio_base64) {
@@ -298,10 +322,10 @@ function App() {
       // Note: Sound feedback is now handled by the Rust backend based on agent_state
       // No need for frontend sound calls here to avoid duplicates
 
-      // Reset processing state
+      // Reset processing state (but streaming end event also does this)
       setIsProcessing(false);
     }, 100), // Debounce for 100ms
-    [] // Remove sound from dependencies since we're not using it here anymore
+    [conversation] // Add conversation to dependencies to check for streaming messages
   );
 
   // Submit query using Tauri invoke (primarily for the main input)
@@ -818,6 +842,76 @@ function App() {
     };
   }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
 
+  // Listen for streaming events
+  useEffect(() => {
+    const streamStartListener = listen<StreamStartEvent>("agent-stream-start", (event) => {
+      console.log("Stream started:", event.payload);
+      const { message_id } = event.payload;
+      
+      // Create a new streaming assistant message
+      const streamingMessage: ChatMessage = {
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+        isStreaming: true,
+        messageId: message_id,
+      };
+      
+      setConversation((prev) => [...prev, streamingMessage]);
+    });
+
+    const streamTextListener = listen<StreamingTextEvent>("agent-text-stream", (event) => {
+      console.log("Stream text chunk:", event.payload);
+      const { chunk, message_id } = event.payload;
+      
+      // Update the streaming message with the new chunk
+      setConversation((prev) => 
+        prev.map((msg) => {
+          if (msg.messageId === message_id && msg.isStreaming) {
+            return {
+              ...msg,
+              content: msg.content + chunk,
+            };
+          }
+          return msg;
+        })
+      );
+      
+      // Auto-scroll to bottom during streaming
+      setTimeout(() => {
+        conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 50);
+    });
+
+    const streamEndListener = listen<StreamEndEvent>("agent-stream-end", (event) => {
+      console.log("Stream ended:", event.payload);
+      const { message_id, complete_text } = event.payload;
+      
+      // Finalize the streaming message
+      setConversation((prev) => 
+        prev.map((msg) => {
+          if (msg.messageId === message_id && msg.isStreaming) {
+            return {
+              ...msg,
+              content: complete_text,
+              isStreaming: false,
+            };
+          }
+          return msg;
+        })
+      );
+      
+      // Reset processing state since the AI has finished responding
+      setIsProcessing(false);
+    });
+
+    return () => {
+      streamStartListener.then((unlistenFn) => unlistenFn());
+      streamTextListener.then((unlistenFn) => unlistenFn());
+      streamEndListener.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     submitQuery(query);
@@ -1190,6 +1284,10 @@ function App() {
                                         <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
                                       </div>
                                     </div>
+                                  )}
+                                  {/* Show typing indicator for streaming messages */}
+                                  {msg.isStreaming && (
+                                    <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">|</span>
                                   )}
                                 </span>
                               </div>
