@@ -356,6 +356,21 @@ function App() {
     [isProcessing, serverStatus, setConversation, setQuery, setIsProcessing]
   );
 
+  // Function to start a new chat (clear conversation and reset state)
+  const startNewChat = useCallback(() => {
+    console.log("Starting new chat - clearing conversation");
+    setConversation([]);
+    setQuery("");
+    setIsProcessing(false);
+  }, [setConversation, setQuery, setIsProcessing]);
+
+  // Function to clear conversation history
+  const clearConversation = useCallback(() => {
+    console.log("Clearing conversation history");
+    setConversation([]);
+    setIsProcessing(false);
+  }, [setConversation, setIsProcessing]);
+
   // Listen for settings menu requests from native menu
   useEffect(() => {
     const unlisten = listen<string>("settings-requested", (event) => {
