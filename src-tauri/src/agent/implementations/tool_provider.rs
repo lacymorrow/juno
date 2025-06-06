@@ -81,7 +81,7 @@ impl LocalToolProvider {
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let name = definition.name.clone();
+        let _name = definition.name.clone();
 
         // Check if tool should be enabled based on configuration
         let should_register = if let Some(state) = app_state {
@@ -108,7 +108,7 @@ impl LocalToolProvider {
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let config_manager = if let Some(state) = app_state {
+        let _config_manager = if let Some(state) = app_state {
             let config_arc = state.get_tool_config_manager().await;
             let config_guard = config_arc.lock().await;
             let is_enabled = config_guard.is_tool_enabled(&definition.name);

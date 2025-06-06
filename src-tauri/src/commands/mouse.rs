@@ -571,7 +571,7 @@ pub(crate) async fn dev_window_relative_click(
     click_type: Option<String>,
     modifier: Option<String>,
 ) -> Result<(), String> {
-    use computer_use_ai_sdk::UIElement;
+
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
     use computer_use_ai_sdk::platforms::macos::utils::window_to_global_coordinates;
 
