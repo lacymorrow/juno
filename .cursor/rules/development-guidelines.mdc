@@ -41,6 +41,7 @@ The system uses a **hierarchical architecture** with clear separation:
 - **Structured Responses**: All specialists return consistent JSON format with success/error status
 
 ### State Management Rules
+- Follow patterns in [AppState Management](mdc:.cursor/rules/app-state-management.mdc)
 - All persistent state goes in [AppState](mdc:src-tauri/src/state.rs)
 - Use `Arc<TokioMutex<T>>` for shared mutable state
 - Access state via provided getter methods
@@ -62,6 +63,7 @@ The system uses a **hierarchical architecture** with clear separation:
 - Log request payloads for debugging (debug level only)
 
 ### Error Handling Patterns
+- Follow patterns in [Error Handling](mdc:.cursor/rules/error-handling-patterns.mdc)
 - Use `AgentError` enum for all agent-related errors
 - Log errors at appropriate levels (error, warn, info, debug)
 - Provide meaningful error messages to frontend
@@ -135,3 +137,10 @@ The system uses a **hierarchical architecture** with clear separation:
 - Test voice integration end-to-end
 - Validate event flow with browser dev tools
 - Test utility functions with real system context data
+- Test permission scenarios (see [macOS Permission Handling](mdc:.cursor/rules/macos-permission-handling.mdc))
+
+## Permission Management ✅
+- Follow patterns in [macOS Permission Handling](mdc:.cursor/rules/macos-permission-handling.mdc)
+- Never use `std::process::exit()` on permission failures
+- Implement graceful degradation for missing permissions
+- Provide helpful error messages to guide users

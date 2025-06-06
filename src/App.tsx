@@ -867,9 +867,11 @@ function App() {
     return () => {
       if (currentAudio) {
         currentAudio.pause();
+        currentAudio.currentTime = 0; // Reset playback position
         if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
           URL.revokeObjectURL(currentAudio.src);
         }
+        setCurrentAudio(null); // Clear the audio reference
       }
     };
   }, [currentAudio]);
@@ -1010,7 +1012,9 @@ function App() {
                       );
 
                       return (
-                        <div key={index}>
+                        <div
+                          key={`msg-${index}-${msg.timestamp || Date.now()}`}
+                        >
                           {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
                           {showTimestamp && msg.timestamp && (
                             <div className="flex justify-center my-4">
@@ -1158,8 +1162,8 @@ function App() {
               <ResizablePanel
                 collapsible
                 collapsedSize={0} // Completely collapses
-                minSize={50} // Minimum size when expanded - Updated min size from main
-                defaultSize={100} // Default size when expanded - Updated default size from main
+                minSize={25} // Reduced minimum size for better responsiveness
+                defaultSize={isDevPanelOpen ? 50 : 0} // Dynamic default size based on state
                 className={cn(
                   isDevPanelOpen ? "block" : "hidden",
                   "overflow-hidden" // Ensure panel itself doesn't scroll
