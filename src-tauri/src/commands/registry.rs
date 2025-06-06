@@ -38,7 +38,8 @@ macro_rules! generate_invoke_handler {
             dev_left_click,
             dev_left_click_drag,
             dev_get_cursor_position,
-            dev_test_click_visualization,
+            dev_window_relative_click,
+            dev_focused_window_relative_click,
             
             // QA Test Commands
             qa_test_click,
@@ -77,6 +78,8 @@ macro_rules! generate_invoke_handler {
             
             // Screenshot Commands
             capture_screenshot_command,
+            capture_window_screenshot_command,
+            capture_focused_window_screenshot_command,
             
             // File System Commands
             dev_list_files,
@@ -158,6 +161,10 @@ macro_rules! generate_invoke_handler {
             floating_bar_input_blur,
             floating_bar_input_change,
             floating_bar_submit,
+            
+            // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
+            list_ai_providers,
+            set_ai_provider,
         ]
     };
 }
@@ -193,7 +200,9 @@ pub mod categories {
         "dev_left_mouse_up",
         "dev_left_click",
         "dev_left_click_drag",
-        "dev_get_cursor_position"
+        "dev_get_cursor_position",
+        "dev_window_relative_click",
+        "dev_focused_window_relative_click",
     ];
     
     /// QA testing commands

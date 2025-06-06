@@ -16,18 +16,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { KeyboardShortcuts } from "@/types/keyboard";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AlertCircle,
   Brain,
   CheckCircle,
-  Keyboard,
   Mic,
   MonitorSpeaker,
   Network,
   RefreshCw,
-  RotateCcw,
   Save,
   Settings as SettingsIcon,
   Shield,
@@ -979,18 +978,19 @@ const Settings: React.FC<SettingsProps> = ({
         </CardContent>
       </Card>
 
-      {/* Keyboard Shortcuts Configuration */}
+      {/* Voice & Keyboard Shortcuts */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Keyboard size={20} />
-            Keyboard Shortcuts
+            Voice & Keyboard Shortcuts
           </CardTitle>
           <CardDescription>
-            Configure keyboard shortcuts for using Juno
+            Configure shortcuts for voice dictation and AI agent interaction
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
+          {/* Customizable Keyboard Shortcuts */}
           {shortcutsLoading ? (
             <div className="flex items-center gap-2 text-muted-foreground">
               <RefreshCw className="h-4 w-4 animate-spin" />
@@ -999,6 +999,9 @@ const Settings: React.FC<SettingsProps> = ({
           ) : (
             <>
               <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+                  Customizable Shortcuts
+                </h4>
                 {Object.entries(keyboardShortcuts)
                   .filter(([key]) => key !== "open_settings") // Don't allow changing settings shortcut
                   .map(([key, value]) => (
@@ -1102,16 +1105,93 @@ const Settings: React.FC<SettingsProps> = ({
                   Reset to Defaults
                 </Button>
               </div>
-
-              <div className="text-xs text-muted-foreground space-y-1">
-                <p>
-                  <strong>Tips:</strong> Use modifier keys like Alt, Cmd, Ctrl,
-                  Shift combined with letters (e.g., Alt+D, Cmd+Space).
-                </p>
-                <p>Changes are applied immediately and saved automatically.</p>
-              </div>
             </>
           )}
+
+          {/* Fixed System Shortcuts */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+              System Shortcuts
+            </h4>
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between p-2 rounded border">
+                <span className="text-sm">Cancel Current Operation</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm font-mono">
+                  Esc
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded border">
+                <span className="text-sm">Open Settings</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm font-mono">
+                  {keyboardShortcuts.open_settings || "⌘+,"}
+                </kbd>
+              </div>
+            </div>
+          </div>
+
+          {/* Voice Settings */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+              Voice Settings
+            </h4>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium">
+                    Enable Voice Feedback
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Play audio responses from AI agent
+                  </p>
+                </div>
+                <Switch
+                  checked={soundEnabled}
+                  onCheckedChange={handleSoundEnabledChange}
+                  id="voice-feedback"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium">
+                    Dictation to Clipboard
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Copy dictated text to clipboard automatically
+                  </p>
+                </div>
+                <Switch
+                  checked={dictationClipboardEnabled}
+                  onCheckedChange={handleDictationClipboardChange}
+                  id="dictation-clipboard"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Usage Tips */}
+          <div className="bg-muted/50 p-4 rounded-lg">
+            <h5 className="text-sm font-medium mb-2">💡 Voice Usage Tips</h5>
+            <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+              <li>
+                Configure your shortcuts above for dictation and AI agent access
+              </li>
+              <li>
+                The floating bar shows real-time voice status and transcription
+              </li>
+              <li>
+                Press Escape anytime to cancel voice input or stop the agent
+              </li>
+              <li>Voice feedback can be toggled in TTS settings above</li>
+            </ul>
+            <div className="text-xs text-muted-foreground space-y-1 mt-3 pt-2 border-t">
+              <p>
+                <strong>Tips:</strong> Use modifier keys like Alt, Cmd, Ctrl,
+                Shift combined with letters (e.g., Alt+D, Cmd+Space).
+              </p>
+              <p>Changes are applied immediately and saved automatically.</p>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
