@@ -43,8 +43,10 @@ const ClickVisualizer = () => {
 
     const cleanupTimeout = setTimeout(() => {
       const now = Date.now();
-      setClicks(clicks.filter((click) => now - click.timestamp < 1000)); // Remove clicks older than 1 second
-    }, 1000);
+      setClicks((prevClicks) =>
+        prevClicks.filter((click) => now - click.timestamp < 1000)
+      ); // Remove clicks older than 1 second
+    }, 100); // Check more frequently for smoother cleanup
 
     return () => clearTimeout(cleanupTimeout);
   }, [clicks]);
@@ -59,7 +61,8 @@ const ClickVisualizer = () => {
         right: 0,
         bottom: 0,
         pointerEvents: "none", // Allow clicks to pass through
-        zIndex: 9999,
+        zIndex: 999999, // Increased z-index to ensure visibility above all other elements
+        overflow: "hidden", // Prevent any overflow issues
       }}
     >
       {clicks.map((click) => (

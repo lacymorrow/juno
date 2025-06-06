@@ -3,3 +3,180 @@ description:
 globs:
 alwaysApply: false
 ---
+# macOS Permission Handling Patterns ✅
+
+## Core Permission Management
+
+### Graceful Degradation Architecture
+The Juno app implements **graceful permission handling** to prevent app crashes when macOS accessibility permissions are not granted. This ensures users have a functional experience even with limited permissions.
+
+### Key Components
+
+#### State Management - [AppState](mdc:src-tauri/src/state.rs)
+- **Desktop Instance**: `desktop: Option<Arc<Desktop>>` - Optional to handle permission failures
+- **Helper Methods**:
+  - `get_desktop()` - Safe access with error handling
+  - `is_desktop_available()` - Check availability before operations
+  - `try_get_desktop()` - Returns Option for conditional logic
+
+#### Initialization - [lib.rs](mdc:src-tauri/src/lib.rs)
+```rust
+// Graceful desktop engine initialization
+let desktop = match Desktop::new(false, true) {
+    Ok(desktop) => {
+        info!("Desktop automation engine initialized successfully");
+        Some(Arc::new(desktop))
+    }
+    Err(e) => {
+        warn!("Desktop automation engine failed to initialize: {}. App will continue with limited functionality.", e);
+        None
+    }
+};
+```
+
+#### DesktopWrapper Pattern
+Implements a wrapper that forwards all Desktop methods but provides helpful error messages when desktop automation is unavailable.
+
+## Permission Request Commands
+
+### Request Accessibility Permission - [commands/core.rs](mdc:src-tauri/src/commands/core.rs)
+```rust
+#[tauri::command]
+pub async fn request_accessibility_permission(state: State<'_, AppState>) -> Result<bool, String>
+```
+- Safely checks if desktop is available
+- Returns permission status without crashing
+- Provides user-friendly error messages
+
+### Check Permission Status
+```rust
+#[tauri::command]
+pub async fn check_accessibility_permission(state: State<'_, AppState>) -> Result<bool, String>
+```
+- Non-invasive permission checking
+- Returns current status for UI updates
+- No system dialogs triggered
+
+## Command Implementation Patterns
+
+### Safe Desktop Access Pattern
+All commands that require desktop automation follow this pattern:
+
+```rust
+#[tauri::command]
+pub async fn desktop_command(state: State<'_, AppState>) -> Result<(), String> {
+    let desktop = state.get_desktop()
+        .map_err(|e| format!("Desktop automation not available: {}", e))?;
+
+    // Perform desktop operations...
+    Ok(())
+}
+```
+
+### Error Handling in Commands
+- **File Commands**: [commands/app_url.rs](mdc:src-tauri/src/commands/app_url.rs), [commands/keyboard.rs](mdc:src-tauri/src/commands/keyboard.rs)
+- **Window Commands**: [commands/window.rs](mdc:src-tauri/src/commands/window.rs)
+- **Element Commands**: [commands/element.rs](mdc:src-tauri/src/commands/element.rs)
+
+All implement consistent error handling:
+```rust
+use tracing::{error, info, warn};
+
+match state.try_get_desktop() {
+    Some(desktop) => {
+        // Perform operation
+    }
+    None => {
+        warn!("Operation requires accessibility permissions");
+        Err("Desktop automation not available. Please grant accessibility permissions.".to_string())
+    }
+}
+```
+
+## Best Practices
+
+### 1. Never Use `std::process::exit()`
+- **Wrong**: `std::process::exit(1)` on permission failure
+- **Right**: Log warning and continue with limited functionality
+
+### 2. Provide Informative Error Messages
+- Include context about what permissions are needed
+- Guide users on how to enable permissions
+- Explain what functionality will be limited
+
+### 3. UI State Management
+- Check permission status on app startup
+- Show permission prompts when needed
+- Update UI based on available capabilities
+- Provide clear indicators when features are disabled
+
+### 4. Logging Strategy
+```rust
+// Initialization
+warn!("Desktop automation engine failed to initialize: {}. App will continue with limited functionality.", e);
+
+// Command execution
+info!("Desktop automation available, proceeding with operation");
+error!("Failed to execute desktop command: {}", e);
+```
+
+### 5. Dependency Injection
+- Pass desktop instance through AppState
+- Use helper methods for safe access
+- Implement wrapper patterns for complex operations
+
+## Testing Permission Scenarios
+
+### Test Cases
+1. **No Permissions**: App starts and functions with limited capabilities
+2. **Partial Permissions**: Some features work, others show helpful errors
+3. **Full Permissions**: All features function normally
+4. **Permission Revocation**: App handles runtime permission changes gracefully
+
+### Manual Testing
+```bash
+# Test without permissions
+# 1. Revoke accessibility permissions in System Preferences
+# 2. Launch app - should not crash
+# 3. Try desktop operations - should show helpful errors
+
+# Test permission request flow
+# 1. Use request_accessibility_permission command
+# 2. Follow system dialog flow
+# 3. Verify app detects new permissions
+```
+
+## Integration Points
+
+### Frontend Integration
+- Check permission status on component mount
+- Show permission request UI when needed
+- Handle permission-denied states gracefully
+- Update UI when permissions change
+
+### Agent System Integration
+- Desktop agents check permissions before tool execution
+- Fallback to limited functionality when permissions unavailable
+- Report permission status in agent responses
+
+## Troubleshooting
+
+### Common Issues
+1. **App Crashes on Launch**: Check for `std::process::exit()` calls
+2. **Commands Fail Silently**: Ensure proper error propagation
+3. **Permission Status Incorrect**: Verify desktop instance availability
+4. **UI Not Updating**: Check event emission for permission changes
+
+### Debug Commands
+```rust
+// Check desktop availability
+state.is_desktop_available()
+
+// Get detailed error information
+state.get_desktop().map_err(|e| println!("Error: {}", e))
+
+// Test permission request
+request_accessibility_permission(state).await
+```
+
+This permission handling system ensures a smooth user experience regardless of macOS permission status, following Apple's best practices for accessibility-dependent applications.
