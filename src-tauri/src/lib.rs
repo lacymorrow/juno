@@ -17,7 +17,7 @@ use tauri::{
     WebviewWindow, // Keep WebviewWindow
     Wry, // Keep Wry if needed elsewhere, remove if not
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
+use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::{info, warn, error}; // Import logging macros
 use std::sync::Mutex; // Added for VoiceController state access
@@ -49,6 +49,74 @@ pub mod dictation_monitor; // Module for intelligent dictation input handling
 // Embed tray icon data directly in the binary - no file system dependencies
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 
+/// Parse a shortcut string into a Shortcut object
+/// Examples: "Alt+D" -> Shortcut, "Option+Space" -> Shortcut
+pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
+    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut modifiers = ShortcutModifiers::empty();
+    let key_part = parts.last()?;
+
+    // Parse modifiers
+    for part in &parts[..parts.len() - 1] {
+        match part.to_lowercase().as_str() {
+            "alt" | "option" => modifiers |= ShortcutModifiers::ALT,
+            "cmd" | "command" => modifiers |= ShortcutModifiers::META,
+            "ctrl" | "control" => modifiers |= ShortcutModifiers::CONTROL,
+            "shift" => modifiers |= ShortcutModifiers::SHIFT,
+            _ => {
+                warn!("Unknown modifier: {}", part);
+                return None;
+            }
+        }
+    }
+
+    // Parse the main key
+    let code = match key_part.to_lowercase().as_str() {
+        "a" => Code::KeyA,
+        "b" => Code::KeyB,
+        "c" => Code::KeyC,
+        "d" => Code::KeyD,
+        "e" => Code::KeyE,
+        "f" => Code::KeyF,
+        "g" => Code::KeyG,
+        "h" => Code::KeyH,
+        "i" => Code::KeyI,
+        "j" => Code::KeyJ,
+        "k" => Code::KeyK,
+        "l" => Code::KeyL,
+        "m" => Code::KeyM,
+        "n" => Code::KeyN,
+        "o" => Code::KeyO,
+        "p" => Code::KeyP,
+        "q" => Code::KeyQ,
+        "r" => Code::KeyR,
+        "s" => Code::KeyS,
+        "t" => Code::KeyT,
+        "u" => Code::KeyU,
+        "v" => Code::KeyV,
+        "w" => Code::KeyW,
+        "x" => Code::KeyX,
+        "y" => Code::KeyY,
+        "z" => Code::KeyZ,
+        "space" => Code::Space,
+        "escape" | "esc" => Code::Escape,
+        "enter" | "return" => Code::Enter,
+        "tab" => Code::Tab,
+        "," => Code::Comma,
+        _ => {
+            warn!("Unknown key: {}", key_part);
+            return None;
+        }
+    };
+
+    let final_modifiers = if modifiers.is_empty() { None } else { Some(modifiers) };
+    Some(Shortcut::new(final_modifiers, code))
+}
+
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
@@ -66,6 +134,14 @@ use crate::commands::{
     is_tool_enabled,
     reset_tool_configuration,
     get_tool_configuration_summary,
+};
+
+// Import keyboard shortcuts commands explicitly
+use crate::commands::{
+    get_keyboard_shortcuts,
+    set_keyboard_shortcut,
+    set_keyboard_shortcuts,
+    reset_keyboard_shortcuts,
 };
 
 // Added for selector parsing
@@ -110,12 +186,12 @@ pub fn run() {
         tracing::info!("Provider settings initialized from configuration");
     }
 
-    // // --- Handle CLI Commands ---
-    // // If handle_cli_commands returns true, it means a command was executed
-    // // and the application should exit.
-    // if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
-    //     return; // Exit early if a CLI command was handled
-    // }
+    // --- Handle CLI Commands ---
+    // If handle_cli_commands returns true, it means a command was executed
+    // and the application should exit.
+    if cli::runner::handle_cli_commands(&cli, desktop_instance.as_ref()) {
+        return; // Exit early if a CLI command was handled
+    }
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---
     println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
@@ -135,14 +211,25 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
-        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
+        .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
+        .plugin        (tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
             println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
-            // Define the specific shortcuts we're interested in
+            let app_state = app.state::<state::AppState>();
+
+            // Get current keyboard shortcuts from state
+            let current_shortcuts = match app_state.keyboard_shortcuts.lock() {
+                Ok(shortcuts) => shortcuts.clone(),
+                Err(e) => {
+                    error!("Failed to get keyboard shortcuts: {}", e);
+                    return; // Exit early if we can't get shortcuts
+                }
+            };
+
+            // Create shortcut objects from current configuration
             let escape_shortcut = Shortcut::new(None, Code::Escape);
-            // TODO: Make the dictation shortcut configurable
-            let dictation_toggle_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
-            let dictation_input_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::Space);
+            let dictation_toggle_shortcut = parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
+            let dictation_input_shortcut = parse_shortcut_string(&current_shortcuts.dictation_input);
 
             if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
                 println!("[GlobalShortcut] Escape pressed! Signaling agent stop and checking for active transcription.");
@@ -169,13 +256,17 @@ pub fn run() {
                     let app_clone = app.clone();
                     tauri::async_runtime::spawn(async move {
                         // Try to stop the voice transcription plugin
-                        if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
-                            app_clone.clone(),
-                            app_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                        ).await {
-                            error!("[GlobalShortcut] Failed to stop voice transcription: {}", e);
+                        if let Some(controller_state) = app_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                            if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_clone.clone(),
+                                controller_state
+                            ).await {
+                                error!("[GlobalShortcut] Failed to stop voice transcription: {}", e);
+                            } else {
+                                info!("[GlobalShortcut] Voice transcription stopped successfully via Escape");
+                            }
                         } else {
-                            info!("[GlobalShortcut] Voice transcription stopped successfully via Escape");
+                            warn!("[GlobalShortcut] Voice controller not available - cannot stop transcription");
                         }
 
                         // Clean up app state
@@ -203,13 +294,17 @@ pub fn run() {
 
                             let app_clone = app.clone();
                             tauri::async_runtime::spawn(async move {
-                                if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                    app_clone.clone(),
-                                    app_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                                ).await {
-                                    error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
+                                if let Some(controller_state) = app_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                                    if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                        app_clone.clone(),
+                                        controller_state
+                                    ).await {
+                                        error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
+                                    } else {
+                                        info!("[GlobalShortcut] Voice controller stopped successfully via Escape");
+                                    }
                                 } else {
-                                    info!("[GlobalShortcut] Voice controller stopped successfully via Escape");
+                                    warn!("[GlobalShortcut] Voice controller not available - cannot stop voice controller");
                                 }
                             });
                         }
@@ -220,22 +315,32 @@ pub fn run() {
                 if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
                     eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
                 }
-            } else if shortcut == &dictation_toggle_shortcut && event.state() == ShortcutState::Pressed {
-                info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
-                // Emit an event for the frontend to handle
-                if let Err(e) = app.emit("toggle-dictation-request", ()) {
-                    tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
-                }
-            } else if shortcut == &dictation_input_shortcut {
-                // Handle dictation input with timing logic - now using Option+Space instead of just Space
-                let app_clone = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if event.state() == ShortcutState::Pressed {
-                        crate::dictation_monitor::on_dictation_input_pressed().await;
-                    } else if event.state() == ShortcutState::Released {
-                        crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
+            }
+
+            // Handle dictation toggle shortcut (Alt+D / Option+D)
+            if let Some(ref toggle_shortcut) = dictation_toggle_shortcut {
+                if shortcut == toggle_shortcut && event.state() == ShortcutState::Pressed {
+                    info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
+                    // Emit an event for the frontend to handle
+                    if let Err(e) = app.emit("toggle-dictation-request", ()) {
+                        tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
                     }
-                });
+                }
+            }
+
+            // Handle dictation input shortcut (Alt+Space / Option+Space)
+            if let Some(ref input_shortcut) = dictation_input_shortcut {
+                if shortcut == input_shortcut {
+                    // Handle dictation input with timing logic
+                    let app_clone = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if event.state() == ShortcutState::Pressed {
+                            crate::dictation_monitor::on_dictation_input_pressed().await;
+                        } else if event.state() == ShortcutState::Released {
+                            crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
+                        }
+                    });
+                }
             }
         }).build())
         .manage(app_state) // Manage the AppState
@@ -362,9 +467,24 @@ pub fn run() {
             floating_bar_input_blur,
             floating_bar_input_change,
             floating_bar_submit,
+            // Keyboard Shortcuts Commands
+            get_keyboard_shortcuts,
+            set_keyboard_shortcut,
+            set_keyboard_shortcuts,
+            reset_keyboard_shortcuts,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
+
+            // --- Load Keyboard Shortcuts from Configuration ---
+            let shortcuts_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let app_state = shortcuts_app_handle.state::<state::AppState>();
+                if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&shortcuts_app_handle, &*app_state).await {
+                    tracing::warn!("Failed to load keyboard shortcuts from store: {}", e);
+                    tracing::info!("Using default keyboard shortcuts");
+                }
+            });
 
             // --- Setup Application Menu ---
             // Juno Application Menu
@@ -555,7 +675,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to emit settings event: {}", e);
                         }
                     }
-                    
+
                     // File Menu
                     constants::app_menu_ids::NEW_CHAT => {
                         info!("[Menu] New Chat menu item clicked");
@@ -581,7 +701,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to emit export chat event: {}", e);
                         }
                     }
-                    
+
                     // View Menu
                     constants::app_menu_ids::TOGGLE_FLOATING_BAR => {
                         info!("[Menu] Toggle Floating Bar menu item clicked");
@@ -613,7 +733,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to emit toggle fullscreen event: {}", e);
                         }
                     }
-                    
+
                     // Window Menu
                     constants::app_menu_ids::MINIMIZE => {
                         info!("[Menu] Minimize menu item clicked");
@@ -632,7 +752,7 @@ pub fn run() {
                         // This is handled automatically by macOS for most cases
                         info!("[Menu] Bring All to Front executed");
                     }
-                    
+
                     // Help Menu
                     constants::app_menu_ids::HELP => {
                         info!("[Menu] Help menu item clicked");
@@ -665,7 +785,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to open website: {}", e);
                         }
                     }
-                    
+
                     _ => {
                         info!("[Menu] Unhandled menu event: {:?}", event.id());
                     }
@@ -698,7 +818,7 @@ pub fn run() {
                 let devtools_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::SHOW_DEVTOOLS, "Developer Tools", true, None::<&str>).unwrap());
                 let settings_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::SETTINGS, "Settings...", true, None::<&str>).unwrap());
                 let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).unwrap());
-                
+
                 let tray_menu = Menu::with_items(&tray_app_handle, &[
                     &show_main_window_item,
                     &new_chat_item,
@@ -909,27 +1029,19 @@ pub fn run() {
 
             let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {
-                // Register Escape Shortcut globally (always available)
-                if let Err(e) = app_handle_shortcuts.global_shortcut().register("Escape") {
-                     eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
-                } else {
-                    info!("[GlobalShortcut] Escape shortcut registered globally");
+                let state = app_handle_shortcuts.state::<state::AppState>();
+
+                // Load keyboard shortcuts from configuration store
+                if let Err(e) = commands::shortcuts::load_shortcuts_from_store(&app_handle_shortcuts, &state).await {
+                    warn!("[GlobalShortcut] Failed to load shortcuts from file: {}", e);
                 }
 
-                // Register Dictation Toggle Shortcut
-                let dictation_shortcut_str = if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };
-                if let Err(e) = app_handle_shortcuts.global_shortcut().register(dictation_shortcut_str) {
-                     eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_shortcut_str, e);
+                // Register keyboard shortcuts based on current configuration
+                if let Err(e) = commands::shortcuts::update_global_shortcuts(&app_handle_shortcuts, &state).await {
+                    error!("[GlobalShortcut] Failed to register shortcuts: {}", e);
                 }
 
-                // REMOVED: Global spacebar shortcut registration - this was causing typing delays
-                // Instead, we'll use Option+Space for hold-to-dictate to avoid interfering with normal typing
-                let dictation_input_shortcut_str = if cfg!(target_os = "macos") { "Option+Space" } else { "Alt+Space" };
-                if let Err(e) = app_handle_shortcuts.global_shortcut().register(dictation_input_shortcut_str) {
-                    eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_input_shortcut_str, e);
-                } else {
-                    info!("[GlobalShortcut] Dictation input shortcut registered as {} (no longer interferes with normal spacebar typing)", dictation_input_shortcut_str);
-                }
+                info!("[GlobalShortcut] Keyboard shortcuts initialized from configuration");
 
                 // Initialize dictation input monitoring system
                 if let Err(e) = crate::dictation_monitor::init_dictation_input_monitoring(app_handle_shortcuts.clone()).await {
@@ -1145,7 +1257,7 @@ pub fn run() {
             });
 
             // Listen for Dictation Mode commitment events (threshold reached)
-            let app_handle_for_dictation_committed = app.handle().clone();
+            let _app_handle_for_dictation_committed = app.handle().clone();
             app.listen("dictation-committed", move |_event| {
                 info!("[Event] Received dictation-committed event - threshold reached");
                 // This event indicates the user has held dictation input long enough to commit to dictation
