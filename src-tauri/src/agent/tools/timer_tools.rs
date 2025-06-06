@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use std::path::PathBuf;
 use tokio::fs;
-use tracing::{info, warn, error, debug};
+use tracing::{info, error, debug};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
