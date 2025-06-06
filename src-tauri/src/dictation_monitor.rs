@@ -246,16 +246,23 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 async fn force_stop_voice_controller(app_handle: &AppHandle) {
     warn!("[DictationMonitor] Attempting to force stop voice controller");
 
-    // Try to stop the voice transcription plugin
-    match tauri_plugin_voice_transcription::commands::stop_dictation(
-        app_handle.clone(),
-        app_handle.state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-    ).await {
-        Ok(_) => {
-            info!("[DictationMonitor] Successfully force stopped voice controller");
+    // Try to stop the voice transcription plugin only if the controller exists
+    match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                app_handle.clone(),
+                controller_state
+            ).await {
+                Ok(_) => {
+                    info!("[DictationMonitor] Successfully force stopped voice controller");
+                }
+                Err(e) => {
+                    error!("[DictationMonitor] Failed to force stop voice controller: {}", e);
+                }
+            }
         }
-        Err(e) => {
-            error!("[DictationMonitor] Failed to force stop voice controller: {}", e);
+        None => {
+            warn!("[DictationMonitor] Voice controller not available - cannot force stop");
         }
     }
 }
