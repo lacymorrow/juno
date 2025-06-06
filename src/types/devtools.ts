@@ -1,5 +1,3 @@
-import { UIElement } from '@tauri-apps/api/window';
-
 export type LoadingStates = {
   screenshot: boolean;
   focusInfo: boolean;

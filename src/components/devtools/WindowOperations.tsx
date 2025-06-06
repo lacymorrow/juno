@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { AppWindow, Maximize2, Move, X } from 'lucide-react';
+import { AppWindow, Maximize2, Move, X, Info, Focus } from 'lucide-react';
 import { invokeCommand } from '@/lib/utils';
 
 const WindowOperations: React.FC = () => {
