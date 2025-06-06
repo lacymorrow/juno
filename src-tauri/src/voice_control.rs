@@ -2,7 +2,6 @@ use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
 use std::path::Path;
 use tracing::info;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{SampleFormat}; // Removed unused SampleRate, SupportedStreamConfigRange
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
