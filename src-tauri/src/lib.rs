@@ -136,6 +136,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
+        .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
             println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
@@ -304,6 +305,11 @@ pub fn run() {
             test_cloud_connection,
             get_cloud_device_info,
             generate_device_id,
+            // Production Cloud Connector Commands
+            commands::cloud::handle_cloud_message,
+            commands::cloud::start_production_cloud_connector,
+            commands::cloud::stop_production_cloud_connector,
+            commands::cloud::get_production_cloud_status,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
