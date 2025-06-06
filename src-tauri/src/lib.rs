@@ -256,13 +256,17 @@ pub fn run() {
                     let app_clone = app.clone();
                     tauri::async_runtime::spawn(async move {
                         // Try to stop the voice transcription plugin
-                        if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
-                            app_clone.clone(),
-                            app_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                        ).await {
-                            error!("[GlobalShortcut] Failed to stop voice transcription: {}", e);
+                        if let Some(controller_state) = app_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                            if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_clone.clone(),
+                                controller_state
+                            ).await {
+                                error!("[GlobalShortcut] Failed to stop voice transcription: {}", e);
+                            } else {
+                                info!("[GlobalShortcut] Voice transcription stopped successfully via Escape");
+                            }
                         } else {
-                            info!("[GlobalShortcut] Voice transcription stopped successfully via Escape");
+                            warn!("[GlobalShortcut] Voice controller not available - cannot stop transcription");
                         }
 
                         // Clean up app state
@@ -290,13 +294,17 @@ pub fn run() {
 
                             let app_clone = app.clone();
                             tauri::async_runtime::spawn(async move {
-                                if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                    app_clone.clone(),
-                                    app_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                                ).await {
-                                    error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
+                                if let Some(controller_state) = app_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                                    if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                        app_clone.clone(),
+                                        controller_state
+                                    ).await {
+                                        error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
+                                    } else {
+                                        info!("[GlobalShortcut] Voice controller stopped successfully via Escape");
+                                    }
                                 } else {
-                                    info!("[GlobalShortcut] Voice controller stopped successfully via Escape");
+                                    warn!("[GlobalShortcut] Voice controller not available - cannot stop voice controller");
                                 }
                             });
                         }
@@ -307,7 +315,10 @@ pub fn run() {
                 if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
                     eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
                 }
-            } else if let Some(ref toggle_shortcut) = dictation_toggle_shortcut {
+            }
+
+            // Handle dictation toggle shortcut (Alt+D / Option+D)
+            if let Some(ref toggle_shortcut) = dictation_toggle_shortcut {
                 if shortcut == toggle_shortcut && event.state() == ShortcutState::Pressed {
                     info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
                     // Emit an event for the frontend to handle
@@ -315,7 +326,10 @@ pub fn run() {
                         tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
                     }
                 }
-            } else if let Some(ref input_shortcut) = dictation_input_shortcut {
+            }
+
+            // Handle dictation input shortcut (Alt+Space / Option+Space)
+            if let Some(ref input_shortcut) = dictation_input_shortcut {
                 if shortcut == input_shortcut {
                     // Handle dictation input with timing logic
                     let app_clone = app.clone();
