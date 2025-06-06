@@ -23,6 +23,14 @@
     "voice-transcription:allow-get-dictation-status",
     "voice-transcription:allow-transcribe-file",
     "voice-transcription:allow-set-model-path",
-    "voice-transcription:allow-get-model-path"
+    "voice-transcription:allow-get-model-path",
+    "voice-transcription:allow-start-always-listening",
+    "voice-transcription:allow-stop-always-listening",
+    "voice-transcription:allow-toggle-always-listening",
+    "voice-transcription:allow-get-always-listening-status",
+    "voice-transcription:allow-set-always-listening-sensitivity",
+    "voice-transcription:allow-get-always-listening-sensitivity",
+    "voice-transcription:allow-set-always-listening-wake-words",
+    "voice-transcription:allow-get-always-listening-wake-words"
   ]
 }
