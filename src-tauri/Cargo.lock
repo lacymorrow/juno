@@ -2635,7 +2635,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-store",
- "tauri-plugin-voice-transcription",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -5187,27 +5186,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "tauri-plugin-voice-transcription"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "cpal",
- "crossbeam-channel",
- "hound",
- "once_cell",
- "rubato",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "whisper-rs",
 ]
 
 [[package]]
