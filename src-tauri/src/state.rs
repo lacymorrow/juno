@@ -80,6 +80,10 @@ pub struct AppState {
     pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
     // Tool configuration manager
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
+    // Always listening mode state
+    pub always_listening_active: Arc<Mutex<bool>>, // Track if Always Listening Mode is active
+    pub always_listening_sensitivity: Arc<Mutex<f32>>, // Sensitivity threshold for activation
+    pub always_listening_wake_words: Arc<Mutex<Vec<String>>>, // Configurable wake words
 }
 
 impl AppState {
@@ -107,6 +111,10 @@ impl AppState {
             permissions_checked: Arc::new(Mutex::new(false)),
             // Initialize tool configuration manager
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
+            // Initialize Always Listening mode state
+            always_listening_active: Arc::new(Mutex::new(false)),
+            always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
+            always_listening_wake_words: Arc::new(Mutex::new(vec!["hey juno".to_string(), "computer".to_string()])),
         }
     }
 

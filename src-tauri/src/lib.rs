@@ -50,7 +50,7 @@ pub mod dictation_monitor; // Module for intelligent dictation input handling
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, always_listening::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
@@ -362,6 +362,15 @@ pub fn run() {
             floating_bar_input_blur,
             floating_bar_input_change,
             floating_bar_submit,
+            // Always Listening Commands
+            start_always_listening_mode,
+            stop_always_listening_mode,
+            toggle_always_listening_mode,
+            get_always_listening_status,
+            set_always_listening_sensitivity,
+            get_always_listening_sensitivity,
+            set_always_listening_wake_words,
+            get_always_listening_wake_words,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
