@@ -34,6 +34,124 @@ pub(crate) async fn capture_screenshot_command(_app: DummyAppHandle) -> Result<S
     Err("Screenshot capture is only supported on macOS currently.".to_string())
 }
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) async fn capture_window_screenshot_command(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    window_id: String,
+) -> Result<String, String> {
+    use computer_use_ai_sdk::UIElement;
+    use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
+    use computer_use_ai_sdk::platforms::macos::utils::capture_window_screenshot;
+
+    // Find the window by ID
+    let desktop = state.get_desktop()?;
+    let windows = desktop.list_windows().map_err(|e| format!("Failed to list windows: {}", e))?;
+
+    let target_window = windows
+        .into_iter()
+        .find(|window| {
+            window.id().map_or(false, |id| id == window_id)
+        })
+        .ok_or_else(|| format!("Window with ID '{}' not found", window_id))?;
+
+    // Downcast to MacOSUIElement
+    let macos_element = target_window
+        .as_any()
+        .downcast_ref::<MacOSUIElement>()
+        .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
+
+    // Capture the window screenshot
+    match capture_window_screenshot(macos_element) {
+        Ok(base64_string) => {
+            send_dev_tool_notification(&app, "Window Screenshot", &format!("Window '{}' screenshot captured successfully.", window_id))?;
+            Ok(base64_string)
+        }
+        Err(e) => Err(format!("Failed to capture window screenshot: {}", e)),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub(crate) async fn capture_window_screenshot_command(
+    _app: DummyAppHandle,
+    _state: State<'_, AppState>,
+    _window_id: String,
+) -> Result<String, String> {
+    Err("Window screenshot capture is only supported on macOS currently.".to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub(crate) async fn capture_focused_window_screenshot_command(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
+    use computer_use_ai_sdk::platforms::macos::utils::capture_window_screenshot;
+
+    let desktop = state.get_desktop()?;
+
+    // Get the focused element first
+    let focused_element = desktop.focused_element()
+        .map_err(|e| format!("Failed to get focused element: {}", e))?;
+
+    // Check if the focused element is a window, if not try to get its window
+    let window_element = {
+        let attrs = focused_element.attributes();
+        if attrs.role == "AXWindow" {
+            focused_element
+        } else {
+            // Try to traverse up to find the window
+            let mut current = focused_element;
+            loop {
+                match current.parent() {
+                    Ok(Some(parent)) => {
+                        let parent_attrs = parent.attributes();
+                        if parent_attrs.role == "AXWindow" {
+                            current = parent;
+                            break;
+                        }
+                        current = parent;
+                    }
+                    Ok(None) => {
+                        return Err("No window found in element hierarchy".to_string());
+                    }
+                    Err(e) => {
+                        return Err(format!("Error traversing element hierarchy: {}", e));
+                    }
+                }
+            }
+            current
+        }
+    };
+
+    // Downcast to MacOSUIElement
+    let macos_element = window_element
+        .as_any()
+        .downcast_ref::<MacOSUIElement>()
+        .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
+
+    // Capture the window screenshot
+    match capture_window_screenshot(macos_element) {
+        Ok(base64_string) => {
+            send_dev_tool_notification(&app, "Focused Window Screenshot", "Focused window screenshot captured successfully.")?;
+            Ok(base64_string)
+        }
+        Err(e) => Err(format!("Failed to capture focused window screenshot: {}", e)),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub(crate) async fn capture_focused_window_screenshot_command(
+    _app: DummyAppHandle,
+    _state: State<'_, AppState>,
+) -> Result<String, String> {
+    Err("Focused window screenshot capture is only supported on macOS currently.".to_string())
+}
+
 #[tauri::command]
 pub(crate) async fn list_apps(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let desktop = state.get_desktop()?;

@@ -1097,6 +1097,76 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(cursor_position_def, cursor_position_exec).await;
     info!("Registered tool: cursor_position");
 
+    // window_management
+    let window_list_def = ToolDefinition {
+        name: "list_windows".to_string(),
+        description: "Get a list of all open windows with their IDs, titles, and applications. Useful for targeting specific windows for screenshots or clicks.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let window_list_exec = move |_input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            match crate::commands::window::dev_get_window_list(app.clone(), state_manager).await {
+                Ok(window_list_json) => {
+                    // Try to parse the JSON to ensure it's valid, then return it
+                    match serde_json::from_str::<Value>(&window_list_json) {
+                        Ok(parsed) => Ok(parsed),
+                        Err(e) => Err(format!("Failed to parse window list JSON: {}", e))
+                    }
+                },
+                Err(e) => Err(format!("Failed to get window list: {}", e))
+            }
+        }
+    };
+    provider.register_async_tool(window_list_def, window_list_exec).await;
+    info!("Registered tool: list_windows");
+
+    let window_info_def = ToolDefinition {
+        name: "get_window_info".to_string(),
+        description: "Get detailed information about a specific window by its ID.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "window_id": {
+                    "type": "string",
+                    "description": "The ID of the window to get information about"
+                }
+            },
+            "required": ["window_id"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let window_info_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let window_id = input["window_id"]
+                .as_str()
+                .ok_or_else(|| "Missing or invalid 'window_id' parameter".to_string())?;
+
+            match crate::commands::window::dev_get_window_info(app.clone(), state_manager, window_id.to_string()).await {
+                Ok(window_info_json) => {
+                    // Try to parse the JSON to ensure it's valid, then return it
+                    match serde_json::from_str::<Value>(&window_info_json) {
+                        Ok(parsed) => Ok(parsed),
+                        Err(e) => Err(format!("Failed to parse window info JSON: {}", e))
+                    }
+                },
+                Err(e) => Err(format!("Failed to get window info: {}", e))
+            }
+        }
+    };
+    provider.register_async_tool(window_info_def, window_info_exec).await;
+    info!("Registered tool: get_window_info");
+
     info!("Desktop tool registration completed.");
 }
 
