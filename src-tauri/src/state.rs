@@ -11,6 +11,7 @@ use tokio::sync::{watch, Mutex as TokioMutex};
 use log;
 use playwright::Playwright; // Import Playwright
 use std::sync::Mutex; // Added for tts_provider
+use serde::{Serialize, Deserialize}; // Added for keyboard shortcuts
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
@@ -20,6 +21,26 @@ use crate::agent::implementations::memory_manager::SimpleMemoryManager;
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
 use crate::agent::tools::tool_config::ToolConfigManager;
+
+/// Keyboard shortcut configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyboardShortcuts {
+    pub agent_mode_toggle: String,      // Default: Alt+D (Option+D on macOS)
+    pub dictation_input: String,        // Default: Alt+Space (Option+Space on macOS)
+    pub stop_current_task: String,      // Default: Escape
+    pub open_settings: String,          // Default: Cmd+, (Ctrl+, on non-macOS)
+}
+
+impl Default for KeyboardShortcuts {
+    fn default() -> Self {
+        Self {
+            agent_mode_toggle: if cfg!(target_os = "macos") { "Option+D".to_string() } else { "Alt+D".to_string() },
+            dictation_input: if cfg!(target_os = "macos") { "Option+Space".to_string() } else { "Alt+Space".to_string() },
+            stop_current_task: "Escape".to_string(),
+            open_settings: if cfg!(target_os = "macos") { "Cmd+,".to_string() } else { "Ctrl+,".to_string() },
+        }
+    }
+}
 
 /// Timestamp tracking for log grouping (Slack/Apple Messages style)
 #[derive(Debug, Clone)]
@@ -80,6 +101,8 @@ pub struct AppState {
     pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
     // Tool configuration manager
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
+    // Keyboard shortcuts configuration
+    pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
 }
 
 impl AppState {
@@ -107,6 +130,8 @@ impl AppState {
             permissions_checked: Arc::new(Mutex::new(false)),
             // Initialize tool configuration manager
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
+            // Initialize keyboard shortcuts configuration
+            keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
         }
     }
 
