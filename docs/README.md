@@ -23,9 +23,10 @@
 1. **[Architecture Overview](architecture.md)** - System design and data flow
 2. **[API Reference](api-reference.md)** - All commands and their signatures
 3. **[Agent System](agent-system.md)** - AI agent architecture and tools
-4. **[Development Guide](development.md)** - Setup, testing, and contribution
-5. **[Configuration](configuration.md)** - Environment variables and settings
-6. **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
+4. **[Enhanced Timer System](enhanced-timer-system.md)** - Agent pause/resume with monitoring capabilities
+5. **[Development Guide](development.md)** - Setup, testing, and contribution
+6. **[Configuration](configuration.md)** - Environment variables and settings
+7. **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
 
 ## Key Concepts
 
@@ -42,6 +43,7 @@
 - **Browser Tools**: Navigate, extract content, interact with pages
 - **Basic Tools**: File operations, shell commands
 - **Voice Tools**: Transcription and TTS
+- **Timer Tools**: Agent pause/resume with screen/file/app monitoring
 
 **State Management**:
 - **AppState**: Global application state with cancellation signals
