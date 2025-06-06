@@ -81,7 +81,7 @@ impl LocalToolProvider {
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let name = definition.name.clone();
+        let _name = definition.name.clone();
 
         // Check if tool should be enabled based on configuration
         let should_register = if let Some(state) = app_state {
@@ -108,7 +108,7 @@ impl LocalToolProvider {
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let config_manager = if let Some(state) = app_state {
+        let _config_manager = if let Some(state) = app_state {
             let config_arc = state.get_tool_config_manager().await;
             let config_guard = config_arc.lock().await;
             let is_enabled = config_guard.is_tool_enabled(&definition.name);
@@ -121,20 +121,6 @@ impl LocalToolProvider {
         };
 
         self.register_async_tool(definition, executor).await;
-    }
-
-    /// Deprecated: Registers a synchronous tool. Use register_async_tool instead.
-    #[deprecated(note = "Use register_async_tool for all tools going forward")]
-    pub async fn register_tool<F>(&mut self, definition: ToolDefinition, executor: F)
-    where
-        F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
-    {
-        let async_executor = move |input: Value| {
-            // Wrap the synchronous function in an async block
-            let result = executor(input);
-            async move { result } // This future resolves immediately
-        };
-        self.register_async_tool(definition, async_executor).await;
     }
 }
 

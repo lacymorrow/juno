@@ -23,6 +23,7 @@
     "voice-transcription:allow-get-dictation-status",
     "voice-transcription:allow-transcribe-file",
     "voice-transcription:allow-set-model-path",
-    "voice-transcription:allow-get-model-path"
+    "voice-transcription:allow-get-model-path",
+    "store:default"
   ]
 }

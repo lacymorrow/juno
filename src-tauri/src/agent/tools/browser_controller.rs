@@ -6,7 +6,6 @@ use tokio::sync::Mutex;
 use base64;
 use std::path::PathBuf;
 use std::env;
-// use tracing::{self};
 
 use crate::agent::structs::{AgentError, ToolResult};
 

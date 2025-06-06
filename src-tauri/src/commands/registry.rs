@@ -1,5 +1,5 @@
 //! Command registry and organization system
-//! 
+//!
 //! This module provides organized command groupings and macros to reduce
 //! boilerplate in Tauri command definitions while maintaining compatibility
 //! with the invoke_handler! macro.
@@ -13,7 +13,7 @@ macro_rules! generate_invoke_handler {
             list_apps,
             check_server_status,
             test_system_context,
-            
+
             // Agent Commands
             submit_query,
             submit_orchestrated_query,
@@ -22,11 +22,12 @@ macro_rules! generate_invoke_handler {
             get_task_history,
             get_active_tasks,
             get_agent_capabilities,
-            
+
             // Anthropic-specific Commands
             crate::anthropic::clear_conversation_history,
             crate::anthropic::cleanup_browser,
-            
+            crate::anthropic::handle_tts_completion,
+
             // Mouse Commands
             dev_right_click,
             dev_middle_click,
@@ -40,7 +41,7 @@ macro_rules! generate_invoke_handler {
             dev_get_cursor_position,
             dev_window_relative_click,
             dev_focused_window_relative_click,
-            
+
             // QA Test Commands
             qa_test_click,
             qa_test_click_series,
@@ -48,14 +49,14 @@ macro_rules! generate_invoke_handler {
             qa_test_click_visualization,
             qa_test_select_text,
             qa_test_scroll,
-            
+
             // Keyboard Commands
             dev_type_text,
             dev_press_key,
             dev_hold_key,
             dev_release_key,
             dev_global_type_text,
-            
+
             // Window Commands
             dev_get_window_list,
             dev_get_window_info,
@@ -63,11 +64,11 @@ macro_rules! generate_invoke_handler {
             dev_open_application,
             dev_open_url,
             dev_scroll_window,
-            
+
             // Clipboard Commands
             dev_get_clipboard,
             dev_set_clipboard,
-            
+
             // Element Commands
             dev_get_focused_element_info,
             dev_click_focused_element,
@@ -75,28 +76,28 @@ macro_rules! generate_invoke_handler {
             dev_click_element_by_selector,
             dev_get_selected_text,
             capture_element_screenshot_command,
-            
+
             // Screenshot Commands
             capture_screenshot_command,
             capture_window_screenshot_command,
             capture_focused_window_screenshot_command,
-            
+
             // File System Commands
             dev_list_files,
             dev_get_file_content,
             dev_set_file_content,
-            
+
             // Text Editor Commands
             dev_text_editor_view,
             dev_text_editor_create,
             dev_text_editor_str_replace,
             dev_text_editor_insert,
             dev_text_editor_undo_edit,
-            
+
             // Shell Commands
             dev_bash_command,
             dev_wait,
-            
+
             // Provider Commands
             get_providers,
             get_active_provider,
@@ -109,7 +110,7 @@ macro_rules! generate_invoke_handler {
             update_provider_system_prompt,
             get_agent_mode,
             set_agent_mode,
-            
+
             // Permissions Commands
             check_permissions_status,
             request_accessibility_permission,
@@ -122,7 +123,7 @@ macro_rules! generate_invoke_handler {
             restart_app_after_permissions,
             prompt_app_restart_after_permissions,
             check_restart_needed_after_permissions,
-            
+
             // Sound Commands
             play_sound_by_type,
             play_sound_file,
@@ -133,12 +134,12 @@ macro_rules! generate_invoke_handler {
             get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
-            
+
             // TTS Commands
             crate::tts::invoke_tts,
             crate::tts::set_tts_provider_command,
             crate::tts::get_tts_provider_command,
-            
+
             // Tool Configuration Commands
             get_tool_configurations,
             get_tool_config,
@@ -148,20 +149,20 @@ macro_rules! generate_invoke_handler {
             is_tool_enabled,
             reset_tool_configuration,
             get_tool_configuration_summary,
-            
+
             // Dictation Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
             force_reset_dictation_transcription,
             get_dictation_transcription_status,
-            
+
             // Floating Bar Commands
             floating_bar_click,
             floating_bar_focus_change,
             floating_bar_input_blur,
             floating_bar_input_change,
             floating_bar_submit,
-            
+
             // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
             list_ai_providers,
             set_ai_provider,
@@ -174,27 +175,27 @@ pub mod categories {
     /// Core system functionality
     pub const CORE: &[&str] = &[
         "list_apps",
-        "check_server_status", 
+        "check_server_status",
         "test_system_context"
     ];
-    
+
     /// AI agent commands
     pub const AGENT: &[&str] = &[
         "submit_query",
-        "submit_orchestrated_query", 
+        "submit_orchestrated_query",
         "get_orchestrator_status",
         "configure_orchestrator",
         "get_task_history",
         "get_active_tasks",
         "get_agent_capabilities"
     ];
-    
+
     /// Mouse interaction commands
     pub const MOUSE: &[&str] = &[
         "dev_right_click",
         "dev_middle_click",
         "dev_double_click",
-        "dev_triple_click", 
+        "dev_triple_click",
         "dev_mouse_move",
         "dev_left_mouse_down",
         "dev_left_mouse_up",
@@ -204,7 +205,7 @@ pub mod categories {
         "dev_window_relative_click",
         "dev_focused_window_relative_click",
     ];
-    
+
     /// QA testing commands
     pub const QA_TEST: &[&str] = &[
         "qa_test_click",
@@ -214,16 +215,16 @@ pub mod categories {
         "qa_test_select_text",
         "qa_test_scroll"
     ];
-    
+
     /// Keyboard interaction commands
     pub const KEYBOARD: &[&str] = &[
         "dev_type_text",
-        "dev_press_key", 
+        "dev_press_key",
         "dev_hold_key",
         "dev_release_key",
         "dev_global_type_text"
     ];
-    
+
     /// Window management commands
     pub const WINDOW: &[&str] = &[
         "dev_get_window_list",
@@ -233,7 +234,7 @@ pub mod categories {
         "dev_open_url",
         "dev_scroll_window"
     ];
-    
+
     /// All command categories
     pub const ALL_CATEGORIES: &[(&str, &[&str])] = &[
         ("Core", CORE),
