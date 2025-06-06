@@ -235,44 +235,6 @@ function App() {
     // Remove frontend boot sound call
   }, []);
 
-  // Clear conversation and reset app state
-  const clearConversation = async () => {
-    try {
-      await invoke("clear_conversation_history");
-      setConversation([]);
-      setQuery("");
-      console.log("Conversation cleared successfully");
-    } catch (error) {
-      console.error("Failed to clear conversation:", error);
-      setConversation([
-        {
-          role: "system",
-          content: `Error clearing conversation: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-  };
-
-  // Start a new agent chat
-  const startNewChat = useCallback(async () => {
-    try {
-      await invoke("clear_conversation_history");
-      setConversation([]);
-      setQuery("");
-      console.log("New chat started successfully");
-    } catch (error) {
-      console.error("Failed to start new chat:", error);
-      setConversation([
-        {
-          role: "system",
-          content: `Error starting new chat: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-  }, []);
-
   // Handle backend responses via event listener
   const handleBackendResponse = useCallback(
     debounce((payload: BackendResponsePayload) => {
@@ -393,6 +355,21 @@ function App() {
     },
     [isProcessing, serverStatus, setConversation, setQuery, setIsProcessing]
   );
+
+  // Function to start a new chat (clear conversation and reset state)
+  const startNewChat = useCallback(() => {
+    console.log("Starting new chat - clearing conversation");
+    setConversation([]);
+    setQuery("");
+    setIsProcessing(false);
+  }, [setConversation, setQuery, setIsProcessing]);
+
+  // Function to clear conversation history
+  const clearConversation = useCallback(() => {
+    console.log("Clearing conversation history");
+    setConversation([]);
+    setIsProcessing(false);
+  }, [setConversation, setIsProcessing]);
 
   // Listen for settings menu requests from native menu
   useEffect(() => {
@@ -711,36 +688,19 @@ function App() {
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
     const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
-      console.log("Received agent-event (RAW):", event); // Log the entire event object
       const { type, payload } = event.payload;
       const currentTime = Date.now();
 
       setConversation((prev) => {
         let newMessage: ChatMessage | null = null;
-        console.log(
-          `[Agent Event Processor] Event type: ${type}, Payload:`,
-          payload
-        ); // Log type and payload
 
         if (type === "thinking" && "content" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing thinking. Payload:",
-            payload
-          );
           newMessage = {
             role: "thinking",
             content: payload.content || "Thinking...",
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created thinking newMessage:",
-            newMessage
-          );
         } else if (type === "tool_call_request" && "tool_name" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing tool_call_request. Payload:",
-            payload
-          );
           const requestPayload = payload as ToolCallRequestPayload;
           newMessage = {
             role: "tool_call_request",
@@ -751,15 +711,7 @@ function App() {
               `Using tool: ${requestPayload.tool_name}`,
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created tool_call_request newMessage:",
-            newMessage
-          );
         } else if (type === "tool_call_result" && "tool_name" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing tool_call_result. Payload:",
-            payload
-          );
           const resultPayload = payload as ToolCallResultPayload;
           newMessage = {
             role: "tool_call_result",
@@ -774,40 +726,17 @@ function App() {
             screenshot_base64: resultPayload.screenshot_base64,
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created tool_call_result newMessage:",
-            newMessage
-          );
         } else if (type === "generic_content" && "content" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing generic_content. Payload:",
-            payload
-          );
           newMessage = {
             role: "system",
             content: payload.content || "System message",
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created generic_content newMessage:",
-            newMessage
-          );
-        } else {
-          console.log(
-            `[Agent Event Processor] Unhandled/unsupported event type for this listener: ${type}`
-          );
         }
 
         if (newMessage) {
-          console.log(
-            "[Agent Event Processor] Adding newMessage to conversation:",
-            newMessage
-          );
           return [...prev, newMessage];
         } else {
-          console.log(
-            "[Agent Event Processor] No newMessage created, conversation unchanged."
-          );
           return prev;
         }
       });
