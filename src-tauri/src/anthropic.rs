@@ -382,6 +382,19 @@ pub async fn submit_query(
             if audio_result != "TTS_DISABLED_BY_SETTING" {
                 final_response.audio_base64 = Some(audio_result);
                 info!("TTS audio generated successfully for response");
+
+                // Update floating bar manager for TTS start
+                let app_handle_for_tts = app_handle.clone();
+                let tts_text = final_response.text.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::commands::floating_bar::handle_tts_started(&app_handle_for_tts, tts_text).await;
+
+                    // Note: TTS finish event would be handled when audio playback completes
+                    // For now, we'll simulate a finish after a reasonable delay
+                    // In a real implementation, this would be handled by the audio player
+                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                    crate::commands::floating_bar::handle_tts_finished(&app_handle_for_tts).await;
+                });
             } else {
                 info!("TTS is disabled, skipping audio generation");
             }
@@ -393,6 +406,18 @@ pub async fn submit_query(
     }
 
     info!("Agent run complete. Final state: {}", final_response.agent_state);
+
+    // --- Update Floating Bar Manager ---
+    let app_handle_for_bar = app_handle.clone();
+    let agent_state_for_bar = final_response.agent_state.clone();
+    let text_for_bar = final_response.text.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::commands::floating_bar::handle_backend_response(
+            &app_handle_for_bar,
+            &agent_state_for_bar,
+            Some(text_for_bar)
+        ).await;
+    });
 
     // --- Emit Final Response ---
     let payload = BackendResponsePayload { query, response: final_response.clone() };
