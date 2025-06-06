@@ -240,9 +240,6 @@ pub async fn submit_query(
             );
             info!("Single agent runner created with all tools.");
 
-            // Register escape key shortcut for agent execution
-            crate::register_escape_key_shortcut(&app_handle);
-
             info!("Starting single agent run...");
 
             // Prepare the query with system context
@@ -253,9 +250,6 @@ pub async fn submit_query(
             };
 
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
-
-            // Always unregister escape key shortcut when agent finishes
-            crate::unregister_escape_key_shortcut(&app_handle);
 
             result
         },
@@ -302,9 +296,6 @@ pub async fn submit_query(
             );
             info!("Orchestrator agent runner created with personality and delegation capabilities.");
 
-            // Register escape key shortcut for orchestrator execution
-            crate::register_escape_key_shortcut(&app_handle);
-
             info!("Starting orchestrator run...");
 
             // Prepare the query with system context for orchestrator
@@ -315,9 +306,6 @@ pub async fn submit_query(
             };
 
             let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
-
-            // Always unregister escape key shortcut when orchestrator finishes
-            crate::unregister_escape_key_shortcut(&app_handle);
 
             result
         }

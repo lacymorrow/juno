@@ -145,10 +145,78 @@ pub fn run() {
             let dictation_input_shortcut = Shortcut::new(None, Code::Space);
 
             if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
-                println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
+                println!("[GlobalShortcut] Escape pressed! Signaling agent stop and checking for active transcription.");
                 let app_state_instance = app.state::<state::AppState>();
+
+                // Cancel any running AI agent
                 app_state_instance.signal_cancel();
                 info!("[GlobalShortcut] Agent cancellation signal sent via Escape.");
+
+                // Check if dictation mode is active and cancel it if so
+                let is_dictation_active = app_state_instance.dictation_active.lock()
+                    .map(|active| *active)
+                    .unwrap_or(false);
+
+                if is_dictation_active {
+                    info!("[GlobalShortcut] Dictation mode is active - cancelling transcription");
+
+                    // Emit dictation cancellation event
+                    if let Err(e) = app.emit("dictation-transcription-cancel", ()) {
+                        error!("[GlobalShortcut] Failed to emit dictation-transcription-cancel: {}", e);
+                    }
+
+                    // Force stop voice controller
+                    let app_clone = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // Try to stop the voice transcription plugin
+                        if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
+                            app_clone.clone(),
+                            app_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
+                        ).await {
+                            error!("[GlobalShortcut] Failed to stop voice transcription: {}", e);
+                        } else {
+                            info!("[GlobalShortcut] Voice transcription stopped successfully via Escape");
+                        }
+
+                        // Clean up app state
+                        let app_state = app_clone.state::<state::AppState>();
+                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                            *dictation_active = false;
+                        }
+
+                        // Update floating bar manager
+                        if let Err(e) = app_clone.emit("dictation-active", false) {
+                            error!("[GlobalShortcut] Failed to emit dictation-active event: {}", e);
+                        }
+
+                        // Reset dictation input monitor state
+                        crate::dictation_monitor::force_reset_dictation_input_state().await;
+                    });
+                }
+
+                // Always check if there's any voice activity to stop (handles both Agent Mode and edge cases)
+                if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                    if let Ok(voice_controller) = voice_controller_state.lock() {
+                        if voice_controller.is_dictating() {
+                            info!("[GlobalShortcut] Voice controller is active - stopping transcription");
+                            drop(voice_controller); // Release the lock before async operation
+
+                            let app_clone = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                    app_clone.clone(),
+                                    app_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
+                                ).await {
+                                    error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
+                                } else {
+                                    info!("[GlobalShortcut] Voice controller stopped successfully via Escape");
+                                }
+                            });
+                        }
+                    }
+                }
+
+                // Emit agent stopping event for any running AI agents
                 if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
                     eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
                 }
@@ -570,7 +638,12 @@ pub fn run() {
 
             let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
             tauri::async_runtime::spawn(async move {
-                // Note: Escape shortcut is now registered dynamically only when AI agent is running
+                // Register Escape Shortcut globally (always available)
+                if let Err(e) = app_handle_shortcuts.global_shortcut().register("Escape") {
+                     eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
+                } else {
+                    info!("[GlobalShortcut] Escape shortcut registered globally");
+                }
 
                 // Register Dictation Toggle Shortcut
                 let dictation_shortcut_str = if cfg!(target_os = "macos") { "Option+D" } else { "Alt+D" };
@@ -1024,25 +1097,6 @@ pub fn run() {
     builder
         .run(tauri::generate_context!()) // Use context relative to lib.rs now
         .expect("error while running tauri application");
-}
-
-// Helper functions for dynamic escape key management
-pub fn register_escape_key_shortcut(app_handle: &AppHandle) {
-    info!("[GlobalShortcut] Registering escape key for agent execution");
-    if let Err(e) = app_handle.global_shortcut().register("Escape") {
-        eprintln!("[GlobalShortcut Error] Failed to register Escape shortcut: {}", e);
-    } else {
-        info!("[GlobalShortcut] Escape key registered successfully");
-    }
-}
-
-pub fn unregister_escape_key_shortcut(app_handle: &AppHandle) {
-    info!("[GlobalShortcut] Unregistering escape key shortcut");
-    if let Err(e) = app_handle.global_shortcut().unregister("Escape") {
-        eprintln!("[GlobalShortcut Error] Failed to unregister Escape shortcut: {}", e);
-    } else {
-        info!("[GlobalShortcut] Escape key unregistered successfully");
-    }
 }
 
 // Unit tests module
