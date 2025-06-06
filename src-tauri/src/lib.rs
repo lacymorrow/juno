@@ -142,7 +142,7 @@ pub fn run() {
             let escape_shortcut = Shortcut::new(None, Code::Escape);
             // TODO: Make the dictation shortcut configurable
             let dictation_toggle_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
-            let dictation_input_shortcut = Shortcut::new(None, Code::Space);
+            let dictation_input_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::Space);
 
             if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
                 println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
@@ -159,7 +159,7 @@ pub fn run() {
                     tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
                 }
             } else if shortcut == &dictation_input_shortcut {
-                // Handle dictation input with timing logic
+                // Handle dictation input with timing logic - now using Option+Space instead of just Space
                 let app_clone = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if event.state() == ShortcutState::Pressed {
@@ -578,11 +578,13 @@ pub fn run() {
                      eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_shortcut_str, e);
                 }
 
-                // Register Dictation Input Shortcut with intelligent hold-to-dictate logic
-                if let Err(e) = app_handle_shortcuts.global_shortcut().register("Space") {
-                    eprintln!("[GlobalShortcut Error] Failed to register Space shortcut: {}", e);
+                // REMOVED: Global spacebar shortcut registration - this was causing typing delays
+                // Instead, we'll use Option+Space for hold-to-dictate to avoid interfering with normal typing
+                let dictation_input_shortcut_str = if cfg!(target_os = "macos") { "Option+Space" } else { "Alt+Space" };
+                if let Err(e) = app_handle_shortcuts.global_shortcut().register(dictation_input_shortcut_str) {
+                    eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_input_shortcut_str, e);
                 } else {
-                    info!("[GlobalShortcut] Dictation input shortcut registered with hold-to-dictate logic");
+                    info!("[GlobalShortcut] Dictation input shortcut registered as {} (no longer interferes with normal spacebar typing)", dictation_input_shortcut_str);
                 }
 
                 // Initialize dictation input monitoring system
