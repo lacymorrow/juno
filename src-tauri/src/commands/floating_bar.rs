@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
@@ -193,18 +193,36 @@ impl FloatingBarManager {
 
         // Transition through shrinking to loading
         let app_handle = self.app_handle.clone();
+        let query_for_agent = query.clone();
         tokio::spawn(async move {
             sleep(Duration::from_millis(600)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
                 manager.set_state(BarState::Shrinking).await;
 
+                let app_handle_inner = app_handle.clone();
+                let query_inner = query_for_agent.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_millis(300)).await;
-                    if let Some(manager) = get_bar_manager(&app_handle).await {
+                    if let Some(manager) = get_bar_manager(&app_handle_inner).await {
                         let mut manager = manager.lock().await;
                         manager.set_state(BarState::Loading).await;
                     }
+
+                    // Trigger the AI agent
+                    let app_handle_for_agent = app_handle_inner.clone();
+                    tokio::spawn(async move {
+                        let app_handle_clone = app_handle_for_agent.clone();
+                        let state = app_handle_for_agent.state::<crate::state::AppState>();
+                        if let Err(e) = crate::anthropic::submit_query(query_inner, state, app_handle_clone).await {
+                            error!("Failed to submit query to AI agent: {}", e);
+                            // Handle the error by updating the floating bar
+                            if let Some(manager) = get_bar_manager(&app_handle_inner).await {
+                                let mut manager = manager.lock().await;
+                                let _ = manager.handle_agent_completion("Failed", Some(e)).await;
+                            }
+                        }
+                    });
                 });
             }
         });
