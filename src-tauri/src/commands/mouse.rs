@@ -583,7 +583,7 @@ pub(crate) async fn dev_window_relative_click(
     // Find the window by ID
     let desktop = state.get_desktop()?;
     let windows = desktop.list_windows().map_err(|e| format!("Failed to list windows: {}", e))?;
-    
+
     let target_window = windows
         .into_iter()
         .find(|window| {
@@ -604,13 +604,12 @@ pub(crate) async fn dev_window_relative_click(
     info!("Converted window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
 
     // Perform the click using existing functionality
-    let modifier_str = modifier.as_deref();
     match click_type.as_deref().unwrap_or("left") {
-        "left" => dev_left_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "right" => dev_right_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "double" => dev_double_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "middle" => dev_middle_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "triple" => dev_triple_click(app.clone(), state, global_x, global_y, modifier_str).await,
+        "left" => dev_left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "right" => dev_right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "double" => dev_double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "middle" => dev_middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "triple" => dev_triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         unknown => Err(format!("Unsupported click type: {}", unknown)),
     }
 }
@@ -648,9 +647,9 @@ pub(crate) async fn dev_focused_window_relative_click(
     );
 
     let desktop = state.get_desktop()?;
-    
+
     // Get the focused element first
-    let focused_element = desktop.get_focused_element()
+    let focused_element = desktop.focused_element()
         .map_err(|e| format!("Failed to get focused element: {}", e))?;
 
     // Check if the focused element is a window, if not try to get its window
@@ -696,13 +695,12 @@ pub(crate) async fn dev_focused_window_relative_click(
     info!("Converted focused window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
 
     // Perform the click using existing functionality
-    let modifier_str = modifier.as_deref();
     match click_type.as_deref().unwrap_or("left") {
-        "left" => dev_left_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "right" => dev_right_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "double" => dev_double_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "middle" => dev_middle_click(app.clone(), state, global_x, global_y, modifier_str).await,
-        "triple" => dev_triple_click(app.clone(), state, global_x, global_y, modifier_str).await,
+        "left" => dev_left_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "right" => dev_right_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "double" => dev_double_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "middle" => dev_middle_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
+        "triple" => dev_triple_click(app.clone(), state, global_x, global_y, modifier.clone()).await,
         unknown => Err(format!("Unsupported click type: {}", unknown)),
     }
 }

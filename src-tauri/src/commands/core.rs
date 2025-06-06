@@ -48,7 +48,7 @@ pub(crate) async fn capture_window_screenshot_command(
     // Find the window by ID
     let desktop = state.get_desktop()?;
     let windows = desktop.list_windows().map_err(|e| format!("Failed to list windows: {}", e))?;
-    
+
     let target_window = windows
         .into_iter()
         .find(|window| {
@@ -92,9 +92,9 @@ pub(crate) async fn capture_focused_window_screenshot_command(
     use computer_use_ai_sdk::platforms::macos::utils::capture_window_screenshot;
 
     let desktop = state.get_desktop()?;
-    
+
     // Get the focused element first
-    let focused_element = desktop.get_focused_element()
+    let focused_element = desktop.focused_element()
         .map_err(|e| format!("Failed to get focused element: {}", e))?;
 
     // Check if the focused element is a window, if not try to get its window
