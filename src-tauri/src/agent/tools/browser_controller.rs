@@ -24,11 +24,180 @@ pub struct BrowserController {
     context: Arc<BrowserContext>,
     // Store page in mutex for thread safety
     page: Arc<Mutex<Option<Page>>>,
+    // Track connection method for debugging
+    connection_method: String,
 }
 
 impl BrowserController {
     pub async fn new(playwright: Arc<Playwright>) -> ControllerResult<Self> {
-        log::info!("BrowserController::new called with Playwright driver instance.");
+        log::info!("BrowserController::new called - attempting optimized browser connection...");
+
+        // Try three connection strategies in order of speed/preference
+
+        // Strategy 1: Connect to existing browser instance via CDP (fastest - ~1-2 seconds)
+        if let Ok(controller) = Self::try_connect_to_existing_browser(playwright.clone()).await {
+            log::info!("Successfully connected to existing browser instance via CDP");
+            return Ok(controller);
+        }
+
+        // Strategy 2: Launch with persistent user profile (fast - ~10-15 seconds)
+        if let Ok(controller) = Self::try_launch_with_user_profile(playwright.clone()).await {
+            log::info!("Successfully launched browser with user profile");
+            return Ok(controller);
+        }
+
+        // Strategy 3: Fallback to fresh instance (current behavior - 90+ seconds)
+        log::info!("Falling back to fresh browser instance...");
+        Self::launch_fresh_instance(playwright).await
+    }
+
+    /// Strategy 1: Try to connect to an existing browser instance via CDP
+    async fn try_connect_to_existing_browser(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+        log::info!("Attempting to connect to existing browser via CDP...");
+
+        // Common CDP endpoints to try
+        let cdp_endpoints = [
+            "http://localhost:9222",  // Chrome default
+            "http://localhost:9223",  // Alternative port
+            "http://localhost:9224",  // Alternative port
+        ];
+
+        for endpoint in &cdp_endpoints {
+            log::debug!("Trying CDP endpoint: {}", endpoint);
+
+            // Use a shorter timeout for CDP connection attempts
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                playwright.chromium().connect_over_cdp_builder(endpoint).connect_over_cdp()
+            ).await {
+                Ok(Ok(browser)) => {
+                    log::info!("Connected to existing browser at {}", endpoint);
+
+                    // Create a new context since we can't clone existing ones
+                    log::info!("Creating new context in existing browser");
+                    let context = browser.context_builder()
+                        .accept_downloads(true)
+                        .build()
+                        .await
+                        .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?;
+
+                    // Get existing page or create new one
+                    let page = match context.pages() {
+                        Ok(pages) if !pages.is_empty() => {
+                            log::info!("Using existing page from browser");
+                            Some(pages[0].clone())
+                        },
+                        _ => {
+                            log::info!("Creating new page in existing browser");
+                            match context.new_page().await {
+                                Ok(page) => Some(page),
+                                Err(e) => {
+                                    log::warn!("Failed to create page in existing browser: {}", e);
+                                    None
+                                }
+                            }
+                        }
+                    };
+
+                    return Ok(BrowserController {
+                        _playwright: playwright,
+                        browser: Arc::new(browser),
+                        context: Arc::new(context),
+                        page: Arc::new(Mutex::new(page)),
+                        connection_method: format!("CDP:{}", endpoint),
+                    });
+                },
+                Ok(Err(e)) => {
+                    log::debug!("CDP connection failed at {}: {}", endpoint, e);
+                },
+                Err(_) => {
+                    log::debug!("CDP connection timeout at {}", endpoint);
+                }
+            }
+        }
+
+        Err(AgentError::ToolError("No existing browser instance found via CDP".to_string()))
+    }
+
+    /// Strategy 2: Launch browser with persistent user profile
+    async fn try_launch_with_user_profile(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+        log::info!("Attempting to launch browser with user profile...");
+
+        // Detect user profile directory based on OS and browser
+        let user_data_dir = Self::detect_user_profile_directory()?;
+        log::info!("Using user data directory: {:?}", user_data_dir);
+
+        // Detect browser executable
+        let browser_info = Self::detect_browser_executable()?;
+        log::info!("Using browser: {} at {:?}", browser_info.0, browser_info.1);
+
+        let chromium = playwright.chromium();
+
+        // Use persistent_context_launcher for user profile access
+        let user_data_path = std::path::Path::new(&user_data_dir);
+        let args = vec![
+            "--no-first-run".to_string(),
+            "--no-default-browser-check".to_string(),
+            "--disable-component-update".to_string(), // Prevent update checks slowing startup
+        ];
+        let launcher = chromium.persistent_context_launcher(user_data_path)
+            .headless(false)
+            .accept_downloads(true)
+            .executable(&browser_info.1)
+            .timeout(30000.0) // 30 second timeout
+            .args(&args);
+
+        // Note: Skip channel setting for broader browser compatibility
+
+        let context_result = launcher.launch().await;
+
+        match context_result {
+            Ok(context) => {
+                log::info!("Successfully launched browser with user profile");
+
+                                // Get browser from context - may return None for persistent contexts
+                let browser = match context.browser() {
+                    Ok(Some(browser)) => browser,
+                    Ok(None) => return Err(AgentError::ToolError("No browser available from persistent context".to_string())),
+                    Err(e) => return Err(AgentError::ToolError(format!("Failed to get browser from persistent context: {}", e))),
+                };
+
+                // Get existing page or create new one
+                let page = match context.pages() {
+                    Ok(pages) if !pages.is_empty() => {
+                        log::info!("Using existing page from persistent context");
+                        Some(pages[0].clone())
+                    },
+                    _ => {
+                        log::info!("Creating new page in persistent context");
+                        match context.new_page().await {
+                            Ok(page) => Some(page),
+                            Err(e) => {
+                                log::warn!("Failed to create page in persistent context: {}", e);
+                                None
+                            }
+                        }
+                    }
+                };
+
+                Ok(BrowserController {
+                    _playwright: playwright,
+                    browser: Arc::new(browser),
+                    context: Arc::new(context),
+                    page: Arc::new(Mutex::new(page)),
+                    connection_method: format!("Persistent:{}", user_data_dir),
+                })
+            },
+            Err(e) => {
+                log::warn!("Failed to launch with user profile: {}", e);
+                Err(AgentError::ToolError(format!("Persistent profile launch failed: {}", e)))
+            }
+        }
+    }
+
+    /// Strategy 3: Launch fresh browser instance (current behavior)
+    async fn launch_fresh_instance(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+        log::info!("Launching fresh browser instance (fallback method)...");
 
         // --- Find Chromium Executable ---
         let executable_path: Option<PathBuf> = env::var("CHROMIUM_EXECUTABLE_PATH")
@@ -122,11 +291,26 @@ impl BrowserController {
             Err(_) => "unknown".to_string(),
         });
 
-        let context = browser.context_builder()
-            .accept_downloads(true)
-            .build()
-            .await
-            .map_err(|e| AgentError::ToolError(format!("Failed to create browser context: {}", e)))?;
+        // Get existing contexts or create a new one
+        let context = match browser.contexts() {
+            Ok(contexts) if !contexts.is_empty() => {
+                log::info!("Using existing browser context with {} contexts", contexts.len());
+                // Create a new context since BrowserContext doesn't implement Clone
+                browser.context_builder()
+                    .accept_downloads(true)
+                    .build()
+                    .await
+                    .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
+            },
+            _ => {
+                log::info!("Creating new context in existing browser");
+                browser.context_builder()
+                    .accept_downloads(true)
+                    .build()
+                    .await
+                    .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
+            }
+        };
         log::info!("Browser context created.");
 
         // Create a test page to verify everything is working - retry multiple times if needed
@@ -183,7 +367,134 @@ impl BrowserController {
             browser: Arc::new(browser),
             context: Arc::new(context),
             page,
+            connection_method: "Fresh".to_string(),
         })
+    }
+
+    /// Detect user profile directory based on OS and available browsers
+    fn detect_user_profile_directory() -> ControllerResult<String> {
+        #[cfg(target_os = "macos")]
+        {
+            let home = env::var("HOME").map_err(|_| AgentError::ToolError("HOME environment variable not found".to_string()))?;
+
+            // Try browsers in order of preference
+            let browser_paths = [
+                format!("{}/Library/Application Support/Google/Chrome", home),
+                format!("{}/Library/Application Support/Microsoft Edge", home),
+                format!("{}/Library/Application Support/BraveSoftware/Brave-Browser", home),
+                format!("{}/Library/Application Support/Chromium", home),
+            ];
+
+            for path in &browser_paths {
+                if PathBuf::from(path).exists() {
+                    log::info!("Found user profile directory: {}", path);
+                    return Ok(path.clone());
+                }
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = env::var("LOCALAPPDATA").map_err(|_| AgentError::ToolError("LOCALAPPDATA environment variable not found".to_string()))?;
+
+            let browser_paths = [
+                format!("{}\\Google\\Chrome\\User Data", appdata),
+                format!("{}\\Microsoft\\Edge\\User Data", appdata),
+                format!("{}\\BraveSoftware\\Brave-Browser\\User Data", appdata),
+            ];
+
+            for path in &browser_paths {
+                if PathBuf::from(path).exists() {
+                    log::info!("Found user profile directory: {}", path);
+                    return Ok(path.clone());
+                }
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let home = env::var("HOME").map_err(|_| AgentError::ToolError("HOME environment variable not found".to_string()))?;
+
+            let browser_paths = [
+                format!("{}/.config/google-chrome", home),
+                format!("{}/.config/microsoft-edge", home),
+                format!("{}/.config/BraveSoftware/Brave-Browser", home),
+                format!("{}/.config/chromium", home),
+            ];
+
+            for path in &browser_paths {
+                if PathBuf::from(path).exists() {
+                    log::info!("Found user profile directory: {}", path);
+                    return Ok(path.clone());
+                }
+            }
+        }
+
+        Err(AgentError::ToolError("No user browser profile directory found".to_string()))
+    }
+
+    /// Detect browser executable and return (channel, path)
+    fn detect_browser_executable() -> ControllerResult<(String, PathBuf)> {
+        #[cfg(target_os = "macos")]
+        {
+            let browsers = [
+                ("chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+                ("msedge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+                ("chrome", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+                ("chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"),
+            ];
+
+            for (channel, path) in &browsers {
+                let path_buf = PathBuf::from(path);
+                if path_buf.exists() {
+                    return Ok((channel.to_string(), path_buf));
+                }
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let browsers = [
+                ("chrome", r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                ("chrome", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+                ("msedge", r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                ("chrome", r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+            ];
+
+            for (channel, path) in &browsers {
+                let path_buf = PathBuf::from(path);
+                if path_buf.exists() {
+                    return Ok((channel.to_string(), path_buf));
+                }
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // Try common installation paths
+            let browsers = [
+                ("chrome", "/usr/bin/google-chrome"),
+                ("chrome", "/usr/bin/google-chrome-stable"),
+                ("msedge", "/usr/bin/microsoft-edge"),
+                ("chrome", "/usr/bin/brave-browser"),
+                ("chromium", "/usr/bin/chromium"),
+                ("chromium", "/usr/bin/chromium-browser"),
+            ];
+
+            for (channel, path) in &browsers {
+                let path_buf = PathBuf::from(path);
+                if path_buf.exists() {
+                    return Ok((channel.to_string(), path_buf));
+                }
+            }
+        }
+
+        Err(AgentError::ToolError("No supported browser executable found".to_string()))
+    }
+
+    /// Get connection method for debugging
+    pub fn get_connection_method(&self) -> &str {
+        &self.connection_method
     }
 
     // Helper to get or create a page, with enhanced error handling and recovery
