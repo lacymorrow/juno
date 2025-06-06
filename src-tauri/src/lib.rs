@@ -713,7 +713,7 @@ pub fn run() {
                 }
             });
 
-                        // Listen for dictation transcription start events (immediate)
+            // Listen for dictation transcription start events (immediate)
             let app_handle_for_dictation_start = app.handle().clone();
             app.listen("dictation-transcription-start", move |_event| {
                 info!("[Event] Received dictation-transcription-start event - starting immediate transcription");
@@ -721,6 +721,43 @@ pub fn run() {
                 // Start dictation using the voice transcription plugin command
                 let app_handle_clone = app_handle_for_dictation_start.clone();
                 tauri::async_runtime::spawn(async move {
+<<<<<<< HEAD
+                    // Use the plugin command to start dictation only if controller exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::start_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(()) => {
+                                    info!("[Dictation Mode] Started immediate transcription successfully");
+                                    // Mark this as Dictation Mode in AppState
+                                    let app_state = app_handle_clone.state::<state::AppState>();
+                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                                        *dictation_active = true;
+                                    }
+                                    if let Err(e) = app_handle_clone.emit("dictation-active", true) {
+                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
+
+                                    // Clean up state if start failed
+                                    let app_state = app_handle_clone.state::<state::AppState>();
+                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                                        *dictation_active = false;
+                                    }
+
+                                    // Reset dictation input monitor state
+                                    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+                                    // Emit failure event to UI
+                                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
+                                    }
+                                }
+=======
                     // Use the plugin command to start dictation
                     match tauri_plugin_voice_transcription::commands::start_dictation(
                         app_handle_clone.clone(),
@@ -742,12 +779,13 @@ pub fn run() {
 
                             if let Err(e) = app_handle_clone.emit("dictation-active", true) {
                                 tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
+>>>>>>> origin/main
                             }
                         }
-                        Err(e) => {
-                            tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
-
-                            // Clean up state if start failed
+                        None => {
+                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot start transcription");
+                            
+                            // Clean up state since start failed
                             let app_state = app_handle_clone.state::<state::AppState>();
                             if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
                                 *dictation_active = false;
@@ -764,7 +802,7 @@ pub fn run() {
 
                             // Emit failure event to UI
                             if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
+                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after unavailable voice controller: {}", e);
                             }
                         }
                     }
@@ -780,7 +818,7 @@ pub fn run() {
                 // The transcription is already running, so we just acknowledge the commitment
             });
 
-                        // Listen for dictation transcription cancellation events (released before threshold)
+            // Listen for dictation transcription cancellation events (released before threshold)
             let app_handle_for_dictation_cancel = app.handle().clone();
             app.listen("dictation-transcription-cancel", move |_event| {
                 info!("[Event] Received dictation-transcription-cancel event - cancelling transcription");
@@ -788,16 +826,23 @@ pub fn run() {
                 // Stop dictation and discard results
                 let app_handle_clone = app_handle_for_dictation_cancel.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Use the plugin command to stop dictation
-                    match tauri_plugin_voice_transcription::commands::stop_dictation(
-                        app_handle_clone.clone(),
-                        app_handle_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                    ).await {
-                        Ok(_) => {
-                            info!("[Dictation Mode] Cancelled transcription successfully");
+                    // Use the plugin command to stop dictation only if controller exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(_) => {
+                                    info!("[Dictation Mode] Cancelled transcription successfully");
+                                }
+                                Err(e) => {
+                                    tracing::error!("[Dictation Mode] Failed to cancel transcription: {}", e);
+                                }
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!("[Dictation Mode] Failed to cancel transcription: {}", e);
+                        None => {
+                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot cancel transcription");
                         }
                     }
 
@@ -827,16 +872,23 @@ pub fn run() {
                 // Stop dictation using the voice transcription plugin command
                 let app_handle_clone = app_handle_for_dictation_stop.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Use the plugin command to stop dictation
-                    match tauri_plugin_voice_transcription::commands::stop_dictation(
-                        app_handle_clone.clone(),
-                        app_handle_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                    ).await {
-                        Ok(_) => {
-                            info!("[Dictation Mode] Completed dictation successfully");
+                    // Use the plugin command to stop dictation only if controller exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(_) => {
+                                    info!("[Dictation Mode] Completed dictation successfully");
+                                }
+                                Err(e) => {
+                                    tracing::error!("[Dictation Mode] Failed to stop dictation: {}", e);
+                                }
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!("[Dictation Mode] Failed to stop dictation: {}", e);
+                        None => {
+                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot stop dictation");
                         }
                     }
 
@@ -865,24 +917,31 @@ pub fn run() {
 
                 let app_handle_clone = app_handle_for_force_stop.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Force stop the voice controller with timeout
-                    let stop_with_timeout = tokio::time::timeout(
-                        std::time::Duration::from_secs(2),
-                        tauri_plugin_voice_transcription::commands::stop_dictation(
-                            app_handle_clone.clone(),
-                            app_handle_clone.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
-                        )
-                    );
+                    // Force stop the voice controller with timeout only if it exists
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            let stop_with_timeout = tokio::time::timeout(
+                                std::time::Duration::from_secs(2),
+                                tauri_plugin_voice_transcription::commands::stop_dictation(
+                                    app_handle_clone.clone(),
+                                    controller_state
+                                )
+                            );
 
-                    match stop_with_timeout.await {
-                        Ok(Ok(_)) => {
-                            info!("[Dictation Mode] Force stop completed successfully");
+                            match stop_with_timeout.await {
+                                Ok(Ok(_)) => {
+                                    info!("[Dictation Mode] Force stop completed successfully");
+                                }
+                                Ok(Err(e)) => {
+                                    error!("[Dictation Mode] Force stop failed: {}", e);
+                                }
+                                Err(_) => {
+                                    error!("[Dictation Mode] Force stop timed out - controller may be deadlocked");
+                                }
+                            }
                         }
-                        Ok(Err(e)) => {
-                            error!("[Dictation Mode] Force stop failed: {}", e);
-                        }
-                        Err(_) => {
-                            error!("[Dictation Mode] Force stop timed out - controller may be deadlocked");
+                        None => {
+                            warn!("[Dictation Mode] Voice controller not available - cannot force stop");
                         }
                     }
 
@@ -935,7 +994,7 @@ pub fn run() {
                 });
             });
 
-                                    // Listen for voice transcription final results specifically for Dictation Mode
+            // Listen for voice transcription final results specifically for Dictation Mode
             let app_handle_for_dictation_result = app.handle().clone();
             app.listen("voice-transcription:final-result", move |event| {
                 // Check if we're in Dictation Mode and handle immediate typing
@@ -961,9 +1020,9 @@ pub fn run() {
                                         let trimmed_text = text.trim();
                                         if !trimmed_text.is_empty() {
                                             // Check if clipboard saving is enabled
-                                                                        let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                .map(|enabled| *enabled)
-                                .unwrap_or(true); // Default to true if lock fails
+                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
+                                                .map(|enabled| *enabled)
+                                                .unwrap_or(true); // Default to true if lock fails
 
                                             // Store to clipboard if enabled
                                             if clipboard_enabled {
