@@ -10,7 +10,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -25,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 interface ShortcutConfig {
   id: string;
@@ -64,11 +64,7 @@ export function ShortcutManager() {
       setShortcuts(config);
     } catch (error) {
       console.error("Failed to load shortcuts:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load shortcut configuration",
-        variant: "destructive",
-      });
+      toast.error("Failed to load shortcut configuration");
     } finally {
       setIsLoading(false);
     }
@@ -126,19 +122,14 @@ export function ShortcutManager() {
       // Reload status after change
       await loadShortcutStatus();
 
-      toast({
-        title: "Shortcut Updated",
-        description: `${shortcuts.find((s) => s.id === shortcutId)?.name} ${
+      toast.success(
+        `${shortcuts.find((s) => s.id === shortcutId)?.name} ${
           enabled ? "enabled" : "disabled"
-        }`,
-      });
+        }`
+      );
     } catch (error) {
       console.error("Failed to toggle shortcut:", error);
-      toast({
-        title: "Error",
-        description: "Failed to update shortcut",
-        variant: "destructive",
-      });
+      toast.error("Failed to update shortcut");
     }
   };
 
@@ -203,18 +194,12 @@ export function ShortcutManager() {
       // Reload status after change
       await loadShortcutStatus();
 
-      toast({
-        title: "Shortcut Updated",
-        description: "Shortcut key combination saved successfully",
-      });
+      toast.success("Shortcut key combination saved successfully");
     } catch (error) {
       console.error("Failed to save shortcut:", error);
-      toast({
-        title: "Error",
-        description:
-          "Failed to save shortcut. Make sure the combination is not already in use.",
-        variant: "destructive",
-      });
+      toast.error(
+        "Failed to save shortcut. Make sure the combination is not already in use."
+      );
     }
   };
 
@@ -232,17 +217,10 @@ export function ShortcutManager() {
       await loadShortcuts();
       await loadShortcutStatus();
 
-      toast({
-        title: "Shortcuts Reset",
-        description: "All shortcuts have been reset to default values",
-      });
+      toast.success("All shortcuts have been reset to default values");
     } catch (error) {
       console.error("Failed to reset shortcuts:", error);
-      toast({
-        title: "Error",
-        description: "Failed to reset shortcuts",
-        variant: "destructive",
-      });
+      toast.error("Failed to reset shortcuts");
     }
   };
 

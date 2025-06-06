@@ -8,7 +8,6 @@ import {
   Check,
   Loader2,
   Mic,
-  MicOff,
   Send,
   Sparkles,
   Type,
@@ -18,26 +17,24 @@ import {
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
 
-// Enhanced bar state with more granular feedback
-type EnhancedBarState =
-  | "idle"
+// Use the existing BarState type from the backend
+type BarState =
+  | "default"
   | "expanding"
   | "input"
   | "shrinking"
   | "loading"
   | "finishing"
   | "success"
+  | "listening"
   | "error"
-  | "dictation_ready"
-  | "dictation_active"
-  | "dictation_processing"
-  | "agent_listening"
-  | "agent_thinking"
-  | "agent_responding"
-  | "speaking";
+  | "transcribing"
+  | "speaking"
+  | "dictating";
 
-interface EnhancedBarStateData {
-  barState: EnhancedBarState;
+// Use the existing BarStateData interface from the backend
+interface BarStateData {
+  barState: BarState;
   inputValue: string;
   lastSubmittedValue: string;
   currentError: string | null;
@@ -45,8 +42,6 @@ interface EnhancedBarStateData {
   spokenText: string;
   isAgentWorking: boolean;
   isDictationMode: boolean;
-  audioLevel: number;
-  voiceMode: "dictation" | "agent" | "idle";
 }
 
 interface FloatingBarConfig {
@@ -58,8 +53,8 @@ interface FloatingBarConfig {
 }
 
 export function EnhancedFloatingBar() {
-  // State management
-  const [barState, setBarState] = useState<EnhancedBarState>("idle");
+  // State management - using the existing backend state structure
+  const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
   const [currentError, setCurrentError] = useState<string | null>(null);
@@ -67,16 +62,12 @@ export function EnhancedFloatingBar() {
   const [spokenText, setSpokenText] = useState("");
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [isDictationMode, setIsDictationMode] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [voiceMode, setVoiceMode] = useState<"dictation" | "agent" | "idle">(
-    "idle"
-  );
 
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [config, setConfig] = useState<FloatingBarConfig>({
+  const [config] = useState<FloatingBarConfig>({
     showVoiceIndicator: true,
     enableAnimations: true,
     autoHide: false,
@@ -93,32 +84,17 @@ export function EnhancedFloatingBar() {
   const EXPANDED_WIDTH = 320;
   const EXPANDED_HEIGHT = 80;
 
-  // Load configuration
-  useEffect(() => {
-    const loadConfig = async () => {
-      try {
-        const savedConfig = await invoke<FloatingBarConfig>(
-          "get_floating_bar_config"
-        );
-        setConfig(savedConfig);
-      } catch (error) {
-        console.error("Failed to load floating bar config:", error);
-      }
-    };
-    loadConfig();
-  }, []);
+  // Load configuration - removed non-existent backend call
+  // Using default config values for now
 
   // Update window size based on bar state
   useEffect(() => {
     const resizeWindow = async () => {
       try {
         const appWindow = await Window.getByLabel("floating-bar");
-        const isExpanded = ![
-          "idle",
-          "shrinking",
-          "finishing",
-          "dictation_ready",
-        ].includes(barState);
+        const isExpanded = !["default", "shrinking", "finishing"].includes(
+          barState
+        );
 
         if (isExpanded) {
           await appWindow?.setSize(
@@ -143,16 +119,18 @@ export function EnhancedFloatingBar() {
     }
   }, [barState, config.enableAnimations]);
 
-  // Listen for enhanced backend state updates
+  // Listen for backend state updates - using the existing event name
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
     const setupListener = async () => {
-      unlisten = await listen<EnhancedBarStateData>(
-        "enhanced-bar-state-update",
+      unlisten = await listen<BarStateData>(
+        "bar-state-update", // Using existing event name
         (event) => {
+          console.log("Received bar-state-update:", event.payload);
           const data = event.payload;
 
+          // Update all state from backend
           setBarState(data.barState);
           setInputValue(data.inputValue);
           setLastSubmittedValue(data.lastSubmittedValue);
@@ -161,8 +139,6 @@ export function EnhancedFloatingBar() {
           setSpokenText(data.spokenText);
           setIsAgentWorking(data.isAgentWorking);
           setIsDictationMode(data.isDictationMode);
-          setAudioLevel(data.audioLevel);
-          setVoiceMode(data.voiceMode);
 
           // Auto-focus input when in input state
           if (data.barState === "input" && inputRef.current) {
@@ -187,7 +163,7 @@ export function EnhancedFloatingBar() {
       unlistenEnter = await listen<null>("mouse-entered-window", () => {
         setIsWindowHovered(true);
 
-        if (barState === "idle") {
+        if (barState === "default") {
           setShowTooltip(true);
           if (tooltipTimeoutRef.current) {
             clearTimeout(tooltipTimeoutRef.current);
@@ -214,19 +190,61 @@ export function EnhancedFloatingBar() {
     };
   }, [barState]);
 
-  // Handler functions
+  // Listen for window focus changes
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupListener = async () => {
+      try {
+        const currentWindow = Window.getCurrent();
+        unlisten = await currentWindow.onFocusChanged(
+          async ({ payload: isFocused }) => {
+            console.log(
+              "Window focus changed:",
+              isFocused,
+              "Current bar state:",
+              barState
+            );
+            try {
+              await invoke("floating_bar_focus_change", { isFocused });
+            } catch (err) {
+              console.error("Failed to handle focus change:", err);
+            }
+          }
+        );
+      } catch (error) {
+        console.error("Failed to setup focus listener:", error);
+      }
+    };
+
+    setupListener();
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [barState]);
+
+  // Handler functions - using existing backend function names
   const handleBarClick = async () => {
     try {
-      await invoke("enhanced_floating_bar_click");
+      await invoke("floating_bar_click"); // Using existing function name
     } catch (err) {
       console.error("Failed to handle bar click:", err);
     }
   };
 
+  const handleInputBlur = async () => {
+    try {
+      await invoke("floating_bar_input_blur");
+    } catch (err) {
+      console.error("Failed to handle input blur:", err);
+    }
+  };
+
   const handleInputChange = async (value: string) => {
     try {
-      setInputValue(value);
-      await invoke("enhanced_floating_bar_input_change", { value });
+      await invoke("floating_bar_input_change", { value }); // Using existing function name
     } catch (err) {
       console.error("Failed to handle input change:", err);
     }
@@ -238,29 +256,23 @@ export function EnhancedFloatingBar() {
     if (!query) return;
 
     try {
-      await invoke("enhanced_floating_bar_submit", { query });
+      await invoke("floating_bar_submit", { query }); // Using existing function name
     } catch (err) {
       console.error("Failed to handle submit:", err);
     }
   };
 
-  // Get main icon based on state
+  // Get main icon based on state - enhanced with better state mapping
   const getMainIcon = () => {
     switch (barState) {
-      case "idle":
+      case "default":
         return <Sparkles className="h-4 w-4 text-emerald-400" />;
-      case "dictation_ready":
-        return <MicOff className="h-4 w-4 text-muted-foreground" />;
-      case "dictation_active":
+      case "dictating":
         return <Type className="h-4 w-4 text-orange-500" />;
-      case "dictation_processing":
-        return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
-      case "agent_listening":
+      case "listening":
         return <Brain className="h-4 w-4 text-blue-500" />;
-      case "agent_thinking":
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "agent_responding":
-        return <Brain className="h-4 w-4 text-blue-500 animate-pulse" />;
+      case "transcribing":
+        return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
       case "speaking":
         return <Volume2 className="h-4 w-4 text-purple-500" />;
       case "loading":
@@ -277,20 +289,14 @@ export function EnhancedFloatingBar() {
   // Get status text for tooltip
   const getStatusText = () => {
     switch (barState) {
-      case "idle":
-        return "Click to interact • Alt+D for AI • Option+Space to dictate";
-      case "dictation_ready":
-        return "Hold Option+Space to start dictating";
-      case "dictation_active":
+      case "default":
+        return "Click to interact • Option+D for AI • Hold Space to dictate";
+      case "dictating":
         return "Dictating... Release key to finish";
-      case "dictation_processing":
+      case "transcribing":
         return "Processing dictation...";
-      case "agent_listening":
+      case "listening":
         return "Listening for voice command...";
-      case "agent_thinking":
-        return "AI is thinking...";
-      case "agent_responding":
-        return "AI is responding...";
       case "speaking":
         return "Playing AI response";
       case "loading":
@@ -304,7 +310,7 @@ export function EnhancedFloatingBar() {
     }
   };
 
-  // Get container styles
+  // Get container styles with enhanced visual feedback
   const getContainerStyles = () => {
     const baseStyles = `
       relative flex items-center justify-center
@@ -315,41 +321,36 @@ export function EnhancedFloatingBar() {
       [transform-origin:center]
     `;
 
-    // Background based on state
+    // Background based on state with gradients for better visual feedback
     let bgColor = "bg-black/90";
 
-    switch (voiceMode) {
-      case "dictation":
-        bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
-        break;
-      case "agent":
-        bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
-        break;
+    if (isDictationMode) {
+      bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
+    } else if (isAgentWorking) {
+      bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
     }
 
+    // Override for specific states
     if (barState === "error") {
       bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
     } else if (barState === "success") {
       bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
+    } else if (barState === "dictating") {
+      bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
+    } else if (barState === "listening") {
+      bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
     }
 
-    const sizeStyles = [
-      "idle",
-      "dictation_ready",
-      "shrinking",
-      "finishing",
-    ].includes(barState)
+    const sizeStyles = ["default", "shrinking", "finishing"].includes(barState)
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
     const hoverEffect =
-      barState === "idle" && isWindowHovered
+      barState === "default" && isWindowHovered
         ? "[transform:scale3d(1.05,1.05,1)]"
         : "";
 
-    const clickable = ["idle", "dictation_ready"].includes(barState)
-      ? "cursor-pointer"
-      : "";
+    const clickable = ["default"].includes(barState) ? "cursor-pointer" : "";
 
     return cn(
       baseStyles,
@@ -361,30 +362,10 @@ export function EnhancedFloatingBar() {
     );
   };
 
-  // Audio level visualization
-  const AudioLevelIndicator = () => {
-    if (!["dictation_active", "agent_listening"].includes(barState))
-      return null;
-
-    return (
-      <div className="flex items-center gap-1 ml-2">
-        {[...Array(5)].map((_, i) => (
-          <div
-            key={i}
-            className={cn(
-              "w-1 rounded-full transition-all duration-150",
-              audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
-            )}
-          />
-        ))}
-      </div>
-    );
-  };
-
   return (
     <div className="w-screen h-screen flex items-start justify-start relative">
-      {/* Tooltip */}
-      {showTooltip && barState === "idle" && (
+      {/* Enhanced Tooltip */}
+      {showTooltip && barState === "default" && (
         <div className="absolute top-16 left-8 z-50 animate-fade-in">
           <div className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs">
             {getStatusText()}
@@ -397,19 +378,16 @@ export function EnhancedFloatingBar() {
           data-tauri-drag-region
           className={getContainerStyles()}
           style={{ opacity: config.opacity }}
-          onClick={
-            ["idle", "dictation_ready"].includes(barState)
-              ? handleBarClick
-              : undefined
-          }
+          onClick={barState === "default" ? handleBarClick : undefined}
         >
-          {/* Idle State */}
-          {(barState === "idle" || barState === "dictation_ready") && (
+          {/* Default State */}
+          {(barState === "default" || barState === "finishing") && (
             <div className="flex items-center gap-2">
               {getMainIcon()}
-              {config.showVoiceIndicator && voiceMode !== "idle" && (
-                <VoiceStatusIndicator variant="compact" className="ml-1" />
-              )}
+              {config.showVoiceIndicator &&
+                (isDictationMode || isAgentWorking) && (
+                  <VoiceStatusIndicator variant="compact" className="ml-1" />
+                )}
             </div>
           )}
 
@@ -430,6 +408,7 @@ export function EnhancedFloatingBar() {
                   type="text"
                   value={inputValue}
                   onChange={(e) => handleInputChange(e.target.value)}
+                  onBlur={handleInputBlur}
                   placeholder="Ask me anything..."
                   className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
                   disabled={barState !== "input"}
@@ -445,14 +424,8 @@ export function EnhancedFloatingBar() {
             </form>
           )}
 
-          {/* Voice States */}
-          {[
-            "dictation_active",
-            "dictation_processing",
-            "agent_listening",
-            "agent_thinking",
-            "agent_responding",
-          ].includes(barState) && (
+          {/* Voice States - Enhanced with better visual feedback */}
+          {["dictating", "transcribing", "listening"].includes(barState) && (
             <div className="flex items-center justify-between w-full h-full">
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {getMainIcon()}
@@ -467,7 +440,19 @@ export function EnhancedFloatingBar() {
                   )}
                 </div>
               </div>
-              <AudioLevelIndicator />
+              {(barState === "dictating" || barState === "listening") && (
+                <div className="flex items-center gap-1 ml-2">
+                  <div className="w-1 h-2 bg-white/60 rounded-full animate-pulse" />
+                  <div
+                    className="w-1 h-3 bg-white/80 rounded-full animate-pulse"
+                    style={{ animationDelay: "0.1s" }}
+                  />
+                  <div
+                    className="w-1 h-2 bg-white/60 rounded-full animate-pulse"
+                    style={{ animationDelay: "0.2s" }}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -485,22 +470,17 @@ export function EnhancedFloatingBar() {
 
           {/* Loading State */}
           {barState === "loading" && (
-            <div className="flex flex-col items-center justify-center w-full h-full gap-2">
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm font-medium">Processing</span>
-              </div>
-              {lastSubmittedValue && (
-                <div className="text-xs text-white/70 truncate w-full text-center">
-                  {lastSubmittedValue}
-                </div>
-              )}
+            <div className="w-full h-full flex flex-col items-center justify-center overflow-hidden px-2">
+              <span className="text-xs text-white/70 truncate w-full text-center pb-1">
+                {lastSubmittedValue}
+              </span>
+              <div className="loading-bar-thin"></div>
             </div>
           )}
 
           {/* Success State */}
           {barState === "success" && (
-            <div className="flex items-center justify-between w-full h-full">
+            <div className="flex items-center justify-between w-full h-full animate-success-fade">
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <Check className="h-4 w-4 text-emerald-300" />
                 <span className="text-sm font-medium text-emerald-100 truncate">
@@ -528,8 +508,8 @@ export function EnhancedFloatingBar() {
             </div>
           )}
 
-          {/* Shrinking/Finishing States */}
-          {(barState === "shrinking" || barState === "finishing") && (
+          {/* Shrinking State */}
+          {barState === "shrinking" && (
             <div className="opacity-0 w-full h-full transition-opacity duration-300" />
           )}
         </div>

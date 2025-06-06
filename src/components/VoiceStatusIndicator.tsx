@@ -31,7 +31,6 @@ export function VoiceStatusIndicator({
   });
 
   const [audioLevel, setAudioLevel] = useState(0);
-  const [lastActivity, setLastActivity] = useState<number>(0);
 
   useEffect(() => {
     let unlistenCallbacks: (() => void)[] = [];
@@ -46,7 +45,6 @@ export function VoiceStatusIndicator({
             mode: isActive ? "dictation" : "idle",
             isListening: isActive,
           }));
-          if (isActive) setLastActivity(Date.now());
         })
       );
 
@@ -58,7 +56,6 @@ export function VoiceStatusIndicator({
             mode: "agent",
             isListening: true,
           }));
-          setLastActivity(Date.now());
         })
       );
 
@@ -80,7 +77,6 @@ export function VoiceStatusIndicator({
             isTranscribing: true,
             transcriptionText: text,
           }));
-          setLastActivity(Date.now());
         })
       );
 
