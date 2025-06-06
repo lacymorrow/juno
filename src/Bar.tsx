@@ -50,8 +50,8 @@ export function FloatingBar() {
   const [currentError, setCurrentError] = useState<string | null>(null);
   const [transcriptionText, setTranscriptionText] = useState("");
   const [spokenText, setSpokenText] = useState("");
-  const [isAgentWorking, setIsAgentWorking] = useState(false);
-  const [isDictationMode, setIsDictationMode] = useState(false);
+  const [_isAgentWorking, setIsAgentWorking] = useState(false);
+  const [_isDictationMode, setIsDictationMode] = useState(false);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
