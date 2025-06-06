@@ -371,6 +371,24 @@ struct GenericContentPayload {
     content: String,
 }
 
+// NEW: Streaming event payloads
+#[derive(Clone, Debug, Serialize)]
+struct StreamingTextPayload {
+    chunk: String,
+    message_id: Option<String>, // Optional message ID to track which response this belongs to
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct StreamStartPayload {
+    message_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct StreamEndPayload {
+    message_id: String,
+    complete_text: String,
+}
+
 // Emit an event when a tool is used
 // This function would be called from your tool execution logic
 fn emit_agent_event(app_handle: &AppHandle, event: AgentEvent) {
@@ -447,6 +465,60 @@ pub fn log_generic_content(app_handle: &AppHandle, content_text: &str) {
         }),
     };
     emit_agent_event(app_handle, event);
+}
+
+// NEW: Streaming event functions
+/// Emit a streaming text chunk event
+pub fn emit_streaming_text_chunk(app_handle: &AppHandle, chunk: String, message_id: Option<String>) {
+    #[derive(Clone, Debug, Serialize)]
+    struct StreamingTextEvent {
+        chunk: String,
+        message_id: Option<String>,
+    }
+
+    let event = StreamingTextEvent {
+        chunk,
+        message_id,
+    };
+
+    info!("Emitting streaming text chunk: {:?}", event.chunk);
+    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_TEXT_STREAM, event) {
+        warn!("Failed to emit streaming text chunk: {}", e);
+    }
+}
+
+/// Emit a stream start event
+pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
+    #[derive(Clone, Debug, Serialize)]
+    struct StreamStartEvent {
+        message_id: String,
+    }
+
+    let event = StreamStartEvent { message_id };
+
+    info!("Emitting stream start for message: {}", event.message_id);
+    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_START, event) {
+        warn!("Failed to emit stream start: {}", e);
+    }
+}
+
+/// Emit a stream end event
+pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
+    #[derive(Clone, Debug, Serialize)]
+    struct StreamEndEvent {
+        message_id: String,
+        complete_text: String,
+    }
+
+    let event = StreamEndEvent {
+        message_id,
+        complete_text,
+    };
+
+    info!("Emitting stream end for message: {}", event.message_id);
+    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event) {
+        warn!("Failed to emit stream end: {}", e);
+    }
 }
 
 // OLD ToolUsageEntry - We might adapt this or replace its usage

@@ -2,12 +2,13 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex; // Using Mutex for mutable access to MemoryManager
 use crate::state::CancelReceiver; // Import the type alias
+use uuid;
 
 use crate::agent::structs::{
     AgentAction, AgentError, AgentState, Message, Role, // Removed ToolCall, ToolResult
 };
 use crate::agent::traits::{
-    AgentBrain, AgentRunnable, MemoryManager, ToolProvider
+    AgentBrain, AgentRunnable, MemoryManager, ToolProvider, StreamingAgentBrain
 };
 use crate::agent::tool_logger; // Added for logging
 use tauri::AppHandle; // Added for AppHandle
@@ -225,7 +226,23 @@ where
              return Err(AgentError::Terminated);
          }
 
-        let brain_action = self.brain.decide_next_action(&messages, &tools).await?;
+        // Check if brain supports streaming and use appropriate method
+        let brain_action = if self.brain.supports_streaming() {
+            // Brain supports streaming - generate a message ID and call streaming method
+            let message_id = uuid::Uuid::new_v4().to_string();
+            log::debug!("Using streaming brain with message ID: {}", message_id);
+            self.brain.decide_next_action_streaming(
+                &messages, 
+                &tools, 
+                Some((*self.app_handle).clone()),
+                Some(message_id)
+            ).await?
+        } else {
+            // Fall back to regular brain method
+            log::debug!("Using non-streaming brain");
+            self.brain.decide_next_action(&messages, &tools).await?
+        };
+
         log::debug!("Brain decided action: {:?}", brain_action);
 
         match brain_action {
