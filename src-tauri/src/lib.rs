@@ -186,12 +186,12 @@ pub fn run() {
         tracing::info!("Provider settings initialized from configuration");
     }
 
-    // // --- Handle CLI Commands ---
-    // // If handle_cli_commands returns true, it means a command was executed
-    // // and the application should exit.
-    // if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
-    //     return; // Exit early if a CLI command was handled
-    // }
+    // --- Handle CLI Commands ---
+    // If handle_cli_commands returns true, it means a command was executed
+    // and the application should exit.
+    if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
+        return; // Exit early if a CLI command was handled
+    }
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---
     println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
