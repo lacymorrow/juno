@@ -9,4 +9,12 @@ commands.allow = [
     "transcribe_file",
     "set_model_path",
     "get_model_path",
+    "start_always_listening",
+    "stop_always_listening",
+    "toggle_always_listening",
+    "get_always_listening_status",
+    "set_always_listening_sensitivity",
+    "get_always_listening_sensitivity",
+    "set_always_listening_wake_words",
+    "get_always_listening_wake_words",
 ]
