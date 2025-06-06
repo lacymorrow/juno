@@ -73,21 +73,13 @@ impl BrowserController {
                 Ok(Ok(browser)) => {
                     log::info!("Connected to existing browser at {}", endpoint);
 
-                    // Get existing contexts or create a new one
-                    let context = match browser.contexts() {
-                        Ok(contexts) if !contexts.is_empty() => {
-                            log::info!("Using existing browser context with {} contexts", contexts.len());
-                            contexts[0].clone()
-                        },
-                        _ => {
-                            log::info!("Creating new context in existing browser");
-                            browser.new_context_builder()
-                                .accept_downloads(true)
-                                .build()
-                                .await
-                                .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
-                        }
-                    };
+                    // Create a new context since we can't clone existing ones
+                    log::info!("Creating new context in existing browser");
+                    let context = browser.context_builder()
+                        .accept_downloads(true)
+                        .build()
+                        .await
+                        .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?;
 
                     // Get existing page or create new one
                     let page = match context.pages() {
@@ -143,27 +135,32 @@ impl BrowserController {
 
         // Use persistent_context_launcher for user profile access
         let user_data_path = std::path::Path::new(&user_data_dir);
-        let context_result = chromium.persistent_context_launcher(user_data_path)
+        let args = vec![
+            "--no-first-run".to_string(),
+            "--no-default-browser-check".to_string(),
+            "--disable-component-update".to_string(), // Prevent update checks slowing startup
+        ];
+        let launcher = chromium.persistent_context_launcher(user_data_path)
             .headless(false)
             .accept_downloads(true)
             .executable(&browser_info.1)
-            .channel(&browser_info.0)
             .timeout(30000.0) // 30 second timeout
-            .args(&[
-                "--no-first-run".to_string(),
-                "--no-default-browser-check".to_string(),
-                "--disable-component-update".to_string(), // Prevent update checks slowing startup
-            ])
-            .launch()
-            .await;
+            .args(&args);
+
+        // Note: Skip channel setting for broader browser compatibility
+
+        let context_result = launcher.launch().await;
 
         match context_result {
             Ok(context) => {
                 log::info!("Successfully launched browser with user profile");
 
-                // Get browser from context
-                let browser = context.browser().ok_or_else(||
-                    AgentError::ToolError("No browser available from persistent context".to_string()))?;
+                                // Get browser from context - may return None for persistent contexts
+                let browser = match context.browser() {
+                    Ok(Some(browser)) => browser,
+                    Ok(None) => return Err(AgentError::ToolError("No browser available from persistent context".to_string())),
+                    Err(e) => return Err(AgentError::ToolError(format!("Failed to get browser from persistent context: {}", e))),
+                };
 
                 // Get existing page or create new one
                 let page = match context.pages() {
