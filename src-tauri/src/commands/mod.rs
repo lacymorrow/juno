@@ -5,6 +5,7 @@ use crate::state::AppState;
 use tauri::{State, Emitter};
 
 // Declare the submodules
+pub mod registry;
 pub mod app_url;
 pub mod core;
 pub mod dictation;
