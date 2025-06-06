@@ -1,0 +1,190 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Enhanced Timer System - Agent Pause & Resume Capabilities ✅
+
+## Overview
+The Enhanced Timer System provides comprehensive pause/resume capabilities for AI agents, allowing them to monitor external conditions and automatically restart when specific events occur. This system is essential for long-running tasks, gaming scenarios, monitoring applications, and scheduled operations.
+
+## Core Implementation
+**Primary File**: [src-tauri/src/agent/tools/timer_tools.rs](mdc:src-tauri/src/agent/tools/timer_tools.rs)
+**Integration**: [src-tauri/src/agent/tools/mod.rs](mdc:src-tauri/src/agent/tools/mod.rs)
+
+## Timer Types
+
+### 1. Simple Timer (`TimerType::Simple`)
+Basic alarm functionality - agent pauses for a specified duration then resumes.
+```rust
+TimerType::Simple
+```
+**Use Cases**: Break timers, scheduled operations, game timeouts
+
+### 2. Screen Monitor (`TimerType::ScreenMonitor`)
+Monitors specific screen regions and triggers when visual changes exceed threshold.
+```rust
+TimerType::ScreenMonitor {
+    region: Option<ScreenRegion>,      // Optional screen region (full screen if None)
+    threshold: f32,                    // Change percentage (0.0-1.0)
+    check_interval_seconds: u64,       // How often to check
+}
+```
+**Use Cases**: Gaming (waiting for events), monitoring dashboards, detecting UI changes
+
+### 3. File Monitor (`TimerType::FileMonitor`)
+Monitors file system events and triggers on specific file changes.
+```rust
+TimerType::FileMonitor {
+    file_path: String,
+    monitor_type: FileMonitorType, // Created, Modified, Deleted, SizeChanged
+}
+```
+**Use Cases**: Processing uploaded files, monitoring logs, detecting downloads
+
+### 4. Application Monitor (`TimerType::ApplicationMonitor`)
+Monitors application states and triggers on app lifecycle events.
+```rust
+TimerType::ApplicationMonitor {
+    app_name: String,
+    monitor_state: AppMonitorState, // Launched, Terminated, BecameFocused, LostFocus
+}
+```
+**Use Cases**: App automation, focus-based workflows, application coordination
+
+## Core Data Structures
+
+### TimerTask
+```rust
+pub struct TimerTask {
+    pub id: String,                    // Unique identifier
+    pub trigger_time: u64,            // Unix timestamp (for Simple timers)
+    pub context: Value,               // JSON context to restore when triggered
+    pub description: String,          // Human-readable description
+    pub created_at: u64,             // Creation timestamp
+    pub timer_type: TimerType,       // Type-specific configuration
+}
+```
+
+### TimerManager
+```rust
+pub struct TimerManager {
+    pub active_timers: Arc<Mutex<HashMap<String, TimerTask>>>,
+    pub monitoring_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
+}
+```
+
+## Available Tools
+
+### 1. `set_timer`
+Sets a simple delay-based timer.
+- **Parameters**: `delay_seconds`, `context`, `description`
+- **Returns**: Timer ID and status
+- **Background Task**: None (uses trigger_time)
+
+### 2. `set_screen_monitor`
+Sets up screen region monitoring with visual change detection.
+- **Parameters**: `region` (optional), `threshold`, `check_interval_seconds`, `max_duration_seconds`, `context`, `description`
+- **Returns**: Monitor ID and status
+- **Background Task**: Screenshot comparison using [macOS utils](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs)
+
+### 3. `set_file_monitor`
+Sets up file system monitoring.
+- **Parameters**: `file_path`, `monitor_type`, `check_interval_seconds`, `max_duration_seconds`, `context`, `description`
+- **Returns**: Monitor ID and status
+- **Background Task**: Async file metadata checking
+
+### 4. `cancel_timer`
+Cancels any active timer or monitor.
+- **Parameters**: `timer_id`
+- **Returns**: Cancellation status
+- **Effect**: Stops background tasks and removes from active timers
+
+### 5. `list_timers`
+Lists all active timers and monitors.
+- **Parameters**: None
+- **Returns**: Array of active TimerTask objects
+
+### 6. `check_expired_timers`
+Checks for and processes expired simple timers.
+- **Parameters**: None
+- **Returns**: Array of expired timer IDs
+- **Note**: Monitoring timers don't expire by time
+
+## Integration Architecture
+
+### Event Flow
+1. **Timer Set**: Tool creates TimerTask and starts background monitoring (if applicable)
+2. **Condition Met**: Background task detects trigger condition
+3. **Event Emission**: Emits `timer-expired` event with context
+4. **Agent Restart**: Event triggers agent restart with saved context
+
+### Background Task Management
+- All monitoring tasks run as independent `tokio::spawn` tasks
+- Tasks are stored in `TimerManager.monitoring_tasks` for lifecycle management
+- Automatic cleanup when timers are cancelled or triggered
+- Tasks emit events via Tauri's event system
+
+### Platform Integration
+- **macOS Screen Capture**: Uses [computer_use_ai_sdk::platforms::macos::utils](mdc:src-tauri/mcp-server-os-level/src/platforms/macos/utils.rs)
+- **File System**: Cross-platform async file operations with `tokio::fs`
+- **Error Handling**: Comprehensive logging with `tracing` crate
+
+## Usage Patterns
+
+### Gaming Scenarios
+```rust
+// Wait for game event with screen monitoring
+set_screen_monitor(
+    region: Some(ScreenRegion { x: 100, y: 100, width: 200, height: 50 }),
+    threshold: 0.1,
+    check_interval_seconds: 2,
+    context: { "game_state": "waiting_for_enemy", "level": 5 }
+)
+```
+
+### File Processing
+```rust
+// Monitor for new file uploads
+set_file_monitor(
+    file_path: "/downloads/data.csv",
+    monitor_type: FileMonitorType::Created,
+    context: { "processing_step": "import_data", "user_id": 123 }
+)
+```
+
+### Scheduled Operations
+```rust
+// Simple 30-minute timer
+set_timer(
+    delay_seconds: 1800,
+    context: { "reminder": "check_server_status", "priority": "high" }
+)
+```
+
+## Performance Considerations
+- **Memory Efficient**: Background tasks use minimal resources when idle
+- **Configurable Intervals**: Adjust check frequency based on requirements
+- **Maximum Duration**: Prevents runaway monitoring tasks
+- **Cleanup**: Automatic resource cleanup on completion or cancellation
+
+## Error Handling
+- **Graceful Failures**: Non-critical monitoring errors don't crash the system
+- **Comprehensive Logging**: Debug information for troubleshooting
+- **Platform Compatibility**: Conditional compilation for platform-specific features
+- **Resource Limits**: Maximum duration and cleanup mechanisms
+
+## Development Guidelines
+- Always use `Arc<Mutex<>>` for shared timer state
+- Implement proper cleanup in monitoring tasks
+- Use debug logging for monitoring operations
+- Test timer accuracy with different system loads
+- Consider battery/performance impact of frequent monitoring
+
+## Dependencies
+- `tokio`: Async runtime and task management
+- `serde_json`: Context serialization
+- `uuid`: Unique timer identification
+- `tracing`: Logging and debugging
+- `tauri`: Event emission and app integration
+- `computer_use_ai_sdk`: macOS screen capture (conditional)
