@@ -189,7 +189,7 @@ pub fn run() {
     // --- Handle CLI Commands ---
     // If handle_cli_commands returns true, it means a command was executed
     // and the application should exit.
-    if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
+    if cli::runner::handle_cli_commands(&cli, desktop_instance.as_ref()) {
         return; // Exit early if a CLI command was handled
     }
 

@@ -5,7 +5,6 @@ use crate::commands;
 use tauri::{State, Manager};
 use serde_json::{Value, json};
 use tracing::info;
-use crate::commands::window;
 
 // Function to register all desktop tools with the tool provider
 pub async fn register_desktop_tools(
@@ -200,7 +199,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::core::dev_set_clipboard_content(args.content, state_manager)
+                    commands::core::dev_set_clipboard(args.content, state_manager)
                         .await
                 })
             });
@@ -247,7 +246,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_desktop_click(app.clone(), state_manager, args.x, args.y, args.click_type, args.modifier)
+                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, args.modifier)
                         .await
                 })
             });
