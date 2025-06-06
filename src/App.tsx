@@ -853,6 +853,11 @@ function App() {
       newAudio.onended = () => {
         URL.revokeObjectURL(audioUrl); // Clean up object URL
         setCurrentAudio(null);
+
+        // Notify backend that TTS has finished so it can play the success sound
+        invoke("handle_tts_completion").catch((error) => {
+          console.error("Failed to notify backend of TTS completion:", error);
+        });
       };
       newAudio.onerror = (e) => {
         console.error("Audio playback error:", e);
