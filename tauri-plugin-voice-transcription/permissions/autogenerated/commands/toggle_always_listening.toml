@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-toggle-always-listening"
+description = "Enables the toggle_always_listening command without any pre-configured scope."
+commands.allow = ["toggle_always_listening"]
+
+[[permission]]
+identifier = "deny-toggle-always-listening"
+description = "Denies the toggle_always_listening command without any pre-configured scope."
+commands.deny = ["toggle_always_listening"]

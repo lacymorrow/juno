@@ -295,6 +295,42 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the get_always_listening_sensitivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-always-listening-sensitivity",
+          "markdownDescription": "Enables the get_always_listening_sensitivity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_always_listening_sensitivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-always-listening-sensitivity",
+          "markdownDescription": "Denies the get_always_listening_sensitivity command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_always_listening_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-always-listening-status",
+          "markdownDescription": "Enables the get_always_listening_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_always_listening_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-always-listening-status",
+          "markdownDescription": "Denies the get_always_listening_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_always_listening_wake_words command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-always-listening-wake-words",
+          "markdownDescription": "Enables the get_always_listening_wake_words command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_always_listening_wake_words command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-always-listening-wake-words",
+          "markdownDescription": "Denies the get_always_listening_wake_words command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_dictation_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-dictation-status",
@@ -319,6 +355,30 @@
           "markdownDescription": "Denies the get_model_path command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_always_listening_sensitivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-always-listening-sensitivity",
+          "markdownDescription": "Enables the set_always_listening_sensitivity command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_always_listening_sensitivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-always-listening-sensitivity",
+          "markdownDescription": "Denies the set_always_listening_sensitivity command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_always_listening_wake_words command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-always-listening-wake-words",
+          "markdownDescription": "Enables the set_always_listening_wake_words command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_always_listening_wake_words command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-always-listening-wake-words",
+          "markdownDescription": "Denies the set_always_listening_wake_words command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_model_path command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-model-path",
@@ -329,6 +389,18 @@
           "type": "string",
           "const": "deny-set-model-path",
           "markdownDescription": "Denies the set_model_path command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_always_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-always-listening",
+          "markdownDescription": "Enables the start_always_listening command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_always_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-always-listening",
+          "markdownDescription": "Denies the start_always_listening command without any pre-configured scope."
         },
         {
           "description": "Enables the start_dictation command without any pre-configured scope.",
@@ -343,6 +415,18 @@
           "markdownDescription": "Denies the start_dictation command without any pre-configured scope."
         },
         {
+          "description": "Enables the stop_always_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-stop-always-listening",
+          "markdownDescription": "Enables the stop_always_listening command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_always_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-stop-always-listening",
+          "markdownDescription": "Denies the stop_always_listening command without any pre-configured scope."
+        },
+        {
           "description": "Enables the stop_dictation command without any pre-configured scope.",
           "type": "string",
           "const": "allow-stop-dictation",
@@ -353,6 +437,18 @@
           "type": "string",
           "const": "deny-stop-dictation",
           "markdownDescription": "Denies the stop_dictation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the toggle_always_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-toggle-always-listening",
+          "markdownDescription": "Enables the toggle_always_listening command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the toggle_always_listening command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-toggle-always-listening",
+          "markdownDescription": "Denies the toggle_always_listening command without any pre-configured scope."
         },
         {
           "description": "Enables the toggle_dictation command without any pre-configured scope.",
