@@ -45,6 +45,7 @@ pub mod agent;
 pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
+pub mod cloud; // Cloud connectivity and remote control
 
 // Embed tray icon data directly in the binary - no file system dependencies
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
@@ -294,6 +295,15 @@ pub fn run() {
             floating_bar_input_blur,
             floating_bar_input_change,
             floating_bar_submit,
+            // Cloud Commands
+            get_cloud_config,
+            update_cloud_config,
+            get_cloud_status,
+            enable_cloud,
+            disable_cloud,
+            test_cloud_connection,
+            get_cloud_device_info,
+            generate_device_id,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -561,6 +571,30 @@ pub fn run() {
                 }
             });
 
+            // --- Initialize Cloud Client ---
+            let app_handle_for_cloud = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let app_state = app_handle_for_cloud.state::<crate::state::AppState>();
+                
+                // Initialize cloud client configuration
+                if let Err(e) = app_state.init_cloud_client(&app_handle_for_cloud).await {
+                    tracing::error!("[Setup] Failed to initialize cloud client: {}", e);
+                } else {
+                    tracing::info!("[Setup] Cloud client configuration initialized");
+                    
+                    // Start cloud client if enabled
+                    if app_state.is_cloud_enabled() {
+                        if let Err(e) = app_state.start_cloud_client().await {
+                            tracing::error!("[Setup] Failed to start cloud client: {}", e);
+                        } else {
+                            tracing::info!("[Setup] Cloud client started successfully");
+                        }
+                    } else {
+                        tracing::info!("[Setup] Cloud connectivity is disabled in configuration");
+                    }
+                }
+            });
+
             // --- Initialize Floating Bar Manager ---
             let app_handle_for_bar_manager = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -723,43 +757,6 @@ pub fn run() {
                 // Start dictation using the voice transcription plugin command
                 let app_handle_clone = app_handle_for_dictation_start.clone();
                 tauri::async_runtime::spawn(async move {
-<<<<<<< HEAD
-                    // Use the plugin command to start dictation only if controller exists
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::start_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(()) => {
-                                    info!("[Dictation Mode] Started immediate transcription successfully");
-                                    // Mark this as Dictation Mode in AppState
-                                    let app_state = app_handle_clone.state::<state::AppState>();
-                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                                        *dictation_active = true;
-                                    }
-                                    if let Err(e) = app_handle_clone.emit("dictation-active", true) {
-                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
-
-                                    // Clean up state if start failed
-                                    let app_state = app_handle_clone.state::<state::AppState>();
-                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                                        *dictation_active = false;
-                                    }
-
-                                    // Reset dictation input monitor state
-                                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                                    // Emit failure event to UI
-                                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
-                                    }
-                                }
-=======
                     // Use the plugin command to start dictation
                     match tauri_plugin_voice_transcription::commands::start_dictation(
                         app_handle_clone.clone(),
@@ -781,11 +778,10 @@ pub fn run() {
 
                             if let Err(e) = app_handle_clone.emit("dictation-active", true) {
                                 tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
->>>>>>> origin/main
                             }
                         }
-                        None => {
-                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot start transcription");
+                        Err(e) => {
+                            tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
                             
                             // Clean up state since start failed
                             let app_state = app_handle_clone.state::<state::AppState>();
@@ -804,7 +800,7 @@ pub fn run() {
 
                             // Emit failure event to UI
                             if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after unavailable voice controller: {}", e);
+                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
                             }
                         }
                     }

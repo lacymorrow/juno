@@ -20,6 +20,8 @@ use crate::agent::implementations::memory_manager::SimpleMemoryManager;
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
 use crate::agent::tools::tool_config::ToolConfigManager;
+// Import cloud client
+use crate::cloud::{CloudClient, CloudConfig};
 
 /// Timestamp tracking for log grouping (Slack/Apple Messages style)
 #[derive(Debug, Clone)]
@@ -80,6 +82,10 @@ pub struct AppState {
     pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
     // Tool configuration manager
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
+    // Cloud connectivity
+    pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
+    pub cloud_config: Arc<TokioMutex<CloudConfig>>, // Cloud configuration
+    pub cloud_enabled: Arc<Mutex<bool>>, // Track if cloud is enabled
 }
 
 impl AppState {
@@ -107,6 +113,10 @@ impl AppState {
             permissions_checked: Arc::new(Mutex::new(false)),
             // Initialize tool configuration manager
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
+            // Initialize cloud connectivity
+            cloud_client: Arc::new(TokioMutex::new(None)),
+            cloud_config: Arc::new(TokioMutex::new(CloudConfig::default())),
+            cloud_enabled: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -268,6 +278,101 @@ impl AppState {
         let config_path = ToolConfigManager::get_config_path(app_handle)?;
         let config_guard = self.tool_config_manager.lock().await;
         config_guard.save_to_file(&config_path)
+    }
+
+    // Cloud connectivity methods
+    
+    /// Initialize cloud client
+    pub async fn init_cloud_client(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        // Load cloud configuration
+        let config = CloudConfig::load_from_file(app_handle)
+            .map_err(|e| format!("Failed to load cloud config: {}", e))?;
+        
+        // Update stored config
+        {
+            let mut config_guard = self.cloud_config.lock().await;
+            *config_guard = config.clone();
+        }
+        
+        // Update enabled status
+        {
+            let mut enabled_guard = self.cloud_enabled.lock();
+            if let Ok(mut enabled) = enabled_guard {
+                *enabled = config.enabled;
+            }
+        }
+        
+        // Create cloud client if enabled
+        if config.enabled {
+            let client = CloudClient::new(app_handle.clone()).await
+                .map_err(|e| format!("Failed to create cloud client: {}", e))?;
+            
+            let mut client_guard = self.cloud_client.lock().await;
+            *client_guard = Some(client);
+        }
+        
+        Ok(())
+    }
+    
+    /// Start cloud connectivity
+    pub async fn start_cloud_client(&self) -> Result<(), String> {
+        let mut client_guard = self.cloud_client.lock().await;
+        if let Some(client) = client_guard.as_mut() {
+            client.start().await
+                .map_err(|e| format!("Failed to start cloud client: {}", e))?;
+        }
+        Ok(())
+    }
+    
+    /// Stop cloud connectivity
+    pub async fn stop_cloud_client(&self) {
+        let mut client_guard = self.cloud_client.lock().await;
+        *client_guard = None;
+    }
+    
+    /// Check if cloud is enabled
+    pub fn is_cloud_enabled(&self) -> bool {
+        self.cloud_enabled.lock()
+            .map(|enabled| *enabled)
+            .unwrap_or(false)
+    }
+    
+    /// Get cloud configuration
+    pub async fn get_cloud_config(&self) -> CloudConfig {
+        let config_guard = self.cloud_config.lock().await;
+        config_guard.clone()
+    }
+    
+    /// Update cloud configuration
+    pub async fn update_cloud_config(&self, config: CloudConfig, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        // Save to file
+        config.save_to_file(app_handle)
+            .map_err(|e| format!("Failed to save cloud config: {}", e))?;
+        
+        // Update stored config
+        {
+            let mut config_guard = self.cloud_config.lock().await;
+            *config_guard = config.clone();
+        }
+        
+        // Update enabled status
+        {
+            let mut enabled_guard = self.cloud_enabled.lock();
+            if let Ok(mut enabled) = enabled_guard {
+                *enabled = config.enabled;
+            }
+        }
+        
+        // Restart cloud client if needed
+        if config.enabled {
+            self.stop_cloud_client().await;
+            self.init_cloud_client(app_handle).await?;
+            self.start_cloud_client().await?;
+        } else {
+            self.stop_cloud_client().await;
+        }
+        
+        Ok(())
     }
 }
 
