@@ -72,6 +72,7 @@ tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription
 tauri-plugin-process = "2.2.1"
 # logging = { path = "../logging" } # Commented out due to path issue and no current usages
 # rabDab = { path = "../rabDab" }   # Commented out due to path issue and no current usages
+open = "5.3"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
