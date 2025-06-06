@@ -33,7 +33,7 @@ impl BrowserController {
         log::info!("BrowserController::new called - attempting optimized browser connection...");
 
         // Try three connection strategies in order of speed/preference
-        
+
         // Strategy 1: Connect to existing browser instance via CDP (fastest - ~1-2 seconds)
         if let Ok(controller) = Self::try_connect_to_existing_browser(playwright.clone()).await {
             log::info!("Successfully connected to existing browser instance via CDP");
@@ -64,36 +64,38 @@ impl BrowserController {
 
         for endpoint in &cdp_endpoints {
             log::debug!("Trying CDP endpoint: {}", endpoint);
-            
+
             // Use a shorter timeout for CDP connection attempts
             match tokio::time::timeout(
                 std::time::Duration::from_secs(3),
-                playwright.chromium().connect_over_cdp(endpoint)
+                playwright.chromium().connect_over_cdp_builder(endpoint).connect_over_cdp()
             ).await {
                 Ok(Ok(browser)) => {
                     log::info!("Connected to existing browser at {}", endpoint);
-                    
+
                     // Get existing contexts or create a new one
-                    let contexts = browser.contexts();
-                    let context = if !contexts.is_empty() {
-                        log::info!("Using existing browser context with {} contexts", contexts.len());
-                        contexts[0].clone()
-                    } else {
-                        log::info!("Creating new context in existing browser");
-                        browser.new_context_builder()
-                            .accept_downloads(true)
-                            .build()
-                            .await
-                            .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
+                    let context = match browser.contexts() {
+                        Ok(contexts) if !contexts.is_empty() => {
+                            log::info!("Using existing browser context with {} contexts", contexts.len());
+                            contexts[0].clone()
+                        },
+                        _ => {
+                            log::info!("Creating new context in existing browser");
+                            browser.new_context_builder()
+                                .accept_downloads(true)
+                                .build()
+                                .await
+                                .map_err(|e| AgentError::ToolError(format!("Failed to create context in existing browser: {}", e)))?
+                        }
                     };
 
                     // Get existing page or create new one
-                    let page = {
-                        let pages = context.pages();
-                        if !pages.is_empty() {
+                    let page = match context.pages() {
+                        Ok(pages) if !pages.is_empty() => {
                             log::info!("Using existing page from browser");
                             Some(pages[0].clone())
-                        } else {
+                        },
+                        _ => {
                             log::info!("Creating new page in existing browser");
                             match context.new_page().await {
                                 Ok(page) => Some(page),
@@ -138,12 +140,13 @@ impl BrowserController {
         log::info!("Using browser: {} at {:?}", browser_info.0, browser_info.1);
 
         let chromium = playwright.chromium();
-        
-        // Use launchPersistentContext for user profile access
-        let context_result = chromium.launch_persistent_context_builder(&user_data_dir)
+
+        // Use persistent_context_launcher for user profile access
+        let user_data_path = std::path::Path::new(&user_data_dir);
+        let context_result = chromium.persistent_context_launcher(user_data_path)
             .headless(false)
             .accept_downloads(true)
-            .executable_path(&browser_info.1)
+            .executable(&browser_info.1)
             .channel(&browser_info.0)
             .timeout(30000.0) // 30 second timeout
             .args(&[
@@ -157,18 +160,18 @@ impl BrowserController {
         match context_result {
             Ok(context) => {
                 log::info!("Successfully launched browser with user profile");
-                
+
                 // Get browser from context
-                let browser = context.browser().ok_or_else(|| 
+                let browser = context.browser().ok_or_else(||
                     AgentError::ToolError("No browser available from persistent context".to_string()))?;
 
                 // Get existing page or create new one
-                let page = {
-                    let pages = context.pages();
-                    if !pages.is_empty() {
+                let page = match context.pages() {
+                    Ok(pages) if !pages.is_empty() => {
                         log::info!("Using existing page from persistent context");
                         Some(pages[0].clone())
-                    } else {
+                    },
+                    _ => {
                         log::info!("Creating new page in persistent context");
                         match context.new_page().await {
                             Ok(page) => Some(page),
@@ -361,7 +364,7 @@ impl BrowserController {
         #[cfg(target_os = "macos")]
         {
             let home = env::var("HOME").map_err(|_| AgentError::ToolError("HOME environment variable not found".to_string()))?;
-            
+
             // Try browsers in order of preference
             let browser_paths = [
                 format!("{}/Library/Application Support/Google/Chrome", home),
@@ -381,7 +384,7 @@ impl BrowserController {
         #[cfg(target_os = "windows")]
         {
             let appdata = env::var("LOCALAPPDATA").map_err(|_| AgentError::ToolError("LOCALAPPDATA environment variable not found".to_string()))?;
-            
+
             let browser_paths = [
                 format!("{}\\Google\\Chrome\\User Data", appdata),
                 format!("{}\\Microsoft\\Edge\\User Data", appdata),
@@ -399,7 +402,7 @@ impl BrowserController {
         #[cfg(target_os = "linux")]
         {
             let home = env::var("HOME").map_err(|_| AgentError::ToolError("HOME environment variable not found".to_string()))?;
-            
+
             let browser_paths = [
                 format!("{}/.config/google-chrome", home),
                 format!("{}/.config/microsoft-edge", home),
