@@ -555,7 +555,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to emit settings event: {}", e);
                         }
                     }
-                    
+
                     // File Menu
                     constants::app_menu_ids::NEW_CHAT => {
                         info!("[Menu] New Chat menu item clicked");
@@ -581,7 +581,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to emit export chat event: {}", e);
                         }
                     }
-                    
+
                     // View Menu
                     constants::app_menu_ids::TOGGLE_FLOATING_BAR => {
                         info!("[Menu] Toggle Floating Bar menu item clicked");
@@ -613,7 +613,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to emit toggle fullscreen event: {}", e);
                         }
                     }
-                    
+
                     // Window Menu
                     constants::app_menu_ids::MINIMIZE => {
                         info!("[Menu] Minimize menu item clicked");
@@ -632,7 +632,7 @@ pub fn run() {
                         // This is handled automatically by macOS for most cases
                         info!("[Menu] Bring All to Front executed");
                     }
-                    
+
                     // Help Menu
                     constants::app_menu_ids::HELP => {
                         info!("[Menu] Help menu item clicked");
@@ -665,7 +665,7 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to open website: {}", e);
                         }
                     }
-                    
+
                     _ => {
                         info!("[Menu] Unhandled menu event: {:?}", event.id());
                     }
@@ -698,7 +698,7 @@ pub fn run() {
                 let devtools_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::SHOW_DEVTOOLS, "Developer Tools", true, None::<&str>).unwrap());
                 let settings_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::SETTINGS, "Settings...", true, None::<&str>).unwrap());
                 let quit_item = MenuItemKind::MenuItem(tauri::menu::MenuItem::with_id(&tray_app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).unwrap());
-                
+
                 let tray_menu = Menu::with_items(&tray_app_handle, &[
                     &show_main_window_item,
                     &new_chat_item,
