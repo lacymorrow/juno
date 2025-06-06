@@ -253,14 +253,32 @@ where
                     .await?;
                 }
 
+                // Track which tool calls have been completed to handle cancellation cleanup
+                let mut completed_tool_calls = Vec::new();
+
                 // Execute tools sequentially for now
                 // TODO: Consider parallel execution if tools are independent
-                for tool_call in tool_calls {
+                for tool_call in tool_calls.iter() {
                     // --- Cancellation Check (Before Tool Execution) ---
-                     if *cancel_rx.borrow() {
-                         log::debug!("Cancellation detected before tool execution: {}", tool_call.name);
-                         return Err(AgentError::Terminated);
-                     }
+                    if *cancel_rx.borrow() {
+                        log::debug!("Cancellation detected before tool execution: {}", tool_call.name);
+
+                        // Add cancelled tool results for any remaining tool calls to maintain conversation consistency
+                        let mut mem = self.memory.lock().await;
+                        for pending_tool_call in tool_calls.iter().skip(completed_tool_calls.len()) {
+                            log::debug!("Adding cancelled tool result for tool: {}", pending_tool_call.name);
+                            mem.add_message(Message {
+                                role: Role::Tool,
+                                content: "Tool execution was cancelled.".to_string(),
+                                tool_calls: None,
+                                tool_call_id: Some(pending_tool_call.id.clone()),
+                                name: Some(pending_tool_call.name.clone()),
+                            })
+                            .await?;
+                        }
+
+                        return Err(AgentError::Terminated);
+                    }
 
                     // Emit tool call request event
                     tool_logger::log_tool_call_request(
@@ -280,8 +298,53 @@ where
                     // --- Cancellation Check (After Tool Execution) ---
                     // Check even if tool execution failed, to ensure timely termination
                     if *cancel_rx.borrow() {
-                         log::debug!("Cancellation detected after tool execution: {}", tool_call.name);
-                         return Err(AgentError::Terminated);
+                        log::debug!("Cancellation detected after tool execution: {}", tool_call.name);
+
+                        // Add tool result for the current tool call first
+                        match tool_result {
+                            Ok(result) => {
+                                let mut mem = self.memory.lock().await;
+                                mem.add_message(Message {
+                                    role: Role::Tool,
+                                    content: serde_json::to_string(&result.output)
+                                        .unwrap_or_else(|e| {
+                                            log::warn!("Failed to serialize tool output to JSON: {}", e);
+                                            format!("{:?}", result.output)
+                                        }),
+                                    tool_calls: None,
+                                    tool_call_id: Some(result.call_id),
+                                    name: Some(tool_call.name.clone()),
+                                })
+                                .await?;
+                            }
+                            Err(_) => {
+                                let mut mem = self.memory.lock().await;
+                                mem.add_message(Message {
+                                    role: Role::Tool,
+                                    content: "Tool execution was cancelled.".to_string(),
+                                    tool_calls: None,
+                                    tool_call_id: Some(tool_call.id.clone()),
+                                    name: Some(tool_call.name.clone()),
+                                })
+                                .await?;
+                            }
+                        }
+
+                        // Add cancelled tool results for any remaining tool calls
+                        let mut mem = self.memory.lock().await;
+                        for pending_tool_call in tool_calls.iter().skip(completed_tool_calls.len() + 1) {
+                            log::debug!("Adding cancelled tool result for remaining tool: {}", pending_tool_call.name);
+                            mem.add_message(Message {
+                                role: Role::Tool,
+                                content: "Tool execution was cancelled.".to_string(),
+                                tool_calls: None,
+                                tool_call_id: Some(pending_tool_call.id.clone()),
+                                name: Some(pending_tool_call.name.clone()),
+                            })
+                            .await?;
+                        }
+
+                        return Err(AgentError::Terminated);
                     }
 
                     // Add tool result message to memory immediately after execution
@@ -290,7 +353,7 @@ where
                             let mut mem = self.memory.lock().await;
                             log::debug!("Tool {} finished successfully.", tool_call.name);
 
-                                                        // Emit tool call result event
+                            // Emit tool call result event
                             let screenshot_base64 = if tool_call.name == "capture_screenshot" || tool_call.name == "screenshot" {
                                 result.output.as_str().map(|s| s.to_string())
                             } else {
@@ -346,6 +409,9 @@ where
                             .await?;
                         }
                     }
+
+                    // Mark this tool call as completed
+                    completed_tool_calls.push(tool_call.clone());
                 }
                 // After executing all tools, transition back to Thinking for the next loop iteration
                 self.transition_state(AgentState::Thinking).await;

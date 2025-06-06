@@ -112,6 +112,14 @@ Created Tauri v2 project structure with React frontend and established basic win
 - Added thinking process display
 - Created resizable developer panel
 
+### Task 2.5: Dictation Loading States ✅ DONE
+- Enhanced floating bar to show message submission loading states for dictation
+- Implemented identical loading sequence for both Dictation Mode and AI Agent Mode
+- Added "will-submit-query" → "success" → "shrinking" → "loading" → "backend-response" → "finishing" flow for dictated messages
+- Unified the user experience between typed and dictated message submissions
+- Maintained separate backend processing (direct typing for Dictation Mode, AI processing for Agent Mode)
+- Enhanced visual feedback consistency across all input methods
+
 ## Phase 3: Advanced Features
 
 ### Task 3.1: Context Awareness

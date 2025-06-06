@@ -8,6 +8,7 @@ use tauri::{State, Emitter};
 pub mod app_url;
 pub mod core;
 pub mod dictation;
+pub mod dictation_reset;
 pub mod element;
 pub mod filesystem;
 pub mod keyboard;
@@ -24,6 +25,7 @@ pub mod tools;
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;
 pub use self::dictation::*;
+pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
 pub use self::mouse::*;
 pub use self::permissions::*;
 pub use self::shell::*;
