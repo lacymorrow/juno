@@ -21,7 +21,7 @@ use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
 use crate::agent::tools::tool_config::ToolConfigManager;
 // Import cloud client
-use crate::cloud::{CloudClient, CloudConfig};
+use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 
 /// Timestamp tracking for log grouping (Slack/Apple Messages style)
 #[derive(Debug, Clone)]
@@ -86,6 +86,8 @@ pub struct AppState {
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
     pub cloud_config: Arc<TokioMutex<CloudConfig>>, // Cloud configuration
     pub cloud_enabled: Arc<Mutex<bool>>, // Track if cloud is enabled
+    // Production cloud connector
+    pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
 }
 
 impl AppState {
@@ -117,6 +119,8 @@ impl AppState {
             cloud_client: Arc::new(TokioMutex::new(None)),
             cloud_config: Arc::new(TokioMutex::new(CloudConfig::default())),
             cloud_enabled: Arc::new(Mutex::new(false)),
+            // Initialize production cloud connector
+            production_cloud_connector: Arc::new(TokioMutex::new(None)),
         }
     }
 
@@ -373,6 +377,43 @@ impl AppState {
         }
         
         Ok(())
+    }
+    
+    // Production cloud connector methods
+    
+    /// Set production cloud connector
+    pub async fn set_production_cloud_connector(&self, connector: ProductionCloudConnector) {
+        let mut connector_guard = self.production_cloud_connector.lock().await;
+        *connector_guard = Some(connector);
+    }
+    
+    /// Get production cloud connector
+    pub fn get_production_cloud_connector(&self) -> Option<ProductionCloudConnector> {
+        // We need to use try_lock here since this method is not async
+        // and we want to avoid blocking the caller
+        if let Ok(connector_guard) = self.production_cloud_connector.try_lock() {
+            connector_guard.clone()
+        } else {
+            None
+        }
+    }
+    
+    /// Get production cloud connector (async version)
+    pub async fn get_production_cloud_connector_async(&self) -> Option<ProductionCloudConnector> {
+        let connector_guard = self.production_cloud_connector.lock().await;
+        connector_guard.clone()
+    }
+    
+    /// Clear production cloud connector
+    pub async fn clear_production_cloud_connector(&self) {
+        let mut connector_guard = self.production_cloud_connector.lock().await;
+        *connector_guard = None;
+    }
+    
+    /// Check if production cloud connector is available
+    pub async fn has_production_cloud_connector(&self) -> bool {
+        let connector_guard = self.production_cloud_connector.lock().await;
+        connector_guard.is_some()
     }
 }
 

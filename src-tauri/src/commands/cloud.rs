@@ -1,6 +1,6 @@
 use tauri::{State, AppHandle};
 use serde::{Deserialize, Serialize};
-use tracing::{info, error};
+use tracing::{info, error, debug, warn};
 
 use crate::state::AppState;
 use crate::cloud::{CloudConfig, types::ConnectionState};
@@ -270,4 +270,145 @@ pub async fn generate_device_id(
     
     info!("Generated new device ID: {}", new_device_id);
     Ok(new_device_id)
+}
+
+#[tauri::command]
+pub async fn handle_cloud_message(
+    connection_id: String,
+    message: String,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Received cloud message from connection {}: {}", connection_id, message);
+    
+    // Parse the WebSocket message
+    let ws_message: crate::cloud::types::WebSocketMessage = serde_json::from_str(&message)
+        .map_err(|e| format!("Failed to parse WebSocket message: {}", e))?;
+    
+    // Handle different message types
+    match ws_message.message_type {
+        crate::cloud::types::MessageType::Command => {
+            let command: crate::cloud::types::CloudCommand = serde_json::from_value(ws_message.data)
+                .map_err(|e| format!("Failed to parse cloud command: {}", e))?;
+            
+            // Get the production connector from app state
+            if let Some(connector) = app_state.get_production_cloud_connector() {
+                match connector.execute_remote_command(command).await {
+                    Ok(response) => {
+                        // Send response back via WebSocket
+                        if let Err(e) = send_cloud_response(response).await {
+                            error!("Failed to send cloud response: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to execute remote command: {}", e);
+                        return Err(format!("Command execution failed: {}", e));
+                    }
+                }
+            } else {
+                return Err("Production cloud connector not available".to_string());
+            }
+        },
+        crate::cloud::types::MessageType::Auth => {
+            info!("Received authentication message from cloud");
+            // Authentication is handled by the connector itself
+        },
+        crate::cloud::types::MessageType::Heartbeat => {
+            debug!("Received heartbeat from cloud");
+            // Heartbeat is handled automatically
+        },
+        crate::cloud::types::MessageType::Error => {
+            let error_msg = ws_message.data.get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown cloud error");
+            error!("Received error from cloud: {}", error_msg);
+        },
+        _ => {
+            warn!("Unhandled cloud message type: {:?}", ws_message.message_type);
+        }
+    }
+    
+    Ok(())
+}
+
+/// Send response back to cloud via WebSocket
+async fn send_cloud_response(response: crate::cloud::types::DeviceResponse) -> Result<(), String> {
+    // This would be implemented to send the response back through the WebSocket
+    // For now, we'll emit it as an event that the frontend can catch and send
+    info!("Cloud response ready: {:?}", response);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_production_cloud_connector(
+    app_handle: tauri::AppHandle,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Starting production cloud connector");
+    
+    match crate::cloud::ProductionCloudConnector::new(app_handle).await {
+        Ok(connector) => {
+            match connector.start().await {
+                Ok(()) => {
+                    // Store the connector in app state
+                    app_state.set_production_cloud_connector(connector).await;
+                    info!("Production cloud connector started successfully");
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("Failed to start production cloud connector: {}", e);
+                    Err(format!("Failed to start connector: {}", e))
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to create production cloud connector: {}", e);
+            Err(format!("Failed to create connector: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn stop_production_cloud_connector(
+    app_state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Stopping production cloud connector");
+    
+    if let Some(connector) = app_state.get_production_cloud_connector() {
+        match connector.disconnect().await {
+            Ok(()) => {
+                app_state.clear_production_cloud_connector().await;
+                info!("Production cloud connector stopped successfully");
+                Ok(())
+            },
+            Err(e) => {
+                error!("Failed to stop production cloud connector: {}", e);
+                Err(format!("Failed to stop connector: {}", e))
+            }
+        }
+    } else {
+        warn!("No production cloud connector to stop");
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub async fn get_production_cloud_status(
+    app_state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if let Some(connector) = app_state.get_production_cloud_connector() {
+        let state = connector.get_connection_state().await;
+        let stats = connector.get_connection_stats().await;
+        
+        Ok(serde_json::json!({
+            "connected": matches!(state, crate::cloud::connector::ConnectorState::Ready),
+            "state": format!("{:?}", state),
+            "stats": stats
+        }))
+    } else {
+        Ok(serde_json::json!({
+            "connected": false,
+            "state": "Not initialized",
+            "stats": null
+        }))
+    }
 }
