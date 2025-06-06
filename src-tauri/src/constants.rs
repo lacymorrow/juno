@@ -24,6 +24,21 @@ pub mod events {
     // Settings events
     pub const SETTINGS_REQUESTED: &str = "settings-requested";
     pub const DEVTOOLS_REQUESTED: &str = "devtools-requested";
+    
+    // New menu events
+    pub const HELP_REQUESTED: &str = "help-requested";
+    pub const NEW_CHAT_REQUESTED: &str = "new-chat-requested";
+    pub const CLEAR_HISTORY_REQUESTED: &str = "clear-history-requested";
+    pub const IMPORT_CHAT_REQUESTED: &str = "import-chat-requested";
+    pub const EXPORT_CHAT_REQUESTED: &str = "export-chat-requested";
+    pub const TOGGLE_FLOATING_BAR_REQUESTED: &str = "toggle-floating-bar-requested";
+    pub const TOGGLE_DEV_PANEL_REQUESTED: &str = "toggle-dev-panel-requested";
+    pub const TOGGLE_FULLSCREEN_REQUESTED: &str = "toggle-fullscreen-requested";
+    pub const MINIMIZE_WINDOW_REQUESTED: &str = "minimize-window-requested";
+    pub const ZOOM_WINDOW_REQUESTED: &str = "zoom-window-requested";
+    pub const PERMISSIONS_REQUESTED: &str = "permissions-requested";
+    pub const FEEDBACK_REQUESTED: &str = "feedback-requested";
+    pub const UPDATE_CHECK_REQUESTED: &str = "update-check-requested";
 }
 
 pub mod window_labels {
@@ -35,11 +50,41 @@ pub mod tray_menu_ids {
     pub const QUIT: &str = "quit";
     pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";
     pub const SHOW_DEVTOOLS: &str = "show-devtools";
+    pub const SHOW_MAIN_WINDOW: &str = "show-main-window";
+    pub const NEW_CHAT: &str = "new-chat";
+    pub const SETTINGS: &str = "tray-settings";
 }
 
 pub mod app_menu_ids {
-    pub const SETTINGS: &str = "settings";
+    // Juno Menu
     pub const ABOUT: &str = "about";
+    pub const SETTINGS: &str = "settings";
+    pub const CHECK_FOR_UPDATES: &str = "check-for-updates";
+    
+    // File Menu
+    pub const NEW_CHAT: &str = "new-chat";
+    pub const CLEAR_HISTORY: &str = "clear-history";
+    pub const IMPORT_CHAT: &str = "import-chat";
+    pub const EXPORT_CHAT: &str = "export-chat";
+    
+    // View Menu
+    pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";
+    pub const TOGGLE_DEV_PANEL: &str = "toggle-dev-panel";
+    pub const SHOW_DEVTOOLS: &str = "show-devtools";
+    pub const SHOW_PERMISSIONS: &str = "show-permissions";
+    pub const TOGGLE_FULLSCREEN: &str = "toggle-fullscreen";
+    
+    // Window Menu
+    pub const MINIMIZE: &str = "minimize";
+    pub const ZOOM: &str = "zoom";
+    pub const BRING_ALL_TO_FRONT: &str = "bring-all-to-front";
+    
+    // Help Menu
+    pub const HELP: &str = "help";
+    pub const KEYBOARD_SHORTCUTS: &str = "keyboard-shortcuts";
+    pub const SEND_FEEDBACK: &str = "send-feedback";
+    pub const REPORT_ISSUE: &str = "report-issue";
+    pub const VISIT_WEBSITE: &str = "visit-website";
 }
 
 pub mod timeouts {

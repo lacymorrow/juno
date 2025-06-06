@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AlertCircle,
@@ -29,6 +30,7 @@ import {
   Settings as SettingsIcon,
   Shield,
   Terminal,
+  Type,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -895,57 +897,141 @@ const Settings: React.FC<SettingsProps> = ({
         </CardContent>
       </Card>
 
-      {/* Keyboard Shortcuts Info */}
+      {/* Voice & Keyboard Shortcuts */}
       <Card>
         <CardHeader>
-          <CardTitle>Keyboard Shortcuts</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Mic size={20} />
+            Voice & Keyboard Shortcuts
+          </CardTitle>
           <CardDescription>
-            Essential keyboard shortcuts for using Juno
+            Essential shortcuts for voice dictation and AI agent interaction
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Voice Input Shortcuts */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              Voice Input
+        <CardContent className="space-y-6">
+          {/* Voice Dictation Section */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+              Voice Dictation
             </h4>
-            <div className="space-y-2">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="font-medium">AI Agent Dictation</span>
-                  <p className="text-xs text-muted-foreground">
-                    Send voice commands to AI agent
-                  </p>
+            <div className="grid gap-4">
+              <div className="flex items-center justify-between p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-orange-100 dark:bg-orange-900/50 rounded-full">
+                    <Type className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                  </div>
+                  <div>
+                    <span className="font-medium text-orange-900 dark:text-orange-100">
+                      Direct Voice Typing
+                    </span>
+                    <p className="text-xs text-orange-700 dark:text-orange-300">
+                      Hold to type speech directly (no AI processing)
+                    </p>
+                  </div>
                 </div>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Alt+D</kbd>
+                <kbd className="px-3 py-1.5 bg-orange-200 dark:bg-orange-800 text-orange-800 dark:text-orange-200 rounded text-sm font-mono">
+                  ⌥+Space
+                </kbd>
               </div>
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="font-medium">Direct Voice Typing</span>
-                  <p className="text-xs text-muted-foreground">
-                    Hold to type speech directly (no AI processing)
-                  </p>
+
+              <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 dark:bg-blue-900/50 rounded-full">
+                    <Brain className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div>
+                    <span className="font-medium text-blue-900 dark:text-blue-100">
+                      AI Agent Voice
+                    </span>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      Send voice commands to AI agent for processing
+                    </p>
+                  </div>
                 </div>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Space</kbd>
+                <kbd className="px-3 py-1.5 bg-blue-200 dark:bg-blue-800 text-blue-800 dark:text-blue-200 rounded text-sm font-mono">
+                  ⌥+D
+                </kbd>
               </div>
             </div>
           </div>
 
-          {/* General Shortcuts */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              General
+          {/* General Shortcuts Section */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+              General Controls
             </h4>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span>Stop Current Task</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Escape</kbd>
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between p-2 rounded border">
+                <span className="text-sm">Cancel Current Operation</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm font-mono">
+                  Esc
+                </kbd>
               </div>
-              <div className="flex justify-between items-center">
-                <span>Settings</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Cmd+,</kbd>
+              <div className="flex items-center justify-between p-2 rounded border">
+                <span className="text-sm">Open Settings</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm font-mono">
+                  ⌘+,
+                </kbd>
               </div>
             </div>
+          </div>
+
+          {/* Voice Settings */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+              Voice Settings
+            </h4>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium">
+                    Enable Voice Feedback
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Play audio responses from AI agent
+                  </p>
+                </div>
+                <Switch
+                  checked={soundEnabled}
+                  onCheckedChange={handleSoundEnabledChange}
+                  id="voice-feedback"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium">
+                    Dictation to Clipboard
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Copy dictated text to clipboard automatically
+                  </p>
+                </div>
+                <Switch
+                  checked={dictationClipboardEnabled}
+                  onCheckedChange={handleDictationClipboardChange}
+                  id="dictation-clipboard"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Usage Tips */}
+          <div className="bg-muted/50 p-4 rounded-lg">
+            <h5 className="text-sm font-medium mb-2">💡 Voice Usage Tips</h5>
+            <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+              <li>
+                Hold Option+Space and speak for instant text input anywhere
+              </li>
+              <li>Press Alt+D to start a conversation with the AI agent</li>
+              <li>
+                The floating bar shows real-time voice status and transcription
+              </li>
+              <li>
+                Press Escape anytime to cancel voice input or stop the agent
+              </li>
+              <li>Voice feedback can be toggled in TTS settings above</li>
+            </ul>
           </div>
         </CardContent>
       </Card>
