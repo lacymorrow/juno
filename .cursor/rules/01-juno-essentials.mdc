@@ -25,11 +25,16 @@ Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Com
 - **Timer System**: Long-running task management with context resumption
 
 ### Voice Interaction Modes
-- **Agent Mode**: Alt+D toggles voice input for AI agent queries
-- **Dictation Mode**: Hold spacebar for immediate voice-to-text typing
+- **Agent Mode**: Alt+D toggles voice input for AI agent conversations and task execution
+  - Voice → Transcription → AI Agent Processing → Agent Response/Actions
+  - Full hierarchical agent system with orchestrator and specialists
+  - No direct text pasting - AI responses through chat interface
+- **Dictation Mode**: Configurable key (default spacebar) for immediate voice-to-text typing
+  - Voice → Transcription → Text insertion at cursor location
+  - Pure transcription service with no AI processing
   - Immediate transcription start (0ms delay)
   - 500ms threshold for commitment vs cancellation
-  - Smart cancellation with space passthrough
+  - Smart cancellation with key passthrough
 
 ### Hierarchical Agent System
 - **Orchestrator Agent**: Maintains personality and conversation memory
@@ -42,7 +47,7 @@ Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Com
 ### Core System
 - [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application setup and event handling
 - [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent
-- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Intelligent spacebar handling
+- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Dictation mode key handling
 
 ### Agent Architecture
 - [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations) - Agent runners and memory

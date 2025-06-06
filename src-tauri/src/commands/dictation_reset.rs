@@ -7,40 +7,42 @@ use std::sync::{Arc, Mutex};
 #[tauri::command]
 pub async fn force_reset_dictation_transcription(
     app: AppHandle,
+    state: State<'_, AppState>,
 ) -> Result<String, String> {
     warn!("[Command] force_reset_dictation_transcription called - performing emergency cleanup");
 
-    // Get app state for cleanup
-    let state = app.state::<crate::state::AppState>();
+    // Force stop the voice controller with timeout
+    let stop_result = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        tauri_plugin_voice_transcription::commands::stop_dictation(
+            app.clone(),
+            app.state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>()
+        )
+    ).await;
 
-    // Force stop any active voice transcription first
-    let voice_controller = state.voice_controller.clone();
-    if let Ok(mut controller) = voice_controller.try_lock() {
-        if let Some(ref mut voice_ctrl) = *controller {
-            match voice_ctrl.stop_transcription().await {
-                Ok(()) => {
-                    info!("[Command] Voice controller stopped successfully during force reset");
-                }
-                Err(e) => {
-                    error!("[Command] Failed to stop voice controller during force reset: {}", e);
-                }
-            }
+    match stop_result {
+        Ok(Ok(_)) => {
+            info!("[Command] Voice controller stopped successfully during force reset");
         }
-    } else {
-        warn!("[Command] Could not acquire voice controller lock during force reset");
+        Ok(Err(e)) => {
+            error!("[Command] Voice controller stop failed during force reset: {}", e);
+        }
+        Err(_) => {
+            error!("[Command] Voice controller stop timed out during force reset - may be deadlocked");
+        }
     }
 
-    // Reset dictation monitor state
-    crate::dictation_monitor::force_reset_dictation_state().await;
+    // Reset dictation input monitor state
+    crate::dictation_monitor::force_reset_dictation_input_state().await;
 
-    // Reset app state flags
+    // Force clean up app state
     if let Ok(mut dictation_active) = state.dictation_active.lock() {
         *dictation_active = false;
     } else {
-        error!("[Command] Failed to lock dictation_active during force reset");
+        error!("[Command] Failed to lock Dictation Mode active during force reset");
     }
 
-    // Emit cleanup events to frontend
+    // Emit state change events
     if let Err(e) = app.emit("dictation-active", false) {
         error!("[Command] Failed to emit dictation-active event during force reset: {}", e);
     }
@@ -57,29 +59,30 @@ pub async fn force_reset_dictation_transcription(
 #[tauri::command]
 pub async fn get_dictation_transcription_status(
     app: AppHandle,
-) -> Result<String, String> {
-    let state = app.state::<crate::state::AppState>();
-
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Get app state
     let dictation_active = state.dictation_active.lock()
         .map(|active| *active)
         .unwrap_or(false);
 
-    let voice_controller_active = {
-        let voice_controller = state.voice_controller.clone();
-        if let Ok(controller) = voice_controller.try_lock() {
-            controller.as_ref().map(|vc| vc.is_recording()).unwrap_or(false)
-        } else {
-            false
+    // Get voice controller state
+    let voice_controller_active = match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+        Some(controller_state) => {
+            controller_state.lock()
+                .map(|controller| controller.is_dictating())
+                .unwrap_or(false)
         }
+        None => false
     };
 
     let status = serde_json::json!({
         "dictation_active": dictation_active,
         "voice_controller_active": voice_controller_active,
         "state_consistent": dictation_active == voice_controller_active,
+        "timestamp": chrono::Utc::now().to_rfc3339()
     });
 
-    let status_str = status.to_string();
     info!("[Command] Dictation transcription status: {}", status);
-    Ok(status_str)
+    Ok(status)
 }

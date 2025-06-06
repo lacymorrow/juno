@@ -45,7 +45,7 @@ pub mod utils;
 pub mod agent;
 pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
-pub mod spacebar_monitor; // New module for intelligent spacebar handling
+pub mod dictation_monitor; // Module for intelligent dictation input handling
 
 // Embed tray icon data directly in the binary - no file system dependencies
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
@@ -53,6 +53,9 @@ const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
+
+// Import dictation reset commands
+use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
 
 // Import tool configuration commands explicitly
 use crate::commands::{
@@ -145,7 +148,7 @@ pub fn run() {
             let escape_shortcut = Shortcut::new(None, Code::Escape);
             // TODO: Make the dictation shortcut configurable
             let dictation_toggle_shortcut = Shortcut::new(Some(ShortcutModifiers::ALT), Code::KeyD);
-            let spacebar_shortcut = Shortcut::new(None, Code::Space);
+            let dictation_input_shortcut = Shortcut::new(None, Code::Space);
 
             if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
                 println!("[GlobalShortcut] Escape pressed! Signaling agent stop.");
@@ -161,14 +164,14 @@ pub fn run() {
                 if let Err(e) = app.emit("toggle-dictation-request", ()) {
                     tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
                 }
-            } else if shortcut == &spacebar_shortcut {
-                // Handle spacebar with timing logic
+            } else if shortcut == &dictation_input_shortcut {
+                // Handle dictation input with timing logic
                 let app_clone = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if event.state() == ShortcutState::Pressed {
-                        crate::spacebar_monitor::on_spacebar_pressed().await;
+                        crate::dictation_monitor::on_dictation_input_pressed().await;
                     } else if event.state() == ShortcutState::Released {
-                        crate::spacebar_monitor::on_spacebar_released(&app_clone).await;
+                        crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
                     }
                 });
             }
@@ -247,8 +250,11 @@ pub fn run() {
             get_agent_mode,
             set_agent_mode,
             // Dictation Settings Commands
-            get_spacebar_clipboard_enabled,
-            set_spacebar_clipboard_enabled,
+            get_dictation_clipboard_enabled,
+            set_dictation_clipboard_enabled,
+            // Dictation Reset Commands
+            force_reset_dictation_transcription,
+            get_dictation_transcription_status,
             // Permissions Commands
             check_permissions_status,
             request_accessibility_permission,
@@ -599,18 +605,18 @@ pub fn run() {
                      eprintln!("[GlobalShortcut Error] Failed to register {} shortcut: {}", dictation_shortcut_str, e);
                 }
 
-                // Register Spacebar Shortcut with intelligent hold-to-dictate logic
+                // Register Dictation Input Shortcut with intelligent hold-to-dictate logic
                 if let Err(e) = app_handle_shortcuts.global_shortcut().register("Space") {
                     eprintln!("[GlobalShortcut Error] Failed to register Space shortcut: {}", e);
                 } else {
-                    info!("[GlobalShortcut] Spacebar shortcut registered with hold-to-dictate logic");
+                    info!("[GlobalShortcut] Dictation input shortcut registered with hold-to-dictate logic");
                 }
 
-                // Initialize spacebar monitoring system
-                if let Err(e) = crate::spacebar_monitor::init_spacebar_monitoring(app_handle_shortcuts.clone()).await {
-                    tracing::error!("[Setup] Failed to initialize spacebar monitoring: {}", e);
+                // Initialize dictation input monitoring system
+                if let Err(e) = crate::dictation_monitor::init_dictation_input_monitoring(app_handle_shortcuts.clone()).await {
+                    tracing::error!("[Setup] Failed to initialize dictation input monitoring: {}", e);
                 } else {
-                    info!("[Setup] Spacebar monitoring system initialized successfully");
+                    info!("[Setup] Dictation input monitoring system initialized successfully");
                 }
             });
 
@@ -642,13 +648,13 @@ pub fn run() {
                 // Check if Dictation Mode is active - if so, skip AI agent processing
                 // This prevents AI processing when user is doing immediate voice-to-text
                 let app_state = app_handle_for_listener.state::<state::AppState>();
-                let is_spacebar_active = app_state.spacebar_dictation_active.lock()
+                let is_dictation_active = app_state.dictation_active.lock()
                     .map(|active| *active)
                     .unwrap_or(false);
 
-                if is_spacebar_active {
+                if is_dictation_active {
                     info!("[Event] Skipping AI agent processing - Dictation Mode is active");
-                    return; // Exit early, let spacebar handler process this
+                    return; // Exit early, let dictation handler process this
                 }
 
                 info!("[Event] Processing final result for AI Agent Mode");
@@ -689,13 +695,13 @@ pub fn run() {
                 }
             });
 
-                        // Listen for spacebar transcription start events (immediate)
-            let app_handle_for_spacebar_start = app.handle().clone();
-            app.listen("spacebar-transcription-start", move |_event| {
-                info!("[Event] Received spacebar-transcription-start event - starting immediate transcription");
+                        // Listen for dictation transcription start events (immediate)
+            let app_handle_for_dictation_start = app.handle().clone();
+            app.listen("dictation-transcription-start", move |_event| {
+                info!("[Event] Received dictation-transcription-start event - starting immediate transcription");
 
                 // Start dictation using the voice transcription plugin command
-                let app_handle_clone = app_handle_for_spacebar_start.clone();
+                let app_handle_clone = app_handle_for_dictation_start.clone();
                 tauri::async_runtime::spawn(async move {
                     // Use the plugin command to start dictation
                     match tauri_plugin_voice_transcription::commands::start_dictation(
@@ -706,11 +712,11 @@ pub fn run() {
                             info!("[Dictation Mode] Started immediate transcription successfully");
                             // Mark this as Dictation Mode in AppState
                             let app_state = app_handle_clone.state::<state::AppState>();
-                            if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                                *spacebar_active = true;
+                            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                                *dictation_active = true;
                             }
-                            if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", true) {
-                                tracing::error!("[Dictation Mode] Failed to emit spacebar-dictation-active event: {}", e);
+                            if let Err(e) = app_handle_clone.emit("dictation-active", true) {
+                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                             }
                         }
                         Err(e) => {
@@ -718,16 +724,16 @@ pub fn run() {
 
                             // Clean up state if start failed
                             let app_state = app_handle_clone.state::<state::AppState>();
-                            if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                                *spacebar_active = false;
+                            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                                *dictation_active = false;
                             }
 
-                            // Reset spacebar monitor state
-                            crate::spacebar_monitor::force_reset_spacebar_state().await;
+                            // Reset dictation input monitor state
+                            crate::dictation_monitor::force_reset_dictation_input_state().await;
 
                             // Emit failure event to UI
-                            if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                                tracing::error!("[Dictation Mode] Failed to emit spacebar-dictation-active event after start failure: {}", e);
+                            if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
                             }
                         }
                     }
@@ -735,21 +741,21 @@ pub fn run() {
             });
 
             // Listen for Dictation Mode commitment events (threshold reached)
-            let app_handle_for_spacebar_committed = app.handle().clone();
-            app.listen("spacebar-dictation-committed", move |_event| {
-                info!("[Event] Received spacebar-dictation-committed event - threshold reached");
-                // This event indicates the user has held spacebar long enough to commit to dictation
+            let app_handle_for_dictation_committed = app.handle().clone();
+            app.listen("dictation-committed", move |_event| {
+                info!("[Event] Received dictation-committed event - threshold reached");
+                // This event indicates the user has held dictation input long enough to commit to dictation
                 // We can use this for additional UI feedback if needed
                 // The transcription is already running, so we just acknowledge the commitment
             });
 
-                        // Listen for spacebar transcription cancellation events (released before threshold)
-            let app_handle_for_spacebar_cancel = app.handle().clone();
-            app.listen("spacebar-transcription-cancel", move |_event| {
-                info!("[Event] Received spacebar-transcription-cancel event - cancelling transcription");
+                        // Listen for dictation transcription cancellation events (released before threshold)
+            let app_handle_for_dictation_cancel = app.handle().clone();
+            app.listen("dictation-transcription-cancel", move |_event| {
+                info!("[Event] Received dictation-transcription-cancel event - cancelling transcription");
 
                 // Stop dictation and discard results
-                let app_handle_clone = app_handle_for_spacebar_cancel.clone();
+                let app_handle_clone = app_handle_for_dictation_cancel.clone();
                 tauri::async_runtime::spawn(async move {
                     // Use the plugin command to stop dictation
                     match tauri_plugin_voice_transcription::commands::stop_dictation(
@@ -766,22 +772,22 @@ pub fn run() {
 
                     // Always clean up state regardless of stop_dictation result
                     let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                        *spacebar_active = false;
+                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                        *dictation_active = false;
                     }
-                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                        tracing::error!("[Dictation Mode] Failed to emit spacebar-dictation-active event: {}", e);
+                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
                 });
             });
 
             // Listen for Dictation Mode stop events (normal completion)
-            let app_handle_for_spacebar_stop = app.handle().clone();
-            app.listen("spacebar-dictation-stop", move |_event| {
-                info!("[Event] Received spacebar-dictation-stop event - completing dictation normally");
+            let app_handle_for_dictation_stop = app.handle().clone();
+            app.listen("dictation-stop", move |_event| {
+                info!("[Event] Received dictation-stop event - completing dictation normally");
 
                 // Stop dictation using the voice transcription plugin command
-                let app_handle_clone = app_handle_for_spacebar_stop.clone();
+                let app_handle_clone = app_handle_for_dictation_stop.clone();
                 tauri::async_runtime::spawn(async move {
                     // Use the plugin command to stop dictation
                     match tauri_plugin_voice_transcription::commands::stop_dictation(
@@ -798,19 +804,19 @@ pub fn run() {
 
                     // Always clean up state regardless of stop_dictation result
                     let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                        *spacebar_active = false;
+                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                        *dictation_active = false;
                     }
-                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                        tracing::error!("[Dictation Mode] Failed to emit spacebar-dictation-active event: {}", e);
+                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
                 });
             });
 
             // Listen for force stop events (timeout/stuck transcription)
             let app_handle_for_force_stop = app.handle().clone();
-            app.listen("spacebar-transcription-force-stop", move |_event| {
-                warn!("[Event] Received spacebar-transcription-force-stop event - emergency cleanup");
+            app.listen("dictation-transcription-force-stop", move |_event| {
+                warn!("[Event] Received dictation-transcription-force-stop event - emergency cleanup");
 
                 let app_handle_clone = app_handle_for_force_stop.clone();
                 tauri::async_runtime::spawn(async move {
@@ -837,34 +843,34 @@ pub fn run() {
 
                     // Force clean up state
                     let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                        *spacebar_active = false;
+                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                        *dictation_active = false;
                     }
-                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                        error!("[Dictation Mode] Failed to emit spacebar-dictation-active event: {}", e);
+                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
                 });
             });
 
             // Listen for force cleanup events (stuck state recovery)
             let app_handle_for_force_cleanup = app.handle().clone();
-            app.listen("spacebar-transcription-force-cleanup", move |_event| {
-                warn!("[Event] Received spacebar-transcription-force-cleanup event - recovering stuck state");
+            app.listen("dictation-transcription-force-cleanup", move |_event| {
+                warn!("[Event] Received dictation-transcription-force-cleanup event - recovering stuck state");
 
                 let app_handle_clone = app_handle_for_force_cleanup.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Reset spacebar monitor state
-                    crate::spacebar_monitor::force_reset_spacebar_state().await;
+                    // Reset dictation input monitor state
+                    crate::dictation_monitor::force_reset_dictation_input_state().await;
 
                     // Force clean up app state
                     let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                        *spacebar_active = false;
+                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                        *dictation_active = false;
                     }
 
                     // Emit cleanup complete event
-                    if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                        error!("[Dictation Mode] Failed to emit spacebar-dictation-active event: {}", e);
+                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
 
                     info!("[Dictation Mode] Force cleanup completed");
@@ -872,19 +878,19 @@ pub fn run() {
             });
 
                                     // Listen for voice transcription final results specifically for Dictation Mode
-            let app_handle_for_spacebar_result = app.handle().clone();
+            let app_handle_for_dictation_result = app.handle().clone();
             app.listen("voice-transcription:final-result", move |event| {
                 // Check if we're in Dictation Mode and handle immediate typing
-                let app_handle_clone = app_handle_for_spacebar_result.clone();
+                let app_handle_clone = app_handle_for_dictation_result.clone();
                 tauri::async_runtime::spawn(async move {
                     let app_state = app_handle_clone.state::<state::AppState>();
 
                     // Check if Dictation Mode is active
-                    let is_spacebar_active = app_state.spacebar_dictation_active.lock()
+                    let is_dictation_active = app_state.dictation_active.lock()
                         .map(|active| *active)
                         .unwrap_or(false);
 
-                    if is_spacebar_active {
+                    if is_dictation_active {
                         info!("[Dictation Mode] Processing final result for immediate typing");
 
                         // Parse the transcription result
@@ -897,9 +903,9 @@ pub fn run() {
                                         let trimmed_text = text.trim();
                                         if !trimmed_text.is_empty() {
                                             // Check if clipboard saving is enabled
-                                            let clipboard_enabled = app_state.spacebar_clipboard_enabled.lock()
-                                                .map(|enabled| *enabled)
-                                                .unwrap_or(true); // Default to true if lock fails
+                                                                        let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
+                                .map(|enabled| *enabled)
+                                .unwrap_or(true); // Default to true if lock fails
 
                                             // Store to clipboard if enabled
                                             if clipboard_enabled {
@@ -942,13 +948,13 @@ pub fn run() {
                         }
 
                         // Reset Dictation Mode state after processing
-                        if let Ok(mut spacebar_active) = app_state.spacebar_dictation_active.lock() {
-                            *spacebar_active = false;
+                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                            *dictation_active = false;
                         }
 
                         // Emit state change event for UI
-                        if let Err(e) = app_handle_clone.emit("spacebar-dictation-active", false) {
-                            error!("[Dictation Mode] Failed to emit spacebar-dictation-active event after final result: {}", e);
+                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
                         }
                     }
                 });

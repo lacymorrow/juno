@@ -78,8 +78,9 @@ AgentFactory::register_computer_use_tools(&mut provider, app_handle).await?;
 ## Voice System Implementation
 
 ### Dual-Mode Voice Control
-- **Agent Mode (Alt+D)**: Voice → AI agent → Response
-- **Dictation Mode (Spacebar)**: Voice → Immediate typing at cursor
+- **Agent Mode (Alt+D)**: Voice → Transcription → AI Agent Processing → Agent Response/Actions
+- **Dictation Mode (Configurable Key)**: Voice → Transcription → Text insertion at cursor location
+- **Shared Infrastructure**: Both modes use same voice transcription with different result handling
 - **Timing Logic**: 0ms start, 500ms commitment threshold
 
 ### Event Flow Pattern
@@ -93,16 +94,16 @@ app.listen("voice-transcription:final-result", move |event| {
 
 ### State Coordination
 ```rust
-// Check spacebar dictation mode to avoid AI processing
-let is_spacebar_active = app_state.spacebar_dictation_active.lock()
+// Check Dictation Mode to avoid AI processing
+let is_dictation_active = app_state.dictation_active.lock()
     .map(|active| *active)
     .unwrap_or(false);
 
-if is_spacebar_active {
-    // Process for immediate typing
+if is_dictation_active {
+    // Process for immediate typing (Dictation Mode)
     return;
 }
-// Otherwise process for AI agent
+// Otherwise process for AI agent (Agent Mode)
 ```
 
 ## Computer Use Tools
@@ -162,7 +163,7 @@ pub enum AgentType {
 - Use Arc for shared state when needed
 
 ### Testing Protocol
-1. Test voice dictation modes independently
+1. Test voice Dictation Mode independently
 2. Verify computer use actions work correctly
 3. Test agent delegation and response integration
 4. Validate event flow and state synchronization
