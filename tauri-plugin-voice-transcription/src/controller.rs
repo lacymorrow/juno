@@ -15,6 +15,28 @@ use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 
+/// Filters out unwanted sequences from transcription text
+fn filter_transcription_text(text: &str) -> String {
+    // Remove [BLANK AUDIO] sequences and any variations
+    let filtered = text
+        .replace("[BLANK AUDIO]", "")
+        .replace("[blank audio]", "")
+        .replace("[Blank Audio]", "")
+        .replace("[ BLANK AUDIO ]", "")
+        .replace("[ blank audio ]", "")
+        .replace("[ Blank Audio ]", "");
+    
+    // Clean up multiple spaces and trim
+    let cleaned = filtered
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    
+    cleaned
+}
+
 enum AudioThreadMessage {
     Stop,
 }
@@ -140,7 +162,7 @@ impl VoiceController {
                 .map_err(|e| format!("Failed to get segment text: {:?}", e))?;
             full_text.push_str(&segment);
         }
-        Ok(full_text)
+        Ok(filter_transcription_text(&full_text))
     }
 
     pub fn start_dictation<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
@@ -429,7 +451,7 @@ impl VoiceController {
                 }
                 if !partial_text.is_empty() {
                     let _ = app_handle.emit("voice-transcription:partial-result",
-                        serde_json::json!({ "text": partial_text }));
+                        serde_json::json!({ "text": filter_transcription_text(&partial_text) }));
                 }
             }
             Err(e) => tracing::error!("[AudioThread] Error transcribing partial chunk: {:?}", e),
@@ -531,7 +553,7 @@ impl VoiceController {
 
                     info!("[AudioThread] Final transcription result: '{}'", transcription_text);
                     let _ = app_handle.emit("voice-transcription:final-result",
-                        serde_json::json!({ "text": transcription_text }));
+                        serde_json::json!({ "text": filter_transcription_text(&transcription_text) }));
                     let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
                 }
                 Err(e) => {
@@ -594,3 +616,41 @@ impl VoiceController {
 // Ensure the controller is thread-safe
 unsafe impl Send for VoiceController {}
 unsafe impl Sync for VoiceController {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_filter_transcription_text() {
+        // Test basic [BLANK AUDIO] removal
+        assert_eq!(filter_transcription_text("Hello [BLANK AUDIO] world"), "Hello world");
+        
+        // Test multiple [BLANK AUDIO] sequences
+        assert_eq!(filter_transcription_text("Start [BLANK AUDIO] middle [BLANK AUDIO] end"), "Start middle end");
+        
+        // Test different case variations
+        assert_eq!(filter_transcription_text("Test [blank audio] case"), "Test case");
+        assert_eq!(filter_transcription_text("Test [Blank Audio] case"), "Test case");
+        
+        // Test with spaces around brackets
+        assert_eq!(filter_transcription_text("Test [ BLANK AUDIO ] spaces"), "Test spaces");
+        assert_eq!(filter_transcription_text("Test [ blank audio ] spaces"), "Test spaces");
+        
+        // Test text with only [BLANK AUDIO]
+        assert_eq!(filter_transcription_text("[BLANK AUDIO]"), "");
+        assert_eq!(filter_transcription_text("[BLANK AUDIO] [blank audio]"), "");
+        
+        // Test text with extra whitespace that should be cleaned up
+        assert_eq!(filter_transcription_text("  Multiple   spaces  "), "Multiple spaces");
+        
+        // Test mixed scenarios
+        assert_eq!(filter_transcription_text("  Start [BLANK AUDIO]   middle   [blank audio]  end  "), "Start middle end");
+        
+        // Test normal text without [BLANK AUDIO]
+        assert_eq!(filter_transcription_text("Normal transcription text"), "Normal transcription text");
+        
+        // Test empty string
+        assert_eq!(filter_transcription_text(""), "");
+    }
+}

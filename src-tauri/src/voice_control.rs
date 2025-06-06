@@ -1,4 +1,4 @@
-use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
+use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters, WhisperState};
 use std::path::Path;
 use tracing::info;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -14,7 +14,27 @@ use tauri::Emitter; // Added Emitter trait for .emit()
 
 const WHISPER_SAMPLE_RATE: u32 = 16000; // Define the constant
 
-
+/// Filters out unwanted sequences from transcription text
+fn filter_transcription_text(text: &str) -> String {
+    // Remove [BLANK AUDIO] sequences and any variations
+    let filtered = text
+        .replace("[BLANK AUDIO]", "")
+        .replace("[blank audio]", "")
+        .replace("[Blank Audio]", "")
+        .replace("[ BLANK AUDIO ]", "")
+        .replace("[ blank audio ]", "")
+        .replace("[ Blank Audio ]", "");
+    
+    // Clean up multiple spaces and trim
+    let cleaned = filtered
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    
+    cleaned
+}
 
 // Enum to send messages to the audio thread
 enum AudioThreadMessage {
@@ -114,7 +134,7 @@ impl VoiceController {
                 .map_err(|e| format!("Failed to get segment text: {:?}", e))?;
             full_text.push_str(&segment);
         }
-        Ok(full_text)
+        Ok(filter_transcription_text(&full_text))
     }
 
     // --- Dictation Methods ---
@@ -357,7 +377,7 @@ impl VoiceController {
                                         }
                                         if !partial_text.is_empty() {
                                             info!("[AudioThread] Emitting final app-dictation-partial-result: {}", partial_text);
-                                            if let Err(e) = app_handle_for_thread.emit("app-dictation-partial-result", serde_json::json!({ "partial": partial_text })) {
+                                            if let Err(e) = app_handle_for_thread.emit("app-dictation-partial-result", serde_json::json!({ "partial": filter_transcription_text(&partial_text) })) {
                                                 eprintln!("[AudioThread] Error emitting final app-dictation-partial-result: {:?}", e);
                                             }
                                         }
@@ -500,14 +520,23 @@ impl VoiceController {
                                     info!("[AudioThread] FINAL Transcription successful: {}", transcription_text);
                                     // Emit Tauri event with transcription_text
                                     if !transcription_text.is_empty() {
-                                        // This is the FINAL result, not a partial.
-                                        // The frontend expects `app-dictation-finished` with a query.
-                                        // And Bar.tsx listens for "app-dictation-finished"
-                                        // Payload: { query: string | null; error?: string; }
-                                        if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": transcription_text, "error": null })) {
-                                            eprintln!("[AudioThread] Failed to emit app-dictation-finished event: {:?}", e);
+                                        // Filter the transcription text before emitting
+                                        let filtered_text = filter_transcription_text(&transcription_text);
+                                        if !filtered_text.is_empty() {
+                                            // This is the FINAL result, not a partial.
+                                            // The frontend expects `app-dictation-finished` with a query.
+                                            // And Bar.tsx listens for "app-dictation-finished"
+                                            // Payload: { query: string | null; error?: string; }
+                                            if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": filtered_text, "error": null })) {
+                                                eprintln!("[AudioThread] Failed to emit app-dictation-finished event: {:?}", e);
+                                            } else {
+                                                info!("[AudioThread] Emitted app-dictation-finished event with transcription: {}", filtered_text);
+                                            }
                                         } else {
-                                            info!("[AudioThread] Emitted app-dictation-finished event with transcription: {}", transcription_text);
+                                            info!("[AudioThread] Filtered transcription was empty, emitting app-dictation-finished with null query.");
+                                            if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": null, "error": "Empty transcription after filtering" })) {
+                                                eprintln!("[AudioThread] Failed to emit app-dictation-finished (empty after filtering) event: {:?}", e);
+                                            }
                                         }
                                     } else {
                                         info!("[AudioThread] FINAL Transcription was empty, emitting app-dictation-finished with null query.");
@@ -819,6 +848,37 @@ mod tests {
          assert!(!controller.is_dictating());
      }
 
-
+    #[test]
+    fn test_filter_transcription_text() {
+        // Test basic [BLANK AUDIO] removal
+        assert_eq!(filter_transcription_text("Hello [BLANK AUDIO] world"), "Hello world");
+        
+        // Test multiple [BLANK AUDIO] sequences
+        assert_eq!(filter_transcription_text("Start [BLANK AUDIO] middle [BLANK AUDIO] end"), "Start middle end");
+        
+        // Test different case variations
+        assert_eq!(filter_transcription_text("Test [blank audio] case"), "Test case");
+        assert_eq!(filter_transcription_text("Test [Blank Audio] case"), "Test case");
+        
+        // Test with spaces around brackets
+        assert_eq!(filter_transcription_text("Test [ BLANK AUDIO ] spaces"), "Test spaces");
+        assert_eq!(filter_transcription_text("Test [ blank audio ] spaces"), "Test spaces");
+        
+        // Test text with only [BLANK AUDIO]
+        assert_eq!(filter_transcription_text("[BLANK AUDIO]"), "");
+        assert_eq!(filter_transcription_text("[BLANK AUDIO] [blank audio]"), "");
+        
+        // Test text with extra whitespace that should be cleaned up
+        assert_eq!(filter_transcription_text("  Multiple   spaces  "), "Multiple spaces");
+        
+        // Test mixed scenarios
+        assert_eq!(filter_transcription_text("  Start [BLANK AUDIO]   middle   [blank audio]  end  "), "Start middle end");
+        
+        // Test normal text without [BLANK AUDIO]
+        assert_eq!(filter_transcription_text("Normal transcription text"), "Normal transcription text");
+        
+        // Test empty string
+        assert_eq!(filter_transcription_text(""), "");
+    }
 }
 
