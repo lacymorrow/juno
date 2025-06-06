@@ -158,7 +158,8 @@ impl VoiceController {
                 .map_err(|e| format!("Failed to get segment text: {:?}", e))?;
             full_text.push_str(&segment);
         }
-        Ok(filter_transcription_text(&full_text))
+        // Return unfiltered text for AI agent processing
+        Ok(full_text)
     }
 
     pub fn start_dictation<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
@@ -548,8 +549,9 @@ impl VoiceController {
                     }
 
                     info!("[AudioThread] Final transcription result: '{}'", transcription_text);
+                    // Send unfiltered text to AI agent - includes [BLANK AUDIO], [SILENCE], etc.
                     let _ = app_handle.emit("voice-transcription:final-result",
-                        serde_json::json!({ "text": filter_transcription_text(&transcription_text) }));
+                        serde_json::json!({ "text": transcription_text }));
                     let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
                 }
                 Err(e) => {
@@ -619,6 +621,9 @@ mod tests {
 
     #[test]
     fn test_filter_transcription_text() {
+        // Note: This function is now only used for filtering partial results displayed to users
+        // Final results go unfiltered to the AI agent to preserve full context
+        
         // Test basic capital text removal
         assert_eq!(filter_transcription_text("Hello [BLANK AUDIO] world"), "Hello world");
         assert_eq!(filter_transcription_text("Test [SILENCE] case"), "Test case");

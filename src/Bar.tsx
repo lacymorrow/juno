@@ -5,6 +5,7 @@ import { Check, Mic, Send, Volume2, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import tauriConfig from "../src-tauri/tauri.conf.json";
 import { cn } from "./lib/utils";
+import { filterTranscriptionForDisplay } from "./lib/transcriptionFilter";
 
 // Get default window dimensions from tauri.conf.json
 const floatingBarConfig = tauriConfig.app.windows.find(
@@ -415,7 +416,9 @@ export function FloatingBar() {
             barState === "transcribing" ||
             barState === "dictating"
           ) {
-            setTranscriptionText(event.payload.partial);
+            // Filter transcription for display - removes [BLANK AUDIO], [SILENCE], etc.
+            const filteredText = filterTranscriptionForDisplay(event.payload.partial);
+            setTranscriptionText(filteredText);
             // Update state to show transcribing unless we're in Dictation Mode
             if (barState === "listening") {
               setBarState(isDictationMode ? "dictating" : "transcribing");

@@ -130,7 +130,8 @@ impl VoiceController {
                 .map_err(|e| format!("Failed to get segment text: {:?}", e))?;
             full_text.push_str(&segment);
         }
-        Ok(filter_transcription_text(&full_text))
+        // Return unfiltered text for AI agent processing
+        Ok(full_text)
     }
 
     // --- Dictation Methods ---
@@ -516,23 +517,12 @@ impl VoiceController {
                                     info!("[AudioThread] FINAL Transcription successful: {}", transcription_text);
                                     // Emit Tauri event with transcription_text
                                     if !transcription_text.is_empty() {
-                                        // Filter the transcription text before emitting
-                                        let filtered_text = filter_transcription_text(&transcription_text);
-                                        if !filtered_text.is_empty() {
-                                            // This is the FINAL result, not a partial.
-                                            // The frontend expects `app-dictation-finished` with a query.
-                                            // And Bar.tsx listens for "app-dictation-finished"
-                                            // Payload: { query: string | null; error?: string; }
-                                            if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": filtered_text, "error": null })) {
-                                                eprintln!("[AudioThread] Failed to emit app-dictation-finished event: {:?}", e);
-                                            } else {
-                                                info!("[AudioThread] Emitted app-dictation-finished event with transcription: {}", filtered_text);
-                                            }
+                                        // Send unfiltered text to AI agent - includes [BLANK AUDIO], [SILENCE], etc.
+                                        // This provides complete context to the AI
+                                        if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": transcription_text, "error": null })) {
+                                            eprintln!("[AudioThread] Failed to emit app-dictation-finished event: {:?}", e);
                                         } else {
-                                            info!("[AudioThread] Filtered transcription was empty, emitting app-dictation-finished with null query.");
-                                            if let Err(e) = app_handle_for_thread.emit("app-dictation-finished", serde_json::json!({ "query": null, "error": "Empty transcription after filtering" })) {
-                                                eprintln!("[AudioThread] Failed to emit app-dictation-finished (empty after filtering) event: {:?}", e);
-                                            }
+                                            info!("[AudioThread] Emitted app-dictation-finished event with transcription: {}", transcription_text);
                                         }
                                     } else {
                                         info!("[AudioThread] FINAL Transcription was empty, emitting app-dictation-finished with null query.");
@@ -846,6 +836,9 @@ mod tests {
 
     #[test]
     fn test_filter_transcription_text() {
+        // Note: This function is now only used for filtering partial results displayed to users
+        // Final results go unfiltered to the AI agent to preserve full context
+        
         // Test basic capital text removal
         assert_eq!(filter_transcription_text("Hello [BLANK AUDIO] world"), "Hello world");
         assert_eq!(filter_transcription_text("Test [SILENCE] case"), "Test case");
