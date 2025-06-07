@@ -11,6 +11,12 @@ pub async fn invoke_system_tts(
 ) -> Result<String, String> {
     info!("Invoking macOS system TTS for text: {}", text);
 
+    // Check if stop was requested before starting
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested before starting system TTS, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     let temp_file = NamedTempFile::new()
         .map_err(|e| format!("Failed to create temporary file: {}", e))?;
     let temp_path = temp_file.path().to_path_buf();
@@ -35,10 +41,25 @@ pub async fn invoke_system_tts(
         .arg(&text)
         .output(); // Use output() to wait for completion and capture stderr
 
+    // Check if stop was requested during execution
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested during system TTS execution, cleaning up");
+        let _ = fs::remove_file(&output_path);
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     match output {
         Ok(cmd_output) => {
             if cmd_output.status.success() {
                 info!("'say' command executed successfully.");
+
+                // Check again before reading the file
+                if crate::tts::is_tts_stop_requested() {
+                    info!("TTS stop was requested after system TTS completion, not returning audio");
+                    let _ = fs::remove_file(&output_path);
+                    return Ok("TTS_STOPPED_BY_USER".to_string());
+                }
+
                 // Read the generated audio file
                 match fs::read(&output_path) {
                     Ok(audio_bytes) => {
