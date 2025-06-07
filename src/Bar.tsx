@@ -276,23 +276,23 @@ export function FloatingBar() {
   return (
     <div
       data-window-hovered={isWindowHovered}
-      className="w-screen h-screen flex items-start justify-start"
+      className="w-screen h-screen flex items-start justify-start bg-transparent"
     >
-      <div className="relative z-50 p-3">
+      <div className="relative z-50 p-3 bg-transparent">
         <div
           data-tauri-drag-region
           className={cn(
             `
-            flex items-center justify-center bg-black/90 text-white
-            rounded-full shadow-lg border border-white/20 overflow-hidden
+            flex items-center justify-center bg-black/20 text-white
+            rounded-full shadow-lg border border-white/10 overflow-hidden
             transition-all duration-300 ease-in-out
             [will-change:width,height,transform]
             [backface-visibility:hidden]
             [transform-origin:center]
+            backdrop-blur-md
             ${getBarStyles()}
             ${barState === "default" ? "cursor-pointer" : ""}
             `,
-            !isAnimatingSize && "backdrop-blur-md",
             barState === "default" &&
               isWindowHovered &&
               "[transform:scale3d(1.05,1.05,1)]"
