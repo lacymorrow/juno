@@ -12,53 +12,58 @@ import FileOperations from "./devtools/FileOperations";
 import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
+import WakeWordTesting from "./devtools/WakeWordTesting";
 import WindowOperations from "./devtools/WindowOperations";
 
-const initialLoadingStates: LoadingStates = {
-  screenshot: false,
-  focusInfo: false,
-  focusDelay: false,
-  elementScreenshot: false,
-  clickFocus: false,
-  typeText: false,
-  pressKey: false,
-  openApp: false,
-  openUrl: false,
-  scroll: false,
-  globalTypeText: false,
-  getClipboard: false,
-  setClipboard: false,
-  holdKey: false,
-  releaseKey: false,
-  wait: false,
-  findElement: false,
-  clickElement: false,
-  getSelectedText: false,
-  getWindowList: false,
-  getWindowInfo: false,
-  focusWindow: false,
-  resizeWindow: false,
-  moveWindow: false,
-  closeWindow: false,
-  listFiles: false,
-  getFileContent: false,
-  setFileContent: false,
-  mouseMove: false,
-  mouseDown: false,
-  mouseUp: false,
-  mouseClick: false,
-  mouseDoubleClick: false,
-  mouseDrag: false,
-  testClickVisualization: false,
-  setDeveloperPlayback: false,
-  playbackAudio: false,
-  setTtsProvider: false,
-  testSystemContext: false,
-};
-
 const DevToolsPanel: React.FC = () => {
-  // Loading states for potential future use with operation status tracking
-  const [,] = useState<LoadingStates>(initialLoadingStates);
+  const [loadingStates, setLoadingStates] = useState<LoadingStates>({
+    screenshot: false,
+    focusInfo: false,
+    focusDelay: false,
+    elementScreenshot: false,
+    clickFocus: false,
+    typeText: false,
+    pressKey: false,
+    openApp: false,
+    openUrl: false,
+    scroll: false,
+    globalTypeText: false,
+    getClipboard: false,
+    setClipboard: false,
+    holdKey: false,
+    releaseKey: false,
+    wait: false,
+    findElement: false,
+    clickElement: false,
+    getSelectedText: false,
+    getWindowList: false,
+    getWindowInfo: false,
+    focusWindow: false,
+    resizeWindow: false,
+    moveWindow: false,
+    closeWindow: false,
+    listFiles: false,
+    getFileContent: false,
+    setFileContent: false,
+    mouseMove: false,
+    mouseDown: false,
+    mouseUp: false,
+    mouseClick: false,
+    mouseDoubleClick: false,
+    mouseDrag: false,
+    testClickVisualization: false,
+    setDeveloperPlayback: false,
+    playbackAudio: false,
+    setTtsProvider: false,
+    testSystemContext: false,
+    // Always Listening Testing
+    debugAlwaysListening: false,
+    startAlwaysListening: false,
+    stopAlwaysListening: false,
+    toggleAlwaysListening: false,
+    setAlwaysListeningSensitivity: false,
+    setAlwaysListeningWakeWords: false,
+  });
   const [appToOpen, setAppToOpen] = useState<string>("TextEdit");
   const [urlToOpen, setUrlToOpen] = useState<string>("https://www.google.com");
   const [waitDuration, setWaitDuration] = useState<string>("1000");
@@ -99,6 +104,15 @@ const DevToolsPanel: React.FC = () => {
           <h2 className="text-lg font-semibold">Cloud & WebSocket Testing</h2>
           <Separator className="my-2" />
           <CloudTestPanel />
+        </div>
+
+        <div>
+          <h2 className="text-lg font-semibold">Wake Word Testing</h2>
+          <Separator className="my-2" />
+          <WakeWordTesting
+            loadingStates={loadingStates}
+            setLoadingStates={setLoadingStates}
+          />
         </div>
 
         <div>
