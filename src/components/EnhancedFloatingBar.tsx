@@ -314,31 +314,32 @@ export function EnhancedFloatingBar() {
   const getContainerStyles = () => {
     const baseStyles = `
       relative flex items-center justify-center
-      text-white rounded-full shadow-lg border border-white/20
+      text-white rounded-full shadow-lg border border-white/10
       transition-all duration-300 ease-in-out
       [will-change:width,height,transform]
       [backface-visibility:hidden]
       [transform-origin:center]
+      backdrop-blur-md
     `;
 
-    // Background based on state with gradients for better visual feedback
-    let bgColor = "bg-black/90";
+    // Background based on state with proper transparency for pill effect
+    let bgColor = "bg-black/20";
 
     if (isDictationMode) {
-      bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
+      bgColor = "bg-gradient-to-r from-orange-600/30 to-orange-700/30";
     } else if (isAgentWorking) {
-      bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
+      bgColor = "bg-gradient-to-r from-blue-600/30 to-blue-700/30";
     }
 
     // Override for specific states
     if (barState === "error") {
-      bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
+      bgColor = "bg-gradient-to-r from-red-600/30 to-red-700/30";
     } else if (barState === "success") {
-      bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
+      bgColor = "bg-gradient-to-r from-emerald-600/30 to-emerald-700/30";
     } else if (barState === "dictating") {
-      bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
+      bgColor = "bg-gradient-to-r from-orange-600/30 to-orange-700/30";
     } else if (barState === "listening") {
-      bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
+      bgColor = "bg-gradient-to-r from-blue-600/30 to-blue-700/30";
     }
 
     const sizeStyles = ["default", "shrinking", "finishing"].includes(barState)
@@ -357,23 +358,22 @@ export function EnhancedFloatingBar() {
       bgColor,
       sizeStyles,
       hoverEffect,
-      clickable,
-      !isAnimatingSize && "backdrop-blur-md"
+      clickable
     );
   };
 
   return (
-    <div className="w-screen h-screen flex items-start justify-start relative">
+    <div className="w-screen h-screen flex items-start justify-start relative bg-transparent">
       {/* Enhanced Tooltip */}
       {showTooltip && barState === "default" && (
         <div className="absolute top-16 left-8 z-50 animate-fade-in">
-          <div className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs">
+          <div className="bg-black/20 text-white text-xs px-3 py-2 rounded-lg border border-white/10 backdrop-blur-md max-w-xs">
             {getStatusText()}
           </div>
         </div>
       )}
 
-      <div className="relative z-50 p-3">
+      <div className="relative z-50 p-3 bg-transparent">
         <div
           data-tauri-drag-region
           className={getContainerStyles()}
