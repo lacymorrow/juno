@@ -2,7 +2,7 @@
 
 use crate::state::{AppState, KeyboardShortcuts};
 use tauri::{State, AppHandle};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, error, warn};
 use serde_json;
@@ -235,8 +235,15 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
         warn!("Failed to parse dictation input shortcut: {}", shortcuts.dictation_input);
     }
 
-    // Note: Escape key is registered dynamically during agent execution
-    // Settings shortcut is handled by the menu system
+    // Register the escape key for cancellation (always active)
+    let escape_shortcut = Shortcut::new(None, Code::Escape);
+    if let Err(e) = app.global_shortcut().register(escape_shortcut) {
+        error!("Failed to register escape key shortcut: {}", e);
+    } else {
+        info!("Registered escape key for cancellation");
+    }
+
+    // Note: Settings shortcut is handled by the menu system
 
     info!("Updated global shortcut registrations");
     Ok(())

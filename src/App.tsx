@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator"; // Import the VoiceStatusIndicator component
 import { useSound, useVoiceSounds } from "@/hooks/useSound"; // Import sound hooks
+import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService"; // Import TTS service
 import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
@@ -235,44 +236,6 @@ function App() {
     // Remove frontend boot sound call
   }, []);
 
-  // Clear conversation and reset app state
-  const clearConversation = async () => {
-    try {
-      await invoke("clear_conversation_history");
-      setConversation([]);
-      setQuery("");
-      console.log("Conversation cleared successfully");
-    } catch (error) {
-      console.error("Failed to clear conversation:", error);
-      setConversation([
-        {
-          role: "system",
-          content: `Error clearing conversation: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-  };
-
-  // Start a new agent chat
-  const startNewChat = useCallback(async () => {
-    try {
-      await invoke("clear_conversation_history");
-      setConversation([]);
-      setQuery("");
-      console.log("New chat started successfully");
-    } catch (error) {
-      console.error("Failed to start new chat:", error);
-      setConversation([
-        {
-          role: "system",
-          content: `Error starting new chat: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-  }, []);
-
   // Handle backend responses via event listener
   const handleBackendResponse = useCallback(
     debounce((payload: BackendResponsePayload) => {
@@ -393,6 +356,21 @@ function App() {
     },
     [isProcessing, serverStatus, setConversation, setQuery, setIsProcessing]
   );
+
+  // Function to start a new chat (clear conversation and reset state)
+  const startNewChat = useCallback(() => {
+    console.log("Starting new chat - clearing conversation");
+    setConversation([]);
+    setQuery("");
+    setIsProcessing(false);
+  }, [setConversation, setQuery, setIsProcessing]);
+
+  // Function to clear conversation history
+  const clearConversation = useCallback(() => {
+    console.log("Clearing conversation history");
+    setConversation([]);
+    setIsProcessing(false);
+  }, [setConversation, setIsProcessing]);
 
   // Listen for settings menu requests from native menu
   useEffect(() => {
@@ -708,39 +686,40 @@ function App() {
     };
   }, [handleBackendResponse]); // Add debounced handler to dependency array
 
+  // Listen for agent stopping events to stop TTS
+  useEffect(() => {
+    const unlisten = listen("agent-stopping", async () => {
+      console.log("Agent stopping event received - stopping TTS");
+      try {
+        await stopTTS((msg, level) =>
+          console.log(`[TTS-${level || "info"}] ${msg}`)
+        );
+      } catch (error) {
+        console.error("Error stopping TTS:", error);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
     const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
-      console.log("Received agent-event (RAW):", event); // Log the entire event object
       const { type, payload } = event.payload;
       const currentTime = Date.now();
 
       setConversation((prev) => {
         let newMessage: ChatMessage | null = null;
-        console.log(
-          `[Agent Event Processor] Event type: ${type}, Payload:`,
-          payload
-        ); // Log type and payload
 
         if (type === "thinking" && "content" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing thinking. Payload:",
-            payload
-          );
           newMessage = {
             role: "thinking",
             content: payload.content || "Thinking...",
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created thinking newMessage:",
-            newMessage
-          );
         } else if (type === "tool_call_request" && "tool_name" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing tool_call_request. Payload:",
-            payload
-          );
           const requestPayload = payload as ToolCallRequestPayload;
           newMessage = {
             role: "tool_call_request",
@@ -751,15 +730,7 @@ function App() {
               `Using tool: ${requestPayload.tool_name}`,
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created tool_call_request newMessage:",
-            newMessage
-          );
         } else if (type === "tool_call_result" && "tool_name" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing tool_call_result. Payload:",
-            payload
-          );
           const resultPayload = payload as ToolCallResultPayload;
           newMessage = {
             role: "tool_call_result",
@@ -774,40 +745,17 @@ function App() {
             screenshot_base64: resultPayload.screenshot_base64,
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created tool_call_result newMessage:",
-            newMessage
-          );
         } else if (type === "generic_content" && "content" in payload) {
-          console.log(
-            "[Agent Event Processor] Processing generic_content. Payload:",
-            payload
-          );
           newMessage = {
             role: "system",
             content: payload.content || "System message",
             timestamp: currentTime,
           };
-          console.log(
-            "[Agent Event Processor] Created generic_content newMessage:",
-            newMessage
-          );
-        } else {
-          console.log(
-            `[Agent Event Processor] Unhandled/unsupported event type for this listener: ${type}`
-          );
         }
 
         if (newMessage) {
-          console.log(
-            "[Agent Event Processor] Adding newMessage to conversation:",
-            newMessage
-          );
           return [...prev, newMessage];
         } else {
-          console.log(
-            "[Agent Event Processor] No newMessage created, conversation unchanged."
-          );
           return prev;
         }
       });
@@ -839,7 +787,11 @@ function App() {
     // Stop any currently playing audio
     if (currentAudio) {
       currentAudio.pause();
-      currentAudio.src = ""; // Release object URL implicitly via new assignment below
+      currentAudio.currentTime = 0;
+      if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
+        URL.revokeObjectURL(currentAudio.src);
+      }
+      currentAudio.src = ""; // Clear the source
     }
 
     try {
@@ -847,12 +799,14 @@ function App() {
       const audioUrl = URL.createObjectURL(audioBlob);
       const newAudio = new Audio(audioUrl);
       setCurrentAudio(newAudio); // Store the new audio element
+      setCurrentAudioElement(newAudio); // Sync with TTS service
 
       newAudio.play();
 
       newAudio.onended = () => {
         URL.revokeObjectURL(audioUrl); // Clean up object URL
         setCurrentAudio(null);
+        setCurrentAudioElement(null); // Sync with TTS service
 
         // Notify backend that TTS has finished so it can play the success sound
         invoke("handle_tts_completion").catch((error) => {
@@ -863,10 +817,12 @@ function App() {
         console.error("Audio playback error:", e);
         URL.revokeObjectURL(audioUrl); // Clean up object URL
         setCurrentAudio(null);
+        setCurrentAudioElement(null); // Sync with TTS service
       };
     } catch (error) {
       console.error("Error processing or playing audio:", error);
       setCurrentAudio(null);
+      setCurrentAudioElement(null); // Sync with TTS service
     }
   };
 
@@ -880,6 +836,7 @@ function App() {
           URL.revokeObjectURL(currentAudio.src);
         }
         setCurrentAudio(null); // Clear the audio reference
+        setCurrentAudioElement(null); // Sync with TTS service
       }
     };
   }, [currentAudio]);

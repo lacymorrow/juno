@@ -3,7 +3,6 @@
 use tauri::State;
 use crate::state::AppState;
 use tracing::{info, error};
-// Removed unused import: super::send_dev_tool_notification
 
 #[tauri::command]
 pub(crate) async fn dev_open_application(app_name: String, state: State<'_, AppState>) -> Result<(), String> {
