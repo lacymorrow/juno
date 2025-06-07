@@ -75,7 +75,7 @@ export const CloudTestPanel: React.FC = () => {
   );
   const [isRunningTests, setIsRunningTests] = useState(false);
 
-  // New remote command testing state
+  // Remote command state variables
   const [remoteCommand, setRemoteCommand] = useState("system_command");
   const [remotePayload, setRemotePayload] = useState(
     '{"action": "screenshot"}'
@@ -118,22 +118,12 @@ export const CloudTestPanel: React.FC = () => {
     }
   };
 
-  const loadConnectionDiagnostics = async () => {
-    try {
-      const connDiag = await invoke<any>("get_cloud_connection_diagnostics");
-      setConnectionDiagnostics(connDiag);
-    } catch (error) {
-      console.error("Failed to load connection diagnostics:", error);
-    }
-  };
-
   const refreshAll = async () => {
     setIsLoading(true);
     await Promise.all([
       loadCloudStatus(),
       loadCloudConfig(),
       loadDiagnostics(),
-      loadConnectionDiagnostics(),
     ]);
     setIsLoading(false);
   };
@@ -259,10 +249,10 @@ export const CloudTestPanel: React.FC = () => {
       setIsLoading(true);
 
       // Test 1: Basic connection test
-      const basicTest = await invoke("test_websocket_connection");
+      const basicTest = (await invoke("test_websocket_connection")) as any;
       setTestResults((prev) => [
         {
-          success: basicTest.success || true,
+          success: (basicTest as any).success || true,
           test: "Quick Test - Basic WebSocket",
           response: basicTest,
           timestamp: Date.now() / 1000,
@@ -283,10 +273,10 @@ export const CloudTestPanel: React.FC = () => {
       ]);
 
       // Test 3: Run test suite
-      const testSuite = await invoke("run_websocket_test_suite");
+      const testSuite = (await invoke("run_websocket_test_suite")) as any;
       setTestResults((prev) => [
         {
-          success: testSuite.overall_success || true,
+          success: (testSuite as any).overall_success || true,
           test: "Quick Test - Test Suite",
           response: testSuite,
           timestamp: Date.now() / 1000,
@@ -312,19 +302,11 @@ export const CloudTestPanel: React.FC = () => {
     setIsLoading(true);
     try {
       const payload = JSON.parse(remotePayload);
-      const result = await invoke<any>("execute_remote_command", {
+      const result = await invoke<TestResult>("execute_remote_command", {
         commandType: remoteCommand,
         payload,
       });
-      setRemoteTestResults((prev) => [
-        {
-          success: result.success,
-          test: `Remote ${remoteCommand}`,
-          response: result,
-          timestamp: Date.now(),
-        },
-        ...prev,
-      ]);
+      setRemoteTestResults((prev) => [result, ...prev]);
     } catch (error) {
       console.error("Remote command failed:", error);
       setRemoteTestResults((prev) => [
@@ -337,6 +319,18 @@ export const CloudTestPanel: React.FC = () => {
       ]);
     }
     setIsLoading(false);
+  };
+
+  const loadConnectionDiagnostics = async () => {
+    try {
+      setIsLoading(true);
+      const diagnostics = await invoke("get_cloud_connection_diagnostics");
+      setConnectionDiagnostics(diagnostics);
+    } catch (error) {
+      console.error("Failed to load connection diagnostics:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
