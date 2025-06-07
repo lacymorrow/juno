@@ -244,49 +244,66 @@ impl CloudCommandProcessor {
     async fn execute_system_command(&self, command: CloudCommand) -> Result<CommandResult, CloudError> {
         info!("Executing system command: {}", command.id);
 
-        match &command.payload {
-            Some(payload) => {
-                let action = payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        // Extract action from parameters
+        let action = command.payload.parameters
+            .as_ref()
+            .and_then(|params| params.get("action"))
+            .map(|s| s.as_str())
+            .unwrap_or("");
 
-                match action {
-                    "screenshot" => {
-                        info!("Taking screenshot for remote command");
-                        self.execute_screenshot_command().await
-                    },
-                    "click" => {
-                        let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                        info!("Executing click at ({}, {})", x, y);
-                        self.execute_click_command(x, y).await
-                    },
-                    "type" => {
-                        let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                        info!("Executing type command: {}", text);
-                        self.execute_type_command(text).await
-                    },
-                    "key" => {
-                        let key = payload.get("key").and_then(|v| v.as_str()).unwrap_or("");
-                        info!("Executing key press: {}", key);
-                        self.execute_key_command(key).await
-                    },
-                    "execute" => {
-                        let shell_command = payload.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                        info!("Executing shell command: {}", shell_command);
-                        self.execute_shell_command(shell_command).await
-                    },
-                    "status" => {
-                        info!("Getting system status");
-                        self.execute_status_request().await
-                    },
-                    _ => {
-                        warn!("Unknown system command action: {}", action);
-                        Err(CloudError::InvalidCommand(format!("Unknown action: {}", action)))
-                    }
-                }
+        match action {
+            "screenshot" => {
+                info!("Taking screenshot for remote command");
+                self.execute_screenshot_command().await
             },
-            None => {
-                error!("System command missing payload");
-                Err(CloudError::InvalidCommand("Missing payload for system command".to_string()))
+            "click" => {
+                let x = command.payload.parameters
+                    .as_ref()
+                    .and_then(|params| params.get("x"))
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let y = command.payload.parameters
+                    .as_ref()
+                    .and_then(|params| params.get("y"))
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                info!("Executing click at ({}, {})", x, y);
+                self.execute_click_command(x, y).await
+            },
+            "type" => {
+                let text = command.payload.parameters
+                    .as_ref()
+                    .and_then(|params| params.get("text"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                info!("Executing type command: {}", text);
+                self.execute_type_command(text).await
+            },
+            "key" => {
+                let key = command.payload.parameters
+                    .as_ref()
+                    .and_then(|params| params.get("key"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                info!("Executing key press: {}", key);
+                self.execute_key_command(key).await
+            },
+            "execute" => {
+                let shell_command = command.payload.parameters
+                    .as_ref()
+                    .and_then(|params| params.get("command"))
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                info!("Executing shell command: {}", shell_command);
+                self.execute_shell_command(shell_command).await
+            },
+            "status" => {
+                info!("Getting system status");
+                self.execute_status_request().await
+            },
+            _ => {
+                warn!("Unknown system command action: {}", action);
+                Err(CloudError::InvalidCommand(format!("Unknown action: {}", action)))
             }
         }
     }
@@ -298,7 +315,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing mouse click functionality
-        match crate::commands::mouse::dev_left_click(x, y, app_state).await {
+        match crate::commands::mouse::dev_left_click(self.app_handle.clone(), app_state, x, y, None).await {
             Ok(_) => {
                 Ok(CommandResult {
                     success: true,
@@ -355,7 +372,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing key press functionality
-        match crate::commands::keyboard::dev_press_key(key.to_string(), app_state).await {
+        match crate::commands::keyboard::dev_press_key(key.to_string(), None, app_state).await {
             Ok(_) => {
                 Ok(CommandResult {
                     success: true,
@@ -383,7 +400,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing shell command functionality
-        match crate::commands::shell::dev_bash_command(command.to_string(), app_state).await {
+        match crate::commands::shell::dev_bash_command(self.app_handle.clone(), app_state, command.to_string(), None, None).await {
             Ok(output) => {
                 Ok(CommandResult {
                     success: true,

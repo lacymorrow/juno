@@ -357,9 +357,10 @@ export const CloudTestPanel: React.FC = () => {
       </div>
 
       <Tabs defaultValue="status" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="status">Status</TabsTrigger>
           <TabsTrigger value="testing">Testing</TabsTrigger>
+          <TabsTrigger value="remote">Remote</TabsTrigger>
           <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
           <TabsTrigger value="results">Results</TabsTrigger>
         </TabsList>
@@ -528,6 +529,57 @@ export const CloudTestPanel: React.FC = () => {
 
           <Card>
             <CardHeader>
+              <CardTitle>Remote Command Test</CardTitle>
+              <CardDescription>
+                Test remote system commands (screenshot, click, type, etc.)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="remote-command-type">Command Type</Label>
+                <select
+                  id="remote-command-type"
+                  value={remoteCommand}
+                  onChange={(e) => setRemoteCommand(e.target.value)}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="system_command">System Command</option>
+                  <option value="text_query">Text Query</option>
+                  <option value="screenshot">Screenshot</option>
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="remote-payload">Payload (JSON)</Label>
+                <Textarea
+                  id="remote-payload"
+                  value={remotePayload}
+                  onChange={(e) => setRemotePayload(e.target.value)}
+                  rows={4}
+                  placeholder='{"action": "screenshot"}'
+                />
+              </div>
+              <div className="text-xs text-gray-600 space-y-1">
+                <p><strong>Available actions:</strong></p>
+                <p>• screenshot - Take a screenshot</p>
+                <p>• click - Click at coordinates: {"action": "click", "x": 100, "y": 200}</p>
+                <p>• type - Type text: {"action": "type", "text": "Hello World"}</p>
+                <p>• key - Press key: {"action": "key", "key": "Return"}</p>
+                <p>• execute - Run shell command: {"action": "execute", "command": "ls -la"}</p>
+                <p>• status - Get system status</p>
+              </div>
+              <Button
+                onClick={executeRemoteCommand}
+                disabled={isLoading}
+                className="w-full"
+              >
+                <Play className="h-4 w-4 mr-2" />
+                Execute Remote Command
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Comprehensive Test Suite</CardTitle>
               <CardDescription>Run all WebSocket tests at once</CardDescription>
             </CardHeader>
@@ -545,6 +597,131 @@ export const CloudTestPanel: React.FC = () => {
                 />
                 {isRunningTests ? "Running Tests..." : "Run Test Suite"}
               </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="remote" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Remote System Control</CardTitle>
+              <CardDescription>
+                Execute system commands remotely via cloud connection
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="remote-cmd-type">Command Type</Label>
+                <select
+                  id="remote-cmd-type"
+                  value={remoteCommand}
+                  onChange={(e) => setRemoteCommand(e.target.value)}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="system_command">System Command</option>
+                  <option value="text_query">Text Query</option>
+                  <option value="screenshot">Screenshot</option>
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="remote-cmd-payload">Command Payload</Label>
+                <Textarea
+                  id="remote-cmd-payload"
+                  value={remotePayload}
+                  onChange={(e) => setRemotePayload(e.target.value)}
+                  rows={6}
+                  placeholder='{"action": "screenshot"}'
+                />
+              </div>
+              <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded space-y-1">
+                <p><strong>System Command Examples:</strong></p>
+                <div className="grid grid-cols-1 gap-1 font-mono">
+                  <p>{"action": "screenshot"}</p>
+                  <p>{"action": "click", "x": 100, "y": 200}</p>
+                  <p>{"action": "type", "text": "Hello World"}</p>
+                  <p>{"action": "key", "key": "Return"}</p>
+                  <p>{"action": "execute", "command": "ls -la"}</p>
+                  <p>{"action": "status"}</p>
+                </div>
+              </div>
+              <Button
+                onClick={executeRemoteCommand}
+                disabled={isLoading}
+                className="w-full"
+              >
+                <Play className="h-4 w-4 mr-2" />
+                Execute Remote Command
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Remote Command Results</CardTitle>
+              <CardDescription>
+                History of remote command executions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-64">
+                {remoteTestResults.length > 0 ? (
+                  <div className="space-y-2">
+                    {remoteTestResults.map((result, index) => (
+                      <div
+                        key={index}
+                        className="p-3 border rounded-lg space-y-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {getTestResultIcon(result.success)}
+                            <span className="font-medium">
+                              {result.test || "Remote Command"}
+                            </span>
+                          </div>
+                          {result.timestamp && (
+                            <span className="text-xs text-gray-500">
+                              {new Date(result.timestamp).toLocaleTimeString()}
+                            </span>
+                          )}
+                        </div>
+
+                        {result.error && (
+                          <Alert>
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>{result.error}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {result.response && (
+                          <details className="text-xs">
+                            <summary className="cursor-pointer text-blue-600">
+                              View Response
+                            </summary>
+                            <pre className="bg-gray-100 p-2 rounded mt-2 overflow-auto">
+                              {JSON.stringify(result.response, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-center py-8">
+                    No remote command results yet. Execute commands to see results here.
+                  </p>
+                )}
+              </ScrollArea>
+
+              {remoteTestResults.length > 0 && (
+                <Button
+                  onClick={() => setRemoteTestResults([])}
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                >
+                  Clear Results
+                </Button>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -594,6 +771,89 @@ export const CloudTestPanel: React.FC = () => {
                 </div>
               ) : (
                 <p className="text-gray-500">Loading diagnostics...</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                Cloud Connection Diagnostics
+                <Button
+                  onClick={loadConnectionDiagnostics}
+                  disabled={isLoading}
+                  size="sm"
+                  variant="outline"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+                  />
+                  Refresh
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {connectionDiagnostics ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Connection Active</Label>
+                      <Badge
+                        variant={
+                          connectionDiagnostics.connection_active
+                            ? "default"
+                            : "destructive"
+                        }
+                      >
+                        {connectionDiagnostics.connection_active ? "Yes" : "No"}
+                      </Badge>
+                    </div>
+                    <div>
+                      <Label>Last Heartbeat</Label>
+                      <p className="text-sm">
+                        {connectionDiagnostics.last_heartbeat || "None"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {connectionDiagnostics.performance_metrics && (
+                    <div className="pt-4 border-t">
+                      <Label>Performance Metrics</Label>
+                      <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                        {JSON.stringify(connectionDiagnostics.performance_metrics, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {connectionDiagnostics.error_history && connectionDiagnostics.error_history.length > 0 && (
+                    <div className="pt-4 border-t">
+                      <Label>Recent Errors</Label>
+                      <div className="space-y-2 mt-2">
+                        {connectionDiagnostics.error_history.map((error: any, index: number) => (
+                          <Alert key={index}>
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>
+                              <span className="text-xs text-gray-500">
+                                {error.timestamp}
+                              </span>
+                              <br />
+                              {error.message}
+                            </AlertDescription>
+                          </Alert>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t">
+                    <Label>Full Diagnostics</Label>
+                    <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                      {JSON.stringify(connectionDiagnostics, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-gray-500">No connection diagnostics available. Click refresh to load.</p>
               )}
             </CardContent>
           </Card>
