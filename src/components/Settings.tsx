@@ -16,15 +16,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { KeyboardShortcuts } from "@/types/keyboard";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AlertCircle,
   Brain,
   CheckCircle,
+  Keyboard,
   Mic,
   MonitorSpeaker,
   Network,
   RefreshCw,
+  RotateCcw,
   Save,
   Settings as SettingsIcon,
   Shield,
@@ -126,6 +130,18 @@ const Settings: React.FC<SettingsProps> = ({
   } | null>(null);
   const [permissionsLoading, setPermissionsLoading] = useState<boolean>(false);
 
+  // Keyboard Shortcuts state
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState<KeyboardShortcuts>(
+    {
+      agent_mode_toggle: "",
+      dictation_input: "",
+      stop_current_task: "",
+      open_settings: "",
+    }
+  );
+  const [shortcutsLoading, setShortcutsLoading] = useState<boolean>(false);
+  const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
+
   // Load initial settings
   useEffect(() => {
     loadAllSettings();
@@ -183,6 +199,12 @@ const Settings: React.FC<SettingsProps> = ({
 
       // Load tool configurations
       await loadToolConfigurations();
+
+      // Load keyboard shortcuts
+      const shortcuts = await invoke<KeyboardShortcuts>(
+        "get_keyboard_shortcuts"
+      );
+      setKeyboardShortcuts(shortcuts);
     } catch (error) {
       console.error("Failed to load settings:", error);
       toast.error("Failed to load settings");
@@ -448,6 +470,69 @@ const Settings: React.FC<SettingsProps> = ({
     } finally {
       setToolConfigLoading(false);
     }
+  };
+
+  // Keyboard Shortcuts handlers
+  const handleShortcutChange = async (shortcutName: string, value: string) => {
+    try {
+      setShortcutsLoading(true);
+      await invoke("set_keyboard_shortcut", {
+        shortcutName,
+        shortcutValue: value,
+      });
+
+      setKeyboardShortcuts((prev) => ({
+        ...prev,
+        [shortcutName]: value,
+      }));
+
+      toast.success(`Updated ${getShortcutDisplayName(shortcutName)} shortcut`);
+    } catch (error) {
+      console.error("Failed to update shortcut:", error);
+      toast.error(`Failed to update shortcut: ${error}`);
+    } finally {
+      setShortcutsLoading(false);
+      setEditingShortcut(null);
+    }
+  };
+
+  const handleResetShortcuts = async () => {
+    try {
+      setShortcutsLoading(true);
+      await invoke("reset_keyboard_shortcuts");
+
+      const shortcuts = await invoke<KeyboardShortcuts>(
+        "get_keyboard_shortcuts"
+      );
+      setKeyboardShortcuts(shortcuts);
+
+      toast.success("Keyboard shortcuts reset to defaults");
+    } catch (error) {
+      console.error("Failed to reset shortcuts:", error);
+      toast.error("Failed to reset shortcuts");
+    } finally {
+      setShortcutsLoading(false);
+    }
+  };
+
+  const getShortcutDisplayName = (shortcutName: string): string => {
+    const names: Record<string, string> = {
+      agent_mode_toggle: "Agent Mode Toggle",
+      dictation_input: "Dictation Input",
+      stop_current_task: "Stop Current Task",
+      open_settings: "Open Settings",
+    };
+    return names[shortcutName] || shortcutName;
+  };
+
+  const getShortcutDescription = (shortcutName: string): string => {
+    const descriptions: Record<string, string> = {
+      agent_mode_toggle: "Send voice commands to AI agent",
+      dictation_input: "Direct voice typing (hold to activate)",
+      stop_current_task: "Stop any running AI task",
+      open_settings: "Open the settings menu",
+    };
+    return descriptions[shortcutName] || "";
   };
 
   const currentProvider = providers.find((p) => p.id === activeProvider);
@@ -895,56 +980,218 @@ const Settings: React.FC<SettingsProps> = ({
         </CardContent>
       </Card>
 
-      {/* Keyboard Shortcuts Info */}
+      {/* Voice & Keyboard Shortcuts */}
       <Card>
         <CardHeader>
-          <CardTitle>Keyboard Shortcuts</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Keyboard size={20} />
+            Voice & Keyboard Shortcuts
+          </CardTitle>
           <CardDescription>
-            Essential keyboard shortcuts for using Juno
+            Configure shortcuts for voice dictation and AI agent interaction
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Voice Input Shortcuts */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              Voice Input
-            </h4>
-            <div className="space-y-2">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="font-medium">AI Agent Dictation</span>
-                  <p className="text-xs text-muted-foreground">
-                    Send voice commands to AI agent
-                  </p>
-                </div>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Alt+D</kbd>
+        <CardContent className="space-y-6">
+          {/* Customizable Keyboard Shortcuts */}
+          {shortcutsLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <span>Updating shortcuts...</span>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+                  Customizable Shortcuts
+                </h4>
+                {Object.entries(keyboardShortcuts)
+                  .filter(([key]) => key !== "open_settings") // Don't allow changing settings shortcut
+                  .map(([key, value]) => (
+                    <div key={key} className="space-y-2">
+                      <Label htmlFor={`shortcut-${key}`}>
+                        {getShortcutDisplayName(key)}
+                      </Label>
+                      <div className="flex items-center gap-3">
+                        {editingShortcut === key ? (
+                          <div className="flex items-center gap-2 flex-1">
+                            <Input
+                              id={`shortcut-${key}`}
+                              value={value}
+                              onChange={(e) =>
+                                setKeyboardShortcuts((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.value,
+                                }))
+                              }
+                              placeholder="Enter shortcut (e.g., Alt+D)"
+                              className="flex-1"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  handleShortcutChange(key, value);
+                                } else if (e.key === "Escape") {
+                                  setEditingShortcut(null);
+                                  // Reset to original value
+                                  const original =
+                                    keyboardShortcuts[
+                                      key as keyof KeyboardShortcuts
+                                    ];
+                                  setKeyboardShortcuts((prev) => ({
+                                    ...prev,
+                                    [key]: original,
+                                  }));
+                                }
+                              }}
+                              onBlur={() => {
+                                handleShortcutChange(key, value);
+                              }}
+                              autoFocus
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => handleShortcutChange(key, value)}
+                              disabled={shortcutsLoading}
+                            >
+                              <Save className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingShortcut(null);
+                                // Reset to original value
+                                const original =
+                                  keyboardShortcuts[
+                                    key as keyof KeyboardShortcuts
+                                  ];
+                                setKeyboardShortcuts((prev) => ({
+                                  ...prev,
+                                  [key]: original,
+                                }));
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between flex-1">
+                            <div className="flex items-center gap-3">
+                              <kbd className="px-2 py-1 bg-muted rounded text-sm min-w-[80px] text-center">
+                                {value || "Not set"}
+                              </kbd>
+                              <span className="text-sm text-muted-foreground">
+                                {getShortcutDescription(key)}
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingShortcut(key)}
+                            >
+                              Edit
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
               </div>
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="font-medium">Direct Voice Typing</span>
-                  <p className="text-xs text-muted-foreground">
-                    Hold to type speech directly (no AI processing)
-                  </p>
-                </div>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Space</kbd>
+
+              <div className="flex gap-2 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResetShortcuts}
+                  disabled={shortcutsLoading}
+                >
+                  <RotateCcw className="h-4 w-4 mr-1" />
+                  Reset to Defaults
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* Fixed System Shortcuts */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+              System Shortcuts
+            </h4>
+            <div className="grid gap-3">
+              <div className="flex items-center justify-between p-2 rounded border">
+                <span className="text-sm">Cancel Current Operation</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm font-mono">
+                  Esc
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded border">
+                <span className="text-sm">Open Settings</span>
+                <kbd className="px-2 py-1 bg-muted rounded text-sm font-mono">
+                  {keyboardShortcuts.open_settings || "⌘+,"}
+                </kbd>
               </div>
             </div>
           </div>
 
-          {/* General Shortcuts */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              General
+          {/* Voice Settings */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-medium text-muted-foreground uppercase tracking-wide border-b pb-2">
+              Voice Settings
             </h4>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span>Stop Current Task</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Escape</kbd>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium">
+                    Enable Voice Feedback
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Play audio responses from AI agent
+                  </p>
+                </div>
+                <Switch
+                  checked={soundEnabled}
+                  onCheckedChange={handleSoundEnabledChange}
+                  id="voice-feedback"
+                />
               </div>
-              <div className="flex justify-between items-center">
-                <span>Settings</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-sm">Cmd+,</kbd>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium">
+                    Dictation to Clipboard
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Copy dictated text to clipboard automatically
+                  </p>
+                </div>
+                <Switch
+                  checked={dictationClipboardEnabled}
+                  onCheckedChange={handleDictationClipboardChange}
+                  id="dictation-clipboard"
+                />
               </div>
+            </div>
+          </div>
+
+          {/* Usage Tips */}
+          <div className="bg-muted/50 p-4 rounded-lg">
+            <h5 className="text-sm font-medium mb-2">💡 Voice Usage Tips</h5>
+            <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+              <li>
+                Configure your shortcuts above for dictation and AI agent access
+              </li>
+              <li>
+                The floating bar shows real-time voice status and transcription
+              </li>
+              <li>
+                Press Escape anytime to cancel voice input or stop the agent
+              </li>
+              <li>Voice feedback can be toggled in TTS settings above</li>
+            </ul>
+            <div className="text-xs text-muted-foreground space-y-1 mt-3 pt-2 border-t">
+              <p>
+                <strong>Tips:</strong> Use modifier keys like Alt, Cmd, Ctrl,
+                Shift combined with letters (e.g., Alt+D, Cmd+Space).
+              </p>
+              <p>Changes are applied immediately and saved automatically.</p>
             </div>
           </div>
         </CardContent>

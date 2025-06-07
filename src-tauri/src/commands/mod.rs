@@ -5,6 +5,7 @@ use crate::state::AppState;
 use tauri::{State, Emitter};
 
 // Declare the submodules
+pub mod registry;
 pub mod app_url;
 pub mod core;
 pub mod dictation;
@@ -17,6 +18,7 @@ pub mod mouse;
 pub mod permissions;
 pub mod providers;
 pub mod shell;
+pub mod shortcuts;
 pub mod text_editor;
 pub mod window;
 pub mod orchestrator;
@@ -32,6 +34,7 @@ pub use self::floating_bar::*;
 pub use self::mouse::*;
 pub use self::permissions::*;
 pub use self::shell::*;
+pub use self::shortcuts::*;
 pub use self::orchestrator::*;
 pub use self::sound::*;
 pub use self::tools::*;

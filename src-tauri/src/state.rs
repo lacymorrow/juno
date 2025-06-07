@@ -11,6 +11,7 @@ use tokio::sync::{watch, Mutex as TokioMutex};
 use log;
 use playwright::Playwright; // Import Playwright
 use std::sync::Mutex; // Added for tts_provider
+use serde::{Serialize, Deserialize}; // Added for keyboard shortcuts
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
@@ -22,6 +23,26 @@ use crate::commands::permissions::PermissionsState;
 use crate::agent::tools::tool_config::ToolConfigManager;
 // Import cloud client
 use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
+
+/// Keyboard shortcut configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyboardShortcuts {
+    pub agent_mode_toggle: String,      // Default: Alt+D (Option+D on macOS)
+    pub dictation_input: String,        // Default: Alt+Space (Option+Space on macOS)
+    pub stop_current_task: String,      // Default: Escape
+    pub open_settings: String,          // Default: Cmd+, (Ctrl+, on non-macOS)
+}
+
+impl Default for KeyboardShortcuts {
+    fn default() -> Self {
+        Self {
+            agent_mode_toggle: if cfg!(target_os = "macos") { "Option+D".to_string() } else { "Alt+D".to_string() },
+            dictation_input: if cfg!(target_os = "macos") { "Option+Space".to_string() } else { "Alt+Space".to_string() },
+            stop_current_task: "Escape".to_string(),
+            open_settings: if cfg!(target_os = "macos") { "Cmd+,".to_string() } else { "Ctrl+,".to_string() },
+        }
+    }
+}
 
 /// Timestamp tracking for log grouping (Slack/Apple Messages style)
 #[derive(Debug, Clone)]
@@ -88,6 +109,8 @@ pub struct AppState {
     pub cloud_enabled: Arc<Mutex<bool>>, // Track if cloud is enabled
     // Production cloud connector
     pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
+    // Keyboard shortcuts configuration
+    pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
 }
 
 impl AppState {
@@ -104,7 +127,7 @@ impl AppState {
             browser_controller: Arc::new(TokioMutex::new(None)),
             memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            tts_provider: Arc::new(Mutex::new("off".to_string())), // Initialize TTS provider to "off"
+            tts_provider: Arc::new(Mutex::new("system".to_string())), // Initialize TTS provider to "system" (was "off")
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
             dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
             dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
@@ -121,6 +144,8 @@ impl AppState {
             cloud_enabled: Arc::new(Mutex::new(false)),
             // Initialize production cloud connector
             production_cloud_connector: Arc::new(TokioMutex::new(None)),
+            // Initialize keyboard shortcuts configuration
+            keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
         }
     }
 
@@ -285,19 +310,19 @@ impl AppState {
     }
 
     // Cloud connectivity methods
-    
+
     /// Initialize cloud client
     pub async fn init_cloud_client(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         // Load cloud configuration
         let config = CloudConfig::load_from_file(app_handle)
             .map_err(|e| format!("Failed to load cloud config: {}", e))?;
-        
+
         // Update stored config
         {
             let mut config_guard = self.cloud_config.lock().await;
             *config_guard = config.clone();
         }
-        
+
         // Update enabled status
         {
             let mut enabled_guard = self.cloud_enabled.lock();
@@ -305,19 +330,19 @@ impl AppState {
                 *enabled = config.enabled;
             }
         }
-        
+
         // Create cloud client if enabled
         if config.enabled {
             let client = CloudClient::new(app_handle.clone()).await
                 .map_err(|e| format!("Failed to create cloud client: {}", e))?;
-            
+
             let mut client_guard = self.cloud_client.lock().await;
             *client_guard = Some(client);
         }
-        
+
         Ok(())
     }
-    
+
     /// Start cloud connectivity
     pub async fn start_cloud_client(&self) -> Result<(), String> {
         let mut client_guard = self.cloud_client.lock().await;
@@ -327,38 +352,38 @@ impl AppState {
         }
         Ok(())
     }
-    
+
     /// Stop cloud connectivity
     pub async fn stop_cloud_client(&self) {
         let mut client_guard = self.cloud_client.lock().await;
         *client_guard = None;
     }
-    
+
     /// Check if cloud is enabled
     pub fn is_cloud_enabled(&self) -> bool {
         self.cloud_enabled.lock()
             .map(|enabled| *enabled)
             .unwrap_or(false)
     }
-    
+
     /// Get cloud configuration
     pub async fn get_cloud_config(&self) -> CloudConfig {
         let config_guard = self.cloud_config.lock().await;
         config_guard.clone()
     }
-    
+
     /// Update cloud configuration
     pub async fn update_cloud_config(&self, config: CloudConfig, app_handle: &tauri::AppHandle) -> Result<(), String> {
         // Save to file
         config.save_to_file(app_handle)
             .map_err(|e| format!("Failed to save cloud config: {}", e))?;
-        
+
         // Update stored config
         {
             let mut config_guard = self.cloud_config.lock().await;
             *config_guard = config.clone();
         }
-        
+
         // Update enabled status
         {
             let mut enabled_guard = self.cloud_enabled.lock();
@@ -366,7 +391,7 @@ impl AppState {
                 *enabled = config.enabled;
             }
         }
-        
+
         // Restart cloud client if needed
         if config.enabled {
             self.stop_cloud_client().await;
@@ -375,18 +400,18 @@ impl AppState {
         } else {
             self.stop_cloud_client().await;
         }
-        
+
         Ok(())
     }
-    
+
     // Production cloud connector methods
-    
+
     /// Set production cloud connector
     pub async fn set_production_cloud_connector(&self, connector: ProductionCloudConnector) {
         let mut connector_guard = self.production_cloud_connector.lock().await;
         *connector_guard = Some(connector);
     }
-    
+
     /// Get production cloud connector
     pub fn get_production_cloud_connector(&self) -> Option<ProductionCloudConnector> {
         // We need to use try_lock here since this method is not async
@@ -397,19 +422,19 @@ impl AppState {
             None
         }
     }
-    
+
     /// Get production cloud connector (async version)
     pub async fn get_production_cloud_connector_async(&self) -> Option<ProductionCloudConnector> {
         let connector_guard = self.production_cloud_connector.lock().await;
         connector_guard.clone()
     }
-    
+
     /// Clear production cloud connector
     pub async fn clear_production_cloud_connector(&self) {
         let mut connector_guard = self.production_cloud_connector.lock().await;
         *connector_guard = None;
     }
-    
+
     /// Check if production cloud connector is available
     pub async fn has_production_cloud_connector(&self) -> bool {
         let connector_guard = self.production_cloud_connector.lock().await;

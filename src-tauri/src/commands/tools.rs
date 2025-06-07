@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use tracing::info;
 
 use crate::state::AppState;
-use crate::agent::tools::tool_config::{ToolCategory, ToolConfig};
+
 
 /// Get all tool configurations organized by category
 #[tauri::command]

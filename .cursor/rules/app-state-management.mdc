@@ -3,3 +3,346 @@ description:
 globs:
 alwaysApply: false
 ---
+# AppState Management Patterns ✅
+
+## Core State Architecture
+
+### Centralized State Management - [AppState](mdc:src-tauri/src/state.rs)
+The Juno app uses a **centralized state management** pattern with Tauri's state system. All shared application state is managed through the `AppState` struct.
+
+```rust
+#[derive(Debug)]
+pub struct AppState {
+    pub desktop: Option<Arc<Desktop>>,
+    pub memory_manager: Arc<TokioMutex<Box<dyn MemoryManager + Send + Sync>>>,
+    pub timer_manager: Arc<TokioMutex<TimerManager>>,
+    pub last_window_operation: Arc<TokioMutex<Option<Instant>>>,
+    pub voice_transcription: Arc<TokioMutex<VoiceTranscriptionState>>,
+}
+```
+
+## State Access Patterns
+
+### 1. Safe Desktop Access
+The desktop instance is optional to handle permission failures gracefully:
+
+```rust
+impl AppState {
+    /// Get desktop instance with error handling
+    pub fn get_desktop(&self) -> Result<Arc<Desktop>, String> {
+        self.desktop.as_ref()
+            .ok_or_else(|| "Desktop automation not available. Please grant accessibility permissions.".to_string())
+            .map(|d| Arc::clone(d))
+    }
+
+    /// Check if desktop automation is available
+    pub fn is_desktop_available(&self) -> bool {
+        self.desktop.is_some()
+    }
+
+    /// Try to get desktop instance (returns Option)
+    pub fn try_get_desktop(&self) -> Option<Arc<Desktop>> {
+        self.desktop.as_ref().map(|d| Arc::clone(d))
+    }
+}
+```
+
+### 2. Memory Manager Access
+```rust
+impl AppState {
+    /// Get memory manager for agent operations
+    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<Box<dyn MemoryManager + Send + Sync>>> {
+        Arc::clone(&self.memory_manager)
+    }
+
+    /// Add message to conversation history
+    pub async fn add_message(&self, role: String, content: String) -> Result<(), String> {
+        let memory = self.memory_manager.lock().await;
+        memory.add_message(role, content).await
+            .map_err(|e| format!("Failed to add message to memory: {}", e))
+    }
+}
+```
+
+### 3. Timer Management
+```rust
+impl AppState {
+    /// Get timer manager for long-running operations
+    pub fn get_timer_manager(&self) -> Arc<TokioMutex<TimerManager>> {
+        Arc::clone(&self.timer_manager)
+    }
+
+    /// Start a new timer
+    pub async fn start_timer(&self, duration: Duration, context: String) -> Result<String, String> {
+        let mut timer_manager = self.timer_manager.lock().await;
+        timer_manager.start_timer(duration, context).await
+    }
+}
+```
+
+## DesktopWrapper Pattern
+
+### Graceful Command Forwarding
+When desktop automation is unavailable, commands still work but return helpful errors:
+
+```rust
+pub struct DesktopWrapper {
+    desktop: Option<Arc<Desktop>>,
+}
+
+impl DesktopWrapper {
+    pub fn new(desktop: Option<Arc<Desktop>>) -> Self {
+        Self { desktop }
+    }
+
+    pub async fn click(&self, x: f64, y: f64) -> Result<(), String> {
+        match &self.desktop {
+            Some(desktop) => {
+                desktop.click(x, y).await
+                    .map_err(|e| format!("Click failed: {}", e))
+            }
+            None => {
+                Err("Desktop automation not available. Please grant accessibility permissions in System Preferences > Security & Privacy > Accessibility.".to_string())
+            }
+        }
+    }
+
+    // Similar pattern for all other desktop methods...
+}
+```
+
+## Command Integration Patterns
+
+### 1. State Access in Commands
+All Tauri commands receive AppState and access it safely:
+
+```rust
+#[tauri::command]
+pub async fn desktop_command(
+    state: State<'_, AppState>
+) -> Result<ResponseType, String> {
+    // Safe desktop access
+    let desktop = state.get_desktop()
+        .map_err(|e| format!("Desktop automation not available: {}", e))?;
+
+    // Perform operation
+    desktop.operation().await
+        .map_err(|e| format!("Operation failed: {}", e))
+}
+```
+
+### 2. Memory Operations in Commands
+```rust
+#[tauri::command]
+pub async fn agent_command(
+    message: String,
+    state: State<'_, AppState>
+) -> Result<String, String> {
+    // Add user message to memory
+    state.add_message("user".to_string(), message.clone()).await?;
+
+    // Get memory manager for agent
+    let memory_manager = state.get_memory_manager().await;
+
+    // Perform agent operation...
+    Ok(response)
+}
+```
+
+### 3. Timer Operations in Commands
+```rust
+#[tauri::command]
+pub async fn start_long_operation(
+    context: String,
+    state: State<'_, AppState>
+) -> Result<String, String> {
+    // Start timer for long operation
+    let timer_id = state.start_timer(
+        Duration::from_secs(300),
+        context
+    ).await?;
+
+    // Perform operation...
+    Ok(timer_id)
+}
+```
+
+## State Initialization
+
+### Application Startup - [lib.rs](mdc:src-tauri/src/lib.rs)
+```rust
+pub fn run() {
+    // Initialize desktop with graceful fallback
+    let desktop = match Desktop::new(false, true) {
+        Ok(desktop) => {
+            info!("Desktop automation engine initialized successfully");
+            Some(Arc::new(desktop))
+        }
+        Err(e) => {
+            warn!("Desktop automation engine failed to initialize: {}. App will continue with limited functionality.", e);
+            None
+        }
+    };
+
+    // Initialize memory manager
+    let memory_manager: Arc<TokioMutex<Box<dyn MemoryManager + Send + Sync>>> =
+        Arc::new(TokioMutex::new(Box::new(SimpleMemoryManager::new())));
+
+    // Initialize timer manager
+    let timer_manager = Arc::new(TokioMutex::new(TimerManager::new()));
+
+    // Create AppState
+    let app_state = AppState {
+        desktop,
+        memory_manager,
+        timer_manager,
+        last_window_operation: Arc::new(TokioMutex::new(None)),
+        voice_transcription: Arc::new(TokioMutex::new(VoiceTranscriptionState::new())),
+    };
+
+    // Register with Tauri
+    tauri::Builder::default()
+        .manage(app_state)
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+```
+
+## Async State Management
+
+### Mutex Usage Patterns
+```rust
+// Correct: Short-lived locks
+{
+    let mut timer_manager = state.timer_manager.lock().await;
+    timer_manager.update_timer(id, status).await?;
+} // Lock released here
+
+// Correct: Clone Arc before async operations
+let memory_manager = Arc::clone(&state.memory_manager);
+tokio::spawn(async move {
+    let mut memory = memory_manager.lock().await;
+    memory.cleanup_old_messages().await;
+});
+```
+
+### Avoiding Deadlocks
+```rust
+// Good: Single lock acquisition
+async fn update_state(state: &AppState) -> Result<(), String> {
+    let mut memory = state.memory_manager.lock().await;
+    memory.add_message("system", "status update").await?;
+    // Lock automatically released at end of scope
+    Ok(())
+}
+
+// Bad: Multiple nested locks
+async fn bad_example(state: &AppState) -> Result<(), String> {
+    let memory = state.memory_manager.lock().await;
+    let timer = state.timer_manager.lock().await; // Potential deadlock
+    // ... operations
+    Ok(())
+}
+```
+
+## State Testing Patterns
+
+### Unit Test Setup
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_state() -> AppState {
+        AppState {
+            desktop: None, // Test without desktop
+            memory_manager: Arc::new(TokioMutex::new(Box::new(SimpleMemoryManager::new()))),
+            timer_manager: Arc::new(TokioMutex::new(TimerManager::new())),
+            last_window_operation: Arc::new(TokioMutex::new(None)),
+            voice_transcription: Arc::new(TokioMutex::new(VoiceTranscriptionState::new())),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_memory_operations() {
+        let state = create_test_state();
+
+        // Test adding message
+        let result = state.add_message("user".to_string(), "test".to_string()).await;
+        assert!(result.is_ok());
+
+        // Verify message was added
+        let memory = state.memory_manager.lock().await;
+        let messages = memory.get_messages().await.unwrap();
+        assert_eq!(messages.len(), 1);
+    }
+}
+```
+
+### Integration Test Patterns
+```rust
+#[tauri::test]
+async fn test_command_with_state() {
+    let app = tauri::test::mock_app();
+    let state = app.state::<AppState>();
+
+    // Test command behavior
+    let result = desktop_command(state).await;
+
+    // Verify expected behavior based on state
+    if state.is_desktop_available() {
+        assert!(result.is_ok());
+    } else {
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("accessibility permissions"));
+    }
+}
+```
+
+## Best Practices
+
+### 1. State Access
+- Always use provided helper methods (`get_desktop()`, `try_get_desktop()`)
+- Check availability before operations when appropriate
+- Handle `None` cases gracefully with helpful error messages
+
+### 2. Memory Management
+- Use `Arc::clone()` for sharing state across threads
+- Keep mutex locks short-lived
+- Don't hold locks across await points unless necessary
+
+### 3. Error Handling
+- Provide context in error messages
+- Guide users on how to fix issues (permission prompts, etc.)
+- Log state changes for debugging
+
+### 4. Thread Safety
+- All state components are thread-safe
+- Use appropriate synchronization primitives
+- Avoid blocking operations inside locks
+
+## Monitoring and Debugging
+
+### State Inspection
+```rust
+impl AppState {
+    /// Get current state summary for debugging
+    pub async fn debug_summary(&self) -> String {
+        format!(
+            "Desktop: {}, Memory: {} messages, Timers: {} active",
+            if self.desktop.is_some() { "Available" } else { "Unavailable" },
+            self.memory_manager.lock().await.message_count().await.unwrap_or(0),
+            self.timer_manager.lock().await.active_timer_count()
+        )
+    }
+}
+```
+
+### Logging State Changes
+```rust
+// Log state changes for debugging
+info!("AppState initialized with desktop: {}", state.is_desktop_available());
+debug!("State summary: {}", state.debug_summary().await);
+```
+
+This state management pattern ensures consistent, thread-safe access to application state while maintaining graceful degradation capabilities.

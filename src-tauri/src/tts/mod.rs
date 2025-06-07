@@ -5,12 +5,59 @@ pub mod system;
 use tauri::State;
 use crate::state::AppState;
 use tracing::{info, warn};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-// Placeholder for stopping speech playback if needed
-#[allow(dead_code)] // Allow dead code as this function is not yet implemented/used
+// Global flag to indicate if TTS should be stopped
+static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+// Function to stop speech playback
 pub fn stop_speech() {
-    // Implementation to stop any ongoing TTS playback
-    println!("[TTS] Stop speech requested (not implemented).");
+    info!("[TTS] Stop speech requested");
+    TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
+
+    // For system TTS, we can try to stop speech synthesis
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, we can use the system say command to stop speech
+        let _ = std::process::Command::new("killall")
+            .arg("say")
+            .output();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, we would need to implement SAPI stop functionality
+        // For now, just set the flag
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, stop espeak or festival
+        let _ = std::process::Command::new("killall")
+            .arg("espeak")
+            .output();
+        let _ = std::process::Command::new("killall")
+            .arg("festival")
+            .output();
+    }
+}
+
+// Check if TTS stop was requested
+pub fn is_tts_stop_requested() -> bool {
+    TTS_STOP_REQUESTED.load(Ordering::SeqCst)
+}
+
+// Reset the stop flag
+pub fn reset_tts_stop_flag() {
+    TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
+}
+
+// Tauri command to stop TTS from frontend
+#[tauri::command]
+pub async fn stop_tts() -> Result<(), String> {
+    info!("Stop TTS command received from frontend");
+    stop_speech();
+    Ok(())
 }
 
 // New command to set TTS provider
@@ -41,6 +88,9 @@ pub async fn invoke_tts(
     text: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    // Reset stop flag before starting new TTS
+    reset_tts_stop_flag();
+
     let provider_from_state = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider for invoke_tts: {}", e))?.clone();
 
     if provider_from_state.is_empty() || provider_from_state.to_lowercase() == "off" {
@@ -62,6 +112,13 @@ pub async fn invoke_tts_for_provider(
     provider: &str,
 ) -> Result<String, String> {
     info!("Invoking TTS for provider: {}", provider);
+
+    // Check if stop was requested before starting
+    if is_tts_stop_requested() {
+        info!("TTS stop was requested before starting, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     match provider.to_lowercase().as_str() {
         "elevenlabs" => elevenlabs::invoke_elevenlabs_tts(text).await,
         "replicate" => replicate::invoke_replicate_tts(text).await,

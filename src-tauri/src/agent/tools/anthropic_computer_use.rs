@@ -70,6 +70,15 @@ pub async fn register_anthropic_computer_use_tools(
                 "scroll_amount": {
                     "type": "integer",
                     "description": "The number of 'clicks' to scroll. Required only by action=scroll."
+                },
+                "window_id": {
+                    "type": "string",
+                    "description": "Optional window ID to target specific window for screenshots and clicks. When provided, coordinates are relative to the window's top-left corner."
+                },
+                "use_focused_window": {
+                    "type": "boolean", 
+                    "description": "When true, targets the currently focused window for screenshots and clicks. Coordinates are relative to the window's top-left corner.",
+                    "default": false
                 }
             },
             "required": ["action"]
@@ -88,12 +97,34 @@ pub async fn register_anthropic_computer_use_tools(
 
             match action {
                 "screenshot" => {
-                    let screenshot_result = tokio::task::block_in_place(|| {
-                        let rt = tokio::runtime::Handle::current();
-                        rt.block_on(async {
-                            crate::capture_screenshot_command(app.clone()).await
+                    let window_id = input["window_id"].as_str();
+                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
+
+                    let screenshot_result = if use_focused_window {
+                        // Capture focused window screenshot
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::core::capture_focused_window_screenshot_command(app.clone(), app.clone().state()).await
+                            })
                         })
-                    });
+                    } else if let Some(window_id_str) = window_id {
+                        // Capture specific window screenshot
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::core::capture_window_screenshot_command(app.clone(), app.clone().state(), window_id_str.to_string()).await
+                            })
+                        })
+                    } else {
+                        // Capture full screen screenshot (default behavior)
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::capture_screenshot_command(app.clone()).await
+                            })
+                        })
+                    };
 
                     match screenshot_result {
                         Ok(base64_image) => Ok(json!({
@@ -162,9 +193,46 @@ pub async fn register_anthropic_computer_use_tools(
                     let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
                     let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
+                    let window_id = input["window_id"].as_str();
+                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
 
-                    state_manager.desktop.left_click(x, y, modifiers)
-                        .map_err(|e| format!("Left click failed: {}", e))?;
+                    let click_result = if use_focused_window {
+                        // Use focused window relative click
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_focused_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    x,
+                                    y,
+                                    Some("left".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else if let Some(window_id_str) = window_id {
+                        // Use window relative click
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    window_id_str.to_string(),
+                                    x,
+                                    y,
+                                    Some("left".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else {
+                        // Use global coordinates (default behavior)
+                        state_manager.desktop.left_click(x, y, modifiers)
+                    };
+
+                    click_result.map_err(|e| format!("Left click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
                 "right_click" => {
@@ -177,9 +245,43 @@ pub async fn register_anthropic_computer_use_tools(
                     let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
                     let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
+                    let window_id = input["window_id"].as_str();
+                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
 
-                    state_manager.desktop.right_click(x, y, modifiers)
-                        .map_err(|e| format!("Right click failed: {}", e))?;
+                    let click_result = if use_focused_window {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_focused_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    x,
+                                    y,
+                                    Some("right".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else if let Some(window_id_str) = window_id {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    window_id_str.to_string(),
+                                    x,
+                                    y,
+                                    Some("right".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else {
+                        state_manager.desktop.right_click(x, y, modifiers)
+                    };
+
+                    click_result.map_err(|e| format!("Right click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
                 "middle_click" => {
@@ -192,9 +294,43 @@ pub async fn register_anthropic_computer_use_tools(
                     let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
                     let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
+                    let window_id = input["window_id"].as_str();
+                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
 
-                    state_manager.desktop.middle_click(x, y, modifiers)
-                        .map_err(|e| format!("Middle click failed: {}", e))?;
+                    let click_result = if use_focused_window {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_focused_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    x,
+                                    y,
+                                    Some("middle".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else if let Some(window_id_str) = window_id {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    window_id_str.to_string(),
+                                    x,
+                                    y,
+                                    Some("middle".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else {
+                        state_manager.desktop.middle_click(x, y, modifiers)
+                    };
+
+                    click_result.map_err(|e| format!("Middle click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
                 "double_click" => {
@@ -207,9 +343,43 @@ pub async fn register_anthropic_computer_use_tools(
                     let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
                     let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
+                    let window_id = input["window_id"].as_str();
+                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
 
-                    state_manager.desktop.double_click(x, y, modifiers)
-                        .map_err(|e| format!("Double click failed: {}", e))?;
+                    let click_result = if use_focused_window {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_focused_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    x,
+                                    y,
+                                    Some("double".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else if let Some(window_id_str) = window_id {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    window_id_str.to_string(),
+                                    x,
+                                    y,
+                                    Some("double".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else {
+                        state_manager.desktop.double_click(x, y, modifiers)
+                    };
+
+                    click_result.map_err(|e| format!("Double click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
                 "triple_click" => {
@@ -222,9 +392,43 @@ pub async fn register_anthropic_computer_use_tools(
                     let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
                     let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
                     let modifiers = input["text"].as_str(); // Optional modifier keys
+                    let window_id = input["window_id"].as_str();
+                    let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
 
-                    state_manager.desktop.triple_click(x, y, modifiers)
-                        .map_err(|e| format!("Triple click failed: {}", e))?;
+                    let click_result = if use_focused_window {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_focused_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    x,
+                                    y,
+                                    Some("triple".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else if let Some(window_id_str) = window_id {
+                        tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(async {
+                                crate::commands::mouse::dev_window_relative_click(
+                                    app.clone(),
+                                    app.clone().state(),
+                                    window_id_str.to_string(),
+                                    x,
+                                    y,
+                                    Some("triple".to_string()),
+                                    modifiers.map(|s| s.to_string()),
+                                ).await
+                            })
+                        })
+                    } else {
+                        state_manager.desktop.triple_click(x, y, modifiers)
+                    };
+
+                    click_result.map_err(|e| format!("Triple click failed: {}", e))?;
                     Ok(json!({"success": true}))
                 },
                 "left_click_drag" => {

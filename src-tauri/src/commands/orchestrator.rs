@@ -103,17 +103,11 @@ pub async fn submit_orchestrated_query(
         return Ok(format!("Query processed: {}", query));
     }
 
-    // Register escape key shortcut for orchestrator execution
-    crate::register_escape_key_shortcut(&app_handle);
-
     let orchestrator = get_orchestrator().await?;
     let orchestrator_guard = orchestrator.lock().await;
 
     let result = orchestrator_guard.process_command(query).await
         .map_err(|e| format!("Orchestrator error: {}", e));
-
-    // Unregister escape key shortcut when orchestrator finishes
-    crate::unregister_escape_key_shortcut(&app_handle);
 
     result
 }

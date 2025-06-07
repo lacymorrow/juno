@@ -20,41 +20,12 @@ use crate::agent::providers::config::AgentMode;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 
-// use crate::tools::{list_tools, handle_tool_call}; // Removed unused
-// use reqwest::Client; // Removed unused
-// use image::{GenericImageView, ImageFormat}; // Removed unused
-// use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}; // Removed unused
-// use std::io::Cursor; // Removed unused
-// use tauri::{Manager, Emitter}; // Import Manager and Emitter
-// use futures::future; // Removed unused
-
-// --- Agent Integration ---
-// use crate::agent::{
-//     implementations::{
-//         // Correct path based on resolved structure
-//         memory_manager::SimpleMemoryManager,
-//         tool_provider::LocalToolProvider,
-//         agent_runner::DefaultAgentRunner,
-//         // AnthropicBrain is now selected via the factory
-//         // agent_brain::AnthropicBrain, // Remove direct import
-//     },
-//     traits::AgentRunnable, // Import the trait for the run method
-//     // tools::{ // Remove this entire block as it's redundant/incorrect
-//     //     basic_tools::register_basic_tools,
-//     //     desktop_tools::register_desktop_tools,
-//     //     browser_tools::get_browser_tool_definitions,
-//     //     browser_controller::BrowserController,
-//     // },
-//      providers::factory::BrainFactory, // Keep BrainFactory import
-// };
 
 // --- Agent State ---
 
-// Removed unused enum AgentState
 
 // --- Anthropic API Structs ---
 
-// Removed unused struct AnthropicMessage
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -72,7 +43,6 @@ pub(crate) struct AnthropicContentBlock {
     // Fields related to tool_result (we create these, don't expect from API)
 }
 
-// Removed unused struct ToolResultBlock
 
 // Keep this for payload structure, ensure Clone is derived
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -92,7 +62,6 @@ struct BackendResponsePayload {
 
 // Removed AnthropicThinkingBudget as it was commented out
 
-// Removed unused struct AnthropicRequest
 
 #[derive(Deserialize, Debug)]
 struct AnthropicUsage {
@@ -117,7 +86,6 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
-// Removed unused function process_screenshot
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
 
@@ -240,9 +208,6 @@ pub async fn submit_query(
             );
             info!("Single agent runner created with all tools.");
 
-            // Register escape key shortcut for agent execution
-            crate::register_escape_key_shortcut(&app_handle);
-
             info!("Starting single agent run...");
 
             // Prepare the query with system context
@@ -253,9 +218,6 @@ pub async fn submit_query(
             };
 
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
-
-            // Always unregister escape key shortcut when agent finishes
-            crate::unregister_escape_key_shortcut(&app_handle);
 
             result
         },
@@ -302,9 +264,6 @@ pub async fn submit_query(
             );
             info!("Orchestrator agent runner created with personality and delegation capabilities.");
 
-            // Register escape key shortcut for orchestrator execution
-            crate::register_escape_key_shortcut(&app_handle);
-
             info!("Starting orchestrator run...");
 
             // Prepare the query with system context for orchestrator
@@ -316,9 +275,6 @@ pub async fn submit_query(
 
             let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
 
-            // Always unregister escape key shortcut when orchestrator finishes
-            crate::unregister_escape_key_shortcut(&app_handle);
-
             result
         }
     };
@@ -329,10 +285,7 @@ pub async fn submit_query(
     // --- Process Agent Result ---
     let mut final_response = match agent_result {
         Ok(message) => {
-            // Play success sound from backend
-            if let Err(e) = crate::commands::sound::play_success_sound(app_handle.clone(), state.clone()).await {
-                warn!("Failed to play success sound: {}", e);
-            }
+            // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 
             SubmitQueryResult {
                 text: message.clone(),
@@ -377,7 +330,7 @@ pub async fn submit_query(
 
     // --- Generate TTS Audio ---
     // Try to generate TTS for the response text if TTS is enabled
-    match crate::tts::invoke_tts(final_response.text.clone(), state.clone()).await {
+    let tts_enabled = match crate::tts::invoke_tts(final_response.text.clone(), state.clone()).await {
         Ok(audio_result) => {
             if audio_result != "TTS_DISABLED_BY_SETTING" {
                 final_response.audio_base64 = Some(audio_result);
@@ -388,20 +341,26 @@ pub async fn submit_query(
                 let tts_text = final_response.text.clone();
                 tauri::async_runtime::spawn(async move {
                     crate::commands::floating_bar::handle_tts_started(&app_handle_for_tts, tts_text).await;
-
-                    // Note: TTS finish event would be handled when audio playback completes
-                    // For now, we'll simulate a finish after a reasonable delay
-                    // In a real implementation, this would be handled by the audio player
-                    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-                    crate::commands::floating_bar::handle_tts_finished(&app_handle_for_tts).await;
+                    // Note: TTS finish event and success sound are now handled by handle_tts_completion
+                    // when the frontend notifies us that audio playback has completed
                 });
+                true // TTS is enabled and audio was generated
             } else {
                 info!("TTS is disabled, skipping audio generation");
+                false // TTS is disabled
             }
         }
         Err(e) => {
             warn!("Failed to generate TTS audio: {}. Continuing without audio.", e);
             // Don't fail the whole response, just continue without audio
+            false // TTS failed, treat as disabled
+        }
+    };
+
+    // Play success sound immediately if TTS is disabled, otherwise it will be played when TTS finishes
+    if !tts_enabled && final_response.agent_state == "Finished" {
+        if let Err(e) = crate::commands::sound::play_success_sound(app_handle.clone(), state.clone()).await {
+            warn!("Failed to play success sound: {}", e);
         }
     }
 
@@ -428,6 +387,25 @@ pub async fn submit_query(
         info!("Final response emitted to frontend.");
     } else {
         error!("Main window not found, cannot emit final response.");
+    }
+
+    Ok(())
+}
+
+/// Handle TTS completion and play success sound
+#[tauri::command]
+pub async fn handle_tts_completion(
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("TTS completion event received from frontend");
+
+    // Update floating bar manager for TTS finish
+    crate::commands::floating_bar::handle_tts_finished(&app_handle).await;
+
+    // Play success sound now that TTS has finished
+    if let Err(e) = crate::commands::sound::play_success_sound(app_handle.clone(), state.clone()).await {
+        warn!("Failed to play success sound after TTS completion: {}", e);
     }
 
     Ok(())
