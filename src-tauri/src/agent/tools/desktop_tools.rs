@@ -5,11 +5,6 @@ use crate::commands;
 use tauri::{State, Manager};
 use serde_json::{Value, json};
 use tracing::info;
-<<<<<<< HEAD
-// use std::fs; // Unused
-// use std::process::Command; // Unused
-// use std::io::Write; // Unused
-// use std::sync::Arc; // Unused
 use crate::commands::window; // Add window for scroll command
 use std::sync::Arc;
 
@@ -340,8 +335,6 @@ async fn register_additional_computer_use_tools(
 
     Ok(())
 }
-=======
->>>>>>> main
 
 // Function to register all desktop tools with the tool provider
 pub async fn register_desktop_tools(
@@ -593,7 +586,6 @@ pub async fn register_desktop_tools(
     };
     provider.register_async_tool(desktop_click_def, desktop_click_exec).await;
     info!("Registered tool: desktop_click");
-<<<<<<< HEAD
 
     // Add new computer use tools based on the Anthropic documentation
     // Handle the result of the registration
@@ -960,8 +952,6 @@ pub async fn register_desktop_tools(
     info!("Registered tool: get_window_info");
 
     info!("Desktop tool registration completed.");
-=======
->>>>>>> main
 }
 
 // Function to set up tools (wrapper for register_desktop_tools for backwards compatibility)
@@ -969,7 +959,6 @@ pub async fn setup_tools(
     provider: &mut LocalToolProvider,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-<<<<<<< HEAD
 ) -> Arc<tokio::sync::Mutex<LocalToolProvider>> {
     // Set up MCP manager in the tool provider
     let mcp_manager = state.get_mcp_manager().await;
@@ -1001,8 +990,4 @@ pub async fn setup_tools(
 
     // Return the Arc so the caller can use the same instance that's registered
     provider_arc
-=======
-) {
-    register_desktop_tools(provider, state, app_handle).await;
->>>>>>> main
 }

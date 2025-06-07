@@ -1,17 +1,18 @@
-import React, { useState } from 'react';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Timer, ExternalLink } from 'lucide-react';
-import { toast } from 'sonner';
-import { invokeCommand } from '@/lib/utils';
-import FileOperations from './devtools/FileOperations';
-import WindowOperations from './devtools/WindowOperations';
-import MouseOperations from './devtools/MouseOperations';
-import KeyboardOperations from './devtools/KeyboardOperations';
-import ScreenshotOperations from './devtools/ScreenshotOperations';
-import type { LoadingStates } from '@/types/devtools';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { invokeCommand } from "@/lib/utils";
+import type { LoadingStates } from "@/types/devtools";
+import { ExternalLink, Timer } from "lucide-react";
+import React, { useState } from "react";
+import { toast } from "sonner";
+import { CloudTestPanel } from "./devtools/CloudTestPanel";
+import FileOperations from "./devtools/FileOperations";
+import KeyboardOperations from "./devtools/KeyboardOperations";
+import MouseOperations from "./devtools/MouseOperations";
+import ScreenshotOperations from "./devtools/ScreenshotOperations";
+import WindowOperations from "./devtools/WindowOperations";
 
 const initialLoadingStates: LoadingStates = {
   screenshot: false,
@@ -57,51 +58,49 @@ const initialLoadingStates: LoadingStates = {
 
 const DevToolsPanel: React.FC = () => {
   // Loading states for potential future use with operation status tracking
-  const [, ] = useState<LoadingStates>(initialLoadingStates);
-  const [appToOpen, setAppToOpen] = useState<string>('TextEdit');
-  const [urlToOpen, setUrlToOpen] = useState<string>('https://www.google.com');
-  const [waitDuration, setWaitDuration] = useState<string>('1000');
+  const [,] = useState<LoadingStates>(initialLoadingStates);
+  const [appToOpen, setAppToOpen] = useState<string>("TextEdit");
+  const [urlToOpen, setUrlToOpen] = useState<string>("https://www.google.com");
+  const [waitDuration, setWaitDuration] = useState<string>("1000");
 
   const handleOpenApp = async () => {
     if (!appToOpen.trim()) {
-      toast.error('Please enter an app name.');
+      toast.error("Please enter an app name.");
       return;
     }
     await invokeCommand(
-      'dev_open_app',
+      "dev_open_app",
       { appName: appToOpen.trim() },
-      'openApp'
+      "openApp"
     );
   };
 
   const handleOpenUrl = async () => {
     if (!urlToOpen.trim()) {
-      toast.error('Please enter a URL.');
+      toast.error("Please enter a URL.");
       return;
     }
-    await invokeCommand(
-      'dev_open_url',
-      { url: urlToOpen.trim() },
-      'openUrl'
-    );
+    await invokeCommand("dev_open_url", { url: urlToOpen.trim() }, "openUrl");
   };
 
   const handleWait = async () => {
     const duration = parseInt(waitDuration, 10);
     if (isNaN(duration) || duration <= 0) {
-      toast.error('Please enter a valid duration in milliseconds.');
+      toast.error("Please enter a valid duration in milliseconds.");
       return;
     }
-    await invokeCommand(
-      'dev_wait',
-      { duration },
-      'wait'
-    );
+    await invokeCommand("dev_wait", { duration }, "wait");
   };
 
   return (
     <ScrollArea className="h-full w-full rounded-md border p-4">
       <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold">Cloud & WebSocket Testing</h2>
+          <Separator className="my-2" />
+          <CloudTestPanel />
+        </div>
+
         <div>
           <h2 className="text-lg font-semibold">Screenshot & Visualization</h2>
           <Separator className="my-2" />

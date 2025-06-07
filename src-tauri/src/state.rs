@@ -21,6 +21,8 @@ use crate::agent::implementations::memory_manager::SimpleMemoryManager;
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
 use crate::agent::tools::tool_config::ToolConfigManager;
+// Import cloud client
+use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 // Import MCP manager for external MCP server support
 use crate::agent::tools::mcp_integration::MCPManager;
 // Import LocalToolProvider for tool provider registry
@@ -105,6 +107,12 @@ pub struct AppState {
     pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
     // Tool configuration manager
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
+    // Cloud connectivity
+    pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
+    pub cloud_config: Arc<TokioMutex<CloudConfig>>, // Cloud configuration
+    pub cloud_enabled: Arc<Mutex<bool>>, // Track if cloud is enabled
+    // Production cloud connector
+    pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
     // Keyboard shortcuts configuration
     pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
     // MCP manager for external MCP server support
@@ -138,6 +146,12 @@ impl AppState {
             permissions_checked: Arc::new(Mutex::new(false)),
             // Initialize tool configuration manager
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
+            // Initialize cloud connectivity
+            cloud_client: Arc::new(TokioMutex::new(None)),
+            cloud_config: Arc::new(TokioMutex::new(CloudConfig::default())),
+            cloud_enabled: Arc::new(Mutex::new(false)),
+            // Initialize production cloud connector
+            production_cloud_connector: Arc::new(TokioMutex::new(None)),
             // Initialize keyboard shortcuts configuration
             keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
             // Initialize MCP manager
@@ -305,6 +319,138 @@ impl AppState {
         let config_path = ToolConfigManager::get_config_path(app_handle)?;
         let config_guard = self.tool_config_manager.lock().await;
         config_guard.save_to_file(&config_path)
+    }
+
+    // Cloud connectivity methods
+
+    /// Initialize cloud client
+    pub async fn init_cloud_client(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        // Load cloud configuration
+        let config = CloudConfig::load_from_file(app_handle)
+            .map_err(|e| format!("Failed to load cloud config: {}", e))?;
+
+        // Update stored config
+        {
+            let mut config_guard = self.cloud_config.lock().await;
+            *config_guard = config.clone();
+        }
+
+        // Update enabled status
+        {
+            let mut enabled_guard = self.cloud_enabled.lock();
+            if let Ok(mut enabled) = enabled_guard {
+                *enabled = config.enabled;
+            }
+        }
+
+        // Create cloud client if enabled
+        if config.enabled {
+            let client = CloudClient::new(app_handle.clone()).await
+                .map_err(|e| format!("Failed to create cloud client: {}", e))?;
+
+            let mut client_guard = self.cloud_client.lock().await;
+            *client_guard = Some(client);
+        }
+
+        Ok(())
+    }
+
+    /// Start cloud connectivity
+    pub async fn start_cloud_client(&self) -> Result<(), String> {
+        let mut client_guard = self.cloud_client.lock().await;
+        if let Some(client) = client_guard.as_mut() {
+            client.start().await
+                .map_err(|e| format!("Failed to start cloud client: {}", e))?;
+        }
+        Ok(())
+    }
+
+    /// Stop cloud connectivity
+    pub async fn stop_cloud_client(&self) {
+        let mut client_guard = self.cloud_client.lock().await;
+        *client_guard = None;
+    }
+
+    /// Check if cloud is enabled
+    pub fn is_cloud_enabled(&self) -> bool {
+        self.cloud_enabled.lock()
+            .map(|enabled| *enabled)
+            .unwrap_or(false)
+    }
+
+    /// Get cloud configuration
+    pub async fn get_cloud_config(&self) -> CloudConfig {
+        let config_guard = self.cloud_config.lock().await;
+        config_guard.clone()
+    }
+
+    /// Update cloud configuration
+    pub async fn update_cloud_config(&self, config: CloudConfig, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        // Save to file
+        config.save_to_file(app_handle)
+            .map_err(|e| format!("Failed to save cloud config: {}", e))?;
+
+        // Update stored config
+        {
+            let mut config_guard = self.cloud_config.lock().await;
+            *config_guard = config.clone();
+        }
+
+        // Update enabled status
+        {
+            let mut enabled_guard = self.cloud_enabled.lock();
+            if let Ok(mut enabled) = enabled_guard {
+                *enabled = config.enabled;
+            }
+        }
+
+        // Restart cloud client if needed
+        if config.enabled {
+            self.stop_cloud_client().await;
+            self.init_cloud_client(app_handle).await?;
+            self.start_cloud_client().await?;
+        } else {
+            self.stop_cloud_client().await;
+        }
+
+        Ok(())
+    }
+
+    // Production cloud connector methods
+
+    /// Set production cloud connector
+    pub async fn set_production_cloud_connector(&self, connector: ProductionCloudConnector) {
+        let mut connector_guard = self.production_cloud_connector.lock().await;
+        *connector_guard = Some(connector);
+    }
+
+    /// Get production cloud connector
+    pub fn get_production_cloud_connector(&self) -> Option<ProductionCloudConnector> {
+        // We need to use try_lock here since this method is not async
+        // and we want to avoid blocking the caller
+        if let Ok(connector_guard) = self.production_cloud_connector.try_lock() {
+            connector_guard.clone()
+        } else {
+            None
+        }
+    }
+
+    /// Get production cloud connector (async version)
+    pub async fn get_production_cloud_connector_async(&self) -> Option<ProductionCloudConnector> {
+        let connector_guard = self.production_cloud_connector.lock().await;
+        connector_guard.clone()
+    }
+
+    /// Clear production cloud connector
+    pub async fn clear_production_cloud_connector(&self) {
+        let mut connector_guard = self.production_cloud_connector.lock().await;
+        *connector_guard = None;
+    }
+
+    /// Check if production cloud connector is available
+    pub async fn has_production_cloud_connector(&self) -> bool {
+        let connector_guard = self.production_cloud_connector.lock().await;
+        connector_guard.is_some()
     }
 
     // MCP Manager Methods

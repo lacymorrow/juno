@@ -24,6 +24,7 @@ pub mod window;
 pub mod orchestrator;
 pub mod sound;
 pub mod tools;
+pub mod cloud;
 pub mod mcp;
 
 // Re-export commands for easy access in lib.rs
@@ -38,6 +39,7 @@ pub use self::shortcuts::*;
 pub use self::orchestrator::*;
 pub use self::sound::*;
 pub use self::tools::*;
+pub use self::cloud::*;
 pub use self::mcp::*;
 
 // Explicitly re-export tool functions to ensure they're available
