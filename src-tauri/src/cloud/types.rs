@@ -165,25 +165,25 @@ pub enum MessageType {
 pub enum CloudError {
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
-    
+
     #[error("Authentication failed: {0}")]
     AuthenticationFailed(String),
-    
+
     #[error("Command validation failed: {0}")]
     ValidationFailed(String),
-    
+
     #[error("Command execution failed: {0}")]
     ExecutionFailed(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
-    
+
     #[error("Network error: {0}")]
     NetworkError(String),
-    
+
     #[error("Configuration error: {0}")]
     ConfigError(String),
-    
+
     #[error("Security error: {0}")]
     SecurityError(String),
 }
@@ -198,4 +198,15 @@ impl From<tokio_tungstenite::tungstenite::Error> for CloudError {
     fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
         CloudError::NetworkError(error.to_string())
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConnectionState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Authenticated,
+    Reconnecting,
+    Failed(String),
+    Error(String),
 }

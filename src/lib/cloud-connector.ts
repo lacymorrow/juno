@@ -1,9 +1,9 @@
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 /**
  * Production Cloud Connector Frontend Integration
- * 
+ *
  * This module provides a TypeScript interface for the production cloud connector
  * that enables remote control of the Juno AI Computer Use Agent.
  */
@@ -128,7 +128,7 @@ export class ProductionCloudConnector {
    */
   onStatusChange(listener: (status: CloudConnectorStatus) => void): () => void {
     this.statusListeners.push(listener);
-    
+
     // Return unsubscribe function
     return () => {
       const index = this.statusListeners.indexOf(listener);
@@ -143,7 +143,7 @@ export class ProductionCloudConnector {
    */
   onMessage(listener: (message: CloudMessage) => void): () => void {
     this.messageListeners.push(listener);
-    
+
     // Return unsubscribe function
     return () => {
       const index = this.messageListeners.indexOf(listener);
@@ -203,7 +203,7 @@ export class CloudConnectorExample {
       // Setup status monitoring
       this.statusUnsubscribe = this.connector.onStatusChange((status) => {
         console.log('[Example] Status update:', status);
-        
+
         if (status.connected) {
           console.log('[Example] ✅ Connected to cloud - remote control is available');
         } else {
@@ -252,7 +252,7 @@ export class CloudConnectorExample {
         if (stats) {
           console.log('[Example] Health check:', {
             totalCommands: stats.total_commands,
-            successRate: stats.total_commands > 0 
+            successRate: stats.total_commands > 0
               ? (stats.successful_commands / stats.total_commands * 100).toFixed(1) + '%'
               : 'N/A',
             reconnectionCount: stats.reconnection_count,

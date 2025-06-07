@@ -7,7 +7,7 @@ alwaysApply: false
 
 ## Project Status: PRODUCTION READY ✅
 
-Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Computer Use API with hierarchical agent architecture and advanced voice transcription capabilities.
+Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Computer Use API with hierarchical agent architecture, advanced voice transcription capabilities, and **production-ready cloud control system**.
 
 ## Tech Stack
 - **Frontend**: React/TypeScript with shadcn/ui components
@@ -15,6 +15,7 @@ Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Com
 - **AI Integration**: Multi-provider support (Anthropic, OpenAI, Gemini)
 - **Voice**: Custom Whisper.cpp-based transcription plugin
 - **Platform**: macOS with native automation APIs
+- **Cloud**: WebSocket-based remote control with security layer
 
 ## Core Features ✅ COMPLETE
 
@@ -42,17 +43,46 @@ Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Com
 - **Tool Delegation**: Intelligent routing based on task analysis
 - **Memory Separation**: Persistent orchestrator memory, isolated specialist memory
 
+### Cloud Control System ✅ NEW
+- **WebSocket Connectivity**: Production-ready remote access infrastructure
+- **Device Authentication**: Secure device registration and credential management
+- **Command Processing**: Comprehensive remote command execution system
+- **Security Layer**: Encryption, audit logging, and authorization protocols
+- **Production Connector**: Robust connection management with auto-reconnection
+
+## Recent Major Achievement: Successful Merge ✅
+
+### Branch Integration Completed (January 15, 2025)
+Successfully merged `main` branch with cloud control branch, combining:
+- **Enhanced Menu System**: Improved keyboard shortcuts and UI functionality
+- **Coding Agent Integration**: Advanced development tools and cursor integration
+- **Window Management**: Window-specific functionality and event handling
+- **Cloud Control**: Complete WebSocket-based remote access system
+- **Unified Architecture**: All systems working together without conflicts
+
+### Technical Success Metrics
+- **Zero Compilation Errors**: Clean merge with successful compilation (exit code 0)
+- **Feature Preservation**: All features from both branches retained and functional
+- **Type Safety**: Proper Rust type system compliance throughout
+- **State Integration**: Unified AppState managing both local and cloud functionality
+
 ## Key Implementation Files
 
 ### Core System
 - [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application setup and event handling
 - [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent
 - [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Dictation mode key handling
+- [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs) - Unified application state management
 
 ### Agent Architecture
 - [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations) - Agent runners and memory
 - [src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers) - AI provider integrations
 - [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools) - Computer use and custom tools
+
+### Cloud Control System
+- [src-tauri/src/cloud/](mdc:src-tauri/src/cloud) - Complete cloud infrastructure
+- [src-tauri/src/commands/cloud.rs](mdc:src-tauri/src/commands/cloud.rs) - Cloud command handlers
+- [src-tauri/src/cloud/connector.rs](mdc:src-tauri/src/cloud/connector.rs) - Production cloud connector
 
 ### Platform Integration
 - [src-tauri/mcp-server-os-level/src/platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos) - macOS automation
@@ -66,5 +96,12 @@ Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Com
 - **macOS**: Accessibility + Screen Recording + Microphone permissions
 - **Voice**: Custom Whisper.cpp-based transcription plugin
 - **AI Providers**: Multi-provider support (Anthropic, OpenAI, Gemini)
+- **Network**: WebSocket connectivity for cloud control features
 
-This implementation represents a production-ready AI Computer Use agent that exceeds Anthropic's official specification with advanced voice interaction and intelligent agent orchestration.
+## Development Guidelines
+- **Compilation Check**: Always run `cargo check --manifest-path src-tauri/Cargo.toml` after Rust changes
+- **Cloud Features**: Follow [Cloud Control System](mdc:.cursor/rules/cloud-control-system.mdc) patterns
+- **Agent Features**: Follow [Development Guidelines](mdc:.cursor/rules/development-guidelines.mdc) patterns
+- **Merge Documentation**: Reference [Successful Merge Documentation](mdc:.cursor/rules/successful-merge-documentation.mdc)
+
+This implementation represents a production-ready AI Computer Use agent that exceeds Anthropic's official specification with advanced voice interaction, intelligent agent orchestration, and comprehensive cloud control capabilities.

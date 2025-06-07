@@ -149,7 +149,11 @@ use crate::commands::{
 
 // Old BarStateChangeEventPayload removed - now using floating bar manager
 
-
+// Cloud Commands
+use commands::cloud::{
+    get_cloud_config, update_cloud_config, get_cloud_status, enable_cloud, disable_cloud,
+    test_cloud_connection, get_cloud_device_info, generate_device_id,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -493,6 +497,12 @@ pub fn run() {
             commands::cloud::start_production_cloud_connector,
             commands::cloud::stop_production_cloud_connector,
             commands::cloud::get_production_cloud_status,
+            // WebSocket Testing Commands
+            commands::cloud::test_websocket_connection,
+            commands::cloud::send_test_cloud_command,
+            commands::cloud::simulate_cloud_command,
+            commands::cloud::get_websocket_diagnostics,
+            commands::cloud::run_websocket_test_suite,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

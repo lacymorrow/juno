@@ -10,6 +10,7 @@ pub use client::CloudClient;
 pub use connector::ProductionCloudConnector;
 pub use auth::{DeviceAuth, CloudCredentials};
 pub use commands::{CloudCommandProcessor, RemoteCommand};
-pub use security::{CloudSecurity, SecurityLevel};
+pub use security::CloudSecurity;
+pub use config::SecurityLevel;
 pub use types::*;
 pub use config::CloudConfig;
