@@ -51,6 +51,13 @@ pub async fn invoke_replicate_tts(
     text: String,
 ) -> Result<String, String> {
     info!("Invoking Replicate TTS for text: {}", text);
+
+    // Check if stop was requested before starting
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested before starting Replicate TTS, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     let api_key = env::var("REPLICATE_API_KEY")
         .map_err(|_| "REPLICATE_API_KEY environment variable not set".to_string())?;
 
@@ -81,6 +88,12 @@ pub async fn invoke_replicate_tts(
         Err(e) => warn!("Failed to serialize Replicate payload for logging: {}", e),
     }
 
+    // Check if stop was requested before sending the initial request
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested before sending Replicate initial request, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     // 1. Start the prediction
     let initial_response = client
         .post(start_url)
@@ -98,6 +111,12 @@ pub async fn invoke_replicate_tts(
             return Err(err_msg);
         }
     };
+
+    // Check if stop was requested after receiving initial response
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested after receiving Replicate initial response, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
 
     if !initial_res.status().is_success() {
         let status = initial_res.status();
@@ -133,6 +152,12 @@ pub async fn invoke_replicate_tts(
 
     // 2. Poll for the result
     loop {
+        // Check if stop was requested before each polling iteration
+        if crate::tts::is_tts_stop_requested() {
+            info!("TTS stop was requested during Replicate polling, aborting");
+            return Ok("TTS_STOPPED_BY_USER".to_string());
+        }
+
         tokio::time::sleep(Duration::from_secs(1)).await; // Wait before polling
 
         let status_response = client
@@ -168,14 +193,32 @@ pub async fn invoke_replicate_tts(
 
         match status_data.status.as_str() {
             "succeeded" => {
+                // Check if stop was requested before processing the successful result
+                if crate::tts::is_tts_stop_requested() {
+                    info!("TTS stop was requested after Replicate prediction succeeded, aborting");
+                    return Ok("TTS_STOPPED_BY_USER".to_string());
+                }
+
                 if let Some(output_url) = status_data.output {
                     info!("Replicate prediction succeeded. Downloading audio from: {}", output_url);
                     // 3. Download the audio file
                     match client.get(&output_url).send().await {
                         Ok(audio_res) => {
+                            // Check if stop was requested before processing audio
+                            if crate::tts::is_tts_stop_requested() {
+                                info!("TTS stop was requested before processing Replicate audio, aborting");
+                                return Ok("TTS_STOPPED_BY_USER".to_string());
+                            }
+
                             if audio_res.status().is_success() {
                                 match audio_res.bytes().await {
                                     Ok(audio_bytes) => {
+                                        // Final check before encoding
+                                        if crate::tts::is_tts_stop_requested() {
+                                            info!("TTS stop was requested before encoding Replicate audio, aborting");
+                                            return Ok("TTS_STOPPED_BY_USER".to_string());
+                                        }
+
                                         let base64_audio = base64::engine::general_purpose::STANDARD.encode(&audio_bytes);
                                         info!("Successfully downloaded and encoded Replicate audio ({} bytes).", audio_bytes.len());
                                         return Ok(base64_audio);
