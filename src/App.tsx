@@ -258,28 +258,54 @@ function App() {
       console.log("Debounced handler executing for:", payload.query);
       const { response } = payload; // Remove query from destructuring since we won't use it
 
-      // Check if we have any streaming assistant messages in progress
-      const hasStreamingMessage = conversation.some((msg: ChatMessage) => msg.isStreaming && msg.role === "assistant");
-      
-      // Only add assistant response message if we're not currently streaming
-      // (streaming handles the assistant message creation and updates)
-      if (!hasStreamingMessage) {
-        const assistantMessage: ChatMessage = {
-          role: "assistant",
-          content: response.text,
-          screenshot_base64: response.screenshot_base64,
-          timestamp: Date.now(),
-        };
+      // Check if we have any streaming assistant messages in progress or recently completed
+      setConversation((prevConversation) => {
+        const hasStreamingMessage = prevConversation.some(
+          (msg: ChatMessage) => msg.isStreaming && msg.role === "assistant"
+        );
 
-        setConversation((prev) => [...prev, assistantMessage]);
-      } else {
-        console.log("Skipping assistant message addition - streaming in progress");
-      }
+        // Check if this response matches a recently streamed message (to prevent duplicates)
+        // Look for an identical assistant message that was created within the last 2 seconds
+        const now = Date.now();
+        const isRecentlyStreamed = prevConversation.some(
+          (msg: ChatMessage) =>
+            msg.role === "assistant" &&
+            msg.content === response.text &&
+            msg.timestamp &&
+            now - msg.timestamp < 2000 // Within last 2 seconds
+        );
 
-      // Play audio if available
-      if (response.audio_base64) {
-        playAudioFromBase64(response.audio_base64); // This function already handles stopping previous audio
-      }
+        // Only add assistant response message if we're not currently streaming
+        // and this isn't a duplicate of a recently streamed message
+        if (!hasStreamingMessage && !isRecentlyStreamed) {
+          console.log("Adding assistant message from backend response");
+          const assistantMessage: ChatMessage = {
+            role: "assistant",
+            content: response.text,
+            screenshot_base64: response.screenshot_base64,
+            timestamp: Date.now(),
+          };
+
+          // Play audio if available (only when not streaming)
+          if (response.audio_base64) {
+            playAudioFromBase64(response.audio_base64);
+          }
+
+          return [...prevConversation, assistantMessage];
+        } else {
+          if (hasStreamingMessage) {
+            console.log(
+              "Skipping assistant message addition - streaming in progress"
+            );
+          } else if (isRecentlyStreamed) {
+            console.log(
+              "Skipping assistant message addition - recently streamed duplicate"
+            );
+          }
+          // Don't play audio during streaming or for duplicates - TTS is handled by backend
+          return prevConversation;
+        }
+      });
 
       // Note: Sound feedback is now handled by the Rust backend based on agent_state
       // No need for frontend sound calls here to avoid duplicates
@@ -287,7 +313,7 @@ function App() {
       // Reset processing state (but streaming end event also does this)
       setIsProcessing(false);
     }, 100), // Debounce for 100ms
-    [conversation] // Add conversation to dependencies to check for streaming messages
+    [] // Remove conversation dependency to avoid stale closure issues
   );
 
   // Submit query using Tauri invoke (primarily for the main input)
@@ -773,66 +799,75 @@ function App() {
 
   // Listen for streaming events
   useEffect(() => {
-    const streamStartListener = listen<StreamStartEvent>("agent-stream-start", (event) => {
-      console.log("Stream started:", event.payload);
-      const { message_id } = event.payload;
-      
-      // Create a new streaming assistant message
-      const streamingMessage: ChatMessage = {
-        role: "assistant",
-        content: "",
-        timestamp: Date.now(),
-        isStreaming: true,
-        messageId: message_id,
-      };
-      
-      setConversation((prev) => [...prev, streamingMessage]);
-    });
+    const streamStartListener = listen<StreamStartEvent>(
+      "agent-stream-start",
+      (event) => {
+        console.log("Stream started:", event.payload);
+        const { message_id } = event.payload;
 
-    const streamTextListener = listen<StreamingTextEvent>("agent-text-stream", (event) => {
-      console.log("Stream text chunk:", event.payload);
-      const { chunk, message_id } = event.payload;
-      
-      // Update the streaming message with the new chunk
-      setConversation((prev) => 
-        prev.map((msg) => {
-          if (msg.messageId === message_id && msg.isStreaming) {
-            return {
-              ...msg,
-              content: msg.content + chunk,
-            };
-          }
-          return msg;
-        })
-      );
-      
-      // Auto-scroll to bottom during streaming
-      setTimeout(() => {
-        conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 50);
-    });
+        // Create a new streaming assistant message
+        const streamingMessage: ChatMessage = {
+          role: "assistant",
+          content: "",
+          timestamp: Date.now(),
+          isStreaming: true,
+          messageId: message_id,
+        };
 
-    const streamEndListener = listen<StreamEndEvent>("agent-stream-end", (event) => {
-      console.log("Stream ended:", event.payload);
-      const { message_id, complete_text } = event.payload;
-      
-      // Finalize the streaming message
-      setConversation((prev) => 
-        prev.map((msg) => {
-          if (msg.messageId === message_id && msg.isStreaming) {
-            return {
-              ...msg,
-              content: complete_text,
-              isStreaming: false,
-            };
-          }
-          return msg;
-        })
-      );
-      
-      // Reset processing state since the AI has finished responding
-      setIsProcessing(false);
-    });
+        setConversation((prev) => [...prev, streamingMessage]);
+      }
+    );
+
+    const streamTextListener = listen<StreamingTextEvent>(
+      "agent-text-stream",
+      (event) => {
+        console.log("Stream text chunk:", event.payload);
+        const { chunk, message_id } = event.payload;
+
+        // Update the streaming message with the new chunk
+        setConversation((prev) =>
+          prev.map((msg) => {
+            if (msg.messageId === message_id && msg.isStreaming) {
+              return {
+                ...msg,
+                content: msg.content + chunk,
+              };
+            }
+            return msg;
+          })
+        );
+
+        // Auto-scroll to bottom during streaming
+        setTimeout(() => {
+          conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 50);
+      }
+    );
+
+    const streamEndListener = listen<StreamEndEvent>(
+      "agent-stream-end",
+      (event) => {
+        console.log("Stream ended:", event.payload);
+        const { message_id, complete_text } = event.payload;
+
+        // Finalize the streaming message
+        setConversation((prev) =>
+          prev.map((msg) => {
+            if (msg.messageId === message_id && msg.isStreaming) {
+              return {
+                ...msg,
+                content: complete_text,
+                isStreaming: false,
+              };
+            }
+            return msg;
+          })
+        );
+
+        // Reset processing state since the AI has finished responding
+        setIsProcessing(false);
+      }
+    );
 
     return () => {
       streamStartListener.then((unlistenFn) => unlistenFn());
@@ -1216,7 +1251,9 @@ function App() {
                                   )}
                                   {/* Show typing indicator for streaming messages */}
                                   {msg.isStreaming && (
-                                    <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">|</span>
+                                    <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
+                                      |
+                                    </span>
                                   )}
                                 </span>
                               </div>
