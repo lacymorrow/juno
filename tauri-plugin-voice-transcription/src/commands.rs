@@ -258,8 +258,77 @@ pub async fn set_always_listening_wake_words(
 pub async fn get_always_listening_wake_words(
     controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,
 ) -> Result<Vec<String>, Error> {
+    info!("[Plugin] get_always_listening_wake_words command called");
+
     let always_listening_controller = controller.lock()
         .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
 
     Ok(always_listening_controller.get_wake_words())
+}
+
+// Enhanced Debugging Commands
+
+#[tauri::command]
+pub async fn set_transcription_debugging<R: tauri::Runtime>(
+    enabled: bool,
+    app: AppHandle<R>,
+    controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,
+) -> Result<(), Error> {
+    info!("[Plugin] set_transcription_debugging command called with enabled: {}", enabled);
+
+    let mut always_listening_controller = controller.lock()
+        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+
+    always_listening_controller.set_transcription_debugging(enabled, &app)?;
+
+    info!("[Plugin] Transcription debugging set to: {}", enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_audio_level_monitoring<R: tauri::Runtime>(
+    enabled: bool,
+    app: AppHandle<R>,
+    controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,
+) -> Result<(), Error> {
+    info!("[Plugin] set_audio_level_monitoring command called with enabled: {}", enabled);
+
+    let mut always_listening_controller = controller.lock()
+        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+
+    always_listening_controller.set_audio_level_monitoring(enabled, &app)?;
+
+    info!("[Plugin] Audio level monitoring set to: {}", enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn test_whisper_model(
+    controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,
+) -> Result<serde_json::Value, Error> {
+    info!("[Plugin] test_whisper_model command called");
+
+    let always_listening_controller = controller.lock()
+        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+
+    let test_result = always_listening_controller.test_whisper_model()?;
+
+    info!("[Plugin] Whisper model test completed");
+    Ok(test_result)
+}
+
+#[tauri::command]
+pub async fn force_transcription_test<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    controller: State<'_, Arc<Mutex<AlwaysListeningController>>>,
+) -> Result<serde_json::Value, Error> {
+    info!("[Plugin] force_transcription_test command called");
+
+    let mut always_listening_controller = controller.lock()
+        .map_err(|e| Error::LockError(format!("Failed to lock AlwaysListeningController: {}", e)))?;
+
+    let test_result = always_listening_controller.force_transcription_test(&app)?;
+
+    info!("[Plugin] Force transcription test completed");
+    Ok(test_result)
 }

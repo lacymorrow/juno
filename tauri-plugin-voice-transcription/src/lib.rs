@@ -35,6 +35,10 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             commands::get_always_listening_sensitivity,
             commands::set_always_listening_wake_words,
             commands::get_always_listening_wake_words,
+            commands::set_transcription_debugging,
+            commands::set_audio_level_monitoring,
+            commands::test_whisper_model,
+            commands::force_transcription_test,
         ])
         .setup(move |app, _api| {
             // Get model path from config or use default

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::{info, warn, error, debug};
+use serde_json;
 
 use crate::error::{Error, Result};
 
@@ -21,6 +22,9 @@ enum AlwaysListeningMessage {
     Stop,
     UpdateSensitivity(f32),
     UpdateWakeWords(Vec<String>),
+    SetTranscriptionDebugging(bool),
+    SetAudioLevelMonitoring(bool),
+    ForceTranscriptionTest,
 }
 
 #[derive(Debug, Clone)]
@@ -220,6 +224,15 @@ impl AlwaysListeningController {
                     wake_words = new_wake_words;
                     debug!("[AlwaysListening] Wake words updated");
                 }
+                Ok(AlwaysListeningMessage::SetTranscriptionDebugging(enabled)) => {
+                    info!("[AlwaysListening] Transcription debugging set to: {}", enabled);
+                }
+                Ok(AlwaysListeningMessage::SetAudioLevelMonitoring(enabled)) => {
+                    info!("[AlwaysListening] Audio level monitoring set to: {}", enabled);
+                }
+                Ok(AlwaysListeningMessage::ForceTranscriptionTest) => {
+                    info!("[AlwaysListening] Force transcription test requested");
+                }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     info!("[AlwaysListening] Control channel disconnected");
@@ -399,8 +412,8 @@ impl AlwaysListeningController {
                 let mut transcribed_text = String::new();
 
                 for i in 0..num_segments {
-                    if let Ok(segment) = whisper_state.full_get_segment_text(i) {
-                        transcribed_text.push_str(&segment);
+                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
+                        transcribed_text.push_str(&segment_text);
                         transcribed_text.push(' ');
                     }
                 }
@@ -476,8 +489,8 @@ impl AlwaysListeningController {
                 let mut transcribed_text = String::new();
 
                 for i in 0..num_segments {
-                    if let Ok(segment) = whisper_state.full_get_segment_text(i) {
-                        transcribed_text.push_str(&segment);
+                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
+                        transcribed_text.push_str(&segment_text);
                     }
                 }
 
@@ -560,6 +573,169 @@ impl AlwaysListeningController {
 
     pub fn get_wake_words(&self) -> Vec<String> {
         self.wake_words.clone()
+    }
+
+    // Enhanced Debugging Methods
+
+    pub fn set_transcription_debugging<R: Runtime>(&mut self, enabled: bool, app_handle: &AppHandle<R>) -> Result<()> {
+        info!("[AlwaysListeningController] Setting transcription debugging to: {}", enabled);
+
+        if let Some((_, control_tx)) = &self.audio_thread {
+            control_tx.send(AlwaysListeningMessage::SetTranscriptionDebugging(enabled))
+                .map_err(|e| Error::ControlError(format!("Failed to set transcription debugging: {:?}", e)))?;
+        }
+
+        if enabled {
+            // Emit an event to confirm debugging is enabled
+            app_handle.emit("always-listening-event", serde_json::json!({
+                "type": "transcription_debug",
+                "payload": { "enabled": true }
+            })).map_err(|e| Error::EventError(format!("Failed to emit debugging enabled event: {}", e)))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn set_audio_level_monitoring<R: Runtime>(&mut self, enabled: bool, app_handle: &AppHandle<R>) -> Result<()> {
+        info!("[AlwaysListeningController] Setting audio level monitoring to: {}", enabled);
+
+        if let Some((_, control_tx)) = &self.audio_thread {
+            control_tx.send(AlwaysListeningMessage::SetAudioLevelMonitoring(enabled))
+                .map_err(|e| Error::ControlError(format!("Failed to set audio level monitoring: {:?}", e)))?;
+        }
+
+        if enabled {
+            // Emit an event to confirm monitoring is enabled
+            app_handle.emit("always-listening-event", serde_json::json!({
+                "type": "audio_level",
+                "payload": { "enabled": true }
+            })).map_err(|e| Error::EventError(format!("Failed to emit monitoring enabled event: {}", e)))?;
+        }
+
+        Ok(())
+    }
+
+        pub fn test_whisper_model(&self) -> Result<serde_json::Value> {
+        info!("[AlwaysListeningController] Testing Whisper model...");
+
+        // Create a test audio buffer (1 second of silence + beep)
+        let sample_rate = WHISPER_SAMPLE_RATE;
+        let duration_seconds = 1.0;
+        let samples = (sample_rate as f64 * duration_seconds) as usize;
+        let mut test_audio = vec![0.0f32; samples];
+
+        // Add a simple beep pattern (440Hz sine wave for last 0.1 seconds)
+        let beep_start = (samples as f32 * 0.9) as usize;
+        for i in beep_start..samples {
+            let t = (i - beep_start) as f32 / sample_rate as f32;
+            test_audio[i] = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+        }
+
+        // Initialize Whisper context and state for testing (same pattern as the worker)
+        match WhisperContext::new_with_params(&self.model_path, WhisperContextParameters::default()) {
+            Ok(whisper_context) => {
+                match whisper_context.create_state() {
+                    Ok(mut whisper_state) => {
+                        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
+                        params.set_n_threads(4);
+                        params.set_print_special(false);
+                        params.set_print_progress(false);
+                        params.set_print_realtime(false);
+                        params.set_print_timestamps(false);
+                        params.set_language(Some("en"));
+                        params.set_temperature(0.0);
+
+                        info!("[AlwaysListeningController] Running Whisper model test with {} samples", test_audio.len());
+
+                        match whisper_state.full(params, &test_audio) {
+                            Ok(_) => {
+                                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
+                                let mut transcribed_text = String::new();
+
+                                for i in 0..num_segments {
+                                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
+                                        transcribed_text.push_str(&segment_text);
+                                        transcribed_text.push(' ');
+                                    }
+                                }
+
+                                let result = serde_json::json!({
+                                    "status": "success",
+                                    "model_path": self.model_path,
+                                    "audio_samples": test_audio.len(),
+                                    "sample_rate": sample_rate,
+                                    "segments": num_segments,
+                                    "transcription": transcribed_text.trim(),
+                                    "whisper_initialized": true,
+                                    "test_type": "synthetic_beep"
+                                });
+
+                                info!("[AlwaysListeningController] Whisper model test completed: {} segments, '{}' transcribed",
+                                      num_segments, transcribed_text.trim());
+                                Ok(result)
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Whisper transcription failed: {:?}", e);
+                                error!("[AlwaysListeningController] {}", error_msg);
+                                Ok(serde_json::json!({
+                                    "status": "error",
+                                    "error": error_msg,
+                                    "model_path": self.model_path,
+                                    "whisper_initialized": true,
+                                    "test_type": "synthetic_beep"
+                                }))
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to create Whisper state: {:?}", e);
+                        error!("[AlwaysListeningController] {}", error_msg);
+                        Ok(serde_json::json!({
+                            "status": "error",
+                            "error": error_msg,
+                            "model_path": self.model_path,
+                            "whisper_initialized": false,
+                            "test_type": "synthetic_beep"
+                        }))
+                    }
+                }
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to initialize Whisper context: {:?}", e);
+                error!("[AlwaysListeningController] {}", error_msg);
+                Ok(serde_json::json!({
+                    "status": "error",
+                    "error": error_msg,
+                    "model_path": self.model_path,
+                    "whisper_initialized": false,
+                    "test_type": "synthetic_beep"
+                }))
+            }
+        }
+    }
+
+    pub fn force_transcription_test<R: Runtime>(&mut self, _app_handle: &AppHandle<R>) -> Result<serde_json::Value> {
+        info!("[AlwaysListeningController] Starting force transcription test...");
+
+        if let Some((_, control_tx)) = &self.audio_thread {
+            control_tx.send(AlwaysListeningMessage::ForceTranscriptionTest)
+                .map_err(|e| Error::ControlError(format!("Failed to send force transcription test: {:?}", e)))?;
+
+            // Wait a moment for the test to process
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            Ok(serde_json::json!({
+                "status": "requested",
+                "message": "Force transcription test requested. Check logs and events for results.",
+                "test_type": "live_audio_capture"
+            }))
+        } else {
+            Ok(serde_json::json!({
+                "status": "error",
+                "error": "Always listening is not active",
+                "test_type": "live_audio_capture"
+            }))
+        }
     }
 }
 

@@ -7,6 +7,9 @@ import type { LoadingStates } from "@/types/devtools";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  AudioLines,
+  Brain,
+  Bug,
   Info,
   Mic,
   MicOff,
@@ -35,8 +38,19 @@ interface AlwaysListeningEvent {
     | "wake_word_detected"
     | "monitoring"
     | "activated"
-    | "error";
+    | "error"
+    | "transcription_debug"
+    | "audio_level";
   payload?: any;
+}
+
+interface TranscriptionDebugInfo {
+  transcription: string;
+  confidence: number;
+  audio_length_ms: number;
+  volume_level: number;
+  wake_word_match: boolean;
+  fuzzy_matches: string[];
 }
 
 // Custom styles for the range input
@@ -73,6 +87,13 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
   const [testingMode, setTestingMode] = useState<boolean>(false);
   const [recentEvents, setRecentEvents] = useState<string[]>([]);
   const [volumeLevel, setVolumeLevel] = useState<number>(0);
+  const [transcriptionDebugging, setTranscriptionDebugging] =
+    useState<boolean>(false);
+  const [recentTranscriptions, setRecentTranscriptions] = useState<
+    TranscriptionDebugInfo[]
+  >([]);
+  const [audioLevelMonitoring, setAudioLevelMonitoring] =
+    useState<boolean>(false);
 
   // Load initial status
   useEffect(() => {
@@ -124,6 +145,27 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
               `❌ Error: ${payload?.message || "Unknown error"} at ${timestamp}`
             );
             break;
+          case "transcription_debug":
+            if (transcriptionDebugging && payload) {
+              const debugInfo: TranscriptionDebugInfo = payload;
+              addEvent(
+                `🔍 Transcription: "${debugInfo.transcription}" (conf: ${
+                  debugInfo.confidence?.toFixed(2) || "N/A"
+                }, len: ${debugInfo.audio_length_ms}ms, vol: ${(
+                  debugInfo.volume_level * 100
+                ).toFixed(1)}%) at ${timestamp}`
+              );
+              setRecentTranscriptions((prev) => [
+                debugInfo,
+                ...prev.slice(0, 9),
+              ]);
+            }
+            break;
+          case "audio_level":
+            if (audioLevelMonitoring && payload) {
+              setVolumeLevel(payload.level || 0);
+            }
+            break;
         }
       }
     );
@@ -143,7 +185,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
   };
 
   const addEvent = (event: string) => {
-    setRecentEvents((prev) => [event, ...prev.slice(0, 9)]); // Keep last 10 events
+    setRecentEvents((prev) => [event, ...prev.slice(0, 19)]); // Keep last 20 events
   };
 
   const loadStatus = async () => {
@@ -207,7 +249,10 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
   };
 
   const handleAddWakeWord = async () => {
-    if (!newWakeWord.trim()) return;
+    if (!newWakeWord.trim()) {
+      toast.error("Please enter a wake word.");
+      return;
+    }
 
     setLoadingStates((prev) => ({
       ...prev,
@@ -221,7 +266,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
       });
       setStatus((prev) => ({ ...prev, wakeWords: updatedWakeWords }));
       setNewWakeWord("");
-      addEvent(`➕ Wake word added: "${newWakeWord.trim()}"`);
+      addEvent(`➕ Added wake word: "${newWakeWord.trim()}"`);
       toast.success(`Wake word "${newWakeWord.trim()}" added`);
     } catch (error) {
       toast.error(`Failed to add wake word: ${error}`);
@@ -245,7 +290,7 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
         wakeWords: updatedWakeWords,
       });
       setStatus((prev) => ({ ...prev, wakeWords: updatedWakeWords }));
-      addEvent(`🗑️ Wake word removed: "${word}"`);
+      addEvent(`➖ Removed wake word: "${word}"`);
       toast.success(`Wake word "${word}" removed`);
     } catch (error) {
       toast.error(`Failed to remove wake word: ${error}`);
@@ -261,27 +306,22 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
     setTestingMode(!testingMode);
     if (!testingMode) {
       addEvent("🧪 Test mode enabled - speak wake words to test detection");
-      toast.info("Test mode enabled. Speak your wake words to test detection.");
     } else {
-      addEvent("🧪 Test mode disabled");
+      addEvent("⏸️ Test mode disabled");
     }
   };
 
   const handleClearEvents = () => {
     setRecentEvents([]);
-    toast.success("Event log cleared");
+    setRecentTranscriptions([]);
   };
 
   const getStatusColor = () => {
-    if (!status.isActive) return "bg-gray-500";
-    if (testingMode) return "bg-blue-500";
-    return "bg-green-500";
+    return status.isActive ? "bg-green-500" : "bg-gray-400";
   };
 
   const getStatusText = () => {
-    if (!status.isActive) return "Inactive";
-    if (testingMode) return "Testing";
-    return "Active";
+    return status.isActive ? "Active" : "Inactive";
   };
 
   const handleDebugStatus = async () => {
@@ -294,6 +334,76 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
       toast.success("Debug information logged to console");
     } catch (error) {
       toast.error(`Failed to get debug info: ${error}`);
+    } finally {
+      setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: false }));
+    }
+  };
+
+  const handleToggleTranscriptionDebugging = async () => {
+    const newState = !transcriptionDebugging;
+    setTranscriptionDebugging(newState);
+
+    try {
+      await invoke("set_transcription_debugging", { enabled: newState });
+      addEvent(
+        `🔍 Transcription debugging ${newState ? "enabled" : "disabled"}`
+      );
+      toast.success(
+        `Transcription debugging ${newState ? "enabled" : "disabled"}`
+      );
+    } catch (error) {
+      toast.error(`Failed to toggle transcription debugging: ${error}`);
+      setTranscriptionDebugging(!newState); // Revert on error
+    }
+  };
+
+  const handleToggleAudioLevelMonitoring = async () => {
+    const newState = !audioLevelMonitoring;
+    setAudioLevelMonitoring(newState);
+
+    try {
+      await invoke("set_audio_level_monitoring", { enabled: newState });
+      addEvent(
+        `📊 Audio level monitoring ${newState ? "enabled" : "disabled"}`
+      );
+      toast.success(
+        `Audio level monitoring ${newState ? "enabled" : "disabled"}`
+      );
+    } catch (error) {
+      toast.error(`Failed to toggle audio level monitoring: ${error}`);
+      setAudioLevelMonitoring(!newState); // Revert on error
+    }
+  };
+
+  const handleTestWhisperModel = async () => {
+    setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: true }));
+
+    try {
+      const testResult = await invoke("test_whisper_model");
+      console.log("Whisper Model Test Result:", testResult);
+      addEvent(`🧠 Whisper model test completed (check console)`);
+      toast.success("Whisper model test completed - check console for details");
+    } catch (error) {
+      toast.error(`Whisper model test failed: ${error}`);
+      addEvent(`❌ Whisper model test failed: ${error}`);
+    } finally {
+      setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: false }));
+    }
+  };
+
+  const handleForceTranscription = async () => {
+    setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: true }));
+
+    try {
+      const result = await invoke("force_transcription_test");
+      console.log("Force Transcription Test Result:", result);
+      addEvent(`🎤 Force transcription test completed (check console)`);
+      toast.success(
+        "Force transcription test completed - check console for details"
+      );
+    } catch (error) {
+      toast.error(`Force transcription test failed: ${error}`);
+      addEvent(`❌ Force transcription test failed: ${error}`);
     } finally {
       setLoadingStates((prev) => ({ ...prev, debugAlwaysListening: false }));
     }
@@ -342,6 +452,56 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
 
       <Separator />
 
+      {/* Enhanced Debugging Controls */}
+      <div className="space-y-3">
+        <Label className="flex items-center space-x-2">
+          <Bug className="w-4 h-4" />
+          <span>Advanced Debugging</span>
+        </Label>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            onClick={handleToggleTranscriptionDebugging}
+            variant={transcriptionDebugging ? "default" : "outline"}
+            size="sm"
+          >
+            <Brain className="w-4 h-4 mr-2" />
+            {transcriptionDebugging ? "Stop" : "Start"} Transcription Debug
+          </Button>
+
+          <Button
+            onClick={handleToggleAudioLevelMonitoring}
+            variant={audioLevelMonitoring ? "default" : "outline"}
+            size="sm"
+          >
+            <AudioLines className="w-4 h-4 mr-2" />
+            {audioLevelMonitoring ? "Stop" : "Start"} Audio Monitor
+          </Button>
+
+          <Button
+            onClick={handleTestWhisperModel}
+            disabled={loadingStates.debugAlwaysListening}
+            variant="outline"
+            size="sm"
+          >
+            <Brain className="w-4 h-4 mr-2" />
+            Test Whisper Model
+          </Button>
+
+          <Button
+            onClick={handleForceTranscription}
+            disabled={loadingStates.debugAlwaysListening}
+            variant="outline"
+            size="sm"
+          >
+            <Mic className="w-4 h-4 mr-2" />
+            Force Transcription
+          </Button>
+        </div>
+      </div>
+
+      <Separator />
+
       {/* Sensitivity Control */}
       <div className="space-y-3">
         <div className="flex items-center space-x-2">
@@ -374,6 +534,50 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
       </div>
 
       <Separator />
+
+      {/* Recent Transcriptions (when debugging enabled) */}
+      {transcriptionDebugging && recentTranscriptions.length > 0 && (
+        <>
+          <div className="space-y-3">
+            <Label>Recent Transcriptions</Label>
+            <div className="bg-gray-50 dark:bg-gray-900 rounded-md p-3 max-h-32 overflow-y-auto">
+              <div className="space-y-1">
+                {recentTranscriptions.map((transcription, index) => (
+                  <div key={index} className="text-xs font-mono space-y-1">
+                    <div className="flex justify-between">
+                      <span
+                        className={
+                          transcription.transcription
+                            ? "text-green-600"
+                            : "text-red-600"
+                        }
+                      >
+                        "{transcription.transcription || "(empty)"}"
+                      </span>
+                      <span className="text-muted-foreground">
+                        {transcription.confidence?.toFixed(2) || "N/A"}
+                      </span>
+                    </div>
+                    <div className="text-muted-foreground">
+                      Length: {transcription.audio_length_ms}ms, Vol:{" "}
+                      {(transcription.volume_level * 100).toFixed(1)}%, Match:{" "}
+                      {transcription.wake_word_match ? "✅" : "❌"}
+                      {transcription.fuzzy_matches &&
+                        transcription.fuzzy_matches.length > 0 && (
+                          <span>
+                            {" "}
+                            (Fuzzy: {transcription.fuzzy_matches.join(", ")})
+                          </span>
+                        )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <Separator />
+        </>
+      )}
 
       {/* Wake Words Management */}
       <div className="space-y-3">
@@ -489,6 +693,13 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
           <div>Wake Words: {status.wakeWords.join(", ")}</div>
           <div>Total Activations: {status.activationCount}</div>
           <div>Test Mode: {testingMode ? "🧪 Enabled" : "⏸️ Disabled"}</div>
+          <div>
+            Transcription Debug:{" "}
+            {transcriptionDebugging ? "🔍 Enabled" : "⏸️ Disabled"}
+          </div>
+          <div>
+            Audio Monitor: {audioLevelMonitoring ? "📊 Enabled" : "⏸️ Disabled"}
+          </div>
         </div>
       </div>
 
