@@ -15,8 +15,9 @@ use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const INTENT_DETECTION_BUFFER_MS: u64 = 3000; // Buffer for intent detection (increased from 1500)
-const VOLUME_THRESHOLD: f32 = 0.002; // Volume threshold for activation (lowered from 0.01)
+const VOLUME_THRESHOLD: f32 = 0.005; // Volume threshold for activation (increased from 0.002)
 const SILENCE_TIMEOUT_MS: u64 = 3000; // Return to monitoring after silence
+const MIN_TRANSCRIPTION_DURATION_MS: u64 = 500; // Minimum audio duration before attempting transcription
 
 enum AlwaysListeningMessage {
     Stop,
@@ -208,6 +209,8 @@ impl AlwaysListeningController {
         let mut audio_buffer: Vec<f32> = Vec::new();
         let mut current_state = AlwaysListeningState::Monitoring;
         let buffer_capacity = (sample_rate as u64 * INTENT_DETECTION_BUFFER_MS / 1000) as usize;
+        let min_transcription_samples = (sample_rate as u64 * MIN_TRANSCRIPTION_DURATION_MS / 1000) as usize;
+        let mut audio_activity_start: Option<Instant> = None;
 
         loop {
             // Check for control messages
@@ -254,33 +257,59 @@ impl AlwaysListeningController {
                             let volume_threshold = VOLUME_THRESHOLD * sensitivity;
 
                             if volume > volume_threshold {
-                                debug!("[AlwaysListening] Volume threshold exceeded: {:.6} > {:.6} (base: {:.3}, sensitivity: {:.1})",
-                                       volume, volume_threshold, VOLUME_THRESHOLD, sensitivity);
+                                // Mark the start of audio activity if not already tracking
+                                if audio_activity_start.is_none() {
+                                    audio_activity_start = Some(Instant::now());
+                                    debug!("[AlwaysListening] Audio activity started - volume: {:.6} > {:.6}", volume, volume_threshold);
+                                }
 
                                 // Keep a rolling buffer for intent detection
                                 if audio_buffer.len() > buffer_capacity {
                                     audio_buffer.drain(0..audio_buffer.len() - buffer_capacity);
                                 }
 
-                                // Check for wake words or speech
-                                if Self::detect_intent(&mut whisper_state, &audio_buffer, sample_rate, resampler.as_mut(), &wake_words, &app_handle) {
-                                    current_state = AlwaysListeningState::Activated;
-                                    info!("[AlwaysListening] Intent detected - activating transcription");
+                                // Only attempt transcription if we have sufficient audio duration and samples
+                                if let Some(start_time) = audio_activity_start {
+                                    let activity_duration = start_time.elapsed().as_millis();
+                                    
+                                    if activity_duration >= MIN_TRANSCRIPTION_DURATION_MS as u128 && 
+                                       audio_buffer.len() >= min_transcription_samples {
+                                        
+                                        debug!("[AlwaysListening] Sufficient audio accumulated: {}ms, {} samples", 
+                                               activity_duration, audio_buffer.len());
 
-                                    // Update last activity
-                                    if let Ok(mut activity) = last_activity.lock() {
-                                        *activity = Some(Instant::now());
+                                        // Check for wake words or speech
+                                        if Self::detect_intent(&mut whisper_state, &audio_buffer, sample_rate, resampler.as_mut(), &wake_words, &app_handle) {
+                                            current_state = AlwaysListeningState::Activated;
+                                            info!("[AlwaysListening] Intent detected - activating transcription");
+
+                                            // Update last activity
+                                            if let Ok(mut activity) = last_activity.lock() {
+                                                *activity = Some(Instant::now());
+                                            }
+
+                                            // Emit activation event
+                                            if let Err(e) = app_handle.emit("always-listening:activated", ()) {
+                                                error!("[AlwaysListening] Failed to emit activation event: {}", e);
+                                            }
+
+                                            // Start active transcription
+                                            audio_buffer.clear();
+                                            audio_activity_start = None; // Reset activity tracking
+                                        } else {
+                                            // No wake word detected, keep monitoring but maintain shorter buffer
+                                            audio_buffer.clear();
+                                            audio_activity_start = None; // Reset activity tracking
+                                        }
                                     }
-
-                                    // Emit activation event
-                                    if let Err(e) = app_handle.emit("always-listening:activated", ()) {
-                                        error!("[AlwaysListening] Failed to emit activation event: {}", e);
-                                    }
-
-                                    // Start active transcription
-                                    audio_buffer.clear(); // Clear buffer to start fresh transcription
                                 }
                             } else {
+                                // Volume below threshold - reset activity tracking
+                                if audio_activity_start.is_some() {
+                                    debug!("[AlwaysListening] Audio activity ended - volume: {:.6} < {:.6}", volume, volume_threshold);
+                                    audio_activity_start = None;
+                                }
+
                                 // Log volume levels every few seconds for debugging
                                 static mut LAST_VOLUME_LOG: Option<Instant> = None;
                                 unsafe {
@@ -365,10 +394,20 @@ impl AlwaysListeningController {
             return false;
         }
 
+        let audio_duration_ms = (audio_buffer.len() as f32 / sample_rate as f32 * 1000.0) as u32;
+        let min_duration_for_transcription = MIN_TRANSCRIPTION_DURATION_MS as u32;
+
         debug!("[AlwaysListening] detect_intent: Processing {} samples ({}ms) for {} wake words",
                audio_buffer.len(),
-               (audio_buffer.len() as f32 / sample_rate as f32 * 1000.0) as u32,
+               audio_duration_ms,
                wake_words.len());
+
+        // Ensure we have sufficient audio duration for meaningful transcription
+        if audio_duration_ms < min_duration_for_transcription {
+            debug!("[AlwaysListening] detect_intent: Audio duration too short ({}ms < {}ms), skipping transcription",
+                   audio_duration_ms, min_duration_for_transcription);
+            return false;
+        }
 
         // Resample if necessary
         let audio_to_process = if sample_rate != WHISPER_SAMPLE_RATE {
@@ -395,6 +434,14 @@ impl AlwaysListeningController {
             audio_buffer.to_vec()
         };
 
+        // Ensure resampled audio also meets minimum duration
+        let resampled_duration_ms = (audio_to_process.len() as f32 / WHISPER_SAMPLE_RATE as f32 * 1000.0) as u32;
+        if resampled_duration_ms < min_duration_for_transcription {
+            debug!("[AlwaysListening] detect_intent: Resampled audio duration too short ({}ms < {}ms), skipping transcription",
+                   resampled_duration_ms, min_duration_for_transcription);
+            return false;
+        }
+
         // Quick transcription for wake word detection
         let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
         params.set_n_threads(4); // Increased from 2 for better performance
@@ -404,7 +451,7 @@ impl AlwaysListeningController {
         params.set_print_timestamps(false);
         params.set_language(Some("en"));
 
-        debug!("[AlwaysListening] Starting Whisper transcription...");
+        debug!("[AlwaysListening] Starting Whisper transcription with {}ms of audio...", resampled_duration_ms);
 
         match whisper_state.full(params, &audio_to_process) {
             Ok(_) => {
