@@ -17,7 +17,7 @@ use tauri::{
     WebviewWindow, // Keep WebviewWindow
     Wry, // Keep Wry if needed elsewhere, remove if not
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
+use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::{info, warn, error}; // Import logging macros
 use std::sync::Mutex; // Added for VoiceController state access
@@ -204,10 +204,15 @@ pub fn run() {
     // --- Handle CLI Commands ---
     // If handle_cli_commands returns true, it means a command was executed
     // and the application should exit.
+<<<<<<< HEAD
     if let Some(ref desktop_instance) = desktop_instance {
         if cli::runner::handle_cli_commands(&cli, desktop_instance) {
             return; // Exit early if a CLI command was handled
         }
+=======
+    if cli::runner::handle_cli_commands(&cli, desktop_instance.as_ref()) {
+        return; // Exit early if a CLI command was handled
+>>>>>>> origin/main
     }
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---
@@ -255,6 +260,10 @@ pub fn run() {
                 // Cancel any running AI agent
                 app_state_instance.signal_cancel();
                 info!("[GlobalShortcut] Agent cancellation signal sent via Escape.");
+
+                // Stop any active TTS
+                crate::tts::stop_speech();
+                info!("[GlobalShortcut] TTS stop signal sent via Escape.");
 
                 // Check if dictation mode is active and cancel it if so
                 let is_dictation_active = app_state_instance.dictation_active.lock()
@@ -379,6 +388,7 @@ pub fn run() {
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection
             tts::get_tts_provider_command, // Added for TTS provider selection
+            tts::stop_tts, // Added for stopping TTS via escape key
             capture_screenshot_command,
             dev_get_focused_element_info,
             capture_element_screenshot_command,
@@ -1286,7 +1296,7 @@ pub fn run() {
             });
 
             // Listen for Dictation Mode commitment events (threshold reached)
-            let app_handle_for_dictation_committed = app.handle().clone();
+            let _app_handle_for_dictation_committed = app.handle().clone();
             app.listen("dictation-committed", move |_event| {
                 info!("[Event] Received dictation-committed event - threshold reached");
                 // This event indicates the user has held dictation input long enough to commit to dictation

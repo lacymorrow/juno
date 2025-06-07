@@ -35,6 +35,13 @@ pub async fn invoke_elevenlabs_tts(
     text: String,
 ) -> Result<String, String> {
     info!("Invoking ElevenLabs TTS for text: {}", text);
+
+    // Check if stop was requested before starting
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested before starting ElevenLabs TTS, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     let api_key = env::var("ELEVENLABS_API_KEY")
         .map_err(|_| "ELEVENLABS_API_KEY environment variable not set".to_string())?;
     let voice_id = env::var("ELEVENLABS_VOICE_ID")
@@ -54,6 +61,12 @@ pub async fn invoke_elevenlabs_tts(
 
     info!("Sending request to ElevenLabs: URL={}, Payload snippet: {{ text: '{}...', ... }}", url, text.chars().take(20).collect::<String>());
 
+    // Check if stop was requested before sending the request
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested before sending ElevenLabs request, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     let response = client
         .post(&url)
         .header("Content-Type", "application/json")
@@ -62,12 +75,30 @@ pub async fn invoke_elevenlabs_tts(
         .send()
         .await;
 
+    // Check if stop was requested after receiving the response
+    if crate::tts::is_tts_stop_requested() {
+        info!("TTS stop was requested after receiving ElevenLabs response, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
     match response {
         Ok(res) => {
             info!("Received response from ElevenLabs with status: {}", res.status());
             if res.status().is_success() {
+                // Check if stop was requested before processing the audio
+                if crate::tts::is_tts_stop_requested() {
+                    info!("TTS stop was requested before processing ElevenLabs audio, aborting");
+                    return Ok("TTS_STOPPED_BY_USER".to_string());
+                }
+
                 match res.bytes().await {
                     Ok(audio_bytes) => {
+                        // Final check before encoding
+                        if crate::tts::is_tts_stop_requested() {
+                            info!("TTS stop was requested before encoding ElevenLabs audio, aborting");
+                            return Ok("TTS_STOPPED_BY_USER".to_string());
+                        }
+
                         let base64_audio = BASE64_STANDARD.encode(&audio_bytes);
                         info!("Successfully received and encoded ElevenLabs audio ({} bytes).", audio_bytes.len());
                         Ok(base64_audio)

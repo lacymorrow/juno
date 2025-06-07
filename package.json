@@ -63,6 +63,7 @@
     "vitest": "^3.1.2"
   },
   "trustedDependencies": [
-    "@tailwindcss/oxide"
+    "@tailwindcss/oxide",
+    "esbuild"
   ]
 }

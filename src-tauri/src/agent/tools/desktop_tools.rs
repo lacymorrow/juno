@@ -2,10 +2,10 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::structs::ToolDefinition;
 use crate::state::AppState;
 use crate::commands;
-// use crate::utils::coordinates; // Unused
-use tauri::{State, Manager}; // Removed unused AppHandle
+use tauri::{State, Manager};
 use serde_json::{Value, json};
 use tracing::info;
+<<<<<<< HEAD
 // use std::fs; // Unused
 // use std::process::Command; // Unused
 // use std::io::Write; // Unused
@@ -340,6 +340,8 @@ async fn register_additional_computer_use_tools(
 
     Ok(())
 }
+=======
+>>>>>>> main
 
 // Function to register all desktop tools with the tool provider
 pub async fn register_desktop_tools(
@@ -481,7 +483,7 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(type_text_def, type_text_exec).await;
     info!("Registered tool: type_text");
 
-    // --- Register Get Clipboard Tool ---
+    // Get Clipboard Tool
     let get_clipboard_def = ToolDefinition {
         name: "get_clipboard".to_string(),
         description: "Get the current text contents of the operating system clipboard.".to_string(),
@@ -507,7 +509,7 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(get_clipboard_def, get_clipboard_exec).await;
     info!("Registered tool: get_clipboard");
 
-    // set_clipboard_content
+    // Set Clipboard Tool
     #[derive(serde::Deserialize)]
     struct SetClipboardContentInput { content: String }
 
@@ -534,10 +536,10 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::core::dev_set_clipboard(args.content, state_manager).await
+                    commands::core::dev_set_clipboard(args.content, state_manager)
+                        .await
                 })
             });
-
             inner_result.map_err(|e| format!("Error setting clipboard content: {}", e))?;
             Ok(json!({"success": true}))
         }
@@ -545,25 +547,26 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(set_clipboard_def, set_clipboard_exec).await;
     info!("Registered tool: set_clipboard_content");
 
-    // --- Register Desktop Click Tool ---
+    // Desktop click tool
     #[derive(serde::Deserialize)]
+    #[allow(dead_code)] // Allow unused fields for now
     struct DesktopClickArgs {
         x: f64,
         y: f64,
-        click_type: Option<String>, // e.g., "left", "right", "double"
-        modifier: Option<String>, // e.g., "shift", "ctrl"
+        click_type: Option<String>,
+        modifier: Option<String>,
     }
 
     let desktop_click_def = ToolDefinition {
         name: "desktop_click".to_string(),
-        description: "Performs a mouse click (left, right, double) at the specified coordinates on the desktop screen. Coordinates should typically be obtained from 'get_focused_element_info' or a screenshot analysis.".to_string(),
+        description: "Performs a mouse click at specified desktop coordinates with optional click type and modifier key.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "x": { "type": "number", "description": "X-coordinate for the click." },
-                "y": { "type": "number", "description": "Y-coordinate for the click." },
-                "click_type": { "type": "string", "enum": ["left", "right", "double"], "description": "Type of click (defaults to left)." },
-                "modifier": { "type": "string", "enum": ["shift", "ctrl", "alt", "cmd"], "description": "Optional modifier key to hold during the click." }
+                "x": { "type": "number", "description": "The x coordinate to click at." },
+                "y": { "type": "number", "description": "The y coordinate to click at." },
+                "click_type": { "type": "string", "description": "Type of click: 'left', 'right', 'double', or 'triple'." },
+                "modifier": { "type": "string", "description": "Modifier key: 'cmd', 'shift', 'alt', or 'ctrl'." }
             },
             "required": ["x", "y"]
         }),
@@ -575,26 +578,22 @@ pub async fn register_desktop_tools(
         async move {
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<DesktopClickArgs>(input)
-                .map_err(|e| format!("Failed to parse desktop_click input: {}", e))?;
+                .map_err(|e| format!("Failed to parse desktop click input: {}", e))?;
 
-            let x = args.x;
-            let y = args.y;
-            let modifier = args.modifier;
-
-            let click_result = match args.click_type.as_deref().unwrap_or("left") {
-                "left" => commands::mouse::dev_left_click(app.clone(), state_manager, x, y, modifier).await,
-                "right" => commands::mouse::dev_right_click(app.clone(), state_manager, x, y, modifier).await,
-                "double" => commands::mouse::dev_double_click(app.clone(), state_manager, x, y, modifier).await,
-                // Add other click types like middle, triple if needed
-                unknown => Err(format!("Unsupported click type: {}", unknown)),
-            };
-
-            click_result.map_err(|e| format!("Error performing desktop click: {}", e))?;
+            let inner_result = tokio::task::block_in_place(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, args.modifier)
+                        .await
+                })
+            });
+            inner_result.map_err(|e| format!("Error clicking on desktop: {}", e))?;
             Ok(json!({"success": true}))
         }
     };
     provider.register_async_tool(desktop_click_def, desktop_click_exec).await;
     info!("Registered tool: desktop_click");
+<<<<<<< HEAD
 
     // Add new computer use tools based on the Anthropic documentation
     // Handle the result of the registration
@@ -961,12 +960,16 @@ pub async fn register_desktop_tools(
     info!("Registered tool: get_window_info");
 
     info!("Desktop tool registration completed.");
+=======
+>>>>>>> main
 }
 
+// Function to set up tools (wrapper for register_desktop_tools for backwards compatibility)
 pub async fn setup_tools(
     provider: &mut LocalToolProvider,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
+<<<<<<< HEAD
 ) -> Arc<tokio::sync::Mutex<LocalToolProvider>> {
     // Set up MCP manager in the tool provider
     let mcp_manager = state.get_mcp_manager().await;
@@ -998,4 +1001,8 @@ pub async fn setup_tools(
 
     // Return the Arc so the caller can use the same instance that's registered
     provider_arc
+=======
+) {
+    register_desktop_tools(provider, state, app_handle).await;
+>>>>>>> main
 }

@@ -140,6 +140,7 @@ impl LocalToolProvider {
 
         self.register_async_tool(definition, executor).await;
     }
+<<<<<<< HEAD
 
     /// Refresh MCP tools from connected servers
     pub async fn refresh_mcp_tools(&mut self) -> Result<(), String> {
@@ -187,6 +188,8 @@ impl LocalToolProvider {
         };
         self.register_async_tool(definition, async_executor).await;
     }
+=======
+>>>>>>> main
 }
 
 #[async_trait]

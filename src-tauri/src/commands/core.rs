@@ -1,7 +1,6 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
 use crate::state::AppState;
-// Removed unused: use tauri::{AppHandle, State};
 use tracing::{info};
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
@@ -41,6 +40,10 @@ pub(crate) async fn capture_window_screenshot_command(
     state: State<'_, AppState>,
     window_id: String,
 ) -> Result<String, String> {
+<<<<<<< HEAD
+=======
+
+>>>>>>> main
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
     use computer_use_ai_sdk::platforms::macos::utils::capture_element_screenshot;
 
