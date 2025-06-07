@@ -186,6 +186,9 @@ pub enum CloudError {
 
     #[error("Security error: {0}")]
     SecurityError(String),
+
+    #[error("Invalid command: {0}")]
+    InvalidCommand(String),
 }
 
 impl From<serde_json::Error> for CloudError {
