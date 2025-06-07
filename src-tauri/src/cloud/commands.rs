@@ -242,39 +242,165 @@ impl CloudCommandProcessor {
 
     /// Execute system command
     async fn execute_system_command(&self, command: CloudCommand) -> Result<CommandResult, CloudError> {
-        let default_params = HashMap::new();
-        let parameters = command.payload.parameters.as_ref().unwrap_or(&default_params);
+        info!("Executing system command: {}", command.id);
 
-        info!("Executing system command with parameters: {:?}", parameters);
+        match &command.payload {
+            Some(payload) => {
+                let action = payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
 
-        // Basic system commands
-        match parameters.get("action").map(|s| s.as_str()) {
-            Some("get_system_info") => {
-                let system_info = self.get_system_info().await?;
-                Ok(CommandResult {
-                    success: true,
-                    data: Some(serde_json::to_string(&system_info).unwrap_or_default()),
-                    error: None,
-                    metadata: None,
-                    screenshot_base64: None,
-                })
-            },
-            Some("get_permissions") => {
-                let permissions = self.get_permissions_status().await?;
-                Ok(CommandResult {
-                    success: true,
-                    data: Some(serde_json::to_string(&permissions).unwrap_or_default()),
-                    error: None,
-                    metadata: None,
-                    screenshot_base64: None,
-                })
-            },
-            Some(action) => {
-                warn!("Unknown system command action: {}", action);
-                Err(CloudError::ValidationFailed(format!("Unknown system action: {}", action)))
+                match action {
+                    "screenshot" => {
+                        info!("Taking screenshot for remote command");
+                        self.execute_screenshot_command().await
+                    },
+                    "click" => {
+                        let x = payload.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let y = payload.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        info!("Executing click at ({}, {})", x, y);
+                        self.execute_click_command(x, y).await
+                    },
+                    "type" => {
+                        let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                        info!("Executing type command: {}", text);
+                        self.execute_type_command(text).await
+                    },
+                    "key" => {
+                        let key = payload.get("key").and_then(|v| v.as_str()).unwrap_or("");
+                        info!("Executing key press: {}", key);
+                        self.execute_key_command(key).await
+                    },
+                    "execute" => {
+                        let shell_command = payload.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                        info!("Executing shell command: {}", shell_command);
+                        self.execute_shell_command(shell_command).await
+                    },
+                    "status" => {
+                        info!("Getting system status");
+                        self.execute_status_request().await
+                    },
+                    _ => {
+                        warn!("Unknown system command action: {}", action);
+                        Err(CloudError::InvalidCommand(format!("Unknown action: {}", action)))
+                    }
+                }
             },
             None => {
-                Err(CloudError::ValidationFailed("System command requires 'action' parameter".to_string()))
+                error!("System command missing payload");
+                Err(CloudError::InvalidCommand("Missing payload for system command".to_string()))
+            }
+        }
+    }
+
+    /// Execute click command at coordinates
+    async fn execute_click_command(&self, x: f64, y: f64) -> Result<CommandResult, CloudError> {
+        info!("Executing click at coordinates ({}, {})", x, y);
+
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+
+        // Use the existing mouse click functionality
+        match crate::commands::mouse::dev_left_click(x, y, app_state).await {
+            Ok(_) => {
+                Ok(CommandResult {
+                    success: true,
+                    data: Some(format!("Clicked at coordinates ({}, {})", x, y)),
+                    error: None,
+                    metadata: Some({
+                        let mut metadata = HashMap::new();
+                        metadata.insert("coordinates".to_string(), serde_json::json!({"x": x, "y": y}));
+                        metadata
+                    }),
+                    screenshot_base64: None,
+                })
+            },
+            Err(e) => {
+                error!("Failed to execute click command: {}", e);
+                Err(CloudError::ExecutionFailed(format!("Click failed: {}", e)))
+            }
+        }
+    }
+
+    /// Execute type command
+    async fn execute_type_command(&self, text: &str) -> Result<CommandResult, CloudError> {
+        info!("Executing type command with text: {}", text);
+
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+
+        // Use the existing text typing functionality
+        match crate::commands::keyboard::dev_global_type_text(text.to_string(), app_state).await {
+            Ok(_) => {
+                Ok(CommandResult {
+                    success: true,
+                    data: Some(format!("Typed text: {}", text)),
+                    error: None,
+                    metadata: Some({
+                        let mut metadata = HashMap::new();
+                        metadata.insert("text".to_string(), serde_json::json!(text));
+                        metadata.insert("length".to_string(), serde_json::json!(text.len()));
+                        metadata
+                    }),
+                    screenshot_base64: None,
+                })
+            },
+            Err(e) => {
+                error!("Failed to execute type command: {}", e);
+                Err(CloudError::ExecutionFailed(format!("Type failed: {}", e)))
+            }
+        }
+    }
+
+    /// Execute key press command
+    async fn execute_key_command(&self, key: &str) -> Result<CommandResult, CloudError> {
+        info!("Executing key press command: {}", key);
+
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+
+        // Use the existing key press functionality
+        match crate::commands::keyboard::dev_press_key(key.to_string(), app_state).await {
+            Ok(_) => {
+                Ok(CommandResult {
+                    success: true,
+                    data: Some(format!("Pressed key: {}", key)),
+                    error: None,
+                    metadata: Some({
+                        let mut metadata = HashMap::new();
+                        metadata.insert("key".to_string(), serde_json::json!(key));
+                        metadata
+                    }),
+                    screenshot_base64: None,
+                })
+            },
+            Err(e) => {
+                error!("Failed to execute key press command: {}", e);
+                Err(CloudError::ExecutionFailed(format!("Key press failed: {}", e)))
+            }
+        }
+    }
+
+    /// Execute shell command
+    async fn execute_shell_command(&self, command: &str) -> Result<CommandResult, CloudError> {
+        info!("Executing shell command: {}", command);
+
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+
+        // Use the existing shell command functionality
+        match crate::commands::shell::dev_bash_command(command.to_string(), app_state).await {
+            Ok(output) => {
+                Ok(CommandResult {
+                    success: true,
+                    data: Some(output.clone()),
+                    error: None,
+                    metadata: Some({
+                        let mut metadata = HashMap::new();
+                        metadata.insert("command".to_string(), serde_json::json!(command));
+                        metadata.insert("output_length".to_string(), serde_json::json!(output.len()));
+                        metadata
+                    }),
+                    screenshot_base64: None,
+                })
+            },
+            Err(e) => {
+                error!("Failed to execute shell command: {}", e);
+                Err(CloudError::ExecutionFailed(format!("Shell command failed: {}", e)))
             }
         }
     }
