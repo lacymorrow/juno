@@ -75,6 +75,14 @@ export const CloudTestPanel: React.FC = () => {
   );
   const [isRunningTests, setIsRunningTests] = useState(false);
 
+  // New remote command testing state
+  const [remoteCommand, setRemoteCommand] = useState("system_command");
+  const [remotePayload, setRemotePayload] = useState(
+    '{"action": "screenshot"}'
+  );
+  const [remoteTestResults, setRemoteTestResults] = useState<TestResult[]>([]);
+  const [connectionDiagnostics, setConnectionDiagnostics] = useState<any>(null);
+
   useEffect(() => {
     loadCloudStatus();
     loadCloudConfig();
@@ -110,12 +118,22 @@ export const CloudTestPanel: React.FC = () => {
     }
   };
 
+  const loadConnectionDiagnostics = async () => {
+    try {
+      const connDiag = await invoke<any>("get_cloud_connection_diagnostics");
+      setConnectionDiagnostics(connDiag);
+    } catch (error) {
+      console.error("Failed to load connection diagnostics:", error);
+    }
+  };
+
   const refreshAll = async () => {
     setIsLoading(true);
     await Promise.all([
       loadCloudStatus(),
       loadCloudConfig(),
       loadDiagnostics(),
+      loadConnectionDiagnostics(),
     ]);
     setIsLoading(false);
   };
@@ -288,6 +306,37 @@ export const CloudTestPanel: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const executeRemoteCommand = async () => {
+    setIsLoading(true);
+    try {
+      const payload = JSON.parse(remotePayload);
+      const result = await invoke<any>("execute_remote_command", {
+        commandType: remoteCommand,
+        payload,
+      });
+      setRemoteTestResults((prev) => [
+        {
+          success: result.success,
+          test: `Remote ${remoteCommand}`,
+          response: result,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+    } catch (error) {
+      console.error("Remote command failed:", error);
+      setRemoteTestResults((prev) => [
+        {
+          success: false,
+          error: error as string,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+    }
+    setIsLoading(false);
   };
 
   return (

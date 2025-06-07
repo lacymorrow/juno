@@ -169,6 +169,7 @@ use crate::commands::mcp::{
 use commands::cloud::{
     get_cloud_config, update_cloud_config, get_cloud_status, enable_cloud, disable_cloud,
     test_cloud_connection, get_cloud_device_info, generate_device_id,
+    execute_remote_command, get_cloud_connection_diagnostics,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -518,6 +519,8 @@ pub fn run() {
             test_cloud_connection,
             get_cloud_device_info,
             generate_device_id,
+            execute_remote_command,
+            get_cloud_connection_diagnostics,
             // Production Cloud Connector Commands
             commands::cloud::handle_cloud_message,
             commands::cloud::start_production_cloud_connector,
