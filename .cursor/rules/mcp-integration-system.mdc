@@ -1,0 +1,285 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP (Model Context Protocol) Integration System ✅
+
+## Overview
+The application includes a complete MCP integration system that allows users to add custom MCP servers and seamlessly execute their tools alongside local tools. This system provides external tool discovery, execution, and management capabilities with proper MCP 2025-03-26 protocol compliance.
+
+## Recent Updates ✅
+
+### Protocol Compliance Fixed
+- **Initialization Protocol**: Now includes required `protocolVersion` and `clientInfo` parameters
+- **Required Notifications**: Sends `initialized` notification after successful initialization
+- **Correct Method Names**: Uses proper MCP protocol methods (`tools/list`, `tools/call`)
+- **Error Resolution**: Fixed "protocolVersion and clientInfo required but undefined" initialization errors
+
+### UI Simplification Completed
+- **JSON-Only Configuration**: Removed complex form-based UI, now uses simple JSON textarea
+- **Example Templates**: Provides common MCP server configuration examples
+- **Streamlined Interface**: Shows active servers with basic status and tool counts
+- **Single Save Flow**: Handles multiple server configurations through JSON input
+
+## Core Architecture
+
+### MCP Integration Module
+**Location**: [src-tauri/src/agent/tools/mcp_integration.rs](mdc:src-tauri/src/agent/tools/mcp_integration.rs)
+
+#### Key Components:
+- **`MCPServerConfig`**: Configuration for MCP servers (command, args, environment, timeouts)
+- **`MCPServerStatus`**: Connection state tracking (Disconnected, Connecting, Connected, Error, Timeout)
+- **`MCPServerConnection`**: Individual server connection handler with STDIO JSON-RPC communication
+- **`MCPManager`**: Central manager for all MCP server connections and tool execution
+
+#### Protocol Implementation:
+```rust
+// MCP 2025-03-26 compliant initialization
+let init_request = json!({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-03-26",
+        "clientInfo": {
+            "name": "Juno AI Agent",
+            "version": "1.0.0"
+        },
+        "capabilities": {}
+    }
+});
+
+// Required initialized notification
+let initialized_notification = json!({
+    "jsonrpc": "2.0",
+    "method": "initialized"
+});
+```
+
+#### Core Functionality:
+```rust
+// Server lifecycle management
+pub async fn add_server(&mut self, config: MCPServerConfig) -> Result<(), String>
+pub async fn start_server(&mut self, server_id: &str) -> Result<(), String>
+pub async fn stop_server(&mut self, server_id: &str) -> Result<(), String>
+
+// Tool discovery and execution
+pub async fn get_all_tools(&self) -> Vec<MCPToolInfo>
+pub async fn execute_tool(&self, tool_name: &str, input: Value, call_id: String) -> Result<ToolResult, AgentError>
+```
+
+### Tool Configuration Extension
+**Location**: [src-tauri/src/agent/tools/tool_config.rs](mdc:src-tauri/src/agent/tools/tool_config.rs)
+
+#### Enhanced Features:
+- **`ToolConfig`** now includes `server_id` field for MCP tool association
+- **`ToolConfigManager`** manages both local and MCP server configurations
+- Persistent storage of MCP server configurations
+- Tool categorization within existing framework
+
+#### MCP-Specific Methods:
+```rust
+pub async fn add_mcp_server(&mut self, config: MCPServerConfig) -> Result<(), String>
+pub async fn remove_mcp_server(&mut self, server_id: &str) -> Result<(), String>
+pub async fn get_mcp_servers(&self) -> Vec<MCPServerConfig>
+pub async fn update_mcp_tools(&mut self, server_id: &str, tools: Vec<ToolDefinition>)
+```
+
+### State Management Integration
+**Location**: [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)
+
+#### Integration Points:
+- **`AppState`** includes `mcp_manager: Arc<tokio::sync::Mutex<MCPManager>>`
+- Automatic MCP server initialization from saved configuration
+- Tool synchronization between MCP servers and configuration
+- Persistent state management across app restarts
+
+### Tool Provider Enhancement
+**Location**: [src-tauri/src/agent/implementations/tool_provider.rs](mdc:src-tauri/src/agent/implementations/tool_provider.rs)
+
+#### Hybrid Tool Execution:
+- **`LocalToolProvider`** now supports both local and MCP tools
+- Automatic tool discovery from connected MCP servers
+- Seamless execution routing (local vs MCP)
+- Tool categorization and management
+
+#### Key Methods:
+```rust
+pub async fn refresh_mcp_tools(&mut self) -> Result<(), String>
+fn is_mcp_tool(&self, tool_name: &str) -> bool
+// Execute tools through either local executors or MCP manager
+```
+
+## User Interface - Simplified JSON Configuration
+
+### Settings Interface
+**Location**: [src/components/Settings.tsx](mdc:src/components/Settings.tsx)
+
+#### Current Implementation:
+- **JSON Textarea**: Single configuration input with syntax highlighting
+- **Example Templates**: Common MCP server configuration patterns
+- **Active Server List**: Shows status, tool counts, and basic management
+- **Save/Refresh Actions**: Simple workflow for configuration updates
+
+#### Example JSON Configurations:
+```json
+[
+  {
+    "id": "filesystem-server",
+    "name": "File System Tools",
+    "command": "npx",
+    "args": ["@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"],
+    "env": {},
+    "timeout_seconds": 30,
+    "enabled": true
+  },
+  {
+    "id": "web-search",
+    "name": "Web Search Tools",
+    "command": "python",
+    "args": ["-m", "mcp_server_web_search"],
+    "env": {"API_KEY": "your-api-key"},
+    "timeout_seconds": 45,
+    "enabled": true
+  }
+]
+```
+
+## Tauri Commands
+
+### Available Commands
+**Location**: [src-tauri/src/commands/mcp.rs](mdc:src-tauri/src/commands/mcp.rs)
+
+```rust
+#[tauri::command]
+pub async fn add_mcp_server(state: State<'_, AppState>, config: MCPServerConfig) -> Result<(), String>
+
+#[tauri::command]
+pub async fn remove_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<(), String>
+
+#[tauri::command]
+pub async fn start_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<(), String>
+
+#[tauri::command]
+pub async fn stop_mcp_server(state: State<'_, AppState>, server_id: String) -> Result<(), String>
+
+#[tauri::command]
+pub async fn get_mcp_servers(state: State<'_, AppState>) -> Result<Vec<MCPServerConfig>, String>
+
+#[tauri::command]
+pub async fn get_mcp_server_statuses(state: State<'_, AppState>) -> Result<Vec<(String, MCPServerStatus)>, String>
+
+#[tauri::command]
+pub async fn get_mcp_tools(state: State<'_, AppState>, server_id: String) -> Result<Vec<ToolDefinition>, String>
+
+#[tauri::command]
+pub async fn save_mcp_servers_json(state: State<'_, AppState>, json_config: String) -> Result<(), String>
+```
+
+## Implementation Patterns
+
+### Server Configuration
+```rust
+let config = MCPServerConfig {
+    id: "my-server".to_string(),
+    name: "My Custom Server".to_string(),
+    command: "python".to_string(),
+    args: vec!["-m", "my_mcp_server"].iter().map(|s| s.to_string()).collect(),
+    env: HashMap::new(),
+    timeout_seconds: 30,
+    enabled: true,
+};
+```
+
+### Tool Discovery Flow
+1. User adds MCP server configuration via JSON
+2. Server starts and establishes STDIO JSON-RPC connection with proper MCP protocol
+3. Manager sends compliant `initialize` request with required parameters
+4. Manager sends `initialized` notification after successful initialization
+5. Manager calls `tools/list` to discover available tools
+6. Tools are registered in tool configuration system
+7. Tools become available for agent execution
+
+### Tool Execution Flow
+1. Agent requests tool execution
+2. `LocalToolProvider` determines if tool is local or MCP
+3. If MCP: Routes to `MCPManager.execute_tool()`
+4. Manager sends JSON-RPC `tools/call` request to appropriate server
+5. Results are returned in standard `ToolResult` format
+
+## Integration with Existing Systems
+
+### Agent Factory Integration
+**Location**: [src-tauri/src/agent/providers/factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)
+
+- MCP manager is passed to tool providers during initialization
+- Automatic tool refresh from connected MCP servers
+- Seamless integration with existing agent architecture
+
+### Error Handling
+- Uses existing `AgentError` enum for consistent error handling
+- Proper logging at appropriate levels (error, warn, info, debug)
+- Graceful degradation when MCP servers are unavailable
+- Protocol compliance error prevention
+
+### Logging and Debugging
+- Comprehensive logging for MCP operations
+- Tool execution logging through existing `tool_logger` system
+- Debug-level logging for JSON-RPC communication
+- Protocol validation logging
+
+## Development Guidelines
+
+### Adding New MCP Features
+1. Extend `MCPManager` with new functionality
+2. Add corresponding Tauri commands in [mcp.rs](mdc:src-tauri/src/commands/mcp.rs)
+3. Update tool configuration if needed
+4. Ensure MCP protocol compliance
+5. Test with real MCP servers
+
+### Testing MCP Integration
+1. Create test MCP server configuration via JSON
+2. Test server lifecycle (start, stop, restart)
+3. Verify proper protocol initialization sequence
+4. Verify tool discovery and execution
+5. Test error scenarios and recovery
+6. Validate persistent configuration storage
+
+### Protocol Compliance Checklist
+- ✅ Include `protocolVersion: "2025-03-26"` in initialize request
+- ✅ Include `clientInfo` with name and version in initialize request
+- ✅ Send `initialized` notification after successful initialization
+- ✅ Use correct method names: `tools/list`, `tools/call`
+- ✅ Handle protocol errors gracefully
+
+### Common MCP Server Types
+- **File operations**: Reading, writing, searching files
+- **Web scraping**: HTTP requests, content extraction
+- **Database access**: SQL queries, data manipulation
+- **External APIs**: Service integrations, data fetching
+- **System operations**: Command execution, monitoring
+
+## Security Considerations
+- MCP servers run as separate processes with limited permissions
+- STDIO communication provides process isolation
+- Server configurations are validated before execution
+- Tool execution is logged for audit purposes
+- JSON configuration validation prevents malformed server definitions
+
+## Performance Notes
+- MCP servers are initialized lazily
+- Tool discovery is cached until server restart
+- JSON-RPC communication is asynchronous
+- Connection timeouts prevent hanging operations
+- Protocol compliance reduces initialization failures
+
+## Troubleshooting
+
+### Common Issues
+1. **"protocolVersion and clientInfo required"**: Fixed in current implementation
+2. **Tool discovery failures**: Check server startup logs and protocol compliance
+3. **JSON configuration errors**: Validate JSON syntax and required fields
+4. **Server startup timeouts**: Adjust timeout_seconds in configuration
+
+The MCP integration system provides a powerful and flexible way to extend the agent's capabilities with custom tools while maintaining security, performance, and MCP protocol compliance.

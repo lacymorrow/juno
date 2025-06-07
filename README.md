@@ -23,6 +23,9 @@ bun run tauri dev
 ✅ **Voice integration** with dual modes (Agent/Dictation)  
 ✅ **Timer system** for long-running tasks with context resumption  
 ✅ **Browser automation** and advanced web interaction
+✅ **MCP integration** for external tool server management
+✅ **Cloud control system** with authentication and management
+✅ **Streaming AI responses** for real-time interaction
 
 ## 🏗️ Architecture
 
@@ -49,7 +52,7 @@ ELEVENLABS_API_KEY=your_key_here   # Text-to-speech (optional)
 bun run tauri dev     # Development mode
 ```
 
-## � For Developers & LLMs
+## 📚 For Developers & LLMs
 
 - **[LLMs.txt](LLMs.txt)** - Complete instructions for AI agents working with this codebase
 - **Key Files**: 
@@ -63,7 +66,7 @@ bun run tauri dev     # Development mode
 - **Agent Mode**: Alt+D → Voice → AI Processing → Computer Actions
 - **Dictation Mode**: Configurable key → Voice → Direct text insertion
 
-## � System Requirements
+## 🔧 System Requirements
 
 - macOS with accessibility permissions
 - Node.js 18+ and Rust 1.70+

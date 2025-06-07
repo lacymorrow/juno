@@ -1,8 +1,9 @@
 use log::{info, error, warn};
+use uuid;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{State, Manager, Emitter};
+use tauri::{State, Manager};
 
 use crate::agent::implementations::{
     agent_runner::DefaultAgentRunner,
@@ -53,12 +54,7 @@ pub struct SubmitQueryResult {
     pub screenshot_base64: Option<String>, // Optional screenshot data from the session
 }
 
-// Define the payload structure for the event
-#[derive(Serialize, Clone)]
-struct BackendResponsePayload {
-    query: String,
-    response: SubmitQueryResult,
-}
+// Note: BackendResponsePayload removed as we now use streaming events only
 
 // Removed AnthropicThinkingBudget as it was commented out
 
@@ -124,8 +120,14 @@ pub async fn submit_query(
     register_basic_tools(&mut tool_provider).await;
     info!("Registered basic tools for specialized agents.");
 
-    // Setup desktop tools for specialized agents
-    setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
+    // Setup desktop tools for specialized agents and get the shared provider
+    let shared_tool_provider = setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
+
+    // Extract the tool provider from Arc<Mutex<>> for agent creation
+    let agent_tool_provider = {
+        let guard = shared_tool_provider.lock().await;
+        guard.clone()
+    };
 
     // Register browser tools for specialized agents (with lazy initialization)
     let browser_definitions = get_browser_tool_definitions();
@@ -163,7 +165,11 @@ pub async fn submit_query(
                 }
             }
         };
-        tool_provider.register_async_tool(definition.clone(), executor).await;
+        // Register browser tools on the shared provider instance
+        {
+            let mut guard = shared_tool_provider.lock().await;
+            guard.register_async_tool(definition.clone(), executor).await;
+        }
         info!("Registered browser tool for specialized agents: {}", definition.name);
     }
 
@@ -179,18 +185,12 @@ pub async fn submit_query(
                 Err(e) => {
                     let err_msg = format!("Failed to initialize single agent brain: {}", e);
                     error!("{}", err_msg);
-                    let result = SubmitQueryResult {
-                        text: err_msg.clone(),
-                        audio_base64: None,
-                        agent_state: "Failed".to_string(),
-                        screenshot_base64: None
-                    };
-                    let payload = BackendResponsePayload { query: query.clone(), response: result };
-                    if let Some(window) = app_handle.get_window("main") {
-                        window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
-                    } else {
-                        error!("Main window not found, cannot emit initial brain error.");
-                    }
+
+                    // Emit error via streaming events instead of backend-response
+                    let error_message_id = uuid::Uuid::new_v4().to_string();
+                    crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
+                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
             };
@@ -201,7 +201,7 @@ pub async fn submit_query(
             // Create single agent runner with all tools
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
                 memory_manager_clone,
-                tool_provider,
+                agent_tool_provider,
                 brain,
                 MAX_ITERATIONS,
                 app_handle.clone(),
@@ -228,18 +228,12 @@ pub async fn submit_query(
                 Err(e) => {
                     let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
                     error!("{}", err_msg);
-                    let result = SubmitQueryResult {
-                        text: err_msg.clone(),
-                        audio_base64: None,
-                        agent_state: "Failed".to_string(),
-                        screenshot_base64: None
-                    };
-                    let payload = BackendResponsePayload { query: query.clone(), response: result };
-                    if let Some(window) = app_handle.get_window("main") {
-                        window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
-                    } else {
-                        error!("Main window not found, cannot emit initial brain error.");
-                    }
+
+                    // Emit error via streaming events instead of backend-response
+                    let error_message_id = uuid::Uuid::new_v4().to_string();
+                    crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
+                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
             };
@@ -249,7 +243,7 @@ pub async fn submit_query(
             let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
             // Register delegation tools for the orchestrator
-            register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, tool_provider, app_handle.clone()).await;
+            register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, agent_tool_provider, app_handle.clone()).await;
             info!("Registered delegation tools for orchestrator.");
 
             const MAX_ITERATIONS: u32 = 15;
@@ -378,16 +372,9 @@ pub async fn submit_query(
         ).await;
     });
 
-    // --- Emit Final Response ---
-    let payload = BackendResponsePayload { query, response: final_response.clone() };
+    // Final response is now fully handled by streaming events
+    // The frontend will reconstruct the complete response from stream events
     info!("Final response text: \"{}\"", final_response.text);
-    if let Some(window) = app_handle.get_window("main") {
-        window.emit("backend-response", payload)
-            .map_err(|e| format!("Emit failed: {}", e))?;
-        info!("Final response emitted to frontend.");
-    } else {
-        error!("Main window not found, cannot emit final response.");
-    }
 
     Ok(())
 }

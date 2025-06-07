@@ -3,11 +3,16 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
+use futures_util::StreamExt;
+use tokio::io::AsyncBufReadExt;
+use tokio_stream::wrappers::LinesStream;
+use tokio_util::io::StreamReader;
+use uuid;
 
 use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
-use crate::agent::traits::AgentBrain;
+use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
 
 // --- Anthropic API Structs --- //
 
@@ -19,6 +24,8 @@ struct AnthropicRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>, // Add streaming support
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -72,6 +79,86 @@ struct ApiTool {
     input_schema: Value,
 }
 
+// Streaming event structures for parsing SSE events
+#[derive(Deserialize, Debug)]
+struct StreamEvent {
+    #[serde(rename = "type")]
+    event_type: String,
+    // The actual event data will be in different structures depending on event type
+}
+
+#[derive(Deserialize, Debug)]
+struct MessageStartEvent {
+    #[serde(rename = "type")]
+    event_type: String, // "message_start"
+    message: StreamMessage,
+}
+
+#[derive(Deserialize, Debug)]
+struct StreamMessage {
+    id: String,
+    #[serde(rename = "type")]
+    message_type: String,
+    role: String,
+    content: Vec<ApiContentBlock>,
+    model: String,
+    stop_reason: Option<String>,
+    stop_sequence: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ContentBlockStartEvent {
+    #[serde(rename = "type")]
+    event_type: String, // "content_block_start"
+    index: u32,
+    content_block: ApiContentBlock,
+}
+
+#[derive(Deserialize, Debug)]
+struct ContentBlockDeltaEvent {
+    #[serde(rename = "type")]
+    event_type: String, // "content_block_delta"
+    index: u32,
+    delta: ContentDelta,
+}
+
+#[derive(Deserialize, Debug)]
+struct ContentDelta {
+    #[serde(rename = "type")]
+    delta_type: String, // "text_delta", "input_json_delta", etc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>, // For text_delta
+    #[serde(skip_serializing_if = "Option::is_none")]
+    partial_json: Option<String>, // For input_json_delta
+}
+
+#[derive(Deserialize, Debug)]
+struct ContentBlockStopEvent {
+    #[serde(rename = "type")]
+    event_type: String, // "content_block_stop"
+    index: u32,
+}
+
+#[derive(Deserialize, Debug)]
+struct MessageDeltaEvent {
+    #[serde(rename = "type")]
+    event_type: String, // "message_delta"
+    delta: MessageDelta,
+    usage: Option<serde_json::Value>, // Usage info
+}
+
+#[derive(Deserialize, Debug)]
+struct MessageDelta {
+    stop_reason: Option<String>,
+    stop_sequence: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+struct MessageStopEvent {
+    #[serde(rename = "type")]
+    event_type: String, // "message_stop"
+}
+
 // --- AnthropicBrain Implementation --- //
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -85,6 +172,7 @@ pub struct AnthropicBrain {
     model: String,
     max_tokens: u32,
     system_prompt: Option<String>, // Optional system prompt
+    streaming_enabled: bool, // New field for streaming support
 }
 
 impl AnthropicBrain {
@@ -100,6 +188,7 @@ impl AnthropicBrain {
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
             system_prompt,
+            streaming_enabled: true, // Enable streaming by default
         })
     }
 
@@ -113,6 +202,154 @@ impl AnthropicBrain {
         let system_prompt = env::var("ANTHROPIC_SYSTEM_PROMPT").ok();
 
         Self::new(api_key, model, max_tokens, system_prompt)
+    }
+
+    /// Enable or disable streaming mode
+    pub fn set_streaming(&mut self, enabled: bool) {
+        self.streaming_enabled = enabled;
+    }
+
+    /// Handle streaming response from Anthropic API
+    async fn handle_streaming_response<F>(
+        &self,
+        response: reqwest::Response,
+        mut on_text_chunk: F,
+    ) -> Result<(String, Vec<ToolCall>, String), AgentError>
+    where
+        F: FnMut(String) + Send,
+    {
+        let mut accumulated_text = String::new();
+        let mut tool_calls = Vec::new();
+        let mut stop_reason = String::new();
+
+        // Track content blocks and partial data
+        let mut current_tool_call: Option<(String, String, String)> = None; // (id, name, partial_json)
+
+        // Get the response body as a stream
+        let stream = response.bytes_stream();
+        let reader = StreamReader::new(stream.map(|result| {
+            result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        }));
+
+        let lines_stream = LinesStream::new(tokio::io::BufReader::new(reader).lines());
+        tokio::pin!(lines_stream);
+
+        while let Some(line_result) = lines_stream.next().await {
+            let line = line_result.map_err(|e| {
+                AgentError::LlmError(format!("Failed to read stream line: {}", e))
+            })?;
+
+            // Skip empty lines
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            // Parse SSE format: "event: <type>" and "data: <json>"
+            if line.starts_with("event:") {
+                // Skip event type lines for now, we'll parse from data
+                continue;
+            }
+
+            if line.starts_with("data:") {
+                let data_part = line.strip_prefix("data:").unwrap_or("").trim();
+
+                // Skip ping events
+                if data_part.is_empty() {
+                    continue;
+                }
+
+                // Parse the JSON data
+                let event_data: serde_json::Value = match serde_json::from_str(data_part) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        log::warn!("Failed to parse SSE data as JSON: {}, data: {}", e, data_part);
+                        continue;
+                    }
+                };
+
+                // Handle different event types
+                if let Some(event_type) = event_data.get("type").and_then(|t| t.as_str()) {
+                    match event_type {
+                        "message_start" => {
+                            log::debug!("Stream: message started");
+                        }
+                        "content_block_start" => {
+                            if let Some(content_block) = event_data.get("content_block") {
+                                if let Some(block_type) = content_block.get("type").and_then(|t| t.as_str()) {
+                                    if block_type == "tool_use" {
+                                        // Start tracking a new tool call
+                                                                    let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            log::debug!("Stream: started tool call {} ({})", name, id);
+                            current_tool_call = Some((id, name, String::new()));
+                                    }
+                                }
+                            }
+                        }
+                        "content_block_delta" => {
+                            if let Some(delta) = event_data.get("delta") {
+                                if let Some(delta_type) = delta.get("type").and_then(|t| t.as_str()) {
+                                    match delta_type {
+                                        "text_delta" => {
+                                            if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
+                                                // Accumulate text and emit chunk
+                                                accumulated_text.push_str(text);
+                                                on_text_chunk(text.to_string());
+                                            }
+                                        }
+                                        "input_json_delta" => {
+                                            if let Some(partial_json) = delta.get("partial_json").and_then(|t| t.as_str()) {
+                                                // Accumulate JSON for tool call
+                                                if let Some((_, _, ref mut json_accumulator)) = current_tool_call {
+                                                    json_accumulator.push_str(partial_json);
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            log::debug!("Stream: unhandled delta type: {}", delta_type);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "content_block_stop" => {
+                            // Complete current tool call if we have one
+                            if let Some((id, name, json_str)) = current_tool_call.take() {
+                                // Parse the complete JSON
+                                match serde_json::from_str(&json_str) {
+                                    Ok(input) => {
+                                        tool_calls.push(ToolCall { id, name, input });
+                                        log::debug!("Stream: completed tool call with input: {}", json_str);
+                                    }
+                                    Err(e) => {
+                                        log::error!("Failed to parse tool call input JSON: {}, json: {}", e, json_str);
+                                    }
+                                }
+                            }
+                        }
+                        "message_delta" => {
+                            if let Some(delta) = event_data.get("delta") {
+                                if let Some(reason) = delta.get("stop_reason").and_then(|r| r.as_str()) {
+                                    stop_reason = reason.to_string();
+                                }
+                            }
+                        }
+                        "message_stop" => {
+                            log::debug!("Stream: message completed");
+                            break;
+                        }
+                        "ping" => {
+                            // Ignore ping events
+                        }
+                        _ => {
+                            log::debug!("Stream: unhandled event type: {}", event_type);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((accumulated_text, tool_calls, stop_reason))
     }
 
     // Helper function to convert our internal Message format to Anthropic's API format
@@ -174,6 +411,21 @@ impl AgentBrain for AnthropicBrain {
         &self,
         messages: &[Message],
         available_tools: &[ToolDefinition],
+    ) -> Result<AgentAction, AgentError> {
+        // Delegate to streaming version without streaming parameters
+        self.decide_next_action_streaming(messages, available_tools, None, None).await
+    }
+
+    fn supports_streaming(&self) -> bool {
+        true // AnthropicBrain supports streaming
+    }
+
+    async fn decide_next_action_streaming(
+        &self,
+        messages: &[Message],
+        available_tools: &[ToolDefinition],
+        app_handle: Option<tauri::AppHandle>,
+        message_id: Option<String>,
     ) -> Result<AgentAction, AgentError> {
         // --- 1. Prepare API Request ---
         let mut api_messages = Vec::new();
@@ -298,13 +550,20 @@ impl AgentBrain for AnthropicBrain {
             )
         };
 
-        let request_payload = AnthropicRequest {
+        let mut request_payload = AnthropicRequest {
             model: self.model.clone(),
             messages: api_messages,
             tools: api_tools,
             system: self.system_prompt.clone(),
             max_tokens: self.max_tokens,
+            stream: None, // Will be set based on streaming mode
         };
+
+        // Enable streaming if configured and we have an app handle
+        let use_streaming = self.streaming_enabled && app_handle.is_some();
+        if use_streaming {
+            request_payload.stream = Some(true);
+        }
 
         // -- DEBUG: Log the request payload --
         match serde_json::to_string_pretty(&request_payload) {
@@ -339,74 +598,130 @@ impl AgentBrain for AnthropicBrain {
             )));
         }
 
-        let response_body: AnthropicMessageResponse = response
-            .json()
-            .await
-            .map_err(|e| AgentError::LlmError(format!("Failed to parse API response: {}", e)))?;
+        // --- 4. Handle Response (Streaming or Non-Streaming) ---
+        if use_streaming {
+            // Handle streaming response
+            let app_handle = app_handle.unwrap(); // Safe because we checked above
+            let message_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        log::debug!("Received response from Anthropic: {:?}", response_body);
+            // Emit stream start event
+            crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
 
-        // --- 4. Determine AgentAction ---
+            let (accumulated_text, tool_calls, stop_reason) = self.handle_streaming_response(
+                response,
+                |chunk| {
+                    // Emit text chunk event
+                    crate::agent::tool_logger::emit_streaming_text_chunk(
+                        &app_handle,
+                        chunk,
+                        Some(message_id.clone()),
+                    );
+                },
+            ).await?;
 
-        let mut tool_calls_to_execute = Vec::new();
-        let mut response_text = String::new();
+            // Emit stream end event
+            crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, accumulated_text.clone());
 
-        // Extract and parse tool calls and text from the response
-        for block in response_body.content.iter() {
-            match block.block_type.as_str() {
-                "text" => {
-                    if let Some(text) = &block.text {
-                        // Append to response text
-                        if !response_text.is_empty() {
-                            response_text.push('\n');
+            // Process stop reason and return appropriate action
+            match stop_reason.as_str() {
+                "tool_use" => {
+                    if tool_calls.is_empty() {
+                        Err(AgentError::LlmError("Stop reason is tool_use, but no valid tool calls found in response".to_string()))
+                    } else {
+                        if !accumulated_text.is_empty() {
+                            log::info!("Anthropic response included text before tool use: {}", accumulated_text);
                         }
-                        response_text.push_str(text);
+                        Ok(AgentAction::ExecuteTool(tool_calls))
                     }
                 }
+                "end_turn" | "stop_sequence" | "max_tokens" => {
+                    if !tool_calls.is_empty() {
+                        log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", stop_reason);
+                    }
+                    Ok(AgentAction::Finish(accumulated_text))
+                }
+                other => Err(AgentError::LlmError(format!(
+                    "Received unexpected stop reason: {}",
+                    other
+                ))),
+            }
+        } else {
+            // Handle non-streaming response (original logic)
+            let response_body: AnthropicMessageResponse = response
+                .json()
+                .await
+                .map_err(|e| AgentError::LlmError(format!("Failed to parse API response: {}", e)))?;
+
+            log::debug!("Received response from Anthropic: {:?}", response_body);
+
+            // --- 4. Determine AgentAction ---
+            let mut tool_calls_to_execute = Vec::new();
+            let mut response_text = String::new();
+
+            // Extract and parse tool calls and text from the response
+            for block in response_body.content.iter() {
+                match block.block_type.as_str() {
+                    "text" => {
+                        if let Some(text) = &block.text {
+                            // Append to response text
+                            if !response_text.is_empty() {
+                                response_text.push('\n');
+                            }
+                            response_text.push_str(text);
+                        }
+                    }
+                    "tool_use" => {
+                        // Check if we have the required fields for a tool call
+                        let id = block.id.clone().ok_or_else(|| AgentError::LlmError("Tool call missing 'id' field".to_string()))?;
+                        let name = block.name.clone().ok_or_else(|| AgentError::LlmError(format!("Tool call {} missing 'name' field", id)))?;
+                        let input = block.input.clone().ok_or_else(|| AgentError::LlmError(format!("Tool call {} missing 'input' field", id)))?;
+
+                        // Add to the list of tool calls to execute
+                        tool_calls_to_execute.push(ToolCall {
+                            id,
+                            name,
+                            input,
+                        });
+                    }
+                    _ => {
+                        log::warn!("Unknown content block type: {}", block.block_type);
+                    }
+                }
+            }
+
+            match response_body.stop_reason.as_str() {
                 "tool_use" => {
-                    // Check if we have the required fields for a tool call
-                    let id = block.id.clone().ok_or_else(|| AgentError::LlmError("Tool call missing 'id' field".to_string()))?;
-                    let name = block.name.clone().ok_or_else(|| AgentError::LlmError(format!("Tool call {} missing 'name' field", id)))?;
-                    let input = block.input.clone().ok_or_else(|| AgentError::LlmError(format!("Tool call {} missing 'input' field", id)))?;
-
-                    // Add to the list of tool calls to execute
-                    tool_calls_to_execute.push(ToolCall {
-                        id,
-                        name,
-                        input,
-                    });
+                    if tool_calls_to_execute.is_empty() {
+                        Err(AgentError::LlmError("Stop reason is tool_use, but no valid tool calls found in response".to_string()))
+                    } else {
+                        if !response_text.is_empty() {
+                            log::info!("Anthropic response included text before tool use: {}", response_text);
+                        }
+                        Ok(AgentAction::ExecuteTool(tool_calls_to_execute))
+                    }
                 }
-                _ => {
-                    log::warn!("Unknown content block type: {}", block.block_type);
+                "end_turn" | "stop_sequence" | "max_tokens" => {
+                    if !tool_calls_to_execute.is_empty() {
+                        log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", response_body.stop_reason);
+                    }
+                    Ok(AgentAction::Finish(response_text))
                 }
+                other => Err(AgentError::LlmError(format!(
+                    "Received unexpected stop reason: {}",
+                    other
+                ))),
             }
         }
+    }
+}
 
-        match response_body.stop_reason.as_str() {
-            "tool_use" => {
-                if tool_calls_to_execute.is_empty() {
-                     Err(AgentError::LlmError("Stop reason is tool_use, but no valid tool calls found in response".to_string()))
-                } else {
-                     if !response_text.is_empty() {
-                         log::info!("Anthropic response included text before tool use: {}", response_text);
-                         // TODO: Decide how to handle this text. Add to memory?
-                     }
-                     // Return all parsed tool calls
-                     Ok(AgentAction::ExecuteTool(tool_calls_to_execute))
-                }
-            }
-            "end_turn" | "stop_sequence" | "max_tokens" => {
-                 if !tool_calls_to_execute.is_empty() {
-                     log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", response_body.stop_reason);
-                 }
-                // If the turn ended naturally or via stop sequence, finish with the text response.
-                // If max_tokens, it also ends, but the response might be incomplete.
-                 Ok(AgentAction::Finish(response_text))
-            }
-            other => Err(AgentError::LlmError(format!(
-                "Received unexpected stop reason: {}",
-                other
-            ))),
-        }
+#[async_trait]
+impl StreamingAgentBrain for AnthropicBrain {
+    fn is_streaming_enabled(&self) -> bool {
+        self.streaming_enabled
+    }
+
+    fn set_streaming_enabled(&mut self, enabled: bool) {
+        self.streaming_enabled = enabled;
     }
 }

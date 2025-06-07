@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tracing::info;
 
+// Re-export MCP types for convenience
+pub use super::mcp_integration::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
+
 /// Categories of tools for organization in the UI
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ToolCategory {
@@ -65,6 +68,7 @@ pub struct ToolConfig {
     pub enabled: bool,
     pub description: Option<String>,
     pub required: bool, // Some tools might be required and cannot be disabled
+    pub server_id: Option<String>, // For MCP tools, which server they belong to
 }
 
 impl ToolConfig {
@@ -75,6 +79,18 @@ impl ToolConfig {
             enabled,
             description: None,
             required: false,
+            server_id: None,
+        }
+    }
+
+    pub fn new_mcp_tool(name: String, server_id: String, enabled: bool) -> Self {
+        Self {
+            name,
+            category: ToolCategory::MCP,
+            enabled,
+            description: None,
+            required: false,
+            server_id: Some(server_id),
         }
     }
 
@@ -95,6 +111,7 @@ impl ToolConfig {
 pub struct ToolConfigManager {
     pub tools: HashMap<String, ToolConfig>,
     pub category_enabled: HashMap<ToolCategory, bool>,
+    pub mcp_servers: HashMap<String, MCPServerConfig>, // Store MCP server configurations
 }
 
 impl Default for ToolConfigManager {
@@ -117,6 +134,7 @@ impl Default for ToolConfigManager {
         Self {
             tools,
             category_enabled,
+            mcp_servers: HashMap::new(),
         }
     }
 }
@@ -133,8 +151,11 @@ impl ToolConfigManager {
             let content = fs::read_to_string(config_path)
                 .map_err(|e| format!("Failed to read tool config: {}", e))?;
 
-            let config: Self = serde_json::from_str(&content)
+            let mut config: Self = serde_json::from_str(&content)
                 .map_err(|e| format!("Failed to parse tool config: {}", e))?;
+
+            // Ensure all default tools are present (for backwards compatibility)
+            Self::ensure_default_tools(&mut config.tools);
 
             info!("Loaded tool configuration from {}", config_path.display());
             Ok(config)
@@ -243,7 +264,81 @@ impl ToolConfigManager {
 
     /// Reset configuration to defaults
     pub fn reset_to_defaults(&mut self) {
-        *self = Self::default();
+        let mut new_config = Self::default();
+        
+        // Preserve MCP server configurations
+        new_config.mcp_servers = self.mcp_servers.clone();
+        
+        *self = new_config;
+    }
+
+    // MCP Server Management Methods
+
+    /// Add an MCP server configuration
+    pub fn add_mcp_server(&mut self, config: MCPServerConfig) {
+        self.mcp_servers.insert(config.id.clone(), config);
+    }
+
+    /// Remove an MCP server configuration
+    pub fn remove_mcp_server(&mut self, server_id: &str) {
+        self.mcp_servers.remove(server_id);
+        
+        // Also remove all tools from this server
+        self.tools.retain(|_, tool_config| {
+            tool_config.server_id.as_ref() != Some(&server_id.to_string())
+        });
+    }
+
+    /// Get all MCP server configurations
+    pub fn get_mcp_servers(&self) -> Vec<MCPServerConfig> {
+        self.mcp_servers.values().cloned().collect()
+    }
+
+    /// Get MCP server configuration by ID
+    pub fn get_mcp_server(&self, server_id: &str) -> Option<MCPServerConfig> {
+        self.mcp_servers.get(server_id).cloned()
+    }
+
+    /// Update MCP server configuration
+    pub fn update_mcp_server(&mut self, config: MCPServerConfig) {
+        self.mcp_servers.insert(config.id.clone(), config);
+    }
+
+    /// Add tools from an MCP server
+    pub fn add_mcp_tools(&mut self, server_id: &str, tools: Vec<MCPToolInfo>) {
+        for tool_info in tools {
+            let tool_config = ToolConfig::new_mcp_tool(
+                tool_info.tool_definition.name.clone(),
+                server_id.to_string(),
+                tool_info.enabled,
+            ).with_description(tool_info.tool_definition.description);
+
+            self.add_tool_config(tool_config);
+        }
+    }
+
+    /// Get all MCP tools for a specific server
+    pub fn get_mcp_tools_for_server(&self, server_id: &str) -> Vec<&ToolConfig> {
+        self.tools.values()
+            .filter(|config| {
+                config.category == ToolCategory::MCP && 
+                config.server_id.as_ref() == Some(&server_id.to_string())
+            })
+            .collect()
+    }
+
+    /// Check if an MCP server is enabled
+    pub fn is_mcp_server_enabled(&self, server_id: &str) -> bool {
+        self.mcp_servers.get(server_id)
+            .map(|config| config.enabled)
+            .unwrap_or(false)
+    }
+
+    /// Enable or disable an MCP server
+    pub fn set_mcp_server_enabled(&mut self, server_id: &str, enabled: bool) {
+        if let Some(server_config) = self.mcp_servers.get_mut(server_id) {
+            server_config.enabled = enabled;
+        }
     }
 
     // Default tool initialization methods
@@ -352,6 +447,23 @@ impl ToolConfigManager {
             ).with_description(description.to_string());
 
             tools.insert(name.to_string(), config);
+        }
+    }
+
+    /// Ensure all default tools are present (for backwards compatibility)
+    fn ensure_default_tools(tools: &mut HashMap<String, ToolConfig>) {
+        let mut default_tools = HashMap::new();
+        Self::add_default_anthropic_tools(&mut default_tools);
+        Self::add_default_desktop_tools(&mut default_tools);
+        Self::add_default_browser_tools(&mut default_tools);
+        Self::add_default_timer_tools(&mut default_tools);
+        Self::add_default_basic_tools(&mut default_tools);
+
+        // Add missing default tools
+        for (name, config) in default_tools {
+            if !tools.contains_key(&name) {
+                tools.insert(name, config);
+            }
         }
     }
 }

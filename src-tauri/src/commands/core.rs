@@ -42,7 +42,7 @@ pub(crate) async fn capture_window_screenshot_command(
 ) -> Result<String, String> {
 
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
-    use computer_use_ai_sdk::platforms::macos::utils::capture_window_screenshot;
+    use computer_use_ai_sdk::platforms::macos::utils::capture_element_screenshot;
 
     // Find the window by ID
     let desktop = state.get_desktop()?;
@@ -62,7 +62,7 @@ pub(crate) async fn capture_window_screenshot_command(
         .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
 
     // Capture the window screenshot
-    match capture_window_screenshot(macos_element) {
+    match capture_element_screenshot(macos_element) {
         Ok(base64_string) => {
             send_dev_tool_notification(&app, "Window Screenshot", &format!("Window '{}' screenshot captured successfully.", window_id))?;
             Ok(base64_string)
@@ -88,7 +88,7 @@ pub(crate) async fn capture_focused_window_screenshot_command(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
-    use computer_use_ai_sdk::platforms::macos::utils::capture_window_screenshot;
+    use computer_use_ai_sdk::platforms::macos::utils::capture_element_screenshot;
 
     let desktop = state.get_desktop()?;
 
@@ -133,7 +133,7 @@ pub(crate) async fn capture_focused_window_screenshot_command(
         .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
 
     // Capture the window screenshot
-    match capture_window_screenshot(macos_element) {
+    match capture_element_screenshot(macos_element) {
         Ok(base64_string) => {
             send_dev_tool_notification(&app, "Focused Window Screenshot", "Focused window screenshot captured successfully.")?;
             Ok(base64_string)
