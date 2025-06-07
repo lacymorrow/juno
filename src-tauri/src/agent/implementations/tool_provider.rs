@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use futures::FutureExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -11,6 +10,7 @@ use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::traits::ToolProvider;
 use crate::agent::tool_logger;
 use crate::state::AppState;
+use crate::agent::tools::mcp_integration::MCPManager;
 
 // Define an async tool function type
 // It takes a Value input and returns a BoxFuture that resolves to Result<Value, String>
@@ -21,13 +21,14 @@ pub type AsyncToolFn = Box<
     dyn Fn(Value) -> BoxFuture<'static, Result<Value, String>> + Send + Sync + 'static
 >;
 
-/// A ToolProvider holding tools in memory, supporting async execution.
+/// A ToolProvider holding tools in memory, supporting async execution and MCP integration.
 #[derive(Clone)]
 pub struct LocalToolProvider {
     definitions: Arc<RwLock<HashMap<String, ToolDefinition>>>,
     // Use the AsyncToolFn type
     executors: Arc<RwLock<HashMap<String, AsyncToolFn>>>,
     app_handle: Option<AppHandle>,
+    mcp_manager: Option<Arc<tokio::sync::Mutex<MCPManager>>>,
 }
 
 impl LocalToolProvider {
@@ -36,6 +37,7 @@ impl LocalToolProvider {
             definitions: Arc::new(RwLock::new(HashMap::new())),
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: None,
+            mcp_manager: None,
         }
     }
 
@@ -45,12 +47,28 @@ impl LocalToolProvider {
             definitions: Arc::new(RwLock::new(HashMap::new())),
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: Some(app_handle),
+            mcp_manager: None,
+        }
+    }
+
+    /// Create a tool provider with both app handle and MCP manager for external tool support
+    pub fn with_mcp_support(app_handle: AppHandle, mcp_manager: Arc<tokio::sync::Mutex<MCPManager>>) -> Self {
+        LocalToolProvider {
+            definitions: Arc::new(RwLock::new(HashMap::new())),
+            executors: Arc::new(RwLock::new(HashMap::new())),
+            app_handle: Some(app_handle),
+            mcp_manager: Some(mcp_manager),
         }
     }
 
     /// Set the app handle for emitting events
     pub fn set_app_handle(&mut self, app_handle: AppHandle) {
         self.app_handle = Some(app_handle);
+    }
+
+    /// Set the MCP manager for external tool support
+    pub fn set_mcp_manager(&mut self, mcp_manager: Arc<tokio::sync::Mutex<MCPManager>>) {
+        self.mcp_manager = Some(mcp_manager);
     }
 
     /// Registers an async tool with its definition and execution logic.
@@ -122,59 +140,180 @@ impl LocalToolProvider {
 
         self.register_async_tool(definition, executor).await;
     }
+
+    /// Refresh MCP tools from connected servers
+    pub async fn refresh_mcp_tools(&mut self) -> Result<(), String> {
+        if let Some(ref mcp_manager) = self.mcp_manager {
+            let manager_guard = mcp_manager.lock().await;
+            let mcp_tools = manager_guard.get_all_tools().await;
+            drop(manager_guard);
+
+            // Clear existing MCP tools first (they have prefixed names)
+            let mut defs = self.definitions.write().await;
+            defs.retain(|name, _| !name.contains("mcp-server-"));
+
+            // Add fresh MCP tools to our local definitions
+            let mut added_count = 0;
+            for tool_info in mcp_tools {
+                if tool_info.enabled {
+                    defs.insert(tool_info.tool_definition.name.clone(), tool_info.tool_definition);
+                    added_count += 1;
+                }
+            }
+
+            log::info!("Refreshed and cached {} MCP tools in provider definitions", added_count);
+        }
+        Ok(())
+    }
+
+    /// Check if a tool is an MCP tool
+    fn is_mcp_tool(&self, tool_name: &str) -> bool {
+        // MCP tools are prefixed with server name
+        tool_name.contains('_') &&
+        self.mcp_manager.is_some() &&
+        !self.executors.try_read().map(|execs| execs.contains_key(tool_name)).unwrap_or(false)
+    }
+
+    /// Deprecated: Registers a synchronous tool. Use register_async_tool instead.
+    #[deprecated(note = "Use register_async_tool for all tools going forward")]
+    pub async fn register_tool<F>(&mut self, definition: ToolDefinition, executor: F)
+    where
+        F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
+    {
+        let async_executor = move |input: Value| {
+            // Wrap the synchronous function in an async block
+            let result = executor(input);
+            async move { result } // This future resolves immediately
+        };
+        self.register_async_tool(definition, async_executor).await;
+    }
 }
 
 #[async_trait]
 impl ToolProvider for LocalToolProvider {
     async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
+        let mut all_tools = Vec::new();
+
+        // Get local tools (which includes previously cached MCP tools)
         let defs = self.definitions.read().await;
-        Ok(defs.values().cloned().collect())
+        all_tools.extend(defs.values().cloned());
+        drop(defs);
+
+        // Only fetch MCP tools if we don't have any cached and we have an MCP manager
+        if let Some(ref mcp_manager) = self.mcp_manager {
+            // Check if we already have MCP tools cached (they have prefixed names)
+            let has_mcp_tools = all_tools.iter().any(|tool| tool.name.contains("mcp-server-"));
+
+            if !has_mcp_tools {
+                let manager_guard = mcp_manager.lock().await;
+                let mcp_tools = manager_guard.get_all_tools().await;
+                drop(manager_guard);
+
+                for tool_info in mcp_tools {
+                    if tool_info.enabled {
+                        all_tools.push(tool_info.tool_definition);
+                    }
+                }
+
+                log::debug!("Fetched {} fresh MCP tools", all_tools.iter().filter(|t| t.name.contains("mcp-server-")).count());
+            } else {
+                log::debug!("Using cached MCP tools, skipping fresh fetch");
+            }
+        }
+
+        // Debug logging to identify duplicates
+        let mut tool_names = std::collections::HashSet::new();
+        let mut duplicates = Vec::new();
+
+        for tool in &all_tools {
+            if !tool_names.insert(tool.name.clone()) {
+                duplicates.push(tool.name.clone());
+            }
+        }
+
+        if !duplicates.is_empty() {
+            log::error!("DUPLICATE TOOLS DETECTED: {:?}", duplicates);
+            log::debug!("All tool names: {:?}", all_tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+        } else {
+            log::debug!("All {} tools are unique", all_tools.len());
+        }
+
+        Ok(all_tools)
     }
 
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
-        let execs = self.executors.read().await;
-        if let Some(executor) = execs.get(&tool_call.name) {
-            let app_handle = self.app_handle.clone();
-            let tool_name = tool_call.name.clone();
-            let tool_input = tool_call.input.clone();
-            let call_id = tool_call.id.clone();
+        let tool_name = &tool_call.name;
 
-            let execution_future = async move {
-                executor(tool_input).await
-            };
+        // Emit tool call request event if app handle is available
+        if let Some(ref app_handle) = self.app_handle {
+            tool_logger::log_tool_call_request(
+                app_handle,
+                tool_name,
+                tool_call.input.clone(),
+                Some(format!("Executing tool: {}", tool_name))
+            );
+        }
 
-            let result_output = if let Some(handle) = app_handle {
-                tool_logger::log_async_tool_execution(
-                    &handle,
-                    &tool_name,
-                    tool_call.input.clone(),
-                    execution_future,
-                )
-                .await
-            } else {
-                log::warn!("Executing tool '{}' without logging via app handle.", tool_name);
-                // Use the catch_unwind from FutureExt
-                match std::panic::AssertUnwindSafe(execution_future).catch_unwind().await {
-                    Ok(Ok(output)) => Ok(output),
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err("Tool execution panicked".to_string()),
+        // Determine if this is an MCP tool or local tool
+        let is_mcp = self.is_mcp_tool(tool_name);
+
+        let result = if is_mcp {
+            // Execute via MCP manager
+            if let Some(ref mcp_manager) = self.mcp_manager {
+                let manager_guard = mcp_manager.lock().await;
+                match manager_guard.execute_tool(tool_name, tool_call.input.clone(), tool_call.id.clone()).await {
+                    Ok(tool_result) => Ok(tool_result),
+                    Err(e) => {
+                        drop(manager_guard);
+                        Err(e)
+                    }
                 }
-            };
-
-            match result_output {
-                Ok(output) => Ok(ToolResult {
-                    call_id,
-                    output,
-                }),
-                Err(e) => Err(AgentError::ToolError(format!(
-                    "Error executing tool '{}': {}",
-                    tool_call.name,
-                    e
-                ))),
+            } else {
+                Err(AgentError::ToolNotFound(format!("MCP tool '{}' requested but no MCP manager available", tool_name)))
             }
         } else {
-            Err(AgentError::ToolNotFound(tool_call.name))
+            // Execute local tool
+            let executors = self.executors.read().await;
+            if let Some(executor) = executors.get(tool_name) {
+                match executor(tool_call.input.clone()).await {
+                    Ok(output) => Ok(ToolResult {
+                        call_id: tool_call.id.clone(),
+                        output,
+                    }),
+                    Err(error_msg) => Err(AgentError::ToolError(error_msg)),
+                }
+            } else {
+                Err(AgentError::ToolNotFound(tool_name.clone()))
+            }
+        };
+
+        // Emit tool call response event if app handle is available
+        if let Some(ref app_handle) = self.app_handle {
+            match &result {
+                Ok(tool_result) => {
+                    tool_logger::log_tool_call_result(
+                        app_handle,
+                        tool_name,
+                        tool_result.output.clone(),
+                        true,
+                        Some(format!("Tool {} executed successfully", tool_name)),
+                        None,
+                    );
+                }
+                Err(e) => {
+                    tool_logger::log_tool_call_result(
+                        app_handle,
+                        tool_name,
+                        serde_json::Value::String(format!("Tool execution failed: {}", e)),
+                        false,
+                        Some(format!("Error in tool {}", tool_name)),
+                        None,
+                    );
+                }
+            }
         }
+
+        result
     }
 }
 

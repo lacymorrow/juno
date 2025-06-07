@@ -18,6 +18,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **Specialists**: Domain-specific agents (browser, desktop, file) with isolated memory
 - **Tools**: Shared providers with lazy initialization
 - **Memory**: Orchestrator uses persistent AppState, specialists use fresh SimpleMemoryManager
+- **MCP Integration**: External tool servers via `src-tauri/src/agent/tools/mcp_integration.rs`
 
 ### Key Patterns
 - Use `AgentError` enum for errors, never `std::process::exit()`
@@ -27,11 +28,14 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - Follow async/await patterns consistently
 
 ### Implementation Status
-✅ All 17 Computer Use actions  
-✅ Timer system with context resumption  
-✅ Voice integration (Agent/Dictation modes)  
-✅ Multi-agent orchestration  
-✅ Browser automation  
+✅ All 17 Computer Use actions
+✅ Timer system with context resumption
+✅ Voice integration (Agent/Dictation modes)
+✅ Multi-agent orchestration
+✅ Browser automation
+✅ MCP integration for extensibility
+✅ Cloud control system and authentication
+✅ Streaming AI responses
 
 ### Quick Reference
 - **Entry Point**: `src-tauri/src/anthropic.rs::submit_query()`
