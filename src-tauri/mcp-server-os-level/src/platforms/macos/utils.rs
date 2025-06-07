@@ -1,10 +1,5 @@
-// Removed unused import use super::wrappers::ThreadSafeAXUIElement;
 use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes}; // Import AXUIElementAttributes trait
-// Removed unused import use accessibility_sys::AXUIElementGetTypeID;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-// Removed unused import use core_foundation::base::TCFType;
-// Removed unused import use core_foundation::boolean::CFBoolean;
-// Removed unused import use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::{CGDisplay, CGDisplayBounds, CGMainDisplayID, CGGetActiveDisplayList, CGDirectDisplayID}; // Use CGGetActiveDisplayList
 use core_graphics::geometry::{CGRect, CGPoint}; // Removed CGPointMake, CGRectContainsPoint
@@ -352,6 +347,123 @@ pub fn capture_element_screenshot(element: &MacOSUIElement) -> Result<String, Au
     }
 }
 
+/// Captures a screenshot of a specific window and encodes it as base64 PNG.
+/// `window_element` should be a UIElement representing a window (role == "AXWindow").
+pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<String, AutomationError> {
+    // Verify that the element is a window
+    let attrs = window_element.attributes();
+    if attrs.role != "AXWindow" {
+        return Err(AutomationError::PlatformError(format!(
+            "Element is not a window. Expected role 'AXWindow', got '{}'",
+            attrs.role
+        )));
+    }
+
+    // Get window bounds
+    let (x, y, width, height) = window_element.bounds()?;
+    
+    // Check for valid dimensions
+    if width <= 0.0 || height <= 0.0 {
+        let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+        warn!(
+            "Cannot capture screenshot for window with zero or negative dimensions. Label: '{}', Bounds: ({}, {}, {}, {})",
+            label, x, y, width, height
+        );
+        return Err(AutomationError::ZeroElementDimensions {
+            role: attrs.role,
+            label,
+            x,
+            y,
+            width,
+            height,
+        });
+    }
+
+    // Get the center point of the window to determine which display it's on
+    let center_x = x + width / 2.0;
+    let center_y = y + height / 2.0;
+    let window_center_point = CGPoint { x: center_x, y: center_y };
+
+    // Find the display containing the window's center point
+    let target_display_id = match find_display_containing_point(window_center_point) {
+        Ok(id) => id,
+        Err(_) => {
+            warn!(
+                "Could not determine display for window at ({}, {}). Defaulting to main display.",
+                center_x, center_y
+            );
+            unsafe { CGMainDisplayID() }
+        }
+    };
+
+    // Get the bounds of the target display
+    let display_bounds = unsafe { CGDisplayBounds(target_display_id) };
+
+    // Adjust window coordinates to be relative to the target display's origin
+    let relative_x = x - display_bounds.origin.x;
+    let relative_y = y - display_bounds.origin.y;
+
+    // Create crop parameters, ensuring they're positive and within display bounds
+    let crop_x = relative_x.max(0.0).floor() as u32;
+    let crop_y = relative_y.max(0.0).floor() as u32;
+    let crop_width = width.max(1.0).ceil() as u32;
+    let crop_height = height.max(1.0).ceil() as u32;
+
+    // Capture the target display
+    let display_cg_image = capture_screenshot_cgimage(Some(target_display_id))?;
+
+    // Convert to ImageBuffer
+    let display_buffer = cgimage_to_imagebuffer(display_cg_image)?;
+
+    // Validate crop dimensions
+    if crop_x + crop_width > display_buffer.width() || crop_y + crop_height > display_buffer.height() {
+        warn!(
+            "Window bounds ({}, {}, {}, {}) exceed screen dimensions ({}, {}). Clamping crop.",
+            crop_x, crop_y, crop_width, crop_height, display_buffer.width(), display_buffer.height()
+        );
+        
+        let clamped_width = crop_width.min(display_buffer.width().saturating_sub(crop_x));
+        let clamped_height = crop_height.min(display_buffer.height().saturating_sub(crop_y));
+        
+        if clamped_width == 0 || clamped_height == 0 {
+            let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+            let err_msg = format!(
+                "Window bounds result in zero-size crop area after clamping. Label: '{}', Original Bounds: ({}, {}, {}, {}), Clamped Crop: ({}, {}, {}, {})",
+                label, x, y, width, height, crop_x, crop_y, clamped_width, clamped_height
+            );
+            warn!("{}", err_msg);
+            return Err(AutomationError::PlatformError(err_msg));
+        }
+        
+        let cropped_buffer = imageops::crop_imm(
+            &display_buffer,
+            crop_x,
+            crop_y,
+            clamped_width,
+            clamped_height,
+        ).to_image();
+        encode_imagebuffer_to_base64_png(&cropped_buffer)
+    } else if crop_width == 0 || crop_height == 0 {
+        let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
+        let err_msg = format!(
+            "Window bounds result in zero-size crop area. Label: '{}', Original Bounds: ({}, {}, {}, {})",
+            label, x, y, width, height
+        );
+        warn!("{}", err_msg);
+        return Err(AutomationError::PlatformError(err_msg));
+    } else {
+        // Crop the buffer using the window bounds
+        let cropped_buffer = imageops::crop_imm(
+            &display_buffer,
+            crop_x,
+            crop_y,
+            crop_width,
+            crop_height
+        ).to_image();
+        encode_imagebuffer_to_base64_png(&cropped_buffer)
+    }
+}
+
 /// Converts a CGImage into an ImageBuffer<Rgba<u8>, Vec<u8>>.
 fn cgimage_to_imagebuffer(cg_image: CGImage) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, AutomationError> {
     let width = cg_image.width();
@@ -475,6 +587,58 @@ pub fn get_display_bounds(display_id: Option<CGDirectDisplayID>) -> Result<CGRec
             Ok(bounds)
         }
     }
+}
+
+/// Convert global screen coordinates to window-relative coordinates.
+/// Returns (x, y) relative to the window's top-left corner.
+pub fn global_to_window_coordinates(
+    global_x: f64,
+    global_y: f64,
+    window_element: &MacOSUIElement,
+) -> Result<(f64, f64), AutomationError> {
+    // Verify that the element is a window
+    let attrs = window_element.attributes();
+    if attrs.role != "AXWindow" {
+        return Err(AutomationError::PlatformError(format!(
+            "Element is not a window. Expected role 'AXWindow', got '{}'",
+            attrs.role
+        )));
+    }
+
+    // Get window bounds
+    let (window_x, window_y, _width, _height) = window_element.bounds()?;
+    
+    // Convert to window-relative coordinates
+    let relative_x = global_x - window_x;
+    let relative_y = global_y - window_y;
+    
+    Ok((relative_x, relative_y))
+}
+
+/// Convert window-relative coordinates to global screen coordinates.
+/// Takes (x, y) relative to the window's top-left corner and returns global coordinates.
+pub fn window_to_global_coordinates(
+    window_x: f64,
+    window_y: f64,
+    window_element: &MacOSUIElement,
+) -> Result<(f64, f64), AutomationError> {
+    // Verify that the element is a window
+    let attrs = window_element.attributes();
+    if attrs.role != "AXWindow" {
+        return Err(AutomationError::PlatformError(format!(
+            "Element is not a window. Expected role 'AXWindow', got '{}'",
+            attrs.role
+        )));
+    }
+
+    // Get window bounds
+    let (global_window_x, global_window_y, _width, _height) = window_element.bounds()?;
+    
+    // Convert to global coordinates
+    let global_x = global_window_x + window_x;
+    let global_y = global_window_y + window_y;
+    
+    Ok((global_x, global_y))
 }
 
 #[cfg(test)]

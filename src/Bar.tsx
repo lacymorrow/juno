@@ -50,8 +50,8 @@ export function FloatingBar() {
   const [currentError, setCurrentError] = useState<string | null>(null);
   const [transcriptionText, setTranscriptionText] = useState("");
   const [spokenText, setSpokenText] = useState("");
-  const [isAgentWorking, setIsAgentWorking] = useState(false);
-  const [isDictationMode, setIsDictationMode] = useState(false);
+  const [_isAgentWorking, setIsAgentWorking] = useState(false);
+  const [_isDictationMode, setIsDictationMode] = useState(false);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -105,34 +105,40 @@ export function FloatingBar() {
     let unlisten: (() => void) | undefined;
 
     const setupListener = async () => {
-      unlisten = await listen<BarStateData>("bar-state-update", (event) => {
-        console.log("Received bar-state-update:", event.payload);
-        const data = event.payload;
+      try {
+        unlisten = await listen<BarStateData>("bar-state-update", (event) => {
+          console.log("Received bar-state-update:", event.payload);
+          const data = event.payload;
 
-        // Update all state from backend
-        setBarState(data.barState);
-        setInputValue(data.inputValue);
-        setLastSubmittedValue(data.lastSubmittedValue);
-        setCurrentError(data.currentError);
-        setTranscriptionText(data.transcriptionText);
-        setSpokenText(data.spokenText);
-        setIsAgentWorking(data.isAgentWorking);
-        setIsDictationMode(data.isDictationMode);
+          // Update all state from backend
+          setBarState(data.barState);
+          setInputValue(data.inputValue);
+          setLastSubmittedValue(data.lastSubmittedValue);
+          setCurrentError(data.currentError);
+          setTranscriptionText(data.transcriptionText);
+          setSpokenText(data.spokenText);
+          setIsAgentWorking(data.isAgentWorking);
+          setIsDictationMode(data.isDictationMode);
 
-        // Handle input focus for input state
-        if (data.barState === "input" && inputRef.current) {
-          requestAnimationFrame(() => {
-            if (inputRef.current) {
-              inputRef.current.focus();
-            }
-          });
-        }
-      });
+          // Handle input focus for input state
+          if (data.barState === "input" && inputRef.current) {
+            requestAnimationFrame(() => {
+              if (inputRef.current) {
+                inputRef.current.focus();
+              }
+            });
+          }
+        });
+      } catch (error) {
+        console.error("Failed to setup bar state listener:", error);
+      }
     };
 
     setupListener();
     return () => {
-      unlisten?.();
+      if (unlisten) {
+        unlisten();
+      }
     };
   }, []);
 
@@ -142,20 +148,24 @@ export function FloatingBar() {
     let unlistenLeave: (() => void) | undefined;
 
     const setupListeners = async () => {
-      unlistenEnter = await listen<null>("mouse-entered-window", () => {
-        console.log("Mouse entered window bounds (event)");
-        setIsWindowHovered(true);
-      });
-      unlistenLeave = await listen<null>("mouse-left-window", () => {
-        console.log("Mouse left window bounds (event)");
-        setIsWindowHovered(false);
-      });
+      try {
+        unlistenEnter = await listen<null>("mouse-entered-window", () => {
+          console.log("Mouse entered window bounds (event)");
+          setIsWindowHovered(true);
+        });
+        unlistenLeave = await listen<null>("mouse-left-window", () => {
+          console.log("Mouse left window bounds (event)");
+          setIsWindowHovered(false);
+        });
+      } catch (error) {
+        console.error("Failed to setup hover listeners:", error);
+      }
     };
 
     setupListeners();
     return () => {
-      unlistenEnter?.();
-      unlistenLeave?.();
+      if (unlistenEnter) unlistenEnter();
+      if (unlistenLeave) unlistenLeave();
     };
   }, []);
 
@@ -164,27 +174,33 @@ export function FloatingBar() {
     let unlisten: (() => void) | undefined;
 
     const setupListener = async () => {
-      const currentWindow = Window.getCurrent();
-      unlisten = await currentWindow.onFocusChanged(
-        async ({ payload: isFocused }) => {
-          console.log(
-            "Window focus changed:",
-            isFocused,
-            "Current bar state:",
-            barState
-          );
-          try {
-            await invoke("floating_bar_focus_change", { isFocused });
-          } catch (err) {
-            console.error("Failed to handle focus change:", err);
+      try {
+        const currentWindow = Window.getCurrent();
+        unlisten = await currentWindow.onFocusChanged(
+          async ({ payload: isFocused }) => {
+            console.log(
+              "Window focus changed:",
+              isFocused,
+              "Current bar state:",
+              barState
+            );
+            try {
+              await invoke("floating_bar_focus_change", { isFocused });
+            } catch (err) {
+              console.error("Failed to handle focus change:", err);
+            }
           }
-        }
-      );
+        );
+      } catch (error) {
+        console.error("Failed to setup focus listener:", error);
+      }
     };
 
     setupListener();
     return () => {
-      unlisten?.();
+      if (unlisten) {
+        unlisten();
+      }
     };
   }, [barState]);
 

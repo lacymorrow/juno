@@ -1,0 +1,27 @@
+// Types for keyboard shortcuts configuration
+
+export interface KeyboardShortcuts {
+    agent_mode_toggle: string;      // Default: Alt+D (Option+D on macOS)
+    dictation_input: string;        // Default: Alt+Space (Option+Space on macOS)
+    stop_current_task: string;      // Default: Escape
+    open_settings: string;          // Default: Cmd+, (Ctrl+, on non-macOS)
+}
+
+export interface ShortcutInputProps {
+    label: string;
+    description: string;
+    value: string;
+    onChange: (value: string) => void;
+    placeholder?: string;
+    disabled?: boolean;
+}
+
+export interface ShortcutValidationResult {
+    isValid: boolean;
+    error?: string;
+}
+
+export interface ShortcutConflict {
+    shortcut: string;
+    conflictsWith: string[];
+}
