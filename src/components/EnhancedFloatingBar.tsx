@@ -72,7 +72,7 @@ export function EnhancedFloatingBar() {
     enableAnimations: true,
     autoHide: false,
     autoHideDelay: 3000,
-    opacity: 0.95,
+    opacity: 1.0,
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -314,32 +314,32 @@ export function EnhancedFloatingBar() {
   const getContainerStyles = () => {
     const baseStyles = `
       relative flex items-center justify-center
-      text-white rounded-full shadow-lg border border-white/10
+      text-white rounded-full shadow-lg border border-white/20
       transition-all duration-300 ease-in-out
       [will-change:width,height,transform]
       [backface-visibility:hidden]
       [transform-origin:center]
-      backdrop-blur-md
+      backdrop-blur-lg
     `;
 
     // Background based on state with proper transparency for pill effect
-    let bgColor = "bg-black/20";
+    let bgColor = "bg-black/95";
 
     if (isDictationMode) {
-      bgColor = "bg-gradient-to-r from-orange-600/30 to-orange-700/30";
+      bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
     } else if (isAgentWorking) {
-      bgColor = "bg-gradient-to-r from-blue-600/30 to-blue-700/30";
+      bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
     }
 
     // Override for specific states
     if (barState === "error") {
-      bgColor = "bg-gradient-to-r from-red-600/30 to-red-700/30";
+      bgColor = "bg-gradient-to-r from-red-600/98 to-red-700/98";
     } else if (barState === "success") {
-      bgColor = "bg-gradient-to-r from-emerald-600/30 to-emerald-700/30";
+      bgColor = "bg-gradient-to-r from-emerald-600/98 to-emerald-700/98";
     } else if (barState === "dictating") {
-      bgColor = "bg-gradient-to-r from-orange-600/30 to-orange-700/30";
+      bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
     } else if (barState === "listening") {
-      bgColor = "bg-gradient-to-r from-blue-600/30 to-blue-700/30";
+      bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
     }
 
     const sizeStyles = ["default", "shrinking", "finishing"].includes(barState)
@@ -353,13 +353,7 @@ export function EnhancedFloatingBar() {
 
     const clickable = ["default"].includes(barState) ? "cursor-pointer" : "";
 
-    return cn(
-      baseStyles,
-      bgColor,
-      sizeStyles,
-      hoverEffect,
-      clickable
-    );
+    return cn(baseStyles, bgColor, sizeStyles, hoverEffect, clickable);
   };
 
   return (
@@ -367,7 +361,7 @@ export function EnhancedFloatingBar() {
       {/* Enhanced Tooltip */}
       {showTooltip && barState === "default" && (
         <div className="absolute top-16 left-8 z-50 animate-fade-in">
-          <div className="bg-black/20 text-white text-xs px-3 py-2 rounded-lg border border-white/10 backdrop-blur-md max-w-xs">
+          <div className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs">
             {getStatusText()}
           </div>
         </div>
