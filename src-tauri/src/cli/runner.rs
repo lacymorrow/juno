@@ -11,7 +11,7 @@ use tracing::{info, error}; // Import tracing macros
 /// Handles the execution of commands specified via CLI arguments.
 /// Returns `true` if a CLI command was handled (and the app should exit),
 /// `false` otherwise (and the Tauri app should launch).
-pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> bool {
+pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: Option<&Desktop>) -> bool {
     // Prefix unused desktop_instance with _
     let _command_handled = false;
 

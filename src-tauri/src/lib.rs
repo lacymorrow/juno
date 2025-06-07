@@ -17,7 +17,7 @@ use tauri::{
     WebviewWindow, // Keep WebviewWindow
     Wry, // Keep Wry if needed elsewhere, remove if not
 };
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
+use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::{info, warn, error}; // Import logging macros
 use std::sync::Mutex; // Added for VoiceController state access
@@ -190,7 +190,7 @@ pub fn run() {
     // --- Handle CLI Commands ---
     // If handle_cli_commands returns true, it means a command was executed
     // and the application should exit.
-    if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
+    if cli::runner::handle_cli_commands(&cli, desktop_instance.as_ref()) {
         return; // Exit early if a CLI command was handled
     }
 
@@ -1258,7 +1258,7 @@ pub fn run() {
             });
 
             // Listen for Dictation Mode commitment events (threshold reached)
-            let app_handle_for_dictation_committed = app.handle().clone();
+            let _app_handle_for_dictation_committed = app.handle().clone();
             app.listen("dictation-committed", move |_event| {
                 info!("[Event] Received dictation-committed event - threshold reached");
                 // This event indicates the user has held dictation input long enough to commit to dictation

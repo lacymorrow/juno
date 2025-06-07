@@ -352,7 +352,7 @@ mod timer_tools_impl {
         let app_handle_clone = app_handle.clone();
         let timer_manager_clone = timer_manager.clone();
         let timer_id_clone = timer_id.clone();
-        let description_clone = description.clone();
+        let _description_clone = description.clone();
 
         let monitoring_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
@@ -534,7 +534,7 @@ mod timer_tools_impl {
         let app_handle_clone = app_handle.clone();
         let timer_manager_clone = timer_manager.clone();
         let timer_id_clone = timer_id.clone();
-        let description_clone = description.clone();
+        let _description_clone = description.clone();
         let file_path_for_async = file_path.clone();
 
         // Get initial file state

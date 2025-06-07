@@ -309,8 +309,6 @@ pub async fn restart_app_after_permissions(app: AppHandle) -> Result<(), String>
 
         // Use the Tauri AppHandle restart method
         app.restart();
-        info!("App restart initiated successfully");
-        Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
