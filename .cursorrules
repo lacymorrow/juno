@@ -1,44 +1,42 @@
-# AI Computer Use Agent - COMPLETE IMPLEMENTATION ✅
+# Juno AI Computer Use Agent - Cursor Rules
 
-This is a TAURI v2 App with **COMPLETE** Anthropic Computer Use Bot implementation.
+**CRITICAL**: See [LLMs.txt](LLMs.txt) for comprehensive project instructions optimized for AI agents.
 
-Documentation: https://v2.tauri.app
+## Project Status ✅ PRODUCTION READY
+Tauri v2 desktop app with COMPLETE Anthropic Computer Use Bot implementation for macOS.
 
-## Implementation Status: ✅ COMPLETE
+## Development Rules
 
-### ✅ Official Anthropic Computer Use Tools (100% Complete)
-- **computer_20250124**: All 17 actions implemented (screenshot, mouse, keyboard, scroll, wait)
-- **str_replace_based_edit_tool**: Full file operations (view, create, edit, insert)
-- **bash_20250124**: Shell command execution with output capture
-- Fully compliant with Claude 4, Sonnet 3.7, and Sonnet 3.5 specifications
+### Mandatory Compilation Check
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+**MUST** run after every Rust change. Project MUST compile with exit code 0.
 
-### ✅ Complete macOS Platform Implementation
-- All mouse operations: click, drag, move, position detection
-- All keyboard operations: type, key combinations, hold/release
-- Advanced features: 4-direction scrolling, clipboard, window management
-- Screenshot capture and accessibility tree navigation
-- Multi-method clicking with fallback strategies
+### Hierarchical Agent Architecture
+- **Orchestrator**: `src-tauri/src/anthropic.rs` - personality + memory + delegation
+- **Specialists**: Domain-specific agents (browser, desktop, file) with isolated memory
+- **Tools**: Shared providers with lazy initialization
+- **Memory**: Orchestrator uses persistent AppState, specialists use fresh SimpleMemoryManager
 
-### ✅ Enhanced Features Beyond Official Spec
-- **Timer System**: Long-running task management with automatic resumption
-- **Multi-Agent Architecture**: Specialized agents for different domains
-- **Voice Integration**: Speech recognition and transcription
-- **Browser Automation**: Advanced web interaction capabilities
+### Key Patterns
+- Use `AgentError` enum for errors, never `std::process::exit()`
+- Dynamic escape key registration ONLY during agent execution
+- All persistent state in `AppState`, access via getters
+- Clone memory managers safely (Arc-based)
+- Follow async/await patterns consistently
 
-### ✅ Project Architecture
-- Frontend: React/TypeScript with floating bar UI
-- Backend: Rust with Tauri v2 framework
-- Agent System: Multi-provider support (Anthropic, OpenAI, Gemini)
-- Desktop Control: macOS APIs with accessibility permissions
+### Implementation Status
+✅ All 17 Computer Use actions  
+✅ Timer system with context resumption  
+✅ Voice integration (Agent/Dictation modes)  
+✅ Multi-agent orchestration  
+✅ Browser automation  
 
-## Development Guidelines
+### Quick Reference
+- **Entry Point**: `src-tauri/src/anthropic.rs::submit_query()`
+- **Agent Tools**: `src-tauri/src/agent/tools/`
+- **macOS Integration**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
+- **Voice System**: `tauri-plugin-voice-transcription/`
 
-After every code modification to Rust files, run `cargo check --manifest-path src-tauri/Cargo.toml`. The project currently compiles successfully with exit code 0.
-
-## Key Implementation Files
-- `src-tauri/src/agent/tools/anthropic_computer_use.rs` - Official Anthropic tools
-- `src-tauri/src/agent/tools/timer_tools.rs` - Timer system for long tasks
-- `src-tauri/mcp-server-os-level/src/platforms/macos/` - macOS automation
-- `src-tauri/src/agent/providers/factory.rs` - AI provider management
-
-The implementation is production-ready and exceeds Anthropic's official Computer Use specification.
+See [LLMs.txt](LLMs.txt) for complete development guidelines, architecture details, and LLM-specific instructions.
