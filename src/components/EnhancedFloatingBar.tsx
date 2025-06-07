@@ -72,7 +72,7 @@ export function EnhancedFloatingBar() {
     enableAnimations: true,
     autoHide: false,
     autoHideDelay: 3000,
-    opacity: 0.95,
+    opacity: 1.0,
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -319,26 +319,27 @@ export function EnhancedFloatingBar() {
       [will-change:width,height,transform]
       [backface-visibility:hidden]
       [transform-origin:center]
+      backdrop-blur-lg
     `;
 
-    // Background based on state with gradients for better visual feedback
-    let bgColor = "bg-black/90";
+    // Background based on state with proper transparency for pill effect
+    let bgColor = "bg-black/95";
 
     if (isDictationMode) {
-      bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
+      bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
     } else if (isAgentWorking) {
-      bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
+      bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
     }
 
     // Override for specific states
     if (barState === "error") {
-      bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
+      bgColor = "bg-gradient-to-r from-red-600/98 to-red-700/98";
     } else if (barState === "success") {
-      bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
+      bgColor = "bg-gradient-to-r from-emerald-600/98 to-emerald-700/98";
     } else if (barState === "dictating") {
-      bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
+      bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
     } else if (barState === "listening") {
-      bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
+      bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
     }
 
     const sizeStyles = ["default", "shrinking", "finishing"].includes(barState)
@@ -352,18 +353,11 @@ export function EnhancedFloatingBar() {
 
     const clickable = ["default"].includes(barState) ? "cursor-pointer" : "";
 
-    return cn(
-      baseStyles,
-      bgColor,
-      sizeStyles,
-      hoverEffect,
-      clickable,
-      !isAnimatingSize && "backdrop-blur-md"
-    );
+    return cn(baseStyles, bgColor, sizeStyles, hoverEffect, clickable);
   };
 
   return (
-    <div className="w-screen h-screen flex items-start justify-start relative">
+    <div className="w-screen h-screen flex items-start justify-start relative bg-transparent">
       {/* Enhanced Tooltip */}
       {showTooltip && barState === "default" && (
         <div className="absolute top-16 left-8 z-50 animate-fade-in">
@@ -373,7 +367,7 @@ export function EnhancedFloatingBar() {
         </div>
       )}
 
-      <div className="relative z-50 p-3">
+      <div className="relative z-50 p-3 bg-transparent">
         <div
           data-tauri-drag-region
           className={getContainerStyles()}
