@@ -509,13 +509,13 @@ function App() {
   useEffect(() => {
     const unlisten = listen("toggle-dev-panel-requested", () => {
       console.log("Toggle dev panel requested from menu");
-      setIsDevPanelOpen(!isDevPanelOpen);
+      setIsDevPanelOpen((current) => !current);
     });
 
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, [isDevPanelOpen]);
+  }, []); // Remove dependency to avoid stale closure
 
   // Listen for permissions requests
   useEffect(() => {
@@ -1361,10 +1361,7 @@ function App() {
                 collapsedSize={0} // Completely collapses
                 minSize={25} // Reduced minimum size for better responsiveness
                 defaultSize={isDevPanelOpen ? 50 : 0} // Dynamic default size based on state
-                className={cn(
-                  isDevPanelOpen ? "block" : "hidden",
-                  "overflow-hidden" // Ensure panel itself doesn't scroll
-                )}
+                className="overflow-hidden" // Ensure panel itself doesn't scroll
               >
                 {/* Apply ScrollArea directly inside the panel */}
                 <ScrollArea className="h-full w-full p-3">

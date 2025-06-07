@@ -559,12 +559,23 @@ export const CloudTestPanel: React.FC = () => {
                 />
               </div>
               <div className="text-xs text-gray-600 space-y-1">
-                <p><strong>Available actions:</strong></p>
+                <p>
+                  <strong>Available actions:</strong>
+                </p>
                 <p>• screenshot - Take a screenshot</p>
-                <p>• click - Click at coordinates: {"action": "click", "x": 100, "y": 200}</p>
-                <p>• type - Type text: {"action": "type", "text": "Hello World"}</p>
-                <p>• key - Press key: {"action": "key", "key": "Return"}</p>
-                <p>• execute - Run shell command: {"action": "execute", "command": "ls -la"}</p>
+                <p>
+                  • click - Click at coordinates:{" "}
+                  {`{"action": "click", "x": 100, "y": 200}`}
+                </p>
+                <p>
+                  • type - Type text:{" "}
+                  {`{"action": "type", "text": "Hello World"}`}
+                </p>
+                <p>• key - Press key: {`{"action": "key", "key": "Return"}`}</p>
+                <p>
+                  • execute - Run shell command:{" "}
+                  {`{"action": "execute", "command": "ls -la"}`}
+                </p>
                 <p>• status - Get system status</p>
               </div>
               <Button
@@ -634,14 +645,16 @@ export const CloudTestPanel: React.FC = () => {
                 />
               </div>
               <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded space-y-1">
-                <p><strong>System Command Examples:</strong></p>
+                <p>
+                  <strong>System Command Examples:</strong>
+                </p>
                 <div className="grid grid-cols-1 gap-1 font-mono">
-                  <p>{"action": "screenshot"}</p>
-                  <p>{"action": "click", "x": 100, "y": 200}</p>
-                  <p>{"action": "type", "text": "Hello World"}</p>
-                  <p>{"action": "key", "key": "Return"}</p>
-                  <p>{"action": "execute", "command": "ls -la"}</p>
-                  <p>{"action": "status"}</p>
+                  <p>{`{"action": "screenshot"}`}</p>
+                  <p>{`{"action": "click", "x": 100, "y": 200}`}</p>
+                  <p>{`{"action": "type", "text": "Hello World"}`}</p>
+                  <p>{`{"action": "key", "key": "Return"}`}</p>
+                  <p>{`{"action": "execute", "command": "ls -la"}`}</p>
+                  <p>{`{"action": "status"}`}</p>
                 </div>
               </div>
               <Button
@@ -707,7 +720,8 @@ export const CloudTestPanel: React.FC = () => {
                   </div>
                 ) : (
                   <p className="text-gray-500 text-center py-8">
-                    No remote command results yet. Execute commands to see results here.
+                    No remote command results yet. Execute commands to see
+                    results here.
                   </p>
                 )}
               </ScrollArea>
@@ -786,7 +800,9 @@ export const CloudTestPanel: React.FC = () => {
                   variant="outline"
                 >
                   <RefreshCw
-                    className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+                    className={`h-4 w-4 mr-2 ${
+                      isLoading ? "animate-spin" : ""
+                    }`}
                   />
                   Refresh
                 </Button>
@@ -820,30 +836,37 @@ export const CloudTestPanel: React.FC = () => {
                     <div className="pt-4 border-t">
                       <Label>Performance Metrics</Label>
                       <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
-                        {JSON.stringify(connectionDiagnostics.performance_metrics, null, 2)}
+                        {JSON.stringify(
+                          connectionDiagnostics.performance_metrics,
+                          null,
+                          2
+                        )}
                       </pre>
                     </div>
                   )}
 
-                  {connectionDiagnostics.error_history && connectionDiagnostics.error_history.length > 0 && (
-                    <div className="pt-4 border-t">
-                      <Label>Recent Errors</Label>
-                      <div className="space-y-2 mt-2">
-                        {connectionDiagnostics.error_history.map((error: any, index: number) => (
-                          <Alert key={index}>
-                            <AlertTriangle className="h-4 w-4" />
-                            <AlertDescription>
-                              <span className="text-xs text-gray-500">
-                                {error.timestamp}
-                              </span>
-                              <br />
-                              {error.message}
-                            </AlertDescription>
-                          </Alert>
-                        ))}
+                  {connectionDiagnostics.error_history &&
+                    connectionDiagnostics.error_history.length > 0 && (
+                      <div className="pt-4 border-t">
+                        <Label>Recent Errors</Label>
+                        <div className="space-y-2 mt-2">
+                          {connectionDiagnostics.error_history.map(
+                            (error: any, index: number) => (
+                              <Alert key={index}>
+                                <AlertTriangle className="h-4 w-4" />
+                                <AlertDescription>
+                                  <span className="text-xs text-gray-500">
+                                    {error.timestamp}
+                                  </span>
+                                  <br />
+                                  {error.message}
+                                </AlertDescription>
+                              </Alert>
+                            )
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
                   <div className="pt-4 border-t">
                     <Label>Full Diagnostics</Label>
@@ -853,7 +876,9 @@ export const CloudTestPanel: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <p className="text-gray-500">No connection diagnostics available. Click refresh to load.</p>
+                <p className="text-gray-500">
+                  No connection diagnostics available. Click refresh to load.
+                </p>
               )}
             </CardContent>
           </Card>
