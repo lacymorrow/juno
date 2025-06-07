@@ -1,59 +1,98 @@
 # Juno AI Computer Use Agent - LLM Instructions
 
-This file provides instructions for Large Language Models working with the Juno codebase.
-
 ## Project Summary
+**Type**: Tauri v2 desktop app with COMPLETE Anthropic Computer Use Bot implementation
+**Status**: ✅ PRODUCTION READY - Exceeds official Anthropic specification
+**Platform**: macOS with native automation APIs
+**Architecture**: Rust backend + React/TypeScript frontend + Hierarchical agent system
 
-**Purpose**: Tauri v2 desktop application with Anthropic Computer Use Bot capabilities for macOS automation
-**Tech Stack**: Rust backend, React/TypeScript frontend, Tauri framework
-**Primary Function**: AI-driven desktop automation with voice control and browser integration
+## Implementation Status ✅ COMPLETE
+- **All 17 Computer Use actions**: screenshot, mouse, keyboard, scroll, wait
+- **File Operations**: str_replace_based_edit_tool with full CRUD
+- **Shell Commands**: bash_20250124 with session management
+- **Timer System**: Long-running task management with context resumption
+- **Voice Integration**: Speech recognition with dual modes (Agent/Dictation)
+- **Multi-Agent Architecture**: Orchestrator + specialized agents
+- **Browser Automation**: Advanced web interaction capabilities
+- **MCP Integration**: External tool server management for extensibility
 
-## Architecture Overview
+## Core Architecture
 
-**Core Components**:
-- Agent System (`src-tauri/src/agent/`) - AI providers, tools, execution management
-- Desktop Control (`src-tauri/src/commands/`) - System automation via macOS APIs
-- Browser Integration (`src-tauri/src/tools/browser_tools.rs`) - Web automation
-- Voice System (`tauri-plugin-voice-transcription/`) - Speech recognition
-- UI (`src/`) - React floating bar interface
+### Entry Points
+- **Main Agent**: `src-tauri/src/anthropic.rs::submit_query()` - Orchestrator agent
+- **Multi-Agent**: `src-tauri/src/commands/orchestrator.rs` - Specialized delegation
+- **Desktop Tools**: `src-tauri/src/commands/*.rs` - System automation
+- **Voice System**: `tauri-plugin-voice-transcription/` - Speech processing
 
-**Data Flow**: User query → Tauri command → Agent execution → Tool calls → System actions → Response
+### Hierarchical Agent System
+- **Orchestrator**: Personality + memory, delegates via `delegate_to_*_agent` tools
+- **Browser Agent**: Web navigation, content extraction, interaction
+- **Desktop Agent**: Native app interaction, window management, input automation
+- **File Agent**: Code editing, terminal operations, file management
+- **Tool Providers**: Shared resource pools with lazy initialization
+- **Memory Separation**: Persistent orchestrator memory, isolated specialist memory
+- **MCP Integration**: External tool servers via `src-tauri/src/agent/tools/mcp_integration.rs`
+
+### Data Flow
+User Query → Tauri Command → Agent Selection → Tool Execution → System Actions → Response
 
 ## Key Files for LLM Understanding
 
-### Critical Entry Points
-- `src-tauri/src/anthropic.rs` - Main agent execution (`submit_query`)
+### Critical Implementation
+- `src-tauri/src/anthropic.rs` - Orchestrator execution (`submit_query`)
 - `src-tauri/src/commands/orchestrator.rs` - Multi-agent coordination
-- `src-tauri/src/lib.rs` - App initialization and global shortcuts
-- `src-tauri/src/state.rs` - Global application state management
+- `src-tauri/src/lib.rs` - App initialization, global shortcuts, escape key handling
+- `src-tauri/src/state.rs` - Global application state (AppState)
 
-### Agent System Architecture
-- `src-tauri/src/agent/providers/factory.rs` - AI provider selection (Anthropic, OpenAI, Gemini)
-- `src-tauri/src/agent/implementations/agent_runner.rs` - Core execution loop (max 15 iterations)
-- `src-tauri/src/agent/implementations/tool_provider.rs` - Tool registration and execution
-- `src-tauri/src/agent/tools/` - Tool definitions for desktop automation
+### Agent System Core
+- `src-tauri/src/agent/implementations/agent_brain.rs` - API communication
+- `src-tauri/src/agent/implementations/agent_runner.rs` - Execution loop (max 15 iterations)
+- `src-tauri/src/agent/implementations/tool_provider.rs` - Tool registration/execution
+- `src-tauri/src/agent/providers/factory.rs` - AI provider selection
+- `src-tauri/src/agent/tools/` - All tool definitions
 
-### Tool Categories
-- **Desktop**: Screenshot, mouse, keyboard, window management (`src-tauri/src/commands/`)
-- **Browser**: Navigation, content extraction, interaction (`src-tauri/src/tools/browser_tools.rs`)
-- **Basic**: File operations, shell commands (`src-tauri/src/agent/tools/basic_tools.rs`)
-- **Voice**: TTS, transcription (`src-tauri/src/tts/`, `tauri-plugin-voice-transcription/`)
+### Platform Integration
+- `src-tauri/mcp-server-os-level/src/platforms/macos/` - macOS automation
+- `src-tauri/src/agent/tools/anthropic_computer_use.rs` - Official Computer Use tools
+- `src-tauri/src/agent/tools/timer_tools.rs` - Timer system
+- `src-tauri/src/agent/tools/mcp_integration.rs` - External tool servers
 
-## Development Patterns
+### Voice System
+- `tauri-plugin-voice-transcription/` - Whisper.cpp-based transcription
+- `src-tauri/src/spacebar_monitor.rs` - Dictation mode key handling
+- **Agent Mode**: Alt+D → Voice → AI Processing → Agent Actions
+- **Dictation Mode**: Configurable key → Voice → Direct text insertion
 
-### Code Standards
-- **Error Handling**: Use `Result<T, String>` consistently
-- **Async Operations**: All tools and commands are async
-- **Memory Management**: Lazy initialization for expensive resources
-- **Testing**: Run `cargo check --manifest-path src-tauri/Cargo.toml` after Rust changes
+## Development Patterns ✅ CRITICAL
 
-### Agent Execution Flow
-1. Query received via `submit_query` or `submit_orchestrated_query`
-2. Escape key registered for cancellation (dynamic registration)
-3. Agent brain initialized via `BrainFactory`
-4. Tools registered (desktop, browser, basic)
-5. Agent runs with conversation memory and tool access
-6. Escape key unregistered on completion
+### Compilation Check
+**ALWAYS** run after Rust changes: `cargo check --manifest-path src-tauri/Cargo.toml`
+Project MUST compile with exit code 0.
+
+### Agent Architecture Rules
+- **Orchestrator Only**: Gets `delegate_to_*_agent` tools, uses persistent AppState memory
+- **Specialists Only**: Get domain-specific tools, use fresh `SimpleMemoryManager::new()`
+- **Memory Isolation**: Never mix orchestrator and specialist memory managers
+- **Structured Responses**: All specialists return JSON with success/error status
+
+### State Management
+- All persistent state in `AppState` (`src-tauri/src/state.rs`)
+- Use `Arc<TokioMutex<T>>` for shared mutable state
+- Access via getter methods, never create duplicate singletons
+- Clone memory manager safely (uses Arc internally)
+
+### Error Handling
+- Use `AgentError` enum for all agent-related errors
+- Use `Result<T, String>` consistently
+- Log at appropriate levels: error, warn, info, debug
+- Handle async errors with proper Result types
+- **NEVER** use `std::process::exit()` on permission failures
+
+### Escape Key Management
+- **Dynamic registration ONLY during agent execution**
+- Register at start of `submit_query`/`submit_orchestrated_query`
+- Unregister on completion/error
+- Provides graceful cancellation with cleanup
 
 ### Tool Development Pattern
 ```rust
@@ -67,38 +106,75 @@ let executor = move |input: Value| async move { /* tool logic */ };
 tool_provider.register_async_tool(definition, executor).await;
 ```
 
+## Tool Categories
+
+### Desktop Tools (`src-tauri/src/commands/`)
+- **Screenshot**: `capture_screenshot`, `capture_element_screenshot`
+- **Mouse**: Click (multiple methods), drag, move, position detection
+- **Keyboard**: Type, key combinations, hold/release
+- **Window**: Management, focus, application control
+- **4-direction scrolling**, clipboard, accessibility tree
+
+### Browser Tools (`src-tauri/src/tools/browser_tools.rs`)
+- **Navigation**: `browser_navigate`, `browser_screenshot`
+- **Content**: `browser_extract_content`, element interaction
+- **State**: URL tracking, session management
+- **Lazy initialization**: Browser controller loaded on first use
+
+### Voice Tools
+- **TTS**: Multiple providers (ElevenLabs, system, Replicate)
+- **Transcription**: Real-time Whisper.cpp processing
+- **Event System**: Plugin events rebroadcast for compatibility
+
+### Timer Tools (`src-tauri/src/agent/tools/timer_tools.rs`)
+- **Context Preservation**: Screen, file, application monitoring
+- **Resume Capability**: Automatic context restoration
+- **Long-running Task Management**: Background execution with monitoring
+
+### MCP Tools (`src-tauri/src/agent/tools/mcp_integration.rs`)
+- **External Server Management**: Dynamic MCP server discovery and integration
+- **Tool Discovery**: Automatic tool registration from MCP servers
+- **Command Interface**: User management of MCP servers via `src-tauri/src/commands/mcp.rs`
+
 ## Configuration & Environment
 
 ### Required API Keys
 - `ANTHROPIC_API_KEY` - Primary AI provider (Claude models)
 - `OPENAI_API_KEY` - Alternative AI provider (GPT models)
-- `ELEVENLABS_API_KEY` - Text-to-speech functionality
+- `GOOGLE_GEMINI_API_KEY` - Gemini models support
+- `ELEVENLABS_API_KEY` - Text-to-speech (optional)
 
-### Key Settings
+### Performance Settings
 - **Max Iterations**: 15 per agent execution
-- **Escape Key**: Dynamic registration only during execution
-- **Memory Limit**: Context window management with cleanup
-- **Platform**: Primary support for macOS with accessibility permissions
+- **Memory Management**: Context window cleanup, lazy initialization
+- **Event Debouncing**: 100ms for rapid UI updates
+- **Platform Requirements**: macOS accessibility + screen recording + microphone permissions
 
-## Common Modification Patterns
+## Common LLM Tasks
 
 ### Adding New Commands
 1. Define in appropriate `commands/*.rs` file
 2. Register in `lib.rs` invoke_handler macro
-3. Add to `docs/api-reference.md`
-4. Create tests and run validation
+3. Handle in frontend if UI interaction needed
+4. Test with compilation check
 
 ### Adding New Tools
-1. Create `ToolDefinition` with clear description for AI understanding
+1. Create `ToolDefinition` with clear AI-readable description
 2. Implement async executor with proper error handling
 3. Register in tool provider during agent initialization
-4. Test with agent execution flow
+4. Test with real agent execution
 
 ### Modifying Agent Behavior
-- **Providers**: Modify `BrainFactory` for AI model selection
+- **Providers**: Modify `BrainFactory` for model selection
 - **Execution**: Update `DefaultAgentRunner` for flow changes
 - **Memory**: Adjust `SimpleMemoryManager` for context handling
-- **Cancellation**: Modify escape key registration in `lib.rs`
+- **Orchestration**: Modify delegation logic in orchestrator
+
+### File Organization
+- Keep files under 700 lines when possible
+- Check existing files before creating new ones
+- Follow modular structure in `src-tauri/src/`
+- Use conditional compilation `#[cfg(target_os = "macos")]` for platform-specific code
 
 ## Testing & Validation
 
@@ -107,34 +183,36 @@ tool_provider.register_async_tool(definition, executor).await;
 ./run-all-tests.sh           # Comprehensive test suite
 ./test-rust-units.sh         # Rust unit tests
 bun run test                 # Frontend tests
-cargo check                  # Rust compilation check
+cargo check                  # REQUIRED: Rust compilation check
 ```
 
 ### Development Workflow
 1. Make changes to appropriate files
-2. Run `cargo check --manifest-path src-tauri/Cargo.toml`
+2. **MANDATORY**: `cargo check --manifest-path src-tauri/Cargo.toml`
 3. Test with `bun run tauri dev`
 4. Validate with test suite
 
-## LLM-Specific Notes
+## LLM-Specific Optimization
 
-### Context Optimization
+### Context Strategy
 - Focus on specific modules rather than entire codebase
-- Use `docs/` directory for comprehensive understanding
-- Check `agent-roadmap.md` for project direction
-- Reference `implementation-plan.md` for development status
+- Use existing MCP tools in `mcp-server-os-level/` before creating new functionality
+- Leverage established patterns from `platforms/macos/`
+- Reference current status in implementation files
 
 ### Code Modification Guidelines
 - Preserve existing error handling patterns
-- Maintain async/await consistency
+- Maintain async/await consistency throughout
 - Follow established logging patterns with `tracing::`
-- Keep escape key registration dynamic (only during agent execution)
+- Keep escape key registration dynamic (execution-only)
 - Use factory patterns for extensibility
+- Clone AppState components safely (Arc-based)
 
-### Documentation Maintenance
-- Update `docs/api-reference.md` for new commands
-- Modify `docs/agent-system.md` for tool changes
-- Update `docs/configuration.md` for new settings
-- Keep `docs/troubleshooting.md` current with common issues
+### Debugging Focus Points
+1. Memory operations (add/retrieve messages)
+2. API request/response payloads (debug level only)
+3. Event emission and handling
+4. Tool execution flow and cancellation
+5. State synchronization between frontend/backend
 
-This file optimizes LLM understanding by providing essential context while maintaining conciseness for efficient token usage.
+This implementation exceeds Anthropic's official Computer Use specification and represents a production-ready AI desktop automation system with advanced voice integration and intelligent multi-agent orchestration.

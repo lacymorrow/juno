@@ -1,107 +1,77 @@
-# Juno - AI Computer Use Agent ✅ COMPLETE
+# Juno - AI Computer Use Agent ✅
 
-**Juno is a production-ready Tauri v2 application with COMPLETE Anthropic Computer Use Bot implementation for macOS automation.**
+**Production-ready Tauri v2 application with COMPLETE Anthropic Computer Use Bot implementation for macOS automation.**
 
-✅ **All 17 Computer Use actions implemented**  
-✅ **Full macOS platform support**  
-✅ **Timer system for long-running tasks**  
-✅ **Multi-agent architecture**  
-✅ **Voice integration & browser automation**
+[![Status](https://img.shields.io/badge/Status-Production%20Ready-green)]()
+[![Platform](https://img.shields.io/badge/Platform-macOS-blue)]()
+[![Architecture](https://img.shields.io/badge/Architecture-Multi--Agent-purple)]()
 
-**⚡ Quick Start**: `bun install` → `cp .env.example .env` → `bun run tauri dev`
+## ⚡ Quick Start
 
-## 🎯 Implementation Status: COMPLETE
-
-### ✅ Official Anthropic Computer Use Tools (100% Complete)
-- **computer_20250124**: All 17 actions (screenshot, mouse, keyboard, scroll, wait)
-- **str_replace_based_edit_tool**: Complete file operations (view, create, edit, insert)  
-- **bash_20250124**: Shell command execution with full output capture
-- **Fully compliant** with Claude 4, Sonnet 3.7, and Sonnet 3.5 specifications
-
-### ✅ Complete macOS Platform Implementation  
-- **Mouse Operations**: All click types, drag, move, position detection
-- **Keyboard Operations**: Text input, key combinations, hold/release
-- **Advanced Features**: 4-direction scrolling, clipboard ops, window management
-- **Visual Processing**: Screenshot capture, accessibility tree navigation
-- **Robust Clicking**: Multi-method with intelligent fallback strategies
-
-### ✅ Enhanced Features Beyond Official Spec
-- **🕐 Timer System**: Long-running task management with automatic context resumption
-- **🤖 Multi-Agent Architecture**: Specialized agents (browser, coding, desktop, general)
-- **🎤 Voice Integration**: Speech recognition and transcription
-- **🌐 Browser Automation**: Advanced web interaction capabilities
-- **⚙️ Multi-Provider Support**: Anthropic, OpenAI, Gemini integration
-
-## 📚 Documentation
-
-**For comprehensive information, see [`docs/`](docs/) directory:**
-
-- **[Getting Started](docs/README.md)** - Overview and quick reference
-- **[Architecture](docs/architecture.md)** - System design and components  
-- **[API Reference](docs/api-reference.md)** - All commands and signatures
-- **[Agent System](docs/agent-system.md)** - AI agent architecture and tools
-- **[Development Guide](docs/development.md)** - Setup, testing, contribution
-- **[Configuration](docs/configuration.md)** - Environment variables and settings
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
-
-## 🚀 Quick Setup
-
-### Prerequisites
-- Node.js 18+ and Bun
-- Rust 1.70+ and Cargo  
-- Tauri CLI v2
-
-### Installation
 ```bash
-# 1. Install dependencies
-bun install
-
-# 2. Setup environment
-cp .env.example .env
-# Edit .env with your API keys (see Configuration docs)
-
-# 3. Development
+# Install and setup
+bun install && cp .env.example .env
+# Add your API keys to .env
 bun run tauri dev
-
-# 4. Testing
-./run-all-tests.sh
 ```
 
-### Required API Keys
-- `ANTHROPIC_API_KEY` - Primary AI provider for Computer Use
-- `OPENAI_API_KEY` - Alternative AI provider
-- `GOOGLE_GEMINI_API_KEY` - Gemini models support
-- `ELEVENLABS_API_KEY` - Text-to-speech (optional)
+## 🎯 Implementation Status
 
-See [Configuration](docs/configuration.md) for complete API key list.
+✅ **All 17 Computer Use actions** (screenshot, mouse, keyboard, scroll, wait)  
+✅ **Complete macOS platform support** with accessibility APIs  
+✅ **Multi-agent architecture** with intelligent task delegation  
+✅ **Voice integration** with dual modes (Agent/Dictation)  
+✅ **Timer system** for long-running tasks with context resumption  
+✅ **Browser automation** and advanced web interaction
+✅ **MCP integration** for external tool server management
 
-## 🏗️ Architecture Overview
+## 🏗️ Architecture
 
-- **Frontend**: React/TypeScript with floating bar UI
-- **Backend**: Rust with Tauri v2 framework  
-- **Agent System**: Multi-provider AI support with tool integration
-- **Desktop Control**: Native macOS APIs with accessibility permissions
-- **Timer System**: Context-preserving task scheduling and resumption
+- **Frontend**: React/TypeScript floating bar + chat interface
+- **Backend**: Rust with Tauri v2 framework
+- **Agent System**: Hierarchical orchestrator + specialized agents
+- **Voice**: Custom Whisper.cpp-based transcription plugin
+- **Platform**: Native macOS APIs with full automation capabilities
 
-## 🔧 Development
+## 🔑 Required API Keys
 
-**Status**: ✅ Project compiles successfully (`cargo check` exit code 0)
+```env
+ANTHROPIC_API_KEY=your_key_here    # Primary AI provider
+OPENAI_API_KEY=your_key_here       # Alternative provider
+ELEVENLABS_API_KEY=your_key_here   # Text-to-speech (optional)
+```
 
-**After every Rust change**: `cargo check --manifest-path src-tauri/Cargo.toml`
+## 🚀 Development
 
-## 🔑 Key Implementation Files
+**Critical**: Run `cargo check --manifest-path src-tauri/Cargo.toml` after every Rust change.
 
-- [`src-tauri/src/agent/tools/anthropic_computer_use.rs`](src-tauri/src/agent/tools/anthropic_computer_use.rs) - Official Anthropic Computer Use tools
-- [`src-tauri/src/agent/tools/timer_tools.rs`](src-tauri/src/agent/tools/timer_tools.rs) - Timer system for long-running tasks
-- [`src-tauri/mcp-server-os-level/src/platforms/macos/`](src-tauri/mcp-server-os-level/src/platforms/macos/) - Complete macOS automation
-- [`src-tauri/src/agent/providers/factory.rs`](src-tauri/src/agent/providers/factory.rs) - AI provider management
+```bash
+./run-all-tests.sh    # Full test suite
+bun run tauri dev     # Development mode
+```
 
-## 🤖 For LLMs
+## 📚 For Developers & LLMs
 
-This project includes [`llms.txt`](llms.txt) with optimized instructions for AI agents working with the codebase.
+- **[LLMs.txt](LLMs.txt)** - Complete instructions for AI agents working with this codebase
+- **[docs/](docs/)** - Comprehensive documentation directory
+- **Key Files**: 
+  - `src-tauri/src/anthropic.rs` - Main orchestrator agent
+  - `src-tauri/src/agent/tools/anthropic_computer_use.rs` - Computer Use tools
+  - `src-tauri/mcp-server-os-level/src/platforms/macos/` - macOS automation
+  - `tauri-plugin-voice-transcription/` - Voice processing
 
-## 📖 Legacy Documentation
+## 🎤 Voice Modes
 
-- `agent-roadmap.md` - Development roadmap
-- `implementation-plan.md` - Current implementation status  
-- `TESTING.md` - Testing procedures
+- **Agent Mode**: Alt+D → Voice → AI Processing → Computer Actions
+- **Dictation Mode**: Configurable key → Voice → Direct text insertion
+
+## 🔧 System Requirements
+
+- macOS with accessibility permissions
+- Node.js 18+ and Rust 1.70+
+- Microphone access for voice features
+- Screen recording permissions for screenshots
+
+---
+
+**This implementation exceeds Anthropic's official Computer Use specification and provides a production-ready AI desktop automation system.**
