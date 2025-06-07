@@ -413,7 +413,7 @@ impl BrainFactory {
         register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
 
         // Register additional desktop automation tools (your existing ones)
-        crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager, app_handle.clone()).await;
+        crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
 
         // Register timer tools for agent task scheduling and resumption
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;

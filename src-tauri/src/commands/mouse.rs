@@ -571,9 +571,7 @@ pub(crate) async fn dev_window_relative_click(
     click_type: Option<String>,
     modifier: Option<String>,
 ) -> Result<(), String> {
-    use computer_use_ai_sdk::UIElement;
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
-    use computer_use_ai_sdk::platforms::macos::utils::window_to_global_coordinates;
 
     info!(
         "Window relative click: window_id={}, x={}, y={}, click_type={:?}, modifier={:?}",
@@ -598,8 +596,10 @@ pub(crate) async fn dev_window_relative_click(
         .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
 
     // Convert window-relative coordinates to global coordinates
-    let (global_x, global_y) = window_to_global_coordinates(x, y, macos_element)
-        .map_err(|e| format!("Failed to convert coordinates: {}", e))?;
+    let (window_x, window_y, _width, _height) = target_window.bounds()
+        .map_err(|e| format!("Failed to get window bounds: {}", e))?;
+    let global_x = window_x + x;
+    let global_y = window_y + y;
 
     info!("Converted window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
 
@@ -639,7 +639,6 @@ pub(crate) async fn dev_focused_window_relative_click(
     modifier: Option<String>,
 ) -> Result<(), String> {
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
-    use computer_use_ai_sdk::platforms::macos::utils::window_to_global_coordinates;
 
     info!(
         "Focused window relative click: x={}, y={}, click_type={:?}, modifier={:?}",
@@ -689,8 +688,10 @@ pub(crate) async fn dev_focused_window_relative_click(
         .ok_or_else(|| "Failed to downcast window element to MacOSUIElement".to_string())?;
 
     // Convert window-relative coordinates to global coordinates
-    let (global_x, global_y) = window_to_global_coordinates(x, y, macos_element)
-        .map_err(|e| format!("Failed to convert coordinates: {}", e))?;
+    let (window_x, window_y, _width, _height) = window_element.bounds()
+        .map_err(|e| format!("Failed to get window bounds: {}", e))?;
+    let global_x = window_x + x;
+    let global_y = window_y + y;
 
     info!("Converted focused window coordinates ({}, {}) to global coordinates ({}, {})", x, y, global_x, global_y);
 

@@ -315,7 +315,7 @@ impl AppState {
         drop(config_guard);
 
         let mcp_manager = self.get_mcp_manager().await;
-        let mut manager_guard = mcp_manager.lock().await;
+        let manager_guard = mcp_manager.lock().await;
 
         for config in mcp_configs {
             if let Err(e) = manager_guard.add_server(config.clone()).await {
@@ -340,7 +340,7 @@ impl AppState {
         drop(manager_guard);
 
         let mut config_guard = self.tool_config_manager.lock().await;
-        
+
         // Group tools by server
         let mut tools_by_server: HashMap<String, Vec<_>> = HashMap::new();
         for tool_info in all_tools {

@@ -144,6 +144,21 @@ use crate::commands::{
     reset_keyboard_shortcuts,
 };
 
+// Import MCP commands explicitly
+use crate::commands::mcp::{
+    add_mcp_server,
+    remove_mcp_server,
+    start_mcp_server,
+    stop_mcp_server,
+    get_mcp_servers,
+    get_mcp_server_statuses,
+    get_mcp_tools,
+    update_mcp_server,
+    set_mcp_server_enabled,
+    test_mcp_server_connection,
+    initialize_mcp_servers,
+};
+
 // Added for selector parsing
 
 // Old BarStateChangeEventPayload removed - now using floating bar manager
@@ -189,8 +204,10 @@ pub fn run() {
     // --- Handle CLI Commands ---
     // If handle_cli_commands returns true, it means a command was executed
     // and the application should exit.
-    if cli::runner::handle_cli_commands(&cli, &desktop_instance) {
-        return; // Exit early if a CLI command was handled
+    if let Some(ref desktop_instance) = desktop_instance {
+        if cli::runner::handle_cli_commands(&cli, desktop_instance) {
+            return; // Exit early if a CLI command was handled
+        }
     }
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---

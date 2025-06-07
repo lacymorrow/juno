@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio::time::timeout;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -181,7 +181,7 @@ impl MCPServerConnection {
         });
 
         let response = self.send_request(request).await?;
-        
+
         if response.get("error").is_some() {
             return Err(format!("MCP server initialization failed: {}", response));
         }
@@ -309,7 +309,7 @@ impl MCPServerConnection {
                 let mut line = String::new();
                 reader.read_line(&mut line).await
                     .map_err(|e| format!("Failed to read response: {}", e))?;
-                
+
                 serde_json::from_str::<Value>(&line)
                     .map_err(|e| format!("Failed to parse response JSON: {}", e))
             } else {
@@ -371,7 +371,7 @@ impl MCPManager {
     /// Add a new MCP server configuration
     pub async fn add_server(&self, config: MCPServerConfig) -> Result<(), String> {
         let server_id = config.id.clone();
-        
+
         // Store the configuration
         {
             let mut configs = self.configs.write().await;
