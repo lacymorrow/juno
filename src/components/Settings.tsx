@@ -17,14 +17,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { KeyboardShortcuts } from "@/types/keyboard";
 import { invoke } from "@tauri-apps/api/core";
@@ -32,6 +24,7 @@ import {
   AlertCircle,
   Brain,
   CheckCircle,
+  ExternalLink,
   Keyboard,
   Mic,
   MonitorSpeaker,
@@ -39,16 +32,11 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Server,
   Settings as SettingsIcon,
   Shield,
-  Terminal,
-  Plus,
-  Play,
   Square,
-  Trash2,
-  Edit,
-  Server,
-  ExternalLink,
+  Terminal,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -157,7 +145,9 @@ const Settings: React.FC<SettingsProps> = ({
 
   // MCP Server Settings
   const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
-  const [mcpServerStatuses, setMcpServerStatuses] = useState<Record<string, MCPServerStatus>>({});
+  const [mcpServerStatuses, setMcpServerStatuses] = useState<
+    Record<string, MCPServerStatus>
+  >({});
   const [mcpTools, setMcpTools] = useState<MCPToolInfo[]>([]);
   const [mcpLoading, setMcpLoading] = useState<boolean>(false);
   const [mcpJsonData, setMcpJsonData] = useState<string>("");
@@ -176,8 +166,6 @@ const Settings: React.FC<SettingsProps> = ({
     temperature: "",
     systemPrompt: "",
   });
-
-
 
   // Permissions state
   const [permissionsState, setPermissionsState] = useState<{
@@ -294,7 +282,9 @@ const Settings: React.FC<SettingsProps> = ({
   const loadKeyboardShortcuts = async () => {
     setShortcutsLoading(true);
     try {
-      const shortcuts = await invoke<KeyboardShortcuts>("get_keyboard_shortcuts");
+      const shortcuts = await invoke<KeyboardShortcuts>(
+        "get_keyboard_shortcuts"
+      );
       setKeyboardShortcuts(shortcuts);
     } catch (error) {
       console.error("Error loading keyboard shortcuts:", error);
@@ -317,7 +307,9 @@ const Settings: React.FC<SettingsProps> = ({
 
       // Load MCP server statuses
       console.log("Fetching MCP server statuses...");
-      const statuses = await invoke<Record<string, MCPServerStatus>>("get_mcp_server_statuses");
+      const statuses = await invoke<Record<string, MCPServerStatus>>(
+        "get_mcp_server_statuses"
+      );
       console.log("MCP server statuses loaded:", statuses);
       setMcpServerStatuses(statuses);
 
@@ -337,119 +329,44 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-
-
   const handleSaveMcpServer = async () => {
     try {
-      let config: MCPServerConfig;
+      const parsedEnvVars = JSON.parse(mcpJsonData);
+      const newServer = {
+        id: `mcp-${Date.now()}`,
+        name: parsedEnvVars.name || "Unnamed Server",
+        description: parsedEnvVars.description || "",
+        command: parsedEnvVars.command || "",
+        args: parsedEnvVars.args || [],
+        working_directory: parsedEnvVars.working_directory || "",
+        environment_variables: parsedEnvVars.environment_variables || {},
+        enabled: true,
+        auto_start: parsedEnvVars.auto_start || false,
+        timeout_seconds: parsedEnvVars.timeout_seconds || 30,
+        max_retries: parsedEnvVars.max_retries || 3,
+      };
 
-      // Always work in JSON mode now
-      try {
-        const jsonData = JSON.parse(mcpJsonData);
-
-        // Handle Cursor/Claude format (multiple servers in one JSON)
-        const serverNames = Object.keys(jsonData);
-        if (serverNames.length === 0) {
-          toast.error("No server configuration found");
-          return;
-        }
-
-        // For now, we'll save each server individually
-        for (const serverName of serverNames) {
-          const serverConfig = jsonData[serverName];
-
-          if (!serverConfig?.command?.trim()) {
-            toast.error(`Server '${serverName}': command is required`);
-            continue;
-          }
-
-          config = {
-            id: `mcp-${serverName}-${Date.now()}`,
-            name: serverName.trim(),
-            description: `${serverName} MCP Server`,
-            command: serverConfig.command,
-            args: Array.isArray(serverConfig.args) ? serverConfig.args : [],
-            working_directory: undefined,
-            environment_variables: serverConfig.env || {},
-            enabled: true,
-            auto_start: true,
-            timeout_seconds: 30,
-            max_retries: 3,
-          };
-
-          console.log("Adding MCP server config:", config);
-          await invoke("add_mcp_server", { config });
-        }
-
-        toast.success(`${serverNames.length} MCP server(s) added successfully`);
-      } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : "Unknown JSON parsing error";
-        toast.error(`Invalid JSON format: ${errorMessage}`);
-        return;
+      await invoke("add_mcp_server", { server: newServer });
+      toast.success("MCP server added successfully");
+      setMcpJsonData("");
+      await loadMcpServers();
+    } catch (error) {
+      console.error("Error adding MCP server:", error);
+      if (error instanceof SyntaxError) {
+        toast.error("Invalid JSON format");
+      } else {
+        toast.error("Failed to add MCP server");
       }
-
-      console.log("Reloading MCP servers...");
-      await loadMcpServers();
-      console.log("Save operation completed successfully");
-    } catch (error) {
-      console.error("Error saving MCP server:", error);
-      toast.error(`Failed to save MCP server: ${error}`);
     }
   };
-
-  const handleDeleteMcpServer = async (serverId: string) => {
-    if (!confirm("Are you sure you want to delete this MCP server?")) {
-      return;
-    }
-
-    try {
-      await invoke("remove_mcp_server", { serverId });
-      toast.success("MCP server deleted successfully");
-      await loadMcpServers();
-    } catch (error) {
-      console.error("Error deleting MCP server:", error);
-      toast.error("Failed to delete MCP server");
-    }
-  };
-
-  const handleToggleMcpServer = async (serverId: string, enabled: boolean) => {
-    try {
-      await invoke("set_mcp_server_enabled", { serverId, enabled });
-      toast.success(`MCP server ${enabled ? "enabled" : "disabled"} successfully`);
-      await loadMcpServers();
-    } catch (error) {
-      console.error("Error toggling MCP server:", error);
-      toast.error("Failed to toggle MCP server");
-    }
-  };
-
-  const handleStartMcpServer = async (serverId: string) => {
-    try {
-      await invoke("start_mcp_server", { serverId });
-      toast.success("MCP server started successfully");
-      await loadMcpServers();
-    } catch (error) {
-      console.error("Error starting MCP server:", error);
-      toast.error("Failed to start MCP server");
-    }
-  };
-
-  const handleStopMcpServer = async (serverId: string) => {
-    try {
-      await invoke("stop_mcp_server", { serverId });
-      toast.success("MCP server stopped successfully");
-      await loadMcpServers();
-    } catch (error) {
-      console.error("Error stopping MCP server:", error);
-      toast.error("Failed to stop MCP server");
-    }
-  };
-
-
 
   const getMcpServerStatusBadge = (status: MCPServerStatus) => {
     if (status.Connected !== undefined) {
-      return <Badge variant="default" className="bg-green-500">Connected</Badge>;
+      return (
+        <Badge variant="default" className="bg-green-500">
+          Connected
+        </Badge>
+      );
     } else if (status.Connecting !== undefined) {
       return <Badge variant="secondary">Connecting</Badge>;
     } else if (status.Error !== undefined) {
@@ -1472,9 +1389,16 @@ const Settings: React.FC<SettingsProps> = ({
               className="h-64 font-mono text-sm"
             />
             <div className="text-xs text-muted-foreground space-y-1">
-              <p>• Server name is the JSON key (e.g., "filesystem", "sqlite")</p>
-              <p>• Required field: <code>command</code></p>
-              <p>• Optional: <code>args</code> (array) and <code>env</code> (object)</p>
+              <p>
+                • Server name is the JSON key (e.g., "filesystem", "sqlite")
+              </p>
+              <p>
+                • Required field: <code>command</code>
+              </p>
+              <p>
+                • Optional: <code>args</code> (array) and <code>env</code>{" "}
+                (object)
+              </p>
             </div>
           </div>
 
@@ -1493,7 +1417,9 @@ const Settings: React.FC<SettingsProps> = ({
               disabled={mcpLoading}
               className="flex items-center gap-2"
             >
-              <RefreshCw className={`h-4 w-4 ${mcpLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`h-4 w-4 ${mcpLoading ? "animate-spin" : ""}`}
+              />
               Refresh
             </Button>
           </div>
@@ -1503,16 +1429,24 @@ const Settings: React.FC<SettingsProps> = ({
               <h3 className="text-sm font-medium">Active Servers:</h3>
               <div className="grid gap-2">
                 {mcpServers.map((server) => {
-                  const status = mcpServerStatuses[server.id] || { Disconnected: null };
-                  const isConnected = status.Connected !== undefined;
+                  const status = mcpServerStatuses[server.id] || {
+                    Disconnected: null,
+                  };
                   const hasError = status.Error !== undefined;
-                  const serverTools = mcpTools.filter(tool => tool.server_id === server.id);
+                  const serverTools = mcpTools.filter(
+                    (tool) => tool.server_id === server.id
+                  );
 
                   return (
-                    <div key={server.id} className="flex items-center justify-between p-2 border rounded">
+                    <div
+                      key={server.id}
+                      className="flex items-center justify-between p-2 border rounded"
+                    >
                       <div className="flex items-center gap-2">
                         {getMcpServerStatusIcon(status)}
-                        <span className="font-medium text-sm">{server.name}</span>
+                        <span className="font-medium text-sm">
+                          {server.name}
+                        </span>
                         <Badge variant="outline" className="text-xs">
                           {serverTools.length} tools
                         </Badge>
@@ -1541,10 +1475,22 @@ const Settings: React.FC<SettingsProps> = ({
             <div className="space-y-2">
               <p className="font-medium">Common MCP Servers:</p>
               <div className="space-y-1 text-xs font-mono bg-muted/50 p-3 rounded">
-                <div><strong>File System:</strong> npx @modelcontextprotocol/server-filesystem /path</div>
-                <div><strong>SQLite:</strong> npx @modelcontextprotocol/server-sqlite /path/to/db.sqlite</div>
-                <div><strong>Git:</strong> npx @modelcontextprotocol/server-git /path/to/repo</div>
-                <div><strong>Brave Search:</strong> npx @modelcontextprotocol/server-brave-search</div>
+                <div>
+                  <strong>File System:</strong> npx
+                  @modelcontextprotocol/server-filesystem /path
+                </div>
+                <div>
+                  <strong>SQLite:</strong> npx
+                  @modelcontextprotocol/server-sqlite /path/to/db.sqlite
+                </div>
+                <div>
+                  <strong>Git:</strong> npx @modelcontextprotocol/server-git
+                  /path/to/repo
+                </div>
+                <div>
+                  <strong>Brave Search:</strong> npx
+                  @modelcontextprotocol/server-brave-search
+                </div>
               </div>
               <a
                 href="https://github.com/modelcontextprotocol/servers"
