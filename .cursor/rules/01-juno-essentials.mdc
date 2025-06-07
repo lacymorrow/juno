@@ -5,66 +5,152 @@ alwaysApply: false
 ---
 # Juno AI Computer Use Agent - Project Essentials ✅
 
-## Project Status: PRODUCTION READY ✅
+## Project Overview
 
-Juno is a **COMPLETE** Tauri v2 desktop application implementing Anthropic's Computer Use API with hierarchical agent architecture and advanced voice transcription capabilities.
+**Juno** is a **complete implementation** of Anthropic's Computer Use API featuring hierarchical agent architecture, advanced voice interaction, and comprehensive tool integration. The project represents a production-ready AI computer use agent with enhanced capabilities beyond the official specification.
 
-## Tech Stack
-- **Frontend**: React/TypeScript with shadcn/ui components
-- **Backend**: Rust with Tauri v2 framework
-- **AI Integration**: Multi-provider support (Anthropic, OpenAI, Gemini)
-- **Voice**: Custom Whisper.cpp-based transcription plugin
-- **Platform**: macOS with native automation APIs
+## Implementation Status: ✅ PRODUCTION READY
 
-## Core Features ✅ COMPLETE
+### Core Features (100% Complete)
+- **✅ Official Anthropic Computer Use Tools**: All 17 actions implemented (screenshot, mouse, keyboard, scroll, wait)
+- **✅ Enhanced File Operations**: Complete str_replace_based_edit_tool with view, create, edit, insert capabilities
+- **✅ Shell Command Execution**: bash_20250124 with output capture and session management
+- **✅ Advanced Voice System**: Dual-mode voice interaction (Agent + Dictation)
+- **✅ Hierarchical Agent Architecture**: Orchestrator with specialist agents (browser, desktop, file)
+- **✅ Timer System**: Long-running task management with screen/file/app monitoring
+- **✅ MCP Integration**: External tool server support with protocol compliance
 
-### AI Computer Use (100% Implementation)
-- **All 17 Anthropic Computer Use actions**: screenshot, mouse, keyboard, scroll, wait
-- **File Operations**: str_replace_based_edit_tool with full CRUD capabilities
-- **Shell Commands**: bash execution with session management
-- **Timer System**: Long-running task management with context resumption
+### Recent Updates (January 2025) ✅
+- **MCP Protocol Compliance**: Fixed initialization errors, now fully compliant with MCP 2025-03-26 spec
+- **Simplified UI Configuration**: JSON-only MCP server configuration with examples
+- **Protocol Error Resolution**: Resolved "protocolVersion and clientInfo required" issues
+- **Enhanced Tool Integration**: Seamless local + external tool execution
+
+## Technology Stack
+
+### Backend (Rust)
+- **Framework**: Tauri v2 for cross-platform desktop app development
+- **Agent System**: Custom hierarchical architecture with memory management
+- **Computer Use**: Direct macOS API integration via objc bindings
+- **Voice Processing**: Custom Whisper.cpp-based transcription plugin
+- **Tool Execution**: Hybrid local/MCP tool provider system
+
+### Frontend (TypeScript/React)
+- **UI Framework**: React with TypeScript for type safety
+- **Component Library**: shadcn/ui for consistent design system
+- **State Management**: Tauri event system for backend-frontend communication
+- **Voice Interface**: Real-time audio handling with visual feedback
+
+### Key Dependencies
+- **Desktop Control**: macOS Accessibility + Screen Recording APIs
+- **AI Providers**: Multi-provider support (Anthropic, OpenAI, Gemini)
+- **External Tools**: MCP (Model Context Protocol) server integration
+- **Audio Processing**: Native speech recognition and TTS capabilities
+
+## Core Capabilities
 
 ### Voice Interaction Modes
-- **Agent Mode**: Alt+D toggles voice input for AI agent conversations and task execution
-  - Voice → Transcription → AI Agent Processing → Agent Response/Actions
-  - Full hierarchical agent system with orchestrator and specialists
-  - No direct text pasting - AI responses through chat interface
-- **Dictation Mode**: Configurable key (default spacebar) for immediate voice-to-text typing
-  - Voice → Transcription → Text insertion at cursor location
-  - Pure transcription service with no AI processing
-  - Immediate transcription start (0ms delay)
-  - 500ms threshold for commitment vs cancellation
-  - Smart cancellation with key passthrough
+1. **Agent Mode (Alt+D)**:
+   - Voice input triggers AI agent conversations
+   - Task execution with computer use actions
+   - Persistent memory and context awareness
 
-### Hierarchical Agent System
-- **Orchestrator Agent**: Maintains personality and conversation memory
-- **Specialist Agents**: Browser, Desktop, File domain experts
-- **Tool Delegation**: Intelligent routing based on task analysis
-- **Memory Separation**: Persistent orchestrator memory, isolated specialist memory
+2. **Dictation Mode (Configurable Key)**:
+   - Immediate voice-to-text typing at cursor location
+   - Real-time transcription with visual feedback
+   - Configurable activation key (default: spacebar)
 
-## Key Implementation Files
-
-### Core System
-- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application setup and event handling
-- [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent
-- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Dictation mode key handling
+### Computer Use Actions
+- **Mouse Operations**: Click, drag, move, scroll (4-direction support)
+- **Keyboard Input**: Type text, key combinations, hold/release patterns
+- **Screen Capture**: Full screenshots with coordinate mapping
+- **Window Management**: Focus, resize, position detection
+- **File Operations**: Read, write, edit, create with full path support
+- **Shell Commands**: Execute with output capture and session persistence
 
 ### Agent Architecture
-- [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations) - Agent runners and memory
-- [src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers) - AI provider integrations
-- [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools) - Computer use and custom tools
+- **Orchestrator Agent**: Maintains personality, memory, and delegates tasks
+- **Browser Agent**: Web automation and scraping capabilities
+- **Desktop Agent**: System-level interactions and window management
+- **File Agent**: Comprehensive file system operations
+- **External Tools**: MCP server integration for custom capabilities
 
-### Platform Integration
-- [src-tauri/mcp-server-os-level/src/platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos) - macOS automation
-- [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription) - Voice transcription plugin
+## Essential Files & Directories
 
-### Frontend
-- [src/Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI with state management
-- [src/App.tsx](mdc:src/App.tsx) - Full chat interface with settings integration
+### Core Application
+- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application initialization and event handling
+- [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent implementation
+- [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs) - Centralized application state management
+- [src/Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI component
+
+### Voice System
+- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Dictation mode key handling
+- [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription) - Custom voice transcription plugin
+- [src-tauri/src/voice_control/](mdc:src-tauri/src/voice_control) - Voice controller integration
+
+### Agent System
+- [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations) - Agent brain and tool providers
+- [src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers) - AI provider factory system
+- [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools) - Anthropic Computer Use + Timer tools
+
+### MCP Integration (Recently Updated)
+- [src-tauri/src/agent/tools/mcp_integration.rs](mdc:src-tauri/src/agent/tools/mcp_integration.rs) - MCP server management with protocol compliance
+- [src-tauri/src/commands/mcp.rs](mdc:src-tauri/src/commands/mcp.rs) - User interface commands for MCP servers
+- [src/components/Settings.tsx](mdc:src/components/Settings.tsx) - Simplified JSON configuration interface
+
+### Desktop Integration
+- [src-tauri/mcp-server-os-level/](mdc:src-tauri/mcp-server-os-level) - Platform-specific OS integration
+- [src-tauri/src/commands/](mdc:src-tauri/src/commands) - Tauri command implementations
+- [src-tauri/src/utils/](mdc:src-tauri/src/utils) - Utility functions and platform abstractions
 
 ## Platform Requirements
-- **macOS**: Accessibility + Screen Recording + Microphone permissions
-- **Voice**: Custom Whisper.cpp-based transcription plugin
-- **AI Providers**: Multi-provider support (Anthropic, OpenAI, Gemini)
 
-This implementation represents a production-ready AI Computer Use agent that exceeds Anthropic's official specification with advanced voice interaction and intelligent agent orchestration.
+### macOS (Primary Platform)
+- **Permissions**: Accessibility + Screen Recording + Microphone access
+- **APIs**: NSWorkspace, CGEvent, Accessibility framework integration
+- **Development**: Xcode command line tools for objc bindings
+
+### System Dependencies
+- **Rust**: Latest stable version with Tauri v2 support
+- **Node.js**: For frontend development and package management
+- **Audio**: Native CoreAudio integration for voice processing
+
+## Development Guidelines
+
+### Critical Requirements
+```bash
+# MANDATORY: Run after every Rust code change
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+### Key Shortcuts & Controls
+- **Alt+D**: Toggle Agent Mode for AI conversations
+- **Configurable Key (Default Spacebar)**: Hold for Dictation Mode
+- **Escape**: Cancel current AI agent operation
+- **UI Settings**: Access through floating bar settings panel
+
+### Architecture Principles
+1. **Hierarchical Delegation**: Orchestrator manages specialists
+2. **Memory Separation**: Persistent orchestrator memory, isolated specialist memory
+3. **Graceful Degradation**: Handle permission failures without crashes
+4. **Event-Driven Communication**: Backend-frontend coordination via Tauri events
+5. **Protocol Compliance**: Full MCP specification adherence for external tools
+
+### Performance Considerations
+- **Lazy Initialization**: MCP servers start on-demand
+- **Tool Discovery Caching**: Efficient tool enumeration and execution
+- **Audio Resource Management**: Proper cleanup in UI components
+- **Memory Management**: Arc-based sharing for thread-safe state access
+
+## Success Metrics
+
+The project successfully implements:
+- ✅ **100% Anthropic Computer Use API coverage**
+- ✅ **Advanced voice interaction beyond official spec**
+- ✅ **Production-ready hierarchical agent system**
+- ✅ **Comprehensive macOS desktop integration**
+- ✅ **Multi-provider AI support with fallback capabilities**
+- ✅ **External tool integration via MCP protocol**
+- ✅ **Enhanced timer system for long-running tasks**
+
+This represents a **complete, production-ready implementation** that exceeds Anthropic's official Computer Use specification while maintaining reliability, performance, and user experience standards.
