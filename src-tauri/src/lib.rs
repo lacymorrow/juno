@@ -239,6 +239,10 @@ pub fn run() {
                 app_state_instance.signal_cancel();
                 info!("[GlobalShortcut] Agent cancellation signal sent via Escape.");
 
+                // Stop any active TTS
+                crate::tts::stop_speech();
+                info!("[GlobalShortcut] TTS stop signal sent via Escape.");
+
                 // Check if dictation mode is active and cancel it if so
                 let is_dictation_active = app_state_instance.dictation_active.lock()
                     .map(|active| *active)
@@ -362,6 +366,7 @@ pub fn run() {
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection
             tts::get_tts_provider_command, // Added for TTS provider selection
+            tts::stop_tts, // Added for stopping TTS via escape key
             capture_screenshot_command,
             dev_get_focused_element_info,
             capture_element_screenshot_command,
