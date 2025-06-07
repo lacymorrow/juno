@@ -34,6 +34,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ✅ Multi-agent orchestration
 ✅ Browser automation
 ✅ MCP integration for extensibility
+✅ Cloud control system and authentication
+✅ Streaming AI responses
 
 ### Quick Reference
 - **Entry Point**: `src-tauri/src/anthropic.rs::submit_query()`

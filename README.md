@@ -24,6 +24,8 @@ bun run tauri dev
 ✅ **Timer system** for long-running tasks with context resumption  
 ✅ **Browser automation** and advanced web interaction
 ✅ **MCP integration** for external tool server management
+✅ **Cloud control system** with authentication and management
+✅ **Streaming AI responses** for real-time interaction
 
 ## 🏗️ Architecture
 
@@ -53,7 +55,6 @@ bun run tauri dev     # Development mode
 ## 📚 For Developers & LLMs
 
 - **[LLMs.txt](LLMs.txt)** - Complete instructions for AI agents working with this codebase
-- **[docs/](docs/)** - Comprehensive documentation directory
 - **Key Files**: 
   - `src-tauri/src/anthropic.rs` - Main orchestrator agent
   - `src-tauri/src/agent/tools/anthropic_computer_use.rs` - Computer Use tools
