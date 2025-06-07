@@ -148,15 +148,20 @@ impl LocalToolProvider {
             let mcp_tools = manager_guard.get_all_tools().await;
             drop(manager_guard);
 
-            // Add MCP tools to our local definitions (but not executors, since they execute via MCP)
+            // Clear existing MCP tools first (they have prefixed names)
             let mut defs = self.definitions.write().await;
+            defs.retain(|name, _| !name.contains("mcp-server-"));
+
+            // Add fresh MCP tools to our local definitions
+            let mut added_count = 0;
             for tool_info in mcp_tools {
                 if tool_info.enabled {
                     defs.insert(tool_info.tool_definition.name.clone(), tool_info.tool_definition);
+                    added_count += 1;
                 }
             }
 
-            tracing::info!("Refreshed {} MCP tools", defs.len());
+            log::info!("Refreshed and cached {} MCP tools in provider definitions", added_count);
         }
         Ok(())
     }
@@ -189,22 +194,48 @@ impl ToolProvider for LocalToolProvider {
     async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
         let mut all_tools = Vec::new();
 
-        // Get local tools
+        // Get local tools (which includes previously cached MCP tools)
         let defs = self.definitions.read().await;
         all_tools.extend(defs.values().cloned());
         drop(defs);
 
-        // Get MCP tools if manager is available
+        // Only fetch MCP tools if we don't have any cached and we have an MCP manager
         if let Some(ref mcp_manager) = self.mcp_manager {
-            let manager_guard = mcp_manager.lock().await;
-            let mcp_tools = manager_guard.get_all_tools().await;
-            drop(manager_guard);
+            // Check if we already have MCP tools cached (they have prefixed names)
+            let has_mcp_tools = all_tools.iter().any(|tool| tool.name.contains("mcp-server-"));
 
-            for tool_info in mcp_tools {
-                if tool_info.enabled {
-                    all_tools.push(tool_info.tool_definition);
+            if !has_mcp_tools {
+                let manager_guard = mcp_manager.lock().await;
+                let mcp_tools = manager_guard.get_all_tools().await;
+                drop(manager_guard);
+
+                for tool_info in mcp_tools {
+                    if tool_info.enabled {
+                        all_tools.push(tool_info.tool_definition);
+                    }
                 }
+
+                log::debug!("Fetched {} fresh MCP tools", all_tools.iter().filter(|t| t.name.contains("mcp-server-")).count());
+            } else {
+                log::debug!("Using cached MCP tools, skipping fresh fetch");
             }
+        }
+
+        // Debug logging to identify duplicates
+        let mut tool_names = std::collections::HashSet::new();
+        let mut duplicates = Vec::new();
+
+        for tool in &all_tools {
+            if !tool_names.insert(tool.name.clone()) {
+                duplicates.push(tool.name.clone());
+            }
+        }
+
+        if !duplicates.is_empty() {
+            log::error!("DUPLICATE TOOLS DETECTED: {:?}", duplicates);
+            log::debug!("All tool names: {:?}", all_tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+        } else {
+            log::debug!("All {} tools are unique", all_tools.len());
         }
 
         Ok(all_tools)

@@ -11,6 +11,7 @@ use tracing::info;
 // use std::io::Write; // Unused
 // use std::sync::Arc; // Unused
 use crate::commands::window; // Add window for scroll command
+use std::sync::Arc;
 
 // Removed unused imports: capture_screenshot_command, dev_get_clipboard, dev_set_clipboard
 // use crate::{
@@ -617,147 +618,13 @@ pub async fn register_desktop_tools(
         end_y: f64,
     }
 
-    // scroll
-    #[derive(serde::Deserialize)]
-    #[allow(dead_code)] // Allow unused fields for now
-    struct ScrollInput {
-        x: f64,
-        y: f64,
-        direction: String,
-        amount: i32, // Keep as i32 as in tools2
-    }
-    let scroll_def = ToolDefinition {
-        name: "scroll".to_string(),
-        description: "Scroll the screen in a specified direction by a specified amount at given coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate to scroll at." },
-                "y": { "type": "number", "description": "The y coordinate to scroll at." },
-                "direction": { "type": "string", "description": "The direction to scroll: 'up', 'down', 'left', or 'right'." },
-                "amount": { "type": "integer", "description": "The number of scroll wheel clicks." }
-            },
-            "required": ["x", "y", "direction", "amount"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let scroll_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<ScrollInput>(input)
-                .map_err(|e| format!("Failed to parse scroll input: {}", e))?;
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::window::dev_scroll_window(app.clone(), state_manager, args.direction, args.amount as f64, None, None).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error scrolling: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(scroll_def, scroll_exec).await;
-    info!("Registered tool: scroll");
+    // Note: scroll tool is already registered in register_additional_computer_use_tools
 
-    // triple_click
-    let triple_click_def = ToolDefinition {
-        name: "triple_click".to_string(),
-        description: "Triple-click at specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate to click at." },
-                "y": { "type": "number", "description": "The y coordinate to click at." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let triple_click_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse triple click input: {}", e))?;
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::dev_triple_click(app.clone(), state_manager, args.x, args.y, None).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error triple clicking: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(triple_click_def, triple_click_exec).await;
-    info!("Registered tool: triple_click");
+    // Note: triple_click tool is already registered in register_additional_computer_use_tools
 
-    // hold_key (Separate Hold)
-    #[derive(serde::Deserialize)]
-    struct KeyInput { key: String }
-    let hold_key_def = ToolDefinition {
-        name: "hold_key".to_string(),
-        description: "Presses and holds a specific key (e.g., 'Shift', 'Cmd'). Use 'release_key' to release it.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "key": { "type": "string", "description": "The key to hold (e.g., 'Shift', 'Cmd', 'A')." }
-            },
-            "required": ["key"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let hold_key_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<KeyInput>(input)
-                .map_err(|e| format!("Failed to parse hold key input: {}", e))?;
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::keyboard::dev_hold_key(args.key, None, state_manager).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error holding key: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(hold_key_def, hold_key_exec).await;
-    info!("Registered tool: hold_key");
+    // Note: hold_key and release_key tools are already registered in register_additional_computer_use_tools
 
-    // release_key (Separate Release)
-    let release_key_def = ToolDefinition {
-        name: "release_key".to_string(),
-        description: "Releases a previously held key.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "key": { "type": "string", "description": "The key to release (e.g., 'Shift', 'Cmd', 'A')." }
-            },
-            "required": ["key"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let release_key_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<KeyInput>(input)
-                .map_err(|e| format!("Failed to parse release key input: {}", e))?;
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::keyboard::dev_release_key(args.key, state_manager).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error releasing key: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(release_key_def, release_key_exec).await;
-    info!("Registered tool: release_key");
+    // Note: left_mouse_down and left_mouse_up tools are already registered in register_additional_computer_use_tools
 
     // mouse_move
     let mouse_move_def = ToolDefinition {
@@ -795,80 +662,6 @@ pub async fn register_desktop_tools(
     };
     provider.register_async_tool(mouse_move_def, mouse_move_exec).await;
     info!("Registered tool: mouse_move");
-
-    // left_mouse_down
-    let left_mouse_down_def = ToolDefinition {
-        name: "left_mouse_down".to_string(),
-        description: "Press the left mouse button down at the specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate." },
-                "y": { "type": "number", "description": "The y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let left_mouse_down_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
-
-            // info! message from HEAD
-            info!("Left mouse down at ({}, {}) - no transformation applied", args.x, args.y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::dev_left_mouse_down(app.clone(), state_manager, args.x, args.y).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error pressing left mouse down: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(left_mouse_down_def, left_mouse_down_exec).await;
-    info!("Registered tool: left_mouse_down");
-
-    // left_mouse_up
-    let left_mouse_up_def = ToolDefinition {
-        name: "left_mouse_up".to_string(),
-        description: "Release the left mouse button at the specified coordinates.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "x": { "type": "number", "description": "The x coordinate." },
-                "y": { "type": "number", "description": "The y coordinate." }
-            },
-            "required": ["x", "y"]
-        }),
-    };
-    let app_handle_clone = app_handle.clone();
-    let left_mouse_up_exec = move |input: Value| {
-        let app = app_handle_clone.clone();
-        async move {
-            let state_manager = app.state::<AppState>();
-            let args = serde_json::from_value::<MousePositionInput>(input)
-                .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
-
-            // info! message from HEAD
-            info!("Left mouse up at ({}, {}) - no transformation applied", args.x, args.y);
-
-            let inner_result = tokio::task::block_in_place(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async {
-                    commands::mouse::dev_left_mouse_up(app.clone(), state_manager, args.x, args.y).await
-                })
-            });
-            inner_result.map_err(|e| format!("Error releasing left mouse: {}", e))?;
-            Ok(json!({"success": true}))
-        }
-    };
-    provider.register_async_tool(left_mouse_up_def, left_mouse_up_exec).await;
-    info!("Registered tool: left_mouse_up");
 
     // left_click
     let left_click_def = ToolDefinition {
@@ -1174,11 +967,35 @@ pub async fn setup_tools(
     provider: &mut LocalToolProvider,
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-) {
-    register_desktop_tools(provider, state, app_handle.clone()).await;
+) -> Arc<tokio::sync::Mutex<LocalToolProvider>> {
+    // Set up MCP manager in the tool provider
+    let mcp_manager = state.get_mcp_manager().await;
+    provider.set_mcp_manager(mcp_manager);
 
-    // Register additional tools, handling the result
-    if let Err(e) = register_additional_computer_use_tools(provider, app_handle.clone()).await {
-        log::error!("Failed to register additional computer use tools in setup_tools: {}", e);
+    // Register basic desktop tools
+    register_desktop_tools(provider, state.clone(), app_handle.clone()).await;
+
+    // Initialize MCP servers and refresh tools if needed
+    if let Err(e) = state.initialize_mcp_servers().await {
+        log::warn!("Failed to initialize MCP servers: {}", e);
+    } else {
+        log::info!("MCP servers initialized successfully");
+
+        // Refresh MCP tools to include them in the provider
+        if let Err(e) = provider.refresh_mcp_tools().await {
+            log::warn!("Failed to refresh MCP tools: {}", e);
+        } else {
+            log::debug!("MCP tools refreshed and available in tool provider");
+        }
     }
+
+    // Create the Arc<Mutex<>> wrapper for the provider
+    let provider_arc = std::sync::Arc::new(tokio::sync::Mutex::new(provider.clone()));
+
+    // Register this tool provider with the AppState for future MCP refresh notifications
+    state.register_tool_provider(provider_arc.clone());
+    log::debug!("Tool provider registered with AppState for MCP refresh notifications");
+
+    // Return the Arc so the caller can use the same instance that's registered
+    provider_arc
 }

@@ -198,16 +198,16 @@ pub async fn test_mcp_server_connection(
 
     // Create a temporary connection to test
     let mut connection = crate::agent::tools::mcp_integration::MCPServerConnection::new(config);
-    
+
     match connection.connect().await {
         Ok(()) => {
             let tool_names: Vec<String> = connection.get_tools()
                 .iter()
                 .map(|tool| tool.name.clone())
                 .collect();
-            
+
             connection.disconnect().await;
-            
+
             info!("MCP server test successful. Found {} tools", tool_names.len());
             Ok(tool_names)
         }
