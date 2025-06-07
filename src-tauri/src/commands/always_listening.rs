@@ -30,12 +30,15 @@ pub async fn start_always_listening_mode(
             ).await {
                 Ok(_) => {
                     info!("[Command] Always listening mode started successfully");
-                    
+
                     // Emit event to UI
                     if let Err(e) = app.emit("always-listening-mode-changed", true) {
                         error!("[Command] Failed to emit always-listening-mode-changed event: {}", e);
                     }
-                    
+
+                    // Update floating bar
+                    crate::commands::floating_bar::handle_always_listening_change(&app, true).await;
+
                     Ok("Always listening mode started successfully".to_string())
                 }
                 Err(e) => {
@@ -43,7 +46,7 @@ pub async fn start_always_listening_mode(
                     if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
                         *always_listening_active = false;
                     }
-                    
+
                     let err_msg = format!("Failed to start always listening mode: {}", e);
                     error!("[Command] {}", err_msg);
                     Err(err_msg)
@@ -55,7 +58,7 @@ pub async fn start_always_listening_mode(
             if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
                 *always_listening_active = false;
             }
-            
+
             let err_msg = "Always listening controller not available".to_string();
             warn!("[Command] {}", err_msg);
             Err(err_msg)
@@ -90,12 +93,15 @@ pub async fn stop_always_listening_mode(
             ).await {
                 Ok(_) => {
                     info!("[Command] Always listening mode stopped successfully");
-                    
+
                     // Emit event to UI
                     if let Err(e) = app.emit("always-listening-mode-changed", false) {
                         error!("[Command] Failed to emit always-listening-mode-changed event: {}", e);
                     }
-                    
+
+                    // Update floating bar
+                    crate::commands::floating_bar::handle_always_listening_change(&app, false).await;
+
                     Ok("Always listening mode stopped successfully".to_string())
                 }
                 Err(e) => {
@@ -142,7 +148,7 @@ pub async fn get_always_listening_status(
     let status = state.always_listening_active.lock()
         .map(|active| *active)
         .unwrap_or(false);
-    
+
     Ok(status)
 }
 
@@ -195,7 +201,7 @@ pub async fn get_always_listening_sensitivity(
     let sensitivity = state.always_listening_sensitivity.lock()
         .map(|s| *s)
         .unwrap_or(0.5);
-    
+
     Ok(sensitivity)
 }
 
@@ -248,6 +254,6 @@ pub async fn get_always_listening_wake_words(
     let wake_words = state.always_listening_wake_words.lock()
         .map(|w| w.clone())
         .unwrap_or_default();
-    
+
     Ok(wake_words)
 }
