@@ -863,3 +863,93 @@ async fn run_error_handling_test() -> serde_json::Value {
         "scenarios_tested": ["invalid_command", "network_timeout", "auth_failure"]
     })
 }
+
+/// Execute a remote command directly for testing
+#[tauri::command]
+pub async fn execute_remote_command(
+    command_type: String,
+    payload: serde_json::Value,
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    info!("Executing remote command: {} with payload: {:?}", command_type, payload);
+
+    // Check if production cloud connector exists and is available
+    let connector = {
+        let connector_guard = app_state.production_cloud_connector.lock().await;
+        match connector_guard.as_ref() {
+            Some(connector) => connector.clone(),
+            None => {
+                return Err("Production cloud connector not available".to_string());
+            }
+        }
+    };
+
+    // Parse command type
+    let parsed_command_type = parse_command_type(&command_type)?;
+
+    // Create cloud command
+    let cloud_command = crate::cloud::types::CloudCommand {
+        id: uuid::Uuid::new_v4().to_string(),
+        command_type: parsed_command_type,
+        payload: Some(payload),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    };
+
+    // Execute the command
+    match connector.execute_remote_command(cloud_command).await {
+        Ok(response) => {
+            info!("Remote command executed successfully: {:?}", response);
+            Ok(serde_json::json!({
+                "success": true,
+                "data": response,
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }))
+        },
+        Err(e) => {
+            error!("Failed to execute remote command: {}", e);
+            Err(format!("Remote command execution failed: {}", e))
+        }
+    }
+}
+
+/// Get comprehensive cloud connection status with diagnostics
+#[tauri::command]
+pub async fn get_cloud_connection_diagnostics(
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut diagnostics = serde_json::json!({
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "cloud_enabled": app_state.is_cloud_enabled(),
+        "connection_available": false,
+        "connector_type": "none",
+        "capabilities": []
+    });
+
+    // Check production cloud connector
+    if let Some(connector) = app_state.get_production_cloud_connector_async().await {
+        let connection_state = connector.get_connection_state().await;
+        let connection_stats = connector.get_connection_stats().await;
+
+        diagnostics["connection_available"] = serde_json::json!(true);
+        diagnostics["connector_type"] = serde_json::json!("production");
+        diagnostics["connection_state"] = serde_json::json!(format!("{:?}", connection_state));
+        diagnostics["connection_stats"] = serde_json::json!(connection_stats);
+        diagnostics["capabilities"] = serde_json::json!([
+            "screenshot", "click", "type", "key", "execute", "status",
+            "text_query", "voice_query", "system_command", "config_update"
+        ]);
+    }
+
+    // Add system info
+    diagnostics["system_info"] = serde_json::json!({
+        "platform": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "desktop_available": app_state.is_desktop_available(),
+        "permissions_checked": app_state.are_permissions_checked()
+    });
+
+    Ok(diagnostics)
+}
