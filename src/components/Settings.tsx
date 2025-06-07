@@ -17,6 +17,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { KeyboardShortcuts } from "@/types/keyboard";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -33,6 +42,13 @@ import {
   Settings as SettingsIcon,
   Shield,
   Terminal,
+  Plus,
+  Play,
+  Square,
+  Trash2,
+  Edit,
+  Server,
+  ExternalLink,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -66,6 +82,40 @@ interface ToolCategory {
   description: string;
   enabled: boolean;
   tools: ToolConfig[];
+}
+
+// MCP Server interfaces
+interface MCPServerConfig {
+  id: string;
+  name: string;
+  description?: string;
+  command: string;
+  args: string[];
+  working_directory?: string;
+  environment_variables: Record<string, string>;
+  enabled: boolean;
+  auto_start: boolean;
+  timeout_seconds: number;
+  max_retries: number;
+}
+
+interface MCPServerStatus {
+  Disconnected?: null;
+  Connecting?: null;
+  Connected?: null;
+  Error?: string;
+  Timeout?: null;
+}
+
+interface MCPToolInfo {
+  server_id: string;
+  server_name: string;
+  tool_definition: {
+    name: string;
+    description: string;
+    input_schema: any;
+  };
+  enabled: boolean;
 }
 
 interface SettingsProps {
@@ -105,6 +155,16 @@ const Settings: React.FC<SettingsProps> = ({
   >({});
   const [toolConfigLoading, setToolConfigLoading] = useState<boolean>(false);
 
+  // MCP Server Settings
+  const [mcpServers, setMcpServers] = useState<MCPServerConfig[]>([]);
+  const [mcpServerStatuses, setMcpServerStatuses] = useState<Record<string, MCPServerStatus>>({});
+  const [mcpTools, setMcpTools] = useState<MCPToolInfo[]>([]);
+  const [mcpLoading, setMcpLoading] = useState<boolean>(false);
+  const [showAddMcpDialog, setShowAddMcpDialog] = useState<boolean>(false);
+  const [editingMcpServer, setEditingMcpServer] = useState<MCPServerConfig | null>(null);
+  const [mcpJsonMode, setMcpJsonMode] = useState<boolean>(false);
+  const [mcpJsonData, setMcpJsonData] = useState<string>("");
+
   // Form state for provider settings
   const [formData, setFormData] = useState<{
     apiKey: string;
@@ -118,6 +178,29 @@ const Settings: React.FC<SettingsProps> = ({
     maxTokens: "",
     temperature: "",
     systemPrompt: "",
+  });
+
+  // Form state for MCP server
+  const [mcpFormData, setMcpFormData] = useState<{
+    name: string;
+    description: string;
+    command: string;
+    args: string;
+    workingDirectory: string;
+    environmentVariables: string;
+    timeoutSeconds: string;
+    maxRetries: string;
+    autoStart: boolean;
+  }>({
+    name: "",
+    description: "",
+    command: "",
+    args: "",
+    workingDirectory: "",
+    environmentVariables: "",
+    timeoutSeconds: "30",
+    maxRetries: "3",
+    autoStart: true,
   });
 
   // Permissions state
@@ -201,33 +284,426 @@ const Settings: React.FC<SettingsProps> = ({
       await loadToolConfigurations();
 
       // Load keyboard shortcuts
-      const shortcuts = await invoke<KeyboardShortcuts>(
-        "get_keyboard_shortcuts"
-      );
-      setKeyboardShortcuts(shortcuts);
+      await loadKeyboardShortcuts();
+
+      // Load MCP server configurations
+      await loadMcpServers();
     } catch (error) {
-      console.error("Failed to load settings:", error);
-      toast.error("Failed to load settings");
+      console.error("Error loading settings:", error);
+      toast.error("Failed to load some settings");
     } finally {
       setIsLoading(false);
     }
   };
 
   const loadPermissionsStatus = async () => {
+    setPermissionsLoading(true);
     try {
-      setPermissionsLoading(true);
-      const result = await invoke<{
+      const permissions = await invoke<{
         accessibility: { granted: boolean; required: boolean };
         screenRecording: { granted: boolean; required: boolean };
         microphone: { granted: boolean; required: boolean };
         allGranted: boolean;
         appName: string;
       }>("check_permissions_status");
-      setPermissionsState(result);
+      setPermissionsState(permissions);
     } catch (error) {
-      console.error("Failed to load permissions status:", error);
+      console.error("Error loading permissions status:", error);
+      setPermissionsState(null);
     } finally {
       setPermissionsLoading(false);
+    }
+  };
+
+  const loadKeyboardShortcuts = async () => {
+    setShortcutsLoading(true);
+    try {
+      const shortcuts = await invoke<KeyboardShortcuts>("get_keyboard_shortcuts");
+      setKeyboardShortcuts(shortcuts);
+    } catch (error) {
+      console.error("Error loading keyboard shortcuts:", error);
+      toast.error("Failed to load keyboard shortcuts");
+    } finally {
+      setShortcutsLoading(false);
+    }
+  };
+
+  const loadMcpServers = async () => {
+    setMcpLoading(true);
+    try {
+      // Load MCP server configurations
+      const servers = await invoke<MCPServerConfig[]>("get_mcp_servers");
+      setMcpServers(servers);
+
+      // Load MCP server statuses
+      const statuses = await invoke<Record<string, MCPServerStatus>>("get_mcp_server_statuses");
+      setMcpServerStatuses(statuses);
+
+      // Load MCP tools
+      const tools = await invoke<MCPToolInfo[]>("get_mcp_tools");
+      setMcpTools(tools);
+    } catch (error) {
+      console.error("Error loading MCP servers:", error);
+      toast.error("Failed to load MCP servers");
+    } finally {
+      setMcpLoading(false);
+    }
+  };
+
+  const resetMcpForm = () => {
+    setMcpFormData({
+      name: "",
+      description: "",
+      command: "",
+      args: "",
+      workingDirectory: "",
+      environmentVariables: "",
+      timeoutSeconds: "30",
+      maxRetries: "3",
+      autoStart: true,
+    });
+    setEditingMcpServer(null);
+    setMcpJsonMode(false);
+    setMcpJsonData("");
+  };
+
+  const handleAddMcpServer = () => {
+    resetMcpForm();
+    // Initialize with Cursor/Claude compatible JSON template
+    const defaultConfig = {
+      "my-server": {
+        "command": "npx",
+        "args": ["@modelcontextprotocol/server-filesystem", "/path/to/directory"],
+        "env": {
+          "API_KEY": "your-api-key-here"
+        }
+      }
+    };
+    setMcpJsonData(JSON.stringify(defaultConfig, null, 2));
+    setShowAddMcpDialog(true);
+  };
+
+  const handleEditMcpServer = (server: MCPServerConfig) => {
+    setMcpFormData({
+      name: server.name,
+      description: server.description || "",
+      command: server.command,
+      args: server.args.join(" "),
+      workingDirectory: server.working_directory || "",
+      environmentVariables: JSON.stringify(server.environment_variables, null, 2),
+      timeoutSeconds: server.timeout_seconds.toString(),
+      maxRetries: server.max_retries.toString(),
+      autoStart: server.auto_start,
+    });
+    setEditingMcpServer(server);
+
+    // Convert to Cursor/Claude compatible format for JSON editor
+    const simplifiedConfig = {
+      [server.name]: {
+        command: server.command,
+        args: server.args,
+        ...(Object.keys(server.environment_variables).length > 0 && { env: server.environment_variables })
+      }
+    };
+    setMcpJsonData(JSON.stringify(simplifiedConfig, null, 2));
+    setShowAddMcpDialog(true);
+  };
+
+  const convertFormToJson = () => {
+    try {
+      let environmentVariables = {};
+      if (mcpFormData.environmentVariables.trim()) {
+        environmentVariables = JSON.parse(mcpFormData.environmentVariables);
+      }
+
+      // Convert to Cursor/Claude compatible format
+      const serverName = mcpFormData.name.trim() || "my-server";
+      const args = mcpFormData.args.trim().split(/\s+/).filter(arg => arg.length > 0);
+
+      const simplifiedConfig = {
+        [serverName]: {
+          command: mcpFormData.command.trim(),
+          args: args,
+          ...(Object.keys(environmentVariables).length > 0 && { env: environmentVariables })
+        }
+      };
+
+      setMcpJsonData(JSON.stringify(simplifiedConfig, null, 2));
+    } catch (e) {
+      toast.error("Invalid form data for JSON conversion");
+    }
+  };
+
+  const convertJsonToForm = () => {
+    try {
+      const simplifiedConfig = JSON.parse(mcpJsonData);
+
+      // Handle both Cursor/Claude format and legacy format
+      let serverName = "";
+      let command = "";
+      let args: string[] = [];
+      let env = {};
+
+      if (simplifiedConfig.name && simplifiedConfig.command) {
+        // Legacy format (full MCPServerConfig)
+        serverName = simplifiedConfig.name;
+        command = simplifiedConfig.command;
+        args = Array.isArray(simplifiedConfig.args) ? simplifiedConfig.args : [];
+        env = simplifiedConfig.environment_variables || {};
+      } else {
+        // Cursor/Claude format - get first server
+        const serverNames = Object.keys(simplifiedConfig);
+        if (serverNames.length > 0) {
+          serverName = serverNames[0];
+          const serverConfig = simplifiedConfig[serverName];
+          command = serverConfig.command || "";
+          args = Array.isArray(serverConfig.args) ? serverConfig.args : [];
+          env = serverConfig.env || {};
+        }
+      }
+
+      setMcpFormData({
+        name: serverName,
+        description: simplifiedConfig.description || "",
+        command: command,
+        args: args.join(" "),
+        workingDirectory: simplifiedConfig.working_directory || "",
+        environmentVariables: JSON.stringify(env, null, 2),
+        timeoutSeconds: simplifiedConfig.timeout_seconds?.toString() || "30",
+        maxRetries: simplifiedConfig.max_retries?.toString() || "3",
+        autoStart: simplifiedConfig.auto_start ?? true,
+      });
+    } catch (e) {
+      toast.error("Invalid JSON format");
+    }
+  };
+
+  const handleSaveMcpServer = async () => {
+    try {
+      let config: MCPServerConfig;
+
+      if (mcpJsonMode) {
+        // Parse and validate JSON mode data
+        try {
+          const jsonData = JSON.parse(mcpJsonData);
+
+          // Handle both Cursor/Claude format and legacy format
+          if (jsonData.name && jsonData.command) {
+            // Legacy format (full MCPServerConfig)
+            config = jsonData;
+
+            // Validate required fields
+            if (!config.name?.trim() || !config.command?.trim()) {
+              toast.error("Name and command are required");
+              return;
+            }
+
+            // Ensure proper types and defaults
+            config.args = Array.isArray(config.args) ? config.args : [];
+            config.environment_variables = config.environment_variables || {};
+            config.enabled = config.enabled ?? true;
+            config.auto_start = config.auto_start ?? true;
+            config.timeout_seconds = config.timeout_seconds || 30;
+            config.max_retries = config.max_retries || 3;
+            config.id = config.id || editingMcpServer?.id || `mcp-${Date.now()}`;
+          } else {
+            // Cursor/Claude format - convert to full format
+            const serverNames = Object.keys(jsonData);
+            if (serverNames.length === 0) {
+              toast.error("No server configuration found in JSON");
+              return;
+            }
+
+            if (serverNames.length > 1) {
+              toast.error("Multiple servers detected. Please edit one server at a time.");
+              return;
+            }
+
+            const serverName = serverNames[0];
+            const serverConfig = jsonData[serverName];
+
+            if (!serverName.trim() || !serverConfig.command?.trim()) {
+              toast.error("Server name and command are required");
+              return;
+            }
+
+            config = {
+              id: editingMcpServer?.id || `mcp-${Date.now()}`,
+              name: serverName.trim(),
+              description: undefined,
+              command: serverConfig.command,
+              args: Array.isArray(serverConfig.args) ? serverConfig.args : [],
+              working_directory: undefined,
+              environment_variables: serverConfig.env || {},
+              enabled: true,
+              auto_start: true,
+              timeout_seconds: 30,
+              max_retries: 3,
+            };
+          }
+        } catch (e) {
+          toast.error("Invalid JSON format");
+          return;
+        }
+      } else {
+        // Use form mode data
+        if (!mcpFormData.name.trim() || !mcpFormData.command.trim()) {
+          toast.error("Name and command are required");
+          return;
+        }
+
+        let environmentVariables = {};
+        if (mcpFormData.environmentVariables.trim()) {
+          try {
+            environmentVariables = JSON.parse(mcpFormData.environmentVariables);
+          } catch (e) {
+            toast.error("Invalid JSON in environment variables");
+            return;
+          }
+        }
+
+        config = {
+          id: editingMcpServer?.id || `mcp-${Date.now()}`,
+          name: mcpFormData.name.trim(),
+          description: mcpFormData.description.trim() || undefined,
+          command: mcpFormData.command.trim(),
+          args: mcpFormData.args.trim().split(/\s+/).filter(arg => arg.length > 0),
+          working_directory: mcpFormData.workingDirectory.trim() || undefined,
+          environment_variables: environmentVariables,
+          enabled: true,
+          auto_start: mcpFormData.autoStart,
+          timeout_seconds: parseInt(mcpFormData.timeoutSeconds) || 30,
+          max_retries: parseInt(mcpFormData.maxRetries) || 3,
+        };
+      }
+
+      if (editingMcpServer) {
+        await invoke("update_mcp_server", { config });
+        toast.success("MCP server updated successfully");
+      } else {
+        await invoke("add_mcp_server", { config });
+        toast.success("MCP server added successfully");
+      }
+
+      setShowAddMcpDialog(false);
+      resetMcpForm();
+      await loadMcpServers();
+    } catch (error) {
+      console.error("Error saving MCP server:", error);
+      toast.error("Failed to save MCP server");
+    }
+  };
+
+  const handleDeleteMcpServer = async (serverId: string) => {
+    if (!confirm("Are you sure you want to delete this MCP server?")) {
+      return;
+    }
+
+    try {
+      await invoke("remove_mcp_server", { serverId });
+      toast.success("MCP server deleted successfully");
+      await loadMcpServers();
+    } catch (error) {
+      console.error("Error deleting MCP server:", error);
+      toast.error("Failed to delete MCP server");
+    }
+  };
+
+  const handleToggleMcpServer = async (serverId: string, enabled: boolean) => {
+    try {
+      await invoke("set_mcp_server_enabled", { serverId, enabled });
+      toast.success(`MCP server ${enabled ? "enabled" : "disabled"} successfully`);
+      await loadMcpServers();
+    } catch (error) {
+      console.error("Error toggling MCP server:", error);
+      toast.error("Failed to toggle MCP server");
+    }
+  };
+
+  const handleStartMcpServer = async (serverId: string) => {
+    try {
+      await invoke("start_mcp_server", { serverId });
+      toast.success("MCP server started successfully");
+      await loadMcpServers();
+    } catch (error) {
+      console.error("Error starting MCP server:", error);
+      toast.error("Failed to start MCP server");
+    }
+  };
+
+  const handleStopMcpServer = async (serverId: string) => {
+    try {
+      await invoke("stop_mcp_server", { serverId });
+      toast.success("MCP server stopped successfully");
+      await loadMcpServers();
+    } catch (error) {
+      console.error("Error stopping MCP server:", error);
+      toast.error("Failed to stop MCP server");
+    }
+  };
+
+  const handleTestMcpServer = async () => {
+    if (!mcpFormData.name.trim() || !mcpFormData.command.trim()) {
+      toast.error("Name and command are required for testing");
+      return;
+    }
+
+    try {
+      let environmentVariables = {};
+      if (mcpFormData.environmentVariables.trim()) {
+        try {
+          environmentVariables = JSON.parse(mcpFormData.environmentVariables);
+        } catch (e) {
+          toast.error("Invalid JSON in environment variables");
+          return;
+        }
+      }
+
+      const config: MCPServerConfig = {
+        id: `test-${Date.now()}`,
+        name: mcpFormData.name.trim(),
+        description: mcpFormData.description.trim() || undefined,
+        command: mcpFormData.command.trim(),
+        args: mcpFormData.args.trim().split(/\s+/).filter(arg => arg.length > 0),
+        working_directory: mcpFormData.workingDirectory.trim() || undefined,
+        environment_variables: environmentVariables,
+        enabled: true,
+        auto_start: false,
+        timeout_seconds: parseInt(mcpFormData.timeoutSeconds) || 30,
+        max_retries: parseInt(mcpFormData.maxRetries) || 3,
+      };
+
+      const tools = await invoke<string[]>("test_mcp_server_connection", { config });
+      toast.success(`Connection successful! Found ${tools.length} tools: ${tools.join(", ")}`);
+    } catch (error) {
+      console.error("Error testing MCP server:", error);
+      toast.error(`Connection failed: ${error}`);
+    }
+  };
+
+  const getMcpServerStatusBadge = (status: MCPServerStatus) => {
+    if (status.Connected !== undefined) {
+      return <Badge variant="default" className="bg-green-500">Connected</Badge>;
+    } else if (status.Connecting !== undefined) {
+      return <Badge variant="secondary">Connecting</Badge>;
+    } else if (status.Error !== undefined) {
+      return <Badge variant="destructive">Error</Badge>;
+    } else if (status.Timeout !== undefined) {
+      return <Badge variant="destructive">Timeout</Badge>;
+    } else {
+      return <Badge variant="outline">Disconnected</Badge>;
+    }
+  };
+
+  const getMcpServerStatusIcon = (status: MCPServerStatus) => {
+    if (status.Connected !== undefined) {
+      return <CheckCircle className="h-4 w-4 text-green-500" />;
+    } else if (status.Connecting !== undefined) {
+      return <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />;
+    } else if (status.Error !== undefined || status.Timeout !== undefined) {
+      return <AlertCircle className="h-4 w-4 text-red-500" />;
+    } else {
+      return <Square className="h-4 w-4 text-gray-400" />;
     }
   };
 
@@ -1196,6 +1672,373 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
         </CardContent>
       </Card>
+
+      {/* MCP Server Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Server size={20} />
+            MCP Servers
+          </CardTitle>
+          <CardDescription>
+            Manage Model Context Protocol servers for extended functionality
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-medium">Connected Servers</h3>
+              {mcpLoading && <RefreshCw className="h-4 w-4 animate-spin" />}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={loadMcpServers} disabled={mcpLoading}>
+                <RefreshCw className="h-4 w-4 mr-1" />
+                Refresh
+              </Button>
+              <Button onClick={handleAddMcpServer} size="sm">
+                <Plus className="h-4 w-4 mr-1" />
+                Add Server
+              </Button>
+            </div>
+          </div>
+
+          {mcpServers.length === 0 ? (
+            <div className="text-center py-8 border-2 border-dashed border-muted rounded-lg">
+              <Server className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium mb-2">No MCP Servers</h3>
+              <p className="text-muted-foreground mb-4">
+                Add MCP servers to extend the AI agent with additional tools and capabilities.
+              </p>
+              <Button onClick={handleAddMcpServer}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Your First Server
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {mcpServers.map((server) => {
+                const status = mcpServerStatuses[server.id] || { Disconnected: null };
+                const isConnected = status.Connected !== undefined;
+                const isConnecting = status.Connecting !== undefined;
+                const hasError = status.Error !== undefined;
+                const serverTools = mcpTools.filter(tool => tool.server_id === server.id);
+
+                return (
+                  <div key={server.id} className="border rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {getMcpServerStatusIcon(status)}
+                        <div>
+                          <h4 className="font-medium">{server.name}</h4>
+                          {server.description && (
+                            <p className="text-sm text-muted-foreground">{server.description}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {getMcpServerStatusBadge(status)}
+                        <Switch
+                          checked={server.enabled}
+                          onCheckedChange={(enabled) => handleToggleMcpServer(server.id, enabled)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Command:</span>
+                        <code className="ml-2 px-1 py-0.5 bg-muted rounded text-xs">
+                          {server.command} {server.args.join(" ")}
+                        </code>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Tools:</span>
+                        <span className="ml-2">{serverTools.length} available</span>
+                      </div>
+                    </div>
+
+                    {hasError && (
+                      <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                        <strong>Error:</strong> {status.Error}
+                      </div>
+                    )}
+
+                    {serverTools.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Available Tools:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {serverTools.slice(0, 5).map((tool) => (
+                            <Badge key={tool.tool_definition.name} variant="secondary" className="text-xs">
+                              {tool.tool_definition.name.replace(`${server.name}_`, "")}
+                            </Badge>
+                          ))}
+                          {serverTools.length > 5 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{serverTools.length - 5} more
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-2 border-t">
+                      {server.enabled && !isConnected && !isConnecting && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleStartMcpServer(server.id)}
+                        >
+                          <Play className="h-4 w-4 mr-1" />
+                          Start
+                        </Button>
+                      )}
+                      {server.enabled && (isConnected || isConnecting) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleStopMcpServer(server.id)}
+                        >
+                          <Square className="h-4 w-4 mr-1" />
+                          Stop
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditMcpServer(server)}
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDeleteMcpServer(server.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="pt-4 border-t text-sm text-muted-foreground">
+            <p className="mb-2">
+              <strong>Popular MCP Servers:</strong>
+            </p>
+            <ul className="space-y-1 text-xs">
+              <li>• <strong>File System:</strong> npx @modelcontextprotocol/server-filesystem /path/to/directory</li>
+              <li>• <strong>SQLite:</strong> npx @modelcontextprotocol/server-sqlite /path/to/database.db</li>
+              <li>• <strong>Git:</strong> npx @modelcontextprotocol/server-git /path/to/repo</li>
+              <li>• <strong>Brave Search:</strong> npx @modelcontextprotocol/server-brave-search</li>
+            </ul>
+            <div className="mt-2 pt-2 border-t">
+              <a
+                href="https://github.com/modelcontextprotocol/servers"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Browse more servers on GitHub
+              </a>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* MCP Server Add/Edit Dialog */}
+      <Dialog open={showAddMcpDialog} onOpenChange={setShowAddMcpDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingMcpServer ? "Edit MCP Server" : "Add MCP Server"}
+            </DialogTitle>
+            <DialogDescription>
+              Configure a Model Context Protocol server to extend the AI agent with additional tools.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="mcp-name">Name *</Label>
+                <Input
+                  id="mcp-name"
+                  value={mcpFormData.name}
+                  onChange={(e) => setMcpFormData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., File System Tools"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mcp-command">Command *</Label>
+                <Input
+                  id="mcp-command"
+                  value={mcpFormData.command}
+                  onChange={(e) => setMcpFormData(prev => ({ ...prev, command: e.target.value }))}
+                  placeholder="e.g., npx or /usr/local/bin/mcp-server"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mcp-description">Description</Label>
+              <Input
+                id="mcp-description"
+                value={mcpFormData.description}
+                onChange={(e) => setMcpFormData(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Brief description of what this server provides"
+              />
+            </div>
+
+            {/* Editor Mode Toggle */}
+            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="mcp-json-mode">Configuration Mode</Label>
+                <Badge variant={mcpJsonMode ? "default" : "secondary"}>
+                  {mcpJsonMode ? "JSON Editor" : "Form Editor"}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                {!mcpJsonMode && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={convertFormToJson}
+                    title="Convert form data to JSON"
+                  >
+                    → JSON
+                  </Button>
+                )}
+                {mcpJsonMode && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={convertJsonToForm}
+                    title="Convert JSON to form"
+                  >
+                    → Form
+                  </Button>
+                )}
+                <Switch
+                  id="mcp-json-mode"
+                  checked={mcpJsonMode}
+                  onCheckedChange={setMcpJsonMode}
+                />
+              </div>
+            </div>
+
+            {mcpJsonMode ? (
+              // JSON Editor Mode
+              <div className="space-y-2">
+                <Label htmlFor="mcp-json">Server Configuration (JSON)</Label>
+                <Textarea
+                  id="mcp-json"
+                  value={mcpJsonData}
+                  onChange={(e) => setMcpJsonData(e.target.value)}
+                  placeholder='{\n  "my-server": {\n    "command": "npx",\n    "args": ["@modelcontextprotocol/server-filesystem", "/path"],\n    "env": {\n      "API_KEY": "your-api-key-here"\n    }\n  }\n}'
+                  className="h-64 font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Edit server configuration using Cursor/Claude compatible format. Server name as key, required fields: command, args
+                </p>
+              </div>
+            ) : (
+              // Form Editor Mode (existing form fields)
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="mcp-args">Arguments</Label>
+              <Input
+                id="mcp-args"
+                value={mcpFormData.args}
+                onChange={(e) => setMcpFormData(prev => ({ ...prev, args: e.target.value }))}
+                placeholder="e.g., @modelcontextprotocol/server-filesystem /path/to/directory"
+              />
+              <p className="text-xs text-muted-foreground">
+                Space-separated arguments for the command
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mcp-working-dir">Working Directory</Label>
+              <Input
+                id="mcp-working-dir"
+                value={mcpFormData.workingDirectory}
+                onChange={(e) => setMcpFormData(prev => ({ ...prev, workingDirectory: e.target.value }))}
+                placeholder="/path/to/working/directory (optional)"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mcp-env-vars">Environment Variables</Label>
+              <Textarea
+                id="mcp-env-vars"
+                value={mcpFormData.environmentVariables}
+                onChange={(e) => setMcpFormData(prev => ({ ...prev, environmentVariables: e.target.value }))}
+                placeholder='{"API_KEY": "your-key", "CONFIG_PATH": "/path/to/config"}'
+                className="h-20"
+              />
+              <p className="text-xs text-muted-foreground">
+                JSON object of environment variables (optional)
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="mcp-timeout">Timeout (seconds)</Label>
+                <Input
+                  id="mcp-timeout"
+                  type="number"
+                  value={mcpFormData.timeoutSeconds}
+                  onChange={(e) => setMcpFormData(prev => ({ ...prev, timeoutSeconds: e.target.value }))}
+                  min="1"
+                  max="300"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mcp-retries">Max Retries</Label>
+                <Input
+                  id="mcp-retries"
+                  type="number"
+                  value={mcpFormData.maxRetries}
+                  onChange={(e) => setMcpFormData(prev => ({ ...prev, maxRetries: e.target.value }))}
+                  min="0"
+                  max="10"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="mcp-auto-start"
+                checked={mcpFormData.autoStart}
+                onCheckedChange={(checked) => setMcpFormData(prev => ({ ...prev, autoStart: checked }))}
+              />
+              <Label htmlFor="mcp-auto-start">Auto-start when app launches</Label>
+            </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={handleTestMcpServer}>
+              Test Connection
+            </Button>
+            <Button variant="outline" onClick={() => setShowAddMcpDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveMcpServer}>
+              {editingMcpServer ? "Update" : "Add"} Server
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Developer Tools */}
       <Card>

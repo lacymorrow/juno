@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use futures::FutureExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -100,7 +99,7 @@ impl LocalToolProvider {
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let name = definition.name.clone();
+        let _name = definition.name.clone();
 
         // Check if tool should be enabled based on configuration
         let should_register = if let Some(state) = app_state {
@@ -127,7 +126,7 @@ impl LocalToolProvider {
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
-        let config_manager = if let Some(state) = app_state {
+        let _config_manager = if let Some(state) = app_state {
             let config_arc = state.get_tool_config_manager().await;
             let config_guard = config_arc.lock().await;
             let is_enabled = config_guard.is_tool_enabled(&definition.name);
@@ -165,7 +164,7 @@ impl LocalToolProvider {
     /// Check if a tool is an MCP tool
     fn is_mcp_tool(&self, tool_name: &str) -> bool {
         // MCP tools are prefixed with server name
-        tool_name.contains('_') && 
+        tool_name.contains('_') &&
         self.mcp_manager.is_some() &&
         !self.executors.try_read().map(|execs| execs.contains_key(tool_name)).unwrap_or(false)
     }
@@ -261,19 +260,23 @@ impl ToolProvider for LocalToolProvider {
         if let Some(ref app_handle) = self.app_handle {
             match &result {
                 Ok(tool_result) => {
-                    tool_logger::log_tool_call_response(
+                    tool_logger::log_tool_call_result(
                         app_handle,
                         tool_name,
                         tool_result.output.clone(),
-                        Some(format!("Tool {} executed successfully", tool_name))
+                        true,
+                        Some(format!("Tool {} executed successfully", tool_name)),
+                        None,
                     );
                 }
                 Err(e) => {
-                    tool_logger::log_tool_call_error(
+                    tool_logger::log_tool_call_result(
                         app_handle,
                         tool_name,
-                        format!("Tool execution failed: {}", e),
-                        Some(format!("Error in tool {}", tool_name))
+                        serde_json::Value::String(format!("Tool execution failed: {}", e)),
+                        false,
+                        Some(format!("Error in tool {}", tool_name)),
+                        None,
                     );
                 }
             }
