@@ -257,3 +257,69 @@ pub async fn get_always_listening_wake_words(
 
     Ok(wake_words)
 }
+
+/// Debug command to get detailed always listening status
+#[tauri::command]
+pub async fn debug_always_listening_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    info!("[Command] debug_always_listening_status called");
+
+    // Get app state
+    let is_active = state.always_listening_active.lock()
+        .map(|active| *active)
+        .unwrap_or(false);
+
+    let sensitivity = state.always_listening_sensitivity.lock()
+        .map(|s| *s)
+        .unwrap_or(0.5);
+
+    let wake_words = state.always_listening_wake_words.lock()
+        .map(|w| w.clone())
+        .unwrap_or_default();
+
+    // Try to get plugin status if available
+    let plugin_status = match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
+        Some(controller_state) => {
+            match controller_state.try_lock() {
+                Ok(controller) => {
+                    serde_json::json!({
+                        "plugin_active": controller.is_active(),
+                        "plugin_sensitivity": controller.get_sensitivity(),
+                        "plugin_wake_words": controller.get_wake_words(),
+                        "plugin_available": true
+                    })
+                }
+                Err(_) => {
+                    serde_json::json!({
+                        "plugin_available": true,
+                        "plugin_locked": true,
+                        "message": "Plugin controller is currently locked"
+                    })
+                }
+            }
+        }
+        None => {
+            serde_json::json!({
+                "plugin_available": false,
+                "message": "Always listening controller not initialized"
+            })
+        }
+    };
+
+    let debug_info = serde_json::json!({
+        "app_state": {
+            "is_active": is_active,
+            "sensitivity": sensitivity,
+            "wake_words": wake_words
+        },
+        "plugin_state": plugin_status,
+        "system_info": {
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "version": "1.0.0"
+        }
+    });
+
+    Ok(debug_info)
+}
