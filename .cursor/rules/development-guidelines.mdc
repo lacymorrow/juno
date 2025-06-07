@@ -32,6 +32,8 @@ The system uses a **hierarchical architecture** with clear separation:
 - **Agent Implementations**: [src-tauri/src/agent/implementations/](mdc:src-tauri/src/agent/implementations)
 - **Agent Providers**: [src-tauri/src/agent/providers/](mdc:src-tauri/src/agent/providers)
 - **Agent Tools**: [src-tauri/src/agent/tools/](mdc:src-tauri/src/agent/tools)
+- **MCP Integration**: [src-tauri/src/agent/tools/mcp_integration.rs](mdc:src-tauri/src/agent/tools/mcp_integration.rs) - External tool server management
+- **MCP Commands**: [src-tauri/src/commands/mcp.rs](mdc:src-tauri/src/commands/mcp.rs) - User interface for MCP server management
 - **Platform Integration**: [src-tauri/mcp-server-os-level/src/platforms/macos/](mdc:src-tauri/mcp-server-os-level/src/platforms/macos)
 
 ### Delegation Architecture Rules
@@ -133,6 +135,8 @@ The cloud control system has been successfully merged with the main branch, comb
 - Emit progress events for user feedback
 - Implement proper cancellation handling
 - Use background execution for appropriate tools
+- Support both local and MCP (external) tools seamlessly
+- See [MCP Integration System](mdc:.cursor/rules/mcp-integration-system.mdc) for external tool management
 
 ## Utility Function Implementation ✅
 
@@ -159,6 +163,7 @@ The cloud control system has been successfully merged with the main branch, comb
 - Test voice integration end-to-end
 - Validate event flow with browser dev tools
 - Test utility functions with real system context data
+- Test MCP server integration and tool discovery (see [MCP Integration System](mdc:.cursor/rules/mcp-integration-system.mdc))
 - Test permission scenarios (see [macOS Permission Handling](mdc:.cursor/rules/macos-permission-handling.mdc))
 - Test cloud connectivity and command execution scenarios
 

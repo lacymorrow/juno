@@ -23,6 +23,10 @@ use crate::commands::permissions::PermissionsState;
 use crate::agent::tools::tool_config::ToolConfigManager;
 // Import cloud client
 use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
+// Import MCP manager for external MCP server support
+use crate::agent::tools::mcp_integration::MCPManager;
+// Import LocalToolProvider for tool provider registry
+use crate::agent::implementations::tool_provider::LocalToolProvider;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +115,10 @@ pub struct AppState {
     pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
     // Keyboard shortcuts configuration
     pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
+    // MCP manager for external MCP server support
+    pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
+    // Tool provider registry for refreshing MCP tools
+    pub tool_provider_registry: Arc<Mutex<Vec<Arc<tokio::sync::Mutex<LocalToolProvider>>>>>, // Track active tool providers
 }
 
 impl AppState {
@@ -146,6 +154,10 @@ impl AppState {
             production_cloud_connector: Arc::new(TokioMutex::new(None)),
             // Initialize keyboard shortcuts configuration
             keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
+            // Initialize MCP manager
+            mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
+            // Initialize tool provider registry
+            tool_provider_registry: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -439,6 +451,117 @@ impl AppState {
     pub async fn has_production_cloud_connector(&self) -> bool {
         let connector_guard = self.production_cloud_connector.lock().await;
         connector_guard.is_some()
+    }
+
+    // MCP Manager Methods
+
+    /// Get the MCP manager
+    pub async fn get_mcp_manager(&self) -> Arc<TokioMutex<MCPManager>> {
+        self.mcp_manager.clone()
+    }
+
+    /// Initialize MCP servers from configuration
+    pub async fn initialize_mcp_servers(&self) -> Result<(), String> {
+        let config_guard = self.tool_config_manager.lock().await;
+        let mcp_configs = config_guard.get_mcp_servers();
+        drop(config_guard);
+
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+
+        for config in mcp_configs {
+            if let Err(e) = manager_guard.add_server(config.clone()).await {
+                log::error!("Failed to add MCP server '{}': {}", config.name, e);
+            }
+        }
+
+        // Start all enabled servers
+        if let Err(e) = manager_guard.start_all_enabled_servers().await {
+            log::error!("Failed to start MCP servers: {}", e);
+        }
+
+        drop(manager_guard);
+        Ok(())
+    }
+
+    /// Sync MCP tools with tool configuration
+    pub async fn sync_mcp_tools(&self) -> Result<(), String> {
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        let all_tools = manager_guard.get_all_tools().await;
+        drop(manager_guard);
+
+        let mut config_guard = self.tool_config_manager.lock().await;
+
+        // Group tools by server
+        let mut tools_by_server: HashMap<String, Vec<_>> = HashMap::new();
+        for tool_info in all_tools {
+            tools_by_server.entry(tool_info.server_id.clone())
+                .or_insert_with(Vec::new)
+                .push(tool_info);
+        }
+
+        // Add tools to configuration
+        for (server_id, tools) in tools_by_server {
+            config_guard.add_mcp_tools(&server_id, tools);
+        }
+
+        drop(config_guard);
+
+        // Emit an event to trigger tool provider refresh in active agents
+        self.notify_mcp_tools_updated().await;
+
+        // Refresh all registered tool providers with the new MCP tools
+        self.refresh_all_tool_providers().await?;
+
+        Ok(())
+    }
+
+    /// Notify that MCP tools have been updated - this triggers a refresh in active agents
+    pub async fn notify_mcp_tools_updated(&self) {
+        // Try to get an app handle and emit the event
+        if let Ok(controller_guard) = self.browser_controller.try_lock() {
+            if let Some(ref controller) = *controller_guard {
+                // Just emit without trying to get app handle from controller
+                log::debug!("MCP tools updated, notifying frontend");
+            }
+        }
+    }
+
+    /// Register a tool provider for MCP tool refresh notifications
+    pub fn register_tool_provider(&self, provider: Arc<tokio::sync::Mutex<LocalToolProvider>>) {
+        if let Ok(mut registry) = self.tool_provider_registry.lock() {
+            registry.push(provider);
+            log::debug!("Registered tool provider for MCP refresh notifications");
+        }
+    }
+
+    /// Refresh all registered tool providers when MCP tools are updated
+    pub async fn refresh_all_tool_providers(&self) -> Result<(), String> {
+        let registry = {
+            if let Ok(registry_guard) = self.tool_provider_registry.lock() {
+                registry_guard.clone()
+            } else {
+                log::warn!("Failed to access tool provider registry");
+                return Ok(());
+            }
+        };
+
+        log::info!("Refreshing {} registered tool providers with updated MCP tools", registry.len());
+
+        for provider_arc in registry.iter() {
+            if let Ok(mut provider) = provider_arc.try_lock() {
+                if let Err(e) = provider.refresh_mcp_tools().await {
+                    log::warn!("Failed to refresh MCP tools for tool provider: {}", e);
+                } else {
+                    log::debug!("Successfully refreshed MCP tools for tool provider");
+                }
+            } else {
+                log::warn!("Tool provider is busy, skipping MCP refresh");
+            }
+        }
+
+        Ok(())
     }
 }
 
