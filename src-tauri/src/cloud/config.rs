@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::fs;
 use super::types::CloudError;
+use tauri::{AppHandle, Manager};
+use tracing::{info, warn, error};
 
 /// Cloud configuration settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,14 +62,14 @@ impl CloudConfig {
     /// Load configuration from file, creating default if not exists
     pub fn load_from_file(app_handle: &tauri::AppHandle) -> Result<Self, CloudError> {
         let config_path = Self::get_config_path(app_handle)?;
-        
+
         if config_path.exists() {
             let config_str = fs::read_to_string(&config_path)
                 .map_err(|e| CloudError::ConfigError(format!("Failed to read config file: {}", e)))?;
-            
+
             let config: Self = toml::from_str(&config_str)
                 .map_err(|e| CloudError::ConfigError(format!("Failed to parse config: {}", e)))?;
-            
+
             Ok(config)
         } else {
             // Create default config and save it
@@ -76,81 +78,81 @@ impl CloudConfig {
             Ok(default_config)
         }
     }
-    
+
     /// Save configuration to file
     pub fn save_to_file(&self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
         let config_path = Self::get_config_path(app_handle)?;
-        
+
         // Ensure parent directory exists
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| CloudError::ConfigError(format!("Failed to create config directory: {}", e)))?;
         }
-        
+
         let config_str = toml::to_string_pretty(self)
             .map_err(|e| CloudError::ConfigError(format!("Failed to serialize config: {}", e)))?;
-        
+
         fs::write(&config_path, config_str)
             .map_err(|e| CloudError::ConfigError(format!("Failed to write config file: {}", e)))?;
-        
+
         Ok(())
     }
-    
+
     /// Get the path to the configuration file
     pub fn get_config_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, CloudError> {
         let app_data_dir = app_handle
             .path()
             .app_data_dir()
             .map_err(|e| CloudError::ConfigError(format!("Failed to get app data directory: {}", e)))?;
-        
+
         Ok(app_data_dir.join("cloud-config.toml"))
     }
-    
+
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), CloudError> {
         if self.enabled {
             if self.api_key.is_none() {
                 return Err(CloudError::ConfigError("API key is required when cloud is enabled".to_string()));
             }
-            
+
             if self.server_url.is_empty() {
                 return Err(CloudError::ConfigError("Server URL cannot be empty".to_string()));
             }
-            
+
             if !self.server_url.starts_with("ws://") && !self.server_url.starts_with("wss://") {
                 return Err(CloudError::ConfigError("Server URL must be a WebSocket URL (ws:// or wss://)".to_string()));
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Update API key and save
     pub fn set_api_key(&mut self, api_key: String, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
         self.api_key = Some(api_key);
         self.save_to_file(app_handle)
     }
-    
+
     /// Enable cloud connectivity
     pub fn enable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
         self.enabled = true;
         self.validate()?;
         self.save_to_file(app_handle)
     }
-    
+
     /// Disable cloud connectivity
     pub fn disable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
         self.enabled = false;
         self.save_to_file(app_handle)
     }
-    
+
     /// Check if a command is allowed
     pub fn is_command_allowed(&self, command: &str) -> bool {
         // If in denied list, always block
         if self.denied_commands.contains(&command.to_string()) {
             return false;
         }
-        
+
         match self.security_level {
             SecurityLevel::Low => true, // Allow all except denied
             SecurityLevel::Medium => {
@@ -164,10 +166,10 @@ impl CloudConfig {
             }
         }
     }
-    
+
     /// Check if a command is considered safe
     fn is_safe_command(&self, command: &str) -> bool {
-        matches!(command, 
+        matches!(command,
             "text_query" | "voice_query" | "status_request" | "screenshot" |
             "get_system_info" | "get_capabilities" | "heartbeat"
         )
