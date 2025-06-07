@@ -156,8 +156,14 @@ pub async fn submit_query(
     register_basic_tools(&mut tool_provider).await;
     info!("Registered basic tools for specialized agents.");
 
-    // Setup desktop tools for specialized agents
-    setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
+    // Setup desktop tools for specialized agents and get the shared provider
+    let shared_tool_provider = setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
+
+    // Extract the tool provider from Arc<Mutex<>> for agent creation
+    let agent_tool_provider = {
+        let guard = shared_tool_provider.lock().await;
+        guard.clone()
+    };
 
     // Register browser tools for specialized agents (with lazy initialization)
     let browser_definitions = get_browser_tool_definitions();
@@ -195,7 +201,11 @@ pub async fn submit_query(
                 }
             }
         };
-        tool_provider.register_async_tool(definition.clone(), executor).await;
+        // Register browser tools on the shared provider instance
+        {
+            let mut guard = shared_tool_provider.lock().await;
+            guard.register_async_tool(definition.clone(), executor).await;
+        }
         info!("Registered browser tool for specialized agents: {}", definition.name);
     }
 
@@ -233,7 +243,7 @@ pub async fn submit_query(
             // Create single agent runner with all tools
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
                 memory_manager_clone,
-                tool_provider,
+                agent_tool_provider,
                 brain,
                 MAX_ITERATIONS,
                 app_handle.clone(),
@@ -281,7 +291,7 @@ pub async fn submit_query(
             let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
 
             // Register delegation tools for the orchestrator
-            register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, tool_provider, app_handle.clone()).await;
+            register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, agent_tool_provider, app_handle.clone()).await;
             info!("Registered delegation tools for orchestrator.");
 
             const MAX_ITERATIONS: u32 = 15;

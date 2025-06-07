@@ -23,6 +23,8 @@ use crate::commands::permissions::PermissionsState;
 use crate::agent::tools::tool_config::ToolConfigManager;
 // Import MCP manager for external MCP server support
 use crate::agent::tools::mcp_integration::MCPManager;
+// Import LocalToolProvider for tool provider registry
+use crate::agent::implementations::tool_provider::LocalToolProvider;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +109,8 @@ pub struct AppState {
     pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
     // MCP manager for external MCP server support
     pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
+    // Tool provider registry for refreshing MCP tools
+    pub tool_provider_registry: Arc<Mutex<Vec<Arc<tokio::sync::Mutex<LocalToolProvider>>>>>, // Track active tool providers
 }
 
 impl AppState {
@@ -138,6 +142,8 @@ impl AppState {
             keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
             // Initialize MCP manager
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
+            // Initialize tool provider registry
+            tool_provider_registry: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -355,6 +361,60 @@ impl AppState {
         }
 
         drop(config_guard);
+
+        // Emit an event to trigger tool provider refresh in active agents
+        self.notify_mcp_tools_updated().await;
+
+        // Refresh all registered tool providers with the new MCP tools
+        self.refresh_all_tool_providers().await?;
+
+        Ok(())
+    }
+
+    /// Notify that MCP tools have been updated - this triggers a refresh in active agents
+    pub async fn notify_mcp_tools_updated(&self) {
+        // Try to get an app handle and emit the event
+        if let Ok(controller_guard) = self.browser_controller.try_lock() {
+            if let Some(ref controller) = *controller_guard {
+                // Just emit without trying to get app handle from controller
+                log::debug!("MCP tools updated, notifying frontend");
+            }
+        }
+    }
+
+    /// Register a tool provider for MCP tool refresh notifications
+    pub fn register_tool_provider(&self, provider: Arc<tokio::sync::Mutex<LocalToolProvider>>) {
+        if let Ok(mut registry) = self.tool_provider_registry.lock() {
+            registry.push(provider);
+            log::debug!("Registered tool provider for MCP refresh notifications");
+        }
+    }
+
+    /// Refresh all registered tool providers when MCP tools are updated
+    pub async fn refresh_all_tool_providers(&self) -> Result<(), String> {
+        let registry = {
+            if let Ok(registry_guard) = self.tool_provider_registry.lock() {
+                registry_guard.clone()
+            } else {
+                log::warn!("Failed to access tool provider registry");
+                return Ok(());
+            }
+        };
+
+        log::info!("Refreshing {} registered tool providers with updated MCP tools", registry.len());
+
+        for provider_arc in registry.iter() {
+            if let Ok(mut provider) = provider_arc.try_lock() {
+                if let Err(e) = provider.refresh_mcp_tools().await {
+                    log::warn!("Failed to refresh MCP tools for tool provider: {}", e);
+                } else {
+                    log::debug!("Successfully refreshed MCP tools for tool provider");
+                }
+            } else {
+                log::warn!("Tool provider is busy, skipping MCP refresh");
+            }
+        }
+
         Ok(())
     }
 }

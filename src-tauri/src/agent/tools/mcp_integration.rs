@@ -157,6 +157,9 @@ impl MCPServerConnection {
         // Initialize the MCP connection
         self.initialize().await?;
 
+        // Send initialized notification
+        self.send_initialized_notification().await?;
+
         // Discover available tools
         self.discover_tools().await?;
 
@@ -172,10 +175,15 @@ impl MCPServerConnection {
             "id": self.next_request_id(),
             "method": "initialize",
             "params": {
+                "protocolVersion": "2025-03-26",
                 "capabilities": {
                     "tools": {
                         "execution": true
                     }
+                },
+                "clientInfo": {
+                    "name": "Juno AI Agent",
+                    "version": "1.0.0"
                 }
             }
         });
@@ -190,12 +198,38 @@ impl MCPServerConnection {
         Ok(())
     }
 
+    /// Send initialized notification
+    async fn send_initialized_notification(&mut self) -> Result<(), String> {
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        });
+
+        let notification_str = serde_json::to_string(&notification)
+            .map_err(|e| format!("Failed to serialize notification: {}", e))?;
+
+        // Send notification (no response expected)
+        if let Some(ref mut writer) = self.stdin_writer {
+            writer.write_all(notification_str.as_bytes()).await
+                .map_err(|e| format!("Failed to write notification: {}", e))?;
+            writer.write_all(b"\n").await
+                .map_err(|e| format!("Failed to write newline: {}", e))?;
+            writer.flush().await
+                .map_err(|e| format!("Failed to flush notification: {}", e))?;
+        } else {
+            return Err("No stdin writer available".to_string());
+        }
+
+        debug!("MCP server '{}' initialized notification sent successfully", self.config.name);
+        Ok(())
+    }
+
     /// Discover available tools from the MCP server
     async fn discover_tools(&mut self) -> Result<(), String> {
         let request = json!({
             "jsonrpc": "2.0",
             "id": self.next_request_id(),
-            "method": "listTools",
+            "method": "tools/list",
             "params": {}
         });
 
@@ -263,7 +297,7 @@ impl MCPServerConnection {
         let request = json!({
             "jsonrpc": "2.0",
             "id": self.next_request_id(),
-            "method": "callTool",
+            "method": "tools/call",
             "params": {
                 "name": original_tool_name,
                 "arguments": input
