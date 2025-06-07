@@ -13,8 +13,8 @@ use tracing::{info, warn, error, debug};
 use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
-const INTENT_DETECTION_BUFFER_MS: u64 = 1500; // Buffer for intent detection
-const VOLUME_THRESHOLD: f32 = 0.01; // Volume threshold for activation
+const INTENT_DETECTION_BUFFER_MS: u64 = 3000; // Buffer for intent detection (increased from 1500)
+const VOLUME_THRESHOLD: f32 = 0.002; // Volume threshold for activation (lowered from 0.01)
 const SILENCE_TIMEOUT_MS: u64 = 3000; // Return to monitoring after silence
 
 enum AlwaysListeningMessage {
@@ -238,8 +238,11 @@ impl AlwaysListeningController {
                     match current_state {
                         AlwaysListeningState::Monitoring => {
                             // Check for intent to activate
-                            if volume > VOLUME_THRESHOLD * sensitivity {
-                                debug!("[AlwaysListening] Volume threshold exceeded: {} (threshold: {})", volume, VOLUME_THRESHOLD * sensitivity);
+                            let volume_threshold = VOLUME_THRESHOLD * sensitivity;
+
+                            if volume > volume_threshold {
+                                debug!("[AlwaysListening] Volume threshold exceeded: {:.6} > {:.6} (base: {:.3}, sensitivity: {:.1})",
+                                       volume, volume_threshold, VOLUME_THRESHOLD, sensitivity);
 
                                 // Keep a rolling buffer for intent detection
                                 if audio_buffer.len() > buffer_capacity {
@@ -265,6 +268,15 @@ impl AlwaysListeningController {
                                     audio_buffer.clear(); // Clear buffer to start fresh transcription
                                 }
                             } else {
+                                // Log volume levels every few seconds for debugging
+                                static mut LAST_VOLUME_LOG: Option<Instant> = None;
+                                unsafe {
+                                    if LAST_VOLUME_LOG.map_or(true, |last| last.elapsed().as_secs() > 5) {
+                                        debug!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (threshold)", volume, volume_threshold);
+                                        LAST_VOLUME_LOG = Some(Instant::now());
+                                    }
+                                }
+
                                 // Maintain rolling buffer during monitoring
                                 if audio_buffer.len() > buffer_capacity {
                                     audio_buffer.drain(0..audio_buffer.len() - buffer_capacity);
@@ -336,17 +348,34 @@ impl AlwaysListeningController {
         _app_handle: &AppHandle<R>,
     ) -> bool {
         if audio_buffer.is_empty() {
+            debug!("[AlwaysListening] detect_intent: Audio buffer is empty");
             return false;
         }
+
+        debug!("[AlwaysListening] detect_intent: Processing {} samples ({}ms) for {} wake words",
+               audio_buffer.len(),
+               (audio_buffer.len() as f32 / sample_rate as f32 * 1000.0) as u32,
+               wake_words.len());
 
         // Resample if necessary
         let audio_to_process = if sample_rate != WHISPER_SAMPLE_RATE {
             if let Some(r) = resampler {
                 match r.process(&[audio_buffer.to_vec()], None) {
-                    Ok(mut resampled) if !resampled.is_empty() => resampled.remove(0),
-                    _ => return false,
+                    Ok(mut resampled) if !resampled.is_empty() => {
+                        debug!("[AlwaysListening] Audio resampled: {} -> {} samples", audio_buffer.len(), resampled[0].len());
+                        resampled.remove(0)
+                    },
+                    Ok(_) => {
+                        debug!("[AlwaysListening] Resampling produced empty output");
+                        return false;
+                    },
+                    Err(e) => {
+                        warn!("[AlwaysListening] Resampling failed: {:?}", e);
+                        return false;
+                    }
                 }
             } else {
+                warn!("[AlwaysListening] No resampler available for rate conversion");
                 return false;
             }
         } else {
@@ -355,11 +384,14 @@ impl AlwaysListeningController {
 
         // Quick transcription for wake word detection
         let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
-        params.set_n_threads(2);
+        params.set_n_threads(4); // Increased from 2 for better performance
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        params.set_language(Some("en"));
+
+        debug!("[AlwaysListening] Starting Whisper transcription...");
 
         match whisper_state.full(params, &audio_to_process) {
             Ok(_) => {
@@ -369,30 +401,39 @@ impl AlwaysListeningController {
                 for i in 0..num_segments {
                     if let Ok(segment) = whisper_state.full_get_segment_text(i) {
                         transcribed_text.push_str(&segment);
+                        transcribed_text.push(' ');
                     }
                 }
 
-                let text_lower = transcribed_text.to_lowercase();
-                debug!("[AlwaysListening] Intent detection transcription: '{}'", text_lower);
+                let text_lower = transcribed_text.trim().to_lowercase();
+                info!("[AlwaysListening] Transcription result: '{}' (length: {})", text_lower, text_lower.len());
 
                 // Check for wake words
                 for wake_word in wake_words {
-                    if text_lower.contains(&wake_word.to_lowercase()) {
-                        info!("[AlwaysListening] Wake word detected: '{}' in '{}'", wake_word, text_lower);
+                    let wake_word_lower = wake_word.to_lowercase();
+                    if text_lower.contains(&wake_word_lower) {
+                        info!("[AlwaysListening] ✅ WAKE WORD DETECTED: '{}' found in '{}'", wake_word, text_lower);
                         return true;
+                    } else {
+                        debug!("[AlwaysListening] Wake word '{}' not found in '{}'", wake_word_lower, text_lower);
                     }
                 }
 
                 // Check for general speech activity (fallback if no wake words)
                 if wake_words.is_empty() && !text_lower.trim().is_empty() {
-                    info!("[AlwaysListening] Speech activity detected (no wake words configured)");
+                    info!("[AlwaysListening] Speech activity detected (no wake words configured): '{}'", text_lower);
                     return true;
+                }
+
+                // Log near misses (similar words)
+                if !text_lower.is_empty() {
+                    info!("[AlwaysListening] ❌ No wake words detected in: '{}'", text_lower);
                 }
 
                 false
             }
             Err(e) => {
-                debug!("[AlwaysListening] Intent detection transcription failed: {:?}", e);
+                warn!("[AlwaysListening] Whisper transcription failed: {:?}", e);
                 false
             }
         }
