@@ -372,6 +372,10 @@ pub fn run() {
             set_always_listening_wake_words,
             get_always_listening_wake_words,
             debug_always_listening_status,
+            set_transcription_debugging,
+            set_audio_level_monitoring,
+            test_whisper_model,
+            force_transcription_test,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
