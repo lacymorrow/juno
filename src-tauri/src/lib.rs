@@ -45,6 +45,7 @@ pub mod agent;
 pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
+pub mod voice_control;
 
 // Embed tray icon data directly in the binary - no file system dependencies
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
