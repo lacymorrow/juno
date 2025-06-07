@@ -323,3 +323,144 @@ pub async fn debug_always_listening_status(
 
     Ok(debug_info)
 }
+
+/// Enhanced Debugging Commands
+
+/// Enable/disable transcription debugging
+#[tauri::command]
+pub async fn set_transcription_debugging(
+    enabled: bool,
+    app: AppHandle,
+) -> Result<String, String> {
+    info!("[Command] set_transcription_debugging called with enabled: {}", enabled);
+
+    // Call the plugin command
+    match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::set_transcription_debugging(
+                enabled,
+                app.clone(),
+                controller_state
+            ).await {
+                Ok(_) => {
+                    info!("[Command] Transcription debugging {} successfully",
+                          if enabled { "enabled" } else { "disabled" });
+                    Ok(format!("Transcription debugging {}",
+                              if enabled { "enabled" } else { "disabled" }))
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to set transcription debugging: {}", e);
+                    error!("[Command] {}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        }
+        None => {
+            let err_msg = "Always listening controller not available".to_string();
+            warn!("[Command] {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+/// Enable/disable audio level monitoring
+#[tauri::command]
+pub async fn set_audio_level_monitoring(
+    enabled: bool,
+    app: AppHandle,
+) -> Result<String, String> {
+    info!("[Command] set_audio_level_monitoring called with enabled: {}", enabled);
+
+    // Call the plugin command
+    match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::set_audio_level_monitoring(
+                enabled,
+                app.clone(),
+                controller_state
+            ).await {
+                Ok(_) => {
+                    info!("[Command] Audio level monitoring {} successfully",
+                          if enabled { "enabled" } else { "disabled" });
+                    Ok(format!("Audio level monitoring {}",
+                              if enabled { "enabled" } else { "disabled" }))
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to set audio level monitoring: {}", e);
+                    error!("[Command] {}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        }
+        None => {
+            let err_msg = "Always listening controller not available".to_string();
+            warn!("[Command] {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+/// Test the Whisper model with synthetic audio
+#[tauri::command]
+pub async fn test_whisper_model(
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    info!("[Command] test_whisper_model called");
+
+    // Call the plugin command
+    match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::test_whisper_model(
+                controller_state
+            ).await {
+                Ok(result) => {
+                    info!("[Command] Whisper model test completed");
+                    Ok(result)
+                }
+                Err(e) => {
+                    let err_msg = format!("Whisper model test failed: {}", e);
+                    error!("[Command] {}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        }
+        None => {
+            let err_msg = "Always listening controller not available".to_string();
+            warn!("[Command] {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}
+
+/// Force a transcription test with live audio
+#[tauri::command]
+pub async fn force_transcription_test(
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    info!("[Command] force_transcription_test called");
+
+    // Call the plugin command
+    match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::force_transcription_test(
+                app.clone(),
+                controller_state
+            ).await {
+                Ok(result) => {
+                    info!("[Command] Force transcription test completed");
+                    Ok(result)
+                }
+                Err(e) => {
+                    let err_msg = format!("Force transcription test failed: {}", e);
+                    error!("[Command] {}", err_msg);
+                    Err(err_msg)
+                }
+            }
+        }
+        None => {
+            let err_msg = "Always listening controller not available".to_string();
+            warn!("[Command] {}", err_msg);
+            Err(err_msg)
+        }
+    }
+}

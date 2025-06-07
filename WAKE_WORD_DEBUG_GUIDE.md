@@ -179,4 +179,173 @@ If wake words still aren't working after following this guide:
 3. **System Info**: Note your macOS version, microphone model, and audio setup
 4. **Test Results**: What specific phrases you tried and what happened
 
-The enhanced logging should now provide clear visibility into exactly what's happening in the wake word detection pipeline! 
+The enhanced logging should now provide clear visibility into exactly what's happening in the wake word detection pipeline!
+
+## Enhanced Debugging Tools Now Available
+
+The wake word detection system now includes comprehensive debugging tools to help diagnose why wake words aren't triggering.
+
+## Current Status
+
+**Problem**: Always listening mode is running but wake words are not triggering activation.
+
+**Symptoms**: 
+- Empty transcription results in logs
+- System shows as active but doesn't respond to wake words
+- Volume levels seem to be detected but no transcription occurs
+
+## Enhanced Debugging Features
+
+### 1. Wake Word Testing Panel (DevTools)
+
+Location: `src/components/devtools/WakeWordTesting.tsx`
+
+**New Features Added**:
+- **Transcription Debugging**: Real-time monitoring of transcription pipeline
+- **Audio Level Monitoring**: Live audio volume level tracking
+- **Whisper Model Testing**: Test the Whisper model with synthetic audio
+- **Force Transcription Test**: Trigger immediate transcription of live audio
+- **Recent Transcriptions Log**: See last 10 transcription attempts with details
+- **Enhanced Event Monitoring**: Track all wake word detection events
+
+### 2. Backend Debugging Commands
+
+New commands added to diagnose transcription issues:
+
+#### Available Debug Commands:
+```bash
+# Enable transcription debugging
+invoke("set_transcription_debugging", { enabled: true })
+
+# Enable audio level monitoring  
+invoke("set_audio_level_monitoring", { enabled: true })
+
+# Test Whisper model with synthetic audio
+invoke("test_whisper_model")
+
+# Force transcription test with live audio
+invoke("force_transcription_test")
+```
+
+### 3. Enhanced Logging and Events
+
+The system now emits detailed events for debugging:
+
+- `always-listening-event` with transcription debug info
+- Audio level monitoring events
+- Transcription confidence scores
+- Wake word matching results (exact and fuzzy)
+
+## Testing the New Features
+
+### 1. Access Enhanced DevTools
+
+1. Open Juno application
+2. Click the DevTools panel button (or press Cmd+D from tray)
+3. Navigate to the "Wake Word Testing" section
+4. You'll see the new debugging controls
+
+### 2. Run Whisper Model Test
+
+1. Click "Test Whisper Model" button
+2. This creates synthetic audio (silence + beep) and tests if Whisper can transcribe it
+3. Check the console for results - this tells us if the Whisper model is working
+
+### 3. Enable Transcription Debugging
+
+1. Toggle "Transcription Debugging" to ON
+2. This will log every transcription attempt with:
+   - Audio length
+   - Volume level
+   - Transcription result (or empty)
+   - Confidence scores
+   - Wake word matches
+
+### 4. Monitor Audio Levels
+
+1. Toggle "Audio Level Monitoring" to ON
+2. Speak near your microphone
+3. Watch the "Recent Events" log for volume level reports
+4. This confirms audio is being captured
+
+### 5. Force Transcription Test
+
+1. Ensure always listening is active
+2. Click "Force Transcription Test"
+3. Speak immediately (the system will try to transcribe whatever audio it's currently capturing)
+4. Check logs for transcription results
+
+## Root Cause Analysis
+
+Based on the logs showing empty transcription results, the issue is likely:
+
+### Most Likely Causes:
+
+1. **Whisper Model Issues**:
+   - Model file corruption or incorrect format
+   - Model not loading properly
+   - Wrong model parameters
+
+2. **Audio Processing Issues**:
+   - Audio format conversion problems
+   - Sample rate mismatch (should be 16kHz for Whisper)
+   - Audio buffer too short/empty
+
+3. **Whisper API Usage**:
+   - Incorrect parameter settings
+   - Thread configuration issues
+   - Language settings
+
+### Diagnostic Steps:
+
+1. **Test Whisper Model**: Use the "Test Whisper Model" button to verify the model works with synthetic audio
+2. **Check Audio Pipeline**: Enable audio level monitoring to confirm audio is being captured
+3. **Monitor Transcription**: Enable transcription debugging to see what's happening during transcription attempts
+4. **Force Test**: Use force transcription test to manually trigger transcription
+
+## Key Files Modified
+
+### Frontend:
+- `src/components/devtools/WakeWordTesting.tsx` - Enhanced with new debugging UI
+- `src/types/devtools.ts` - Added types for debugging interfaces
+
+### Backend:
+- `tauri-plugin-voice-transcription/src/always_listening.rs` - Added debugging methods
+- `tauri-plugin-voice-transcription/src/commands.rs` - Added debug commands
+- `src-tauri/src/commands/always_listening.rs` - Added wrapper commands
+- `src-tauri/src/lib.rs` - Registered new commands
+
+## Next Steps
+
+1. **Run the Whisper Model Test** to verify if the model initialization is working
+2. **Enable transcription debugging** to see detailed logs of what's happening
+3. **Check the transcription pipeline** - if Whisper model test fails, the issue is with model loading
+4. **If model test passes but live transcription fails**, the issue is with audio processing
+
+The enhanced debugging tools should help pinpoint exactly where in the pipeline the issue occurs.
+
+## Expected Behavior
+
+When working correctly:
+- Whisper model test should transcribe the synthetic beep (may be empty/silence, but shouldn't error)
+- Audio level monitoring should show volume spikes when speaking
+- Transcription debugging should show non-empty transcription results when speaking wake words
+- Wake word detection should activate and emit activation events
+
+## Troubleshooting Commands
+
+```bash
+# Check always listening status with detailed debug info
+invoke("debug_always_listening_status")
+
+# Test just the model loading
+invoke("test_whisper_model") 
+
+# Check if audio is being captured
+invoke("set_audio_level_monitoring", { enabled: true })
+
+# See transcription attempts in real-time
+invoke("set_transcription_debugging", { enabled: true })
+```
+
+Use these tools to systematically debug the wake word detection pipeline and identify where the failure is occurring. 
