@@ -29,7 +29,8 @@ type BarState =
   | "error"
   | "transcribing"
   | "speaking"
-  | "dictating";
+  | "dictating"
+  | "always-listening";
 
 interface BarStateData {
   barState: BarState;
@@ -40,6 +41,7 @@ interface BarStateData {
   spokenText: string;
   isAgentWorking: boolean;
   isDictationMode: boolean;
+  isAlwaysListening: boolean;
 }
 
 export function FloatingBar() {
@@ -52,6 +54,7 @@ export function FloatingBar() {
   const [spokenText, setSpokenText] = useState("");
   const [_isAgentWorking, setIsAgentWorking] = useState(false);
   const [_isDictationMode, setIsDictationMode] = useState(false);
+  const [isAlwaysListening, setIsAlwaysListening] = useState(false);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -77,6 +80,7 @@ export function FloatingBar() {
           case "transcribing":
           case "speaking":
           case "dictating":
+          case "always-listening":
             await appWindow?.setSize(
               new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
             );
@@ -108,6 +112,7 @@ export function FloatingBar() {
           setSpokenText(data.spokenText);
           setIsAgentWorking(data.isAgentWorking);
           setIsDictationMode(data.isDictationMode);
+          setIsAlwaysListening(data.isAlwaysListening);
 
           // Handle input focus for input state
           if (data.barState === "input" && inputRef.current) {
@@ -193,6 +198,40 @@ export function FloatingBar() {
     };
   }, [barState]);
 
+  // Listen for always listening events
+  useEffect(() => {
+    let unlistenStarted: (() => void) | undefined;
+    let unlistenStopped: (() => void) | undefined;
+    let unlistenModeChanged: (() => void) | undefined;
+
+    const setupListeners = async () => {
+      unlistenStarted = await listen("always-listening:started", () => {
+        console.log("Always listening started");
+        setIsAlwaysListening(true);
+      });
+
+      unlistenStopped = await listen("always-listening:stopped", () => {
+        console.log("Always listening stopped");
+        setIsAlwaysListening(false);
+      });
+
+      unlistenModeChanged = await listen<boolean>(
+        "always-listening-mode-changed",
+        (event) => {
+          console.log("Always listening mode changed:", event.payload);
+          setIsAlwaysListening(event.payload);
+        }
+      );
+    };
+
+    setupListeners();
+    return () => {
+      unlistenStarted?.();
+      unlistenStopped?.();
+      unlistenModeChanged?.();
+    };
+  }, []);
+
   // Handler functions that call backend commands
   const handleBarClick = async () => {
     try {
@@ -257,6 +296,8 @@ export function FloatingBar() {
         return "h-[40px] w-[240px] px-3";
       case "dictating":
         return "h-[40px] w-[240px] px-3";
+      case "always-listening":
+        return "h-[40px] w-[240px] px-3";
       default:
         return "h-[20px] w-[60px] px-2";
     }
@@ -290,13 +331,18 @@ export function FloatingBar() {
         >
           {/* Default State Content */}
           {(barState === "default" || barState === "finishing") && (
-            <div
-              className={cn(
-                "w-5 h-[4px] bg-emerald-400 rounded-full",
-                "transition-all duration-300 ease-in-out",
-                barState === "finishing" ? "opacity-0 animate-fade-in" : ""
+            <div className="flex items-center gap-1">
+              <div
+                className={cn(
+                  "w-5 h-[4px] bg-emerald-400 rounded-full",
+                  "transition-all duration-300 ease-in-out",
+                  barState === "finishing" ? "opacity-0 animate-fade-in" : ""
+                )}
+              ></div>
+              {isAlwaysListening && (
+                <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"></div>
               )}
-            ></div>
+            </div>
           )}
 
           {/* Expanding/Input State Content */}
@@ -404,6 +450,19 @@ export function FloatingBar() {
               </div>
               <span className="text-sm text-orange-200 truncate font-medium">
                 {transcriptionText || "Hold dictation key to dictate..."}
+              </span>
+            </div>
+          )}
+
+          {/* Always Listening State Content */}
+          {barState === "always-listening" && (
+            <div className="w-full h-full flex items-center justify-start overflow-hidden px-3">
+              <div className="mr-2 flex-shrink-0 relative">
+                <Mic size={16} className="text-blue-400" />
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+              </div>
+              <span className="text-sm text-blue-200 truncate font-medium">
+                Always listening for wake words...
               </span>
             </div>
           )}
