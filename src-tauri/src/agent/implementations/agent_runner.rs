@@ -232,8 +232,8 @@ where
             let message_id = uuid::Uuid::new_v4().to_string();
             log::debug!("Using streaming brain with message ID: {}", message_id);
             self.brain.decide_next_action_streaming(
-                &messages, 
-                &tools, 
+                &messages,
+                &tools,
                 Some((*self.app_handle).clone()),
                 Some(message_id)
             ).await?

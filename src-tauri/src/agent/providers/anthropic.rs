@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 use futures_util::StreamExt;
+use tokio::io::AsyncBufReadExt;
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 use uuid;
@@ -220,16 +221,16 @@ impl AnthropicBrain {
         let mut accumulated_text = String::new();
         let mut tool_calls = Vec::new();
         let mut stop_reason = String::new();
-        
+
         // Track content blocks and partial data
         let mut current_tool_call: Option<(String, String, String)> = None; // (id, name, partial_json)
-        
+
         // Get the response body as a stream
         let stream = response.bytes_stream();
         let reader = StreamReader::new(stream.map(|result| {
             result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
         }));
-        
+
         let lines_stream = LinesStream::new(tokio::io::BufReader::new(reader).lines());
         tokio::pin!(lines_stream);
 
@@ -248,15 +249,15 @@ impl AnthropicBrain {
                 // Skip event type lines for now, we'll parse from data
                 continue;
             }
-            
+
             if line.starts_with("data:") {
                 let data_part = line.strip_prefix("data:").unwrap_or("").trim();
-                
+
                 // Skip ping events
                 if data_part.is_empty() {
                     continue;
                 }
-                
+
                 // Parse the JSON data
                 let event_data: serde_json::Value = match serde_json::from_str(data_part) {
                     Ok(data) => data,
@@ -277,10 +278,10 @@ impl AnthropicBrain {
                                 if let Some(block_type) = content_block.get("type").and_then(|t| t.as_str()) {
                                     if block_type == "tool_use" {
                                         // Start tracking a new tool call
-                                        let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                        let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                        current_tool_call = Some((id, name, String::new()));
-                                        log::debug!("Stream: started tool call {} ({})", name, id);
+                                                                    let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            log::debug!("Stream: started tool call {} ({})", name, id);
+                            current_tool_call = Some((id, name, String::new()));
                                     }
                                 }
                             }

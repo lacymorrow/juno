@@ -14,6 +14,7 @@ use tracing::{error, info};
 use serde_json::{json, from_value};
 use std::fs;
 use std::process::Command;
+use crate::platforms::AccessibilityEngine;
 
 // Make element module public
 pub mod element;
@@ -92,7 +93,7 @@ impl Desktop {
             Ok(engine) => {
                 info!("Desktop engine initialized successfully.");
                 Ok(Self {
-                    engine: Arc::from(engine) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>,
+                    engine: Arc::from(engine as Box<dyn AccessibilityEngine + Send + Sync>),
                     use_background_apps,
                     activate_app,
                 })
@@ -113,7 +114,7 @@ impl Desktop {
             Ok(engine) => {
                 info!("Desktop engine with auto-redirect initialized successfully.");
                 Ok(Self {
-                    engine: Arc::from(engine) as Arc<dyn platforms::AccessibilityEngine + Send + Sync>,
+                    engine: Arc::from(engine as Box<dyn AccessibilityEngine + Send + Sync>),
                     use_background_apps,
                     activate_app,
                 })

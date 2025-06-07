@@ -29,7 +29,9 @@ pub mod events {
     // Settings events
     pub const SETTINGS_REQUESTED: &str = "settings-requested";
     pub const DEVTOOLS_REQUESTED: &str = "devtools-requested";
-    
+    pub const PERMISSIONS_REQUESTED: &str = "permissions-requested";
+    pub const FEEDBACK_REQUESTED: &str = "feedback-requested";
+
     // New menu events
     pub const HELP_REQUESTED: &str = "help-requested";
     pub const NEW_CHAT_REQUESTED: &str = "new-chat-requested";
@@ -63,25 +65,25 @@ pub mod app_menu_ids {
     pub const ABOUT: &str = "about";
     pub const SETTINGS: &str = "settings";
     pub const CHECK_FOR_UPDATES: &str = "check-for-updates";
-    
+
     // File Menu
     pub const NEW_CHAT: &str = "new-chat";
     pub const CLEAR_HISTORY: &str = "clear-history";
     pub const IMPORT_CHAT: &str = "import-chat";
     pub const EXPORT_CHAT: &str = "export-chat";
-    
+
     // View Menu
     pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";
     pub const TOGGLE_DEV_PANEL: &str = "toggle-dev-panel";
     pub const SHOW_DEVTOOLS: &str = "show-devtools";
     pub const SHOW_PERMISSIONS: &str = "show-permissions";
     pub const TOGGLE_FULLSCREEN: &str = "toggle-fullscreen";
-    
+
     // Window Menu
     pub const MINIMIZE: &str = "minimize";
     pub const ZOOM: &str = "zoom";
     pub const BRING_ALL_TO_FRONT: &str = "bring-all-to-front";
-    
+
     // Help Menu
     pub const HELP: &str = "help";
     pub const KEYBOARD_SHORTCUTS: &str = "keyboard-shortcuts";
