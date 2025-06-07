@@ -175,6 +175,9 @@ pub enum CloudError {
     #[error("Command execution failed: {0}")]
     ExecutionFailed(String),
 
+    #[error("Invalid command: {0}")]
+    InvalidCommand(String),
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
 

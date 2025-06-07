@@ -891,11 +891,24 @@ pub async fn execute_remote_command(
     let cloud_command = crate::cloud::types::CloudCommand {
         id: uuid::Uuid::new_v4().to_string(),
         command_type: parsed_command_type,
-        payload: Some(payload),
+        payload: crate::cloud::types::CloudCommandPayload {
+            query: payload.get("query").and_then(|v| v.as_str()).map(String::from),
+            audio_base64: payload.get("audio_base64").and_then(|v| v.as_str()).map(String::from),
+            mode: payload.get("mode").and_then(|v| v.as_str())
+                .and_then(|s| serde_json::from_str(&format!("\"{}\"", s)).ok()),
+            config: payload.get("config").and_then(|v| v.as_object()).map(|obj| {
+                obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            }),
+            parameters: payload.get("parameters").and_then(|v| v.as_object()).map(|obj| {
+                obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
+            }),
+        },
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs(),
+        signature: None,
+        metadata: None,
     };
 
     // Execute the command
