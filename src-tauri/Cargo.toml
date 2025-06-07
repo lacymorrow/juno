@@ -46,7 +46,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4.4", features = ["derive"] }
 tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 wait-timeout = "0.2"
-futures-util = "0.3.31"
+futures-util = "0.3"
 futures = "0.3"
 tempfile = "3.10.1"
 # Additions for native macOS interop
@@ -68,7 +68,7 @@ hound = "3.5"
 cpal = "0.15"
 rubato = "0.14.1"
 chrono = "0.4"
-uuid = { version = "1.0", features = ["v4"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 lazy_static = "1.4"
 # Voice transcription plugin
 tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription" }
@@ -77,6 +77,17 @@ tauri-plugin-store = "2.0.1"
 # logging = { path = "../logging" } # Commented out due to path issue and no current usages
 # rabDab = { path = "../rabDab" }   # Commented out due to path issue and no current usages
 open = "5.3"
+
+# Cloud connectivity dependencies
+tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
+ring = "0.17"
+rustls = "0.23"
+hmac = "0.12"
+sha2 = "0.10"
+toml = "0.8"
+url = "2.4"
+gethostname = "0.4"
+tauri-plugin-websocket = "2.0"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

@@ -56,6 +56,27 @@ The system uses a **hierarchical architecture** with clear separation:
 - Use debug logging to track memory operations
 - Never mix orchestrator and specialist memory managers
 
+## Cloud Control Integration ✅
+
+### Successful Merge Completion
+The cloud control system has been successfully merged with the main branch, combining:
+- **Original Cloud Features**: WebSocket connectivity, device authentication, command processing
+- **Main Branch Features**: Enhanced menu system, coding agent integration, window management
+- **Unified Architecture**: Both systems work together without conflicts
+
+### Cloud System Guidelines
+- Follow patterns in [Cloud Control System](mdc:.cursor/rules/cloud-control-system.mdc)
+- Cloud state management integrates with main AppState
+- WebSocket connections are handled asynchronously
+- Command processing maintains security and audit logging
+- Production-ready connector provides robust connection management
+
+### Integration Points
+- **Tauri Commands**: Cloud commands registered alongside existing handlers
+- **State Management**: Cloud fields integrated into main AppState structure
+- **Event System**: Cloud events use same Tauri event system as other features
+- **Error Handling**: Cloud errors follow established error handling patterns
+
 ## API Integration
 
 ### Anthropic API Handling
@@ -99,6 +120,7 @@ The system uses a **hierarchical architecture** with clear separation:
 3. Event emission and handling
 4. Tool execution flow
 5. State synchronization issues
+6. Cloud connection and command processing
 
 ## Performance Considerations
 
@@ -143,9 +165,16 @@ The system uses a **hierarchical architecture** with clear separation:
 - Test utility functions with real system context data
 - Test MCP server integration and tool discovery (see [MCP Integration System](mdc:.cursor/rules/mcp-integration-system.mdc))
 - Test permission scenarios (see [macOS Permission Handling](mdc:.cursor/rules/macos-permission-handling.mdc))
+- Test cloud connectivity and command execution scenarios
 
 ## Permission Management ✅
 - Follow patterns in [macOS Permission Handling](mdc:.cursor/rules/macos-permission-handling.mdc)
 - Never use `std::process::exit()` on permission failures
 - Implement graceful degradation for missing permissions
 - Provide helpful error messages to guide users
+
+## Post-Merge Compilation Success ✅
+- Project successfully compiles with exit code 0 after merge
+- All major type conflicts resolved between cloud and main branches
+- WebSocket plugin and store plugin working together
+- Both keyboard shortcuts and cloud commands registered properly

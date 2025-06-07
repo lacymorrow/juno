@@ -5,12 +5,9 @@ pub mod basic_tools; // Ensure basic_tools is declared
 pub mod anthropic_computer_use; // Add the new Anthropic Computer Use tools
 pub mod timer_tools; // Add timer tools for agent scheduling
 pub mod tool_config; // Add tool configuration management
-<<<<<<< HEAD
 pub mod enhanced_coding_tools;
 pub mod cursor_integration;
-=======
 pub mod mcp_integration;
->>>>>>> 67d803a (Add MCP server integration for dynamic external tool support)
 
 pub use browser_tools::get_browser_tool_definitions;
 pub use browser_controller::BrowserController;

@@ -571,10 +571,7 @@ pub(crate) async fn dev_window_relative_click(
     click_type: Option<String>,
     modifier: Option<String>,
 ) -> Result<(), String> {
-<<<<<<< HEAD
-=======
 
->>>>>>> main
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
 
     info!(

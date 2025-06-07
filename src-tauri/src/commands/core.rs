@@ -40,10 +40,7 @@ pub(crate) async fn capture_window_screenshot_command(
     state: State<'_, AppState>,
     window_id: String,
 ) -> Result<String, String> {
-<<<<<<< HEAD
-=======
 
->>>>>>> main
     use computer_use_ai_sdk::platforms::macos::element::MacOSUIElement;
     use computer_use_ai_sdk::platforms::macos::utils::capture_element_screenshot;
 

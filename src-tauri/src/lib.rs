@@ -45,6 +45,7 @@ pub mod agent;
 pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
+pub mod cloud; // Cloud connectivity and remote control
 pub mod voice_control;
 
 // Embed tray icon data directly in the binary - no file system dependencies
@@ -164,7 +165,11 @@ use crate::commands::mcp::{
 
 // Old BarStateChangeEventPayload removed - now using floating bar manager
 
-
+// Cloud Commands
+use commands::cloud::{
+    get_cloud_config, update_cloud_config, get_cloud_status, enable_cloud, disable_cloud,
+    test_cloud_connection, get_cloud_device_info, generate_device_id,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -205,15 +210,18 @@ pub fn run() {
     // --- Handle CLI Commands ---
     // If handle_cli_commands returns true, it means a command was executed
     // and the application should exit.
-<<<<<<< HEAD
-    if let Some(ref desktop_instance) = desktop_instance {
-        if cli::runner::handle_cli_commands(&cli, desktop_instance) {
+    if let Some(desktop_ref) = desktop_instance.as_ref() {
+        if cli::runner::handle_cli_commands(&cli, desktop_ref) {
             return; // Exit early if a CLI command was handled
         }
-=======
-    if cli::runner::handle_cli_commands(&cli, desktop_instance.as_ref()) {
-        return; // Exit early if a CLI command was handled
->>>>>>> origin/main
+    } else {
+        // Handle CLI commands without desktop instance
+        if cli::runner::handle_cli_commands(&cli, &Desktop::new_with_auto_redirect(false, false, false).unwrap_or_else(|_| {
+            // Create a minimal desktop instance for CLI processing
+            panic!("Unable to create desktop instance for CLI commands")
+        })) {
+            return;
+        }
     }
 
     // --- Proceed with Tauri Application Launch if no CLI command was run ---
@@ -234,8 +242,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
+        .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
         .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
-        .plugin        (tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
             println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
             let app_state = app.state::<state::AppState>();
@@ -500,6 +509,26 @@ pub fn run() {
             set_keyboard_shortcut,
             set_keyboard_shortcuts,
             reset_keyboard_shortcuts,
+            // Cloud Commands
+            get_cloud_config,
+            update_cloud_config,
+            get_cloud_status,
+            enable_cloud,
+            disable_cloud,
+            test_cloud_connection,
+            get_cloud_device_info,
+            generate_device_id,
+            // Production Cloud Connector Commands
+            commands::cloud::handle_cloud_message,
+            commands::cloud::start_production_cloud_connector,
+            commands::cloud::stop_production_cloud_connector,
+            commands::cloud::get_production_cloud_status,
+            // WebSocket Testing Commands
+            commands::cloud::test_websocket_connection,
+            commands::cloud::send_test_cloud_command,
+            commands::cloud::simulate_cloud_command,
+            commands::cloud::get_websocket_diagnostics,
+            commands::cloud::run_websocket_test_suite,
             // MCP Server Management Commands
             add_mcp_server,
             remove_mcp_server,
@@ -1060,6 +1089,30 @@ pub fn run() {
                 }
             });
 
+            // --- Initialize Cloud Client ---
+            let app_handle_for_cloud = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let app_state = app_handle_for_cloud.state::<crate::state::AppState>();
+
+                // Initialize cloud client configuration
+                if let Err(e) = app_state.init_cloud_client(&app_handle_for_cloud).await {
+                    tracing::error!("[Setup] Failed to initialize cloud client: {}", e);
+                } else {
+                    tracing::info!("[Setup] Cloud client configuration initialized");
+
+                    // Start cloud client if enabled
+                    if app_state.is_cloud_enabled() {
+                        if let Err(e) = app_state.start_cloud_client().await {
+                            tracing::error!("[Setup] Failed to start cloud client: {}", e);
+                        } else {
+                            tracing::info!("[Setup] Cloud client started successfully");
+                        }
+                    } else {
+                        tracing::info!("[Setup] Cloud connectivity is disabled in configuration");
+                    }
+                }
+            });
+
             // --- Initialize Floating Bar Manager ---
             let app_handle_for_bar_manager = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -1289,7 +1342,7 @@ pub fn run() {
 
                             // Emit failure event to UI
                             if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after unavailable voice controller: {}", e);
+                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
                             }
                         }
                     }
