@@ -14,6 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator"; // Import the VoiceStatusIndicator component
 import { useSound, useVoiceSounds } from "@/hooks/useSound"; // Import sound hooks
+import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService"; // Import TTS service
 import { cn } from "@/lib/utils"; // Shadcn utility
 import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
 import { listen } from "@tauri-apps/api/event"; // Import listen
@@ -735,6 +736,24 @@ function App() {
     };
   }, [handleBackendResponse]); // Add debounced handler to dependency array
 
+  // Listen for agent stopping events to stop TTS
+  useEffect(() => {
+    const unlisten = listen("agent-stopping", async () => {
+      console.log("Agent stopping event received - stopping TTS");
+      try {
+        await stopTTS((msg, level) =>
+          console.log(`[TTS-${level || "info"}] ${msg}`)
+        );
+      } catch (error) {
+        console.error("Error stopping TTS:", error);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
     const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
@@ -897,7 +916,11 @@ function App() {
     // Stop any currently playing audio
     if (currentAudio) {
       currentAudio.pause();
-      currentAudio.src = ""; // Release object URL implicitly via new assignment below
+      currentAudio.currentTime = 0;
+      if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
+        URL.revokeObjectURL(currentAudio.src);
+      }
+      currentAudio.src = ""; // Clear the source
     }
 
     try {
@@ -905,12 +928,14 @@ function App() {
       const audioUrl = URL.createObjectURL(audioBlob);
       const newAudio = new Audio(audioUrl);
       setCurrentAudio(newAudio); // Store the new audio element
+      setCurrentAudioElement(newAudio); // Sync with TTS service
 
       newAudio.play();
 
       newAudio.onended = () => {
         URL.revokeObjectURL(audioUrl); // Clean up object URL
         setCurrentAudio(null);
+        setCurrentAudioElement(null); // Sync with TTS service
 
         // Notify backend that TTS has finished so it can play the success sound
         invoke("handle_tts_completion").catch((error) => {
@@ -921,10 +946,12 @@ function App() {
         console.error("Audio playback error:", e);
         URL.revokeObjectURL(audioUrl); // Clean up object URL
         setCurrentAudio(null);
+        setCurrentAudioElement(null); // Sync with TTS service
       };
     } catch (error) {
       console.error("Error processing or playing audio:", error);
       setCurrentAudio(null);
+      setCurrentAudioElement(null); // Sync with TTS service
     }
   };
 
@@ -938,6 +965,7 @@ function App() {
           URL.revokeObjectURL(currentAudio.src);
         }
         setCurrentAudio(null); // Clear the audio reference
+        setCurrentAudioElement(null); // Sync with TTS service
       }
     };
   }, [currentAudio]);
