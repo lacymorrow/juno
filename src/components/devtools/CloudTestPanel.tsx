@@ -83,6 +83,10 @@ export const CloudTestPanel: React.FC = () => {
   const [remoteTestResults, setRemoteTestResults] = useState<TestResult[]>([]);
   const [connectionDiagnostics, setConnectionDiagnostics] = useState<any>(null);
 
+  // Cloud configuration editing state
+  const [editingConfig, setEditingConfig] = useState(false);
+  const [configForm, setConfigForm] = useState<CloudConfig | null>(null);
+
   useEffect(() => {
     loadCloudStatus();
     loadCloudConfig();
@@ -102,6 +106,7 @@ export const CloudTestPanel: React.FC = () => {
     try {
       const config = await invoke<CloudConfig>("get_cloud_config");
       setCloudConfig(config);
+      setConfigForm(config); // Initialize form with current config
     } catch (error) {
       console.error("Failed to load cloud config:", error);
     }
@@ -333,6 +338,33 @@ export const CloudTestPanel: React.FC = () => {
     }
   };
 
+  const updateCloudConfig = async () => {
+    if (!configForm) return;
+
+    setIsLoading(true);
+    try {
+      await invoke("update_cloud_config", {
+        enabled: configForm.enabled,
+        serverUrl: configForm.server_url,
+        deviceName: configForm.device_name,
+        securityLevel: configForm.security_level.toLowerCase(),
+        autoConnect: configForm.auto_connect,
+      });
+
+      // Reload config and status after update
+      await Promise.all([loadCloudConfig(), loadCloudStatus()]);
+      setEditingConfig(false);
+    } catch (error) {
+      console.error("Failed to update cloud config:", error);
+    }
+    setIsLoading(false);
+  };
+
+  const resetConfigForm = () => {
+    setConfigForm(cloudConfig);
+    setEditingConfig(false);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -351,8 +383,9 @@ export const CloudTestPanel: React.FC = () => {
       </div>
 
       <Tabs defaultValue="status" className="w-full">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="status">Status</TabsTrigger>
+          <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="testing">Testing</TabsTrigger>
           <TabsTrigger value="remote">Remote</TabsTrigger>
           <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
@@ -425,6 +458,214 @@ export const CloudTestPanel: React.FC = () => {
                   Stop Connector
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="config" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                Cloud Configuration
+                {!editingConfig && (
+                  <Button
+                    onClick={() => setEditingConfig(true)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Edit Config
+                  </Button>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Configure cloud connection settings including server URL
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {editingConfig && configForm ? (
+                <div className="space-y-4">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="enabled"
+                      checked={configForm.enabled}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          enabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <Label htmlFor="enabled">Enable Cloud Connectivity</Label>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="server-url">Server URL</Label>
+                    <Input
+                      id="server-url"
+                      value={configForm.server_url}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          server_url: e.target.value,
+                        })
+                      }
+                      placeholder="wss://your-cloud-server.com"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="device-name">Device Name</Label>
+                    <Input
+                      id="device-name"
+                      value={configForm.device_name}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          device_name: e.target.value,
+                        })
+                      }
+                      placeholder="My Device"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="security-level">Security Level</Label>
+                    <select
+                      id="security-level"
+                      value={configForm.security_level}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          security_level: e.target.value,
+                        })
+                      }
+                      className="w-full p-2 border rounded"
+                    >
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="auto-connect"
+                      checked={configForm.auto_connect}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          auto_connect: e.target.checked,
+                        })
+                      }
+                    />
+                    <Label htmlFor="auto-connect">Auto Connect</Label>
+                  </div>
+
+                  <div className="flex gap-2 pt-4">
+                    <Button
+                      onClick={updateCloudConfig}
+                      disabled={isLoading}
+                      className="flex-1"
+                    >
+                      {isLoading ? "Saving..." : "Save Configuration"}
+                    </Button>
+                    <Button
+                      onClick={resetConfigForm}
+                      variant="outline"
+                      className="flex-1"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                cloudConfig && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Enabled</Label>
+                        <Badge
+                          variant={
+                            cloudConfig.enabled ? "default" : "secondary"
+                          }
+                        >
+                          {cloudConfig.enabled ? "Yes" : "No"}
+                        </Badge>
+                      </div>
+                      <div>
+                        <Label>Auto Connect</Label>
+                        <Badge
+                          variant={
+                            cloudConfig.auto_connect ? "default" : "secondary"
+                          }
+                        >
+                          {cloudConfig.auto_connect ? "Yes" : "No"}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label>Server URL</Label>
+                      <p className="text-sm font-mono bg-gray-100 p-2 rounded">
+                        {cloudConfig.server_url}
+                      </p>
+                    </div>
+
+                    <div>
+                      <Label>Device Name</Label>
+                      <p className="text-sm">{cloudConfig.device_name}</p>
+                    </div>
+
+                    <div>
+                      <Label>Device ID</Label>
+                      <p className="text-sm font-mono">
+                        {cloudConfig.device_id || "Not generated"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <Label>Security Level</Label>
+                      <Badge variant="outline">
+                        {cloudConfig.security_level}
+                      </Badge>
+                    </div>
+                  </div>
+                )
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Device Management</CardTitle>
+              <CardDescription>
+                Manage device identity and authentication
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Button
+                onClick={async () => {
+                  try {
+                    setIsLoading(true);
+                    const newDeviceId = await invoke<string>(
+                      "generate_device_id"
+                    );
+                    await loadCloudConfig();
+                    console.log("Generated new device ID:", newDeviceId);
+                  } catch (error) {
+                    console.error("Failed to generate device ID:", error);
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
+                disabled={isLoading}
+                variant="outline"
+                className="w-full"
+              >
+                Generate New Device ID
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
