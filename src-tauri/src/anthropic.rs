@@ -1,8 +1,9 @@
 use log::{info, error, warn};
+use uuid;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{State, Manager, Emitter};
+use tauri::{State, Manager};
 
 use crate::agent::implementations::{
     agent_runner::DefaultAgentRunner,
@@ -53,12 +54,7 @@ pub struct SubmitQueryResult {
     pub screenshot_base64: Option<String>, // Optional screenshot data from the session
 }
 
-// Define the payload structure for the event
-#[derive(Serialize, Clone)]
-struct BackendResponsePayload {
-    query: String,
-    response: SubmitQueryResult,
-}
+// Note: BackendResponsePayload removed as we now use streaming events only
 
 // Removed AnthropicThinkingBudget as it was commented out
 
@@ -189,18 +185,12 @@ pub async fn submit_query(
                 Err(e) => {
                     let err_msg = format!("Failed to initialize single agent brain: {}", e);
                     error!("{}", err_msg);
-                    let result = SubmitQueryResult {
-                        text: err_msg.clone(),
-                        audio_base64: None,
-                        agent_state: "Failed".to_string(),
-                        screenshot_base64: None
-                    };
-                    let payload = BackendResponsePayload { query: query.clone(), response: result };
-                    if let Some(window) = app_handle.get_window("main") {
-                        window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
-                    } else {
-                        error!("Main window not found, cannot emit initial brain error.");
-                    }
+
+                    // Emit error via streaming events instead of backend-response
+                    let error_message_id = uuid::Uuid::new_v4().to_string();
+                    crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
+                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
             };
@@ -238,18 +228,12 @@ pub async fn submit_query(
                 Err(e) => {
                     let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
                     error!("{}", err_msg);
-                    let result = SubmitQueryResult {
-                        text: err_msg.clone(),
-                        audio_base64: None,
-                        agent_state: "Failed".to_string(),
-                        screenshot_base64: None
-                    };
-                    let payload = BackendResponsePayload { query: query.clone(), response: result };
-                    if let Some(window) = app_handle.get_window("main") {
-                        window.emit("backend-response", payload).map_err(|e| format!("Emit failed: {}", e))?;
-                    } else {
-                        error!("Main window not found, cannot emit initial brain error.");
-                    }
+
+                    // Emit error via streaming events instead of backend-response
+                    let error_message_id = uuid::Uuid::new_v4().to_string();
+                    crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
+                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
             };
@@ -388,16 +372,9 @@ pub async fn submit_query(
         ).await;
     });
 
-    // --- Emit Final Response ---
-    let payload = BackendResponsePayload { query, response: final_response.clone() };
+    // Final response is now fully handled by streaming events
+    // The frontend will reconstruct the complete response from stream events
     info!("Final response text: \"{}\"", final_response.text);
-    if let Some(window) = app_handle.get_window("main") {
-        window.emit("backend-response", payload)
-            .map_err(|e| format!("Emit failed: {}", e))?;
-        info!("Final response emitted to frontend.");
-    } else {
-        error!("Main window not found, cannot emit final response.");
-    }
 
     Ok(())
 }

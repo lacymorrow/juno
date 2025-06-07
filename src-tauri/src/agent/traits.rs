@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use super::structs::{AgentAction, AgentError, Message, ToolCall, ToolDefinition, ToolResult};
 use crate::state::CancelReceiver;
+use tauri::AppHandle;
 
 /// Manages the agent's memory (conversation history).
 #[async_trait]
@@ -41,6 +42,33 @@ pub trait AgentBrain: Send + Sync {
         messages: &[Message],
         available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError>;
+
+    /// Check if this brain supports streaming
+    fn supports_streaming(&self) -> bool {
+        false // Default implementation - no streaming support
+    }
+
+    /// Streaming version of decide_next_action (default implementation delegates to regular method)
+    async fn decide_next_action_streaming(
+        &self,
+        messages: &[Message],
+        available_tools: &[ToolDefinition],
+        app_handle: Option<AppHandle>,
+        message_id: Option<String>,
+    ) -> Result<AgentAction, AgentError> {
+        // Default implementation ignores streaming parameters and calls regular method
+        self.decide_next_action(messages, available_tools).await
+    }
+}
+
+/// Extended version of AgentBrain that supports streaming responses
+#[async_trait]
+pub trait StreamingAgentBrain: AgentBrain {
+    /// Check if streaming is enabled for this brain
+    fn is_streaming_enabled(&self) -> bool;
+
+    /// Enable or disable streaming
+    fn set_streaming_enabled(&mut self, enabled: bool);
 }
 
 /// Defines the main runnable interface for an agent.
