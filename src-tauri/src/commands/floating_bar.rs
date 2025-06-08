@@ -135,10 +135,9 @@ impl FloatingBarManager {
         }
 
         if is_focused {
-            // When window gains focus, expand if in default state
-            if self.current_state == BarState::Default {
-                self.handle_click().await?;
-            }
+            // Don't automatically expand on focus - this can interfere with mouse clicks
+            // The user should explicitly click the bar to expand it
+            debug!("FloatingBarManager: Window gained focus, but not auto-expanding to prevent click interference");
         } else {
             // When window loses focus, shrink if input is empty and agent is idle
             if self.current_state == BarState::Input && self.input_value.trim().is_empty() {
