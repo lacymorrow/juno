@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:universal": "bun run tauri build --target universal-apple-darwin",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
