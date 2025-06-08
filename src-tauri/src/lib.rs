@@ -120,6 +120,13 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
 use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, always_listening::*};
+
+// Import specific sound commands from sound.rs
+use crate::commands::sound::{
+    play_agent_start_sound, play_agent_success_sound, play_agent_error_sound, play_agent_attention_sound,
+    play_voice_start_sound, play_voice_end_sound, play_dictation_start_sound, play_dictation_end_sound, play_voice_error_sound,
+    play_boot_sound, play_system_ready_sound, play_connection_sound, play_disconnection_sound
+};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
@@ -622,18 +629,18 @@ pub fn run() {
             get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
-            // Voice Control Sound Commands
+            // Specific Agent Sound Commands
+            play_agent_start_sound,
+            play_agent_success_sound,
+            play_agent_error_sound,
+            play_agent_attention_sound,
+            // Voice Sound Commands
             play_voice_start_sound,
             play_voice_end_sound,
             play_dictation_start_sound,
             play_dictation_end_sound,
             play_voice_error_sound,
-            // Agent Sound Commands
-            play_agent_start_sound,
-            play_agent_success_sound,
-            play_agent_error_sound,
-            play_agent_attention_sound,
-            // Boot and System Sound Commands
+            // System Sound Commands
             play_boot_sound,
             play_system_ready_sound,
             play_connection_sound,
