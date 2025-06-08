@@ -15,9 +15,11 @@ use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const INTENT_DETECTION_BUFFER_MS: u64 = 3000; // Buffer for intent detection (increased from 1500)
-const VOLUME_THRESHOLD: f32 = 0.005; // Volume threshold for activation (increased from 0.002)
+const VOLUME_THRESHOLD: f32 = 0.003; // Volume threshold for activation (lowered from 0.005)
+const VOLUME_THRESHOLD_END: f32 = 0.002; // Lower threshold for ending activity (hysteresis)
 const SILENCE_TIMEOUT_MS: u64 = 3000; // Return to monitoring after silence
 const MIN_TRANSCRIPTION_DURATION_MS: u64 = 500; // Minimum audio duration before attempting transcription
+const VOLUME_DROP_TOLERANCE_MS: u64 = 200; // Allow brief volume drops during activity
 
 enum AlwaysListeningMessage {
     Stop,
@@ -211,6 +213,7 @@ impl AlwaysListeningController {
         let buffer_capacity = (sample_rate as u64 * INTENT_DETECTION_BUFFER_MS / 1000) as usize;
         let min_transcription_samples = (sample_rate as u64 * MIN_TRANSCRIPTION_DURATION_MS / 1000) as usize;
         let mut audio_activity_start: Option<Instant> = None;
+        let mut last_volume_drop: Option<Instant> = None;
 
         loop {
             // Check for control messages
@@ -251,6 +254,15 @@ impl AlwaysListeningController {
                     // Calculate volume level
                     let volume = Self::calculate_rms_volume(&audio_chunk);
 
+                    // Log audio chunk reception occasionally for debugging
+                    static mut LAST_CHUNK_LOG: Option<Instant> = None;
+                    unsafe {
+                        if LAST_CHUNK_LOG.map_or(true, |last| last.elapsed().as_secs() > 10) {
+                            info!("[AlwaysListening] Audio chunk: {} samples, RMS volume: {:.6}", audio_chunk.len(), volume);
+                            LAST_CHUNK_LOG = Some(Instant::now());
+                        }
+                    }
+
                     match current_state {
                         AlwaysListeningState::Monitoring => {
                             // Check for intent to activate
@@ -260,7 +272,7 @@ impl AlwaysListeningController {
                                 // Mark the start of audio activity if not already tracking
                                 if audio_activity_start.is_none() {
                                     audio_activity_start = Some(Instant::now());
-                                    debug!("[AlwaysListening] Audio activity started - volume: {:.6} > {:.6}", volume, volume_threshold);
+                                    info!("[AlwaysListening] Audio activity started - volume: {:.6} > {:.6}", volume, volume_threshold);
                                 }
 
                                 // Keep a rolling buffer for intent detection
@@ -271,11 +283,11 @@ impl AlwaysListeningController {
                                 // Only attempt transcription if we have sufficient audio duration and samples
                                 if let Some(start_time) = audio_activity_start {
                                     let activity_duration = start_time.elapsed().as_millis();
-                                    
-                                    if activity_duration >= MIN_TRANSCRIPTION_DURATION_MS as u128 && 
+
+                                    if activity_duration >= MIN_TRANSCRIPTION_DURATION_MS as u128 &&
                                        audio_buffer.len() >= min_transcription_samples {
-                                        
-                                        debug!("[AlwaysListening] Sufficient audio accumulated: {}ms, {} samples", 
+
+                                        info!("[AlwaysListening] Sufficient audio accumulated: {}ms, {} samples",
                                                activity_duration, audio_buffer.len());
 
                                         // Check for wake words or speech
@@ -296,25 +308,41 @@ impl AlwaysListeningController {
                                             // Start active transcription
                                             audio_buffer.clear();
                                             audio_activity_start = None; // Reset activity tracking
+                                            last_volume_drop = None; // Reset drop tracking
                                         } else {
                                             // No wake word detected, keep monitoring but maintain shorter buffer
                                             audio_buffer.clear();
                                             audio_activity_start = None; // Reset activity tracking
+                                            last_volume_drop = None; // Reset drop tracking
                                         }
                                     }
                                 }
                             } else {
-                                // Volume below threshold - reset activity tracking
-                                if audio_activity_start.is_some() {
-                                    debug!("[AlwaysListening] Audio activity ended - volume: {:.6} < {:.6}", volume, volume_threshold);
-                                    audio_activity_start = None;
+                                // Volume below threshold - use hysteresis for ending activity
+                                let end_threshold = VOLUME_THRESHOLD_END * sensitivity;
+
+                                if audio_activity_start.is_some() && volume < end_threshold {
+                                    // Check if we should tolerate brief volume drops
+                                    if last_volume_drop.is_none() {
+                                        last_volume_drop = Some(Instant::now());
+                                        debug!("[AlwaysListening] Volume drop detected, starting tolerance timer - volume: {:.6} < {:.6}", volume, end_threshold);
+                                    } else if let Some(drop_time) = last_volume_drop {
+                                        if drop_time.elapsed().as_millis() > VOLUME_DROP_TOLERANCE_MS as u128 {
+                                            info!("[AlwaysListening] Audio activity ended after tolerance period - volume: {:.6} < {:.6}", volume, end_threshold);
+                                            audio_activity_start = None;
+                                            last_volume_drop = None;
+                                        }
+                                    }
+                                } else if audio_activity_start.is_some() {
+                                    // Volume above end threshold, reset drop tracking
+                                    last_volume_drop = None;
                                 }
 
-                                // Log volume levels every few seconds for debugging
+                                // Log volume levels more frequently for debugging
                                 static mut LAST_VOLUME_LOG: Option<Instant> = None;
                                 unsafe {
-                                    if LAST_VOLUME_LOG.map_or(true, |last| last.elapsed().as_secs() > 5) {
-                                        debug!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (threshold)", volume, volume_threshold);
+                                    if LAST_VOLUME_LOG.map_or(true, |last| last.elapsed().as_secs() > 2) {
+                                        info!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (start threshold, sensitivity: {:.1})", volume, volume_threshold, sensitivity);
                                         LAST_VOLUME_LOG = Some(Instant::now());
                                     }
                                 }
@@ -327,12 +355,14 @@ impl AlwaysListeningController {
                         }
                         AlwaysListeningState::Activated => {
                             // Actively transcribing - check for silence to return to monitoring
-                            if volume < VOLUME_THRESHOLD * 0.1 { // Lower threshold for silence detection
+                            let end_threshold = VOLUME_THRESHOLD_END * sensitivity;
+
+                            if volume < end_threshold { // Lower threshold for ending activity
                                 if let Ok(activity) = last_activity.lock() {
                                     if let Some(last_time) = *activity {
                                         if last_time.elapsed().as_millis() > SILENCE_TIMEOUT_MS as u128 {
                                             current_state = AlwaysListeningState::Monitoring;
-                                            info!("[AlwaysListening] Silence timeout - returning to monitoring");
+                                            info!("[AlwaysListening] Silence timeout - returning to monitoring (volume: {:.6} < {:.6})", volume, end_threshold);
 
                                             // Emit deactivation event
                                             if let Err(e) = app_handle.emit("always-listening:deactivated", ()) {
@@ -340,6 +370,8 @@ impl AlwaysListeningController {
                                             }
 
                                             audio_buffer.clear();
+                                            audio_activity_start = None;
+                                            last_volume_drop = None;
                                             continue;
                                         }
                                     }
@@ -397,28 +429,30 @@ impl AlwaysListeningController {
         let audio_duration_ms = (audio_buffer.len() as f32 / sample_rate as f32 * 1000.0) as u32;
         let min_duration_for_transcription = MIN_TRANSCRIPTION_DURATION_MS as u32;
 
-        debug!("[AlwaysListening] detect_intent: Processing {} samples ({}ms) for {} wake words",
+        info!("[AlwaysListening] detect_intent: Processing {} samples ({}ms) for {} wake words",
                audio_buffer.len(),
                audio_duration_ms,
                wake_words.len());
 
         // Ensure we have sufficient audio duration for meaningful transcription
         if audio_duration_ms < min_duration_for_transcription {
-            debug!("[AlwaysListening] detect_intent: Audio duration too short ({}ms < {}ms), skipping transcription",
+            info!("[AlwaysListening] detect_intent: Audio duration too short ({}ms < {}ms), skipping transcription",
                    audio_duration_ms, min_duration_for_transcription);
             return false;
         }
 
         // Resample if necessary
+        info!("[AlwaysListening] Sample rate check: {} -> {} (needs resampling: {})",
+              sample_rate, WHISPER_SAMPLE_RATE, sample_rate != WHISPER_SAMPLE_RATE);
         let audio_to_process = if sample_rate != WHISPER_SAMPLE_RATE {
             if let Some(r) = resampler {
                 match r.process(&[audio_buffer.to_vec()], None) {
                     Ok(mut resampled) if !resampled.is_empty() => {
-                        debug!("[AlwaysListening] Audio resampled: {} -> {} samples", audio_buffer.len(), resampled[0].len());
+                        info!("[AlwaysListening] Audio resampled: {} -> {} samples", audio_buffer.len(), resampled[0].len());
                         resampled.remove(0)
                     },
                     Ok(_) => {
-                        debug!("[AlwaysListening] Resampling produced empty output");
+                        info!("[AlwaysListening] Resampling produced empty output");
                         return false;
                     },
                     Err(e) => {
@@ -437,7 +471,7 @@ impl AlwaysListeningController {
         // Ensure resampled audio also meets minimum duration
         let resampled_duration_ms = (audio_to_process.len() as f32 / WHISPER_SAMPLE_RATE as f32 * 1000.0) as u32;
         if resampled_duration_ms < min_duration_for_transcription {
-            debug!("[AlwaysListening] detect_intent: Resampled audio duration too short ({}ms < {}ms), skipping transcription",
+            info!("[AlwaysListening] detect_intent: Resampled audio duration too short ({}ms < {}ms), skipping transcription",
                    resampled_duration_ms, min_duration_for_transcription);
             return false;
         }
@@ -451,7 +485,7 @@ impl AlwaysListeningController {
         params.set_print_timestamps(false);
         params.set_language(Some("en"));
 
-        debug!("[AlwaysListening] Starting Whisper transcription with {}ms of audio...", resampled_duration_ms);
+        info!("[AlwaysListening] Starting Whisper transcription with {}ms of audio...", resampled_duration_ms);
 
         match whisper_state.full(params, &audio_to_process) {
             Ok(_) => {
@@ -662,7 +696,7 @@ impl AlwaysListeningController {
         Ok(())
     }
 
-        pub fn test_whisper_model(&self) -> Result<serde_json::Value> {
+    pub fn test_whisper_model(&self) -> Result<serde_json::Value> {
         info!("[AlwaysListeningController] Testing Whisper model...");
 
         // Create a test audio buffer (1 second of silence + beep)
@@ -781,6 +815,31 @@ impl AlwaysListeningController {
                 "status": "error",
                 "error": "Always listening is not active",
                 "test_type": "live_audio_capture"
+            }))
+        }
+    }
+
+    pub fn force_threshold_test<R: Runtime>(&mut self, app_handle: &AppHandle<R>) -> Result<serde_json::Value> {
+        info!("[AlwaysListeningController] Starting force threshold test...");
+
+        if let Some((_, control_tx)) = &self.audio_thread {
+            // Temporarily set very low sensitivity for testing
+            control_tx.send(AlwaysListeningMessage::UpdateSensitivity(0.1))
+                .map_err(|e| Error::ControlError(format!("Failed to set test sensitivity: {:?}", e)))?;
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            Ok(serde_json::json!({
+                "status": "test_started",
+                "message": "Force threshold test started with sensitivity 0.1. Speak now and check logs.",
+                "test_type": "volume_threshold",
+                "instructions": "This test sets extremely low threshold. Speak normally and check for 'Audio activity started' messages."
+            }))
+        } else {
+            Ok(serde_json::json!({
+                "status": "error",
+                "error": "Always listening is not active",
+                "test_type": "volume_threshold"
             }))
         }
     }
