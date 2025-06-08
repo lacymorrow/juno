@@ -315,14 +315,31 @@ impl AnthropicBrain {
                         "content_block_stop" => {
                             // Complete current tool call if we have one
                             if let Some((id, name, json_str)) = current_tool_call.take() {
-                                // Parse the complete JSON
-                                match serde_json::from_str(&json_str) {
-                                    Ok(input) => {
-                                        tool_calls.push(ToolCall { id, name, input });
-                                        log::debug!("Stream: completed tool call with input: {}", json_str);
-                                    }
-                                    Err(e) => {
-                                        log::error!("Failed to parse tool call input JSON: {}, json: {}", e, json_str);
+                                // Check if we have any JSON content before parsing
+                                if json_str.trim().is_empty() {
+                                    log::warn!("Tool call {} ({}) has empty JSON input, using empty object", name, id);
+                                    // Use empty object as fallback
+                                    tool_calls.push(ToolCall {
+                                        id,
+                                        name,
+                                        input: serde_json::json!({})
+                                    });
+                                } else {
+                                    // Parse the complete JSON
+                                    match serde_json::from_str(&json_str) {
+                                        Ok(input) => {
+                                            tool_calls.push(ToolCall { id, name, input });
+                                            log::debug!("Stream: completed tool call with input: {}", json_str);
+                                        }
+                                        Err(e) => {
+                                            log::warn!("Failed to parse tool call input JSON: {}, json: '{}'. Using empty object as fallback.", e, json_str);
+                                            // Use empty object as fallback instead of failing
+                                            tool_calls.push(ToolCall {
+                                                id,
+                                                name,
+                                                input: serde_json::json!({})
+                                            });
+                                        }
                                     }
                                 }
                             }
