@@ -27,6 +27,7 @@ pub mod tools;
 pub mod cloud;
 pub mod mcp;
 pub mod always_listening;
+pub mod heatmap;
 
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;
@@ -43,6 +44,7 @@ pub use self::tools::*;
 pub use self::cloud::*;
 pub use self::mcp::*;
 pub use self::always_listening::*;
+pub use self::heatmap::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

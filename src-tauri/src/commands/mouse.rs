@@ -5,6 +5,7 @@ use crate::state::AppState;
 use tracing::{info, error};
 use crate::utils::coordinates;
 use super::send_dev_tool_notification;
+use super::heatmap; // Import heatmap module
 
 // Helper function to create a visual indicator for mouse clicks
 fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> Result<(), String> {
@@ -367,6 +368,10 @@ pub(crate) async fn dev_right_click(
     ensure_main_window_focus(&app).await?;
     
     create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
+    
+    // Record click in heatmap
+    heatmap::record_click_heatmap(&app, x, y, "right");
+    
     match state.desktop.right_click(x, y, modifier.as_deref()) {
         Ok(_) => {
             send_dev_tool_notification(&app, "Right Click", &format!("Clicked at ({}, {})", x, y))?;
@@ -394,6 +399,10 @@ pub(crate) async fn dev_middle_click(
     ensure_main_window_focus(&app).await?;
     
     create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click (Adjusted from tools2 green)
+    
+    // Record click in heatmap
+    heatmap::record_click_heatmap(&app, x, y, "middle");
+    
     match state.desktop.middle_click(x, y, modifier.as_deref()) {
         Ok(_) => {
             send_dev_tool_notification(&app, "Middle Click", &format!("Clicked at ({}, {})", x, y))?;
@@ -421,6 +430,10 @@ pub(crate) async fn dev_double_click(
     ensure_main_window_focus(&app).await?;
     
     create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
+    
+    // Record click in heatmap
+    heatmap::record_click_heatmap(&app, x, y, "double");
+    
     match state.desktop.double_click(x, y, modifier.as_deref()) {
         Ok(_) => {
             send_dev_tool_notification(&app, "Double Click", &format!("Clicked at ({}, {})", x, y))?;
@@ -448,6 +461,10 @@ pub(crate) async fn dev_triple_click(
     ensure_main_window_focus(&app).await?;
     
     create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
+    
+    // Record click in heatmap
+    heatmap::record_click_heatmap(&app, x, y, "triple");
+    
     match state.desktop.triple_click(x, y, modifier.as_deref()) { // Use main's logic
         Ok(_) => {
             send_dev_tool_notification(&app, "Triple Click", &format!("Clicked at ({}, {})", x, y))?;
@@ -468,10 +485,14 @@ pub(crate) async fn dev_mouse_move(
     x: f64,
     y: f64
 ) -> Result<(), String> {
-    info!("[DEV_TOOL] Moving mouse to ({}, {})...", x, y);
-    match state.desktop.mouse_move(x, y) { // Use main's logging style
+    info!("[DEV_TOOL] Moving mouse to ({}, {})", x, y);
+    
+    // Record movement in heatmap
+    heatmap::record_move_heatmap(&app, x, y);
+    
+    match state.desktop.mouse_move(x, y) {
         Ok(_) => {
-            send_dev_tool_notification(&app, "Mouse Move", &format!("Moved mouse to ({}, {})", x, y))?;
+            send_dev_tool_notification(&app, "Mouse Move", &format!("Moved to ({}, {})", x, y))?;
             Ok(())
         }
         Err(e) => {
@@ -538,6 +559,10 @@ pub(crate) async fn dev_left_click(
     ensure_main_window_focus(&app).await?;
     
     create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
+    
+    // Record click in heatmap
+    heatmap::record_click_heatmap(&app, x, y, "left");
+    
     match state.desktop.left_click(x, y, modifier.as_deref()) { // Use main's version
         Ok(_) => {
             send_dev_tool_notification(&app, "Left Click", &format!("Clicked at ({}, {})", x, y))?;

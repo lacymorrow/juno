@@ -509,6 +509,7 @@ pub fn run() {
             }
         }).build())
         .manage(app_state) // Manage the AppState
+        .manage(commands::heatmap::HeatmapTracker::default()) // Manage the HeatmapTracker
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
             list_apps,
@@ -560,6 +561,13 @@ pub fn run() {
             dev_double_click,
             dev_get_cursor_position,
             dev_test_click_visualization,
+            // Heatmap Commands
+            start_heatmap_tracking,
+            stop_heatmap_tracking,
+            clear_heatmap_data,
+            get_heatmap_data,
+            is_heatmap_tracking,
+            get_heatmap_grid,
             dev_bash_command,
             dev_list_files,
             dev_get_file_content,
