@@ -492,7 +492,7 @@ async fn check_screen_recording_permission() -> Result<PermissionStatus, String>
     #[cfg(target_os = "macos")]
     {
         info!("Testing screen recording permission with actual screenshot capture");
-        
+
         // Test actual screen recording functionality using computer_use_ai_sdk
         let granted = match test_screen_recording_access().await {
             Ok(true) => {
@@ -536,14 +536,14 @@ async fn test_screen_recording_access() -> Result<bool, String> {
     {
         use computer_use_ai_sdk::Desktop;
         use std::time::Duration;
-        
+
         // Try to take a screenshot using the Desktop API
         let result = tokio::time::timeout(Duration::from_secs(5), async {
             // Try creating a minimal Desktop instance just for screenshot test
             match Desktop::new(false, false) {
                 Ok(desktop) => {
                     // Try to take a screenshot
-                    match desktop.screenshot(None) {
+                    match desktop.capture_screenshot_base64() {
                         Ok(_) => {
                             info!("Screenshot test successful - screen recording permission granted");
                             Ok(true)
@@ -560,7 +560,7 @@ async fn test_screen_recording_access() -> Result<bool, String> {
                 }
             }
         }).await;
-        
+
         match result {
             Ok(test_result) => test_result,
             Err(_) => {
@@ -569,7 +569,7 @@ async fn test_screen_recording_access() -> Result<bool, String> {
             }
         }
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         Ok(true)
@@ -580,7 +580,7 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
     #[cfg(target_os = "macos")]
     {
         info!("Testing microphone permission with actual audio access");
-        
+
         // Test actual microphone access using the voice transcription plugin
         let granted = match test_microphone_access().await {
             Ok(true) => {
@@ -624,21 +624,21 @@ async fn test_microphone_access() -> Result<bool, String> {
     {
         use std::process::Command;
         use std::time::Duration;
-        
+
         // Try to query audio input devices using system_profiler
         let output = tokio::time::timeout(Duration::from_secs(5), async {
             let output = Command::new("system_profiler")
                 .args(&["SPAudioDataType", "-json"])
                 .output()
                 .map_err(|e| format!("Failed to run system_profiler: {}", e))?;
-            
+
             if !output.status.success() {
                 return Err("system_profiler failed".to_string());
             }
-            
+
             let json_str = String::from_utf8(output.stdout)
                 .map_err(|e| format!("Failed to parse output: {}", e))?;
-            
+
             // Check if we can actually access audio device information
             if json_str.contains("Audio") || json_str.contains("Built-in") {
                 // Try to test actual microphone access using AVFoundation via a simple test
@@ -647,7 +647,7 @@ async fn test_microphone_access() -> Result<bool, String> {
                 Ok(false)
             }
         }).await;
-        
+
         match output {
             Ok(result) => result,
             Err(_) => {
@@ -656,7 +656,7 @@ async fn test_microphone_access() -> Result<bool, String> {
             }
         }
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         Ok(true)
@@ -668,12 +668,12 @@ fn test_avfoundation_microphone_access() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
-        
+
         // Use a quick osascript test to check microphone permission
         let output = Command::new("osascript")
             .args(&["-e", "tell application \"System Events\" to return microphone authorization status"])
             .output();
-            
+
         match output {
             Ok(output) => {
                 let result = String::from_utf8_lossy(&output.stdout);
@@ -688,7 +688,7 @@ fn test_avfoundation_microphone_access() -> Result<bool, String> {
             }
         }
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         Ok(true)
@@ -699,10 +699,10 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
     #[cfg(target_os = "macos")]
     {
         info!("Testing input monitoring permission with actual event monitoring");
-        
+
         // Test actual input monitoring functionality
         let granted = test_input_monitoring_access().await;
-        
+
         if granted {
             info!("Input monitoring permission test PASSED - event monitoring working");
         } else {
@@ -735,12 +735,12 @@ async fn test_input_monitoring_access() -> bool {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
-        
+
         // Test using ioreg to check if we can monitor input events
         let output = Command::new("ioreg")
             .args(&["-c", "IOHIDEventDriver"])
             .output();
-            
+
         match output {
             Ok(output) => {
                 if output.status.success() {
@@ -760,14 +760,14 @@ async fn test_input_monitoring_access() -> bool {
             }
         }
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         true
     }
 }
 
-/// Request screen recording permissions 
+/// Request screen recording permissions
 #[tauri::command]
 pub async fn request_screen_recording_permission() -> Result<bool, String> {
     info!("Requesting screen recording permissions");
@@ -847,7 +847,7 @@ pub async fn request_input_monitoring_permission() -> Result<bool, String> {
     {
         // Test current input monitoring permission status
         let granted = test_input_monitoring_access().await;
-        
+
         if granted {
             info!("Input monitoring permissions already granted");
             Ok(true)
