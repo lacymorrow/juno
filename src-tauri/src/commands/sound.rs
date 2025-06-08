@@ -142,74 +142,103 @@ pub async fn play_sound_file(
         });
     }
 
-    // For Tauri v2, bundled resources are accessed directly from the resource directory
-    // When we bundle "../public/sounds/**/*", the files are copied to "sounds/" in the resource dir
-    let resource_path = app.path().resource_dir()
-        .map_err(|e| format!("Failed to get resource directory: {}", e))?;
+    // Strategy 1: Try bundled resources (production builds)
+    let mut final_path = None;
+    let mut found_path = None;
 
-    // Debug: Log resource directory and what it contains
-    info!("Resource directory: {:?}", resource_path);
-    if let Ok(entries) = std::fs::read_dir(&resource_path) {
-        info!("Resource directory contents:");
-        for entry in entries {
-            if let Ok(entry) = entry {
-                info!("  - {:?}", entry.path());
+    if let Ok(resource_path) = app.path().resource_dir() {
+        info!("Resource directory: {:?}", resource_path);
+
+        let bundled_path = resource_path.join(&file_path);
+        let alt_bundled_path = if file_path.starts_with("sounds/") {
+            resource_path.join(&file_path[7..]) // Remove "sounds/" prefix
+        } else {
+            resource_path.join(&file_path)
+        };
+
+        if bundled_path.exists() {
+            info!("Found sound in bundled resources: {:?}", bundled_path);
+            final_path = Some(bundled_path);
+            found_path = Some(file_path.clone());
+        } else if alt_bundled_path != bundled_path && alt_bundled_path.exists() {
+            info!("Found sound in bundled resources (alt path): {:?}", alt_bundled_path);
+            final_path = Some(alt_bundled_path);
+            found_path = Some(file_path[7..].to_string());
+        }
+    }
+
+    // Strategy 2: Try development mode paths (when bundled resources not available)
+    if final_path.is_none() && cfg!(debug_assertions) {
+        info!("Bundled resources not found, trying development paths...");
+
+        // Try relative to current working directory (development mode)
+        if let Ok(cwd) = std::env::current_dir() {
+            let mut dev_paths = vec![
+                cwd.join("public").join(&file_path),
+                cwd.join(&file_path),
+            ];
+
+            // Try going up one directory level if we're in src-tauri
+            if let Some(parent) = cwd.parent() {
+                dev_paths.push(parent.join("public").join(&file_path));
+            }
+
+            for dev_path in dev_paths.iter() {
+                info!("Checking development path: {:?}", dev_path);
+                if dev_path.exists() {
+                    info!("Found sound in development path: {:?}", dev_path);
+                    final_path = Some(dev_path.clone());
+                    found_path = Some(file_path.clone());
+                    break;
+                }
             }
         }
     }
 
-    let full_path = resource_path.join(&file_path);
-    info!("Trying to access sound file at: {:?}", full_path);
+    // Strategy 3: Final fallback - try absolute path
+    if final_path.is_none() {
+        let fallback_path = std::path::PathBuf::from(&file_path);
+        if fallback_path.exists() {
+            info!("Found sound at absolute path: {:?}", fallback_path);
+            final_path = Some(fallback_path);
+            found_path = Some(file_path.clone());
+        }
+    }
 
-    // Also try without the leading "sounds/" prefix in case the bundling strips it
-    let alt_path = if file_path.starts_with("sounds/") {
-        resource_path.join(&file_path[7..]) // Remove "sounds/" prefix
-    } else {
-        resource_path.join(&file_path)
-    };
-    info!("Alternative path (without sounds/ prefix): {:?}", alt_path);
-
-    // Check which path exists
-    let (final_path, found_path) = if full_path.exists() {
-        (full_path, file_path.clone())
-    } else if alt_path != full_path && alt_path.exists() {
-        info!("Original path not found, using alternative path");
-        (alt_path, file_path[7..].to_string())
-    } else {
-        let error_msg = format!(
-            "Sound file does not exist at either:\n  1. {}\n  2. {}", 
-            full_path.display(), 
-            alt_path.display()
-        );
-        error!("{}", error_msg);
-        return Ok(SoundPlayResult {
-            success: false,
-            message: error_msg,
-            file_path: Some(file_path),
-        });
+    // If no path found, return error
+    let (sound_path, result_path) = match (final_path, found_path) {
+        (Some(path), Some(result)) => (path, result),
+        _ => {
+            let error_msg = format!("Sound file not found: {}", file_path);
+            error!("{}", error_msg);
+            return Ok(SoundPlayResult {
+                success: false,
+                message: error_msg,
+                file_path: Some(file_path),
+            });
+        }
     };
 
-    info!("Playing sound from: {:?}", final_path);
+    info!("Playing sound from: {:?}", sound_path);
 
-    // For now, we'll use the system's default audio player
-    // In a production app, you might want to use a more sophisticated audio library
-    match play_audio_file(&final_path) {
+    // Play the audio file
+    match play_audio_file(&sound_path) {
         Ok(_) => {
-            let success_msg = format!("Successfully played sound: {}", found_path);
+            let success_msg = format!("Successfully played sound: {}", result_path);
             info!("{}", success_msg);
             Ok(SoundPlayResult {
                 success: true,
                 message: success_msg,
-                file_path: Some(found_path),
+                file_path: Some(result_path),
             })
         }
         Err(e) => {
-            let error_msg = format!("Failed to play sound {}: {}", found_path, e);
+            let error_msg = format!("Failed to play sound {}: {}", result_path, e);
             error!("{}", error_msg);
             Ok(SoundPlayResult {
                 success: false,
                 message: error_msg,
-                file_path: Some(found_path),
+                file_path: Some(result_path),
             })
         }
     }

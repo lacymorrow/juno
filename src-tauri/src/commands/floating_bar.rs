@@ -192,41 +192,32 @@ impl FloatingBarManager {
         self.current_error = None;
         self.is_agent_working = true;
 
-        // Show success state briefly
+        // Show success state briefly, then transition directly to loading (stay expanded)
         self.set_state(BarState::Success).await;
 
-        // Transition through shrinking to loading
+        // Transition directly to loading without shrinking
         let app_handle = self.app_handle.clone();
         let query_for_agent = query.clone();
         tokio::spawn(async move {
             sleep(Duration::from_millis(600)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
-                manager.set_state(BarState::Shrinking).await;
+                // Skip shrinking, go directly to loading to keep bar expanded
+                manager.set_state(BarState::Loading).await;
 
-                let app_handle_inner = app_handle.clone();
-                let query_inner = query_for_agent.clone();
+                // Trigger the AI agent
+                let app_handle_for_agent = app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(300)).await;
-                    if let Some(manager) = get_bar_manager(&app_handle_inner).await {
-                        let mut manager = manager.lock().await;
-                        manager.set_state(BarState::Loading).await;
-                    }
-
-                    // Trigger the AI agent
-                    let app_handle_for_agent = app_handle_inner.clone();
-                    tokio::spawn(async move {
-                        let app_handle_clone = app_handle_for_agent.clone();
-                        let state = app_handle_for_agent.state::<crate::state::AppState>();
-                        if let Err(e) = crate::anthropic::submit_query(query_inner, state, app_handle_clone).await {
-                            error!("Failed to submit query to AI agent: {}", e);
-                            // Handle the error by updating the floating bar
-                            if let Some(manager) = get_bar_manager(&app_handle_inner).await {
-                                let mut manager = manager.lock().await;
-                                let _ = manager.handle_agent_completion("Failed", Some(e)).await;
-                            }
+                    let app_handle_clone = app_handle_for_agent.clone();
+                    let state = app_handle_for_agent.state::<crate::state::AppState>();
+                    if let Err(e) = crate::anthropic::submit_query(query_for_agent, state, app_handle_clone).await {
+                        error!("Failed to submit query to AI agent: {}", e);
+                        // Handle the error by updating the floating bar
+                        if let Some(manager) = get_bar_manager(&app_handle).await {
+                            let mut manager = manager.lock().await;
+                            let _ = manager.handle_agent_completion("Failed", Some(e)).await;
                         }
-                    });
+                    }
                 });
             }
         });
@@ -240,6 +231,12 @@ impl FloatingBarManager {
 
         self.is_agent_working = false;
 
+        // Reset input values regardless of completion state
+        self.input_value.clear();
+        self.last_submitted_value.clear();
+        self.transcription_text.clear();
+        self.spoken_text.clear();
+
         match agent_state {
             "Finished" => {
                 self.set_state(BarState::Finishing).await;
@@ -249,7 +246,7 @@ impl FloatingBarManager {
                     sleep(Duration::from_millis(300)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
-                        manager.set_state(BarState::Input).await;
+                        manager.set_state(BarState::Default).await;
                     }
                 });
             }
@@ -269,12 +266,12 @@ impl FloatingBarManager {
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
                         manager.current_error = None;
-                        manager.set_state(BarState::Input).await;
+                        manager.set_state(BarState::Default).await;
                     }
                 });
             }
             _ => {
-                self.set_state(BarState::Input).await;
+                self.set_state(BarState::Default).await;
             }
         }
 
