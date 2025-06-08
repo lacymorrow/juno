@@ -399,6 +399,131 @@ fn play_audio_file(path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Sen
     Err("No suitable audio player found on Linux".into())
 }
 
+// --- Voice Control Sound Commands ---
+// All voice interaction sound logic centralized in Rust backend
+
+/// Play voice recording start sound (when user starts speaking)
+#[tauri::command]
+pub async fn play_voice_start_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::NotificationAmbient, state).await // Gentle start sound
+}
+
+/// Play voice recording end sound (when transcription completes)
+#[tauri::command]
+pub async fn play_voice_end_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::NotificationDecorative01, state).await // Pleasant end sound
+}
+
+/// Play dictation mode start sound (immediate typing mode)
+#[tauri::command]
+pub async fn play_dictation_start_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::RingtoneMinimal, state).await // Distinct dictation start
+}
+
+/// Play dictation mode end sound (immediate typing completed)
+#[tauri::command]
+pub async fn play_dictation_end_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::NotificationDecorative02, state).await // Different end sound
+}
+
+/// Play voice error sound (transcription failed, permission issues, etc.)
+#[tauri::command]
+pub async fn play_voice_error_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::AlertSimple, state).await // Error sound
+}
+
+// --- Agent Sound Commands ---
+// All AI agent interaction sound logic centralized in Rust backend
+
+/// Play agent start sound (when AI agent begins processing)
+#[tauri::command]
+pub async fn play_agent_start_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_notification_sound(app, state).await // Use notification sound for agent start
+}
+
+/// Play agent success sound (when AI agent completes successfully)
+#[tauri::command]
+pub async fn play_agent_success_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_success_sound(app, state).await // Use success sound for agent completion
+}
+
+/// Play agent error sound (when AI agent encounters an error)
+#[tauri::command]
+pub async fn play_agent_error_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_error_sound(app, state).await // Use error sound for agent failures
+}
+
+/// Play agent attention sound (for important agent notifications)
+#[tauri::command]
+pub async fn play_agent_attention_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_alert_sound(app, state).await // Use alert sound for agent attention
+}
+
+// --- Boot and System Sound Commands ---
+
+/// Play application boot sound (when app starts)
+#[tauri::command]
+pub async fn play_boot_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::HeroSimpleCelebration02, state).await // Friendly boot sound
+}
+
+/// Play system ready sound (when all systems are initialized)
+#[tauri::command]
+pub async fn play_system_ready_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::NotificationSimple02, state).await // System ready notification
+}
+
+/// Play connection established sound (for cloud/remote connections)
+#[tauri::command]
+pub async fn play_connection_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::NotificationSimple01, state).await // Connection established
+}
+
+/// Play disconnection sound (for cloud/remote disconnections)
+#[tauri::command]
+pub async fn play_disconnection_sound(
+    app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<SoundPlayResult, String> {
+    play_sound_by_type(app, SoundType::AlarmGentle, state).await // Gentle disconnection warning
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

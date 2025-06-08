@@ -49,25 +49,22 @@ export function useSound(): SoundSystem {
 		}
 	}, []);
 
-	// Convenience function for notifications
+	// Convenience functions - now just call backend commands
 	const playNotification = useCallback(async (): Promise<SoundPlayResult> => {
-		return await playSound(SoundType.NotificationSimple01);
-	}, [playSound]);
+		return await invoke<SoundPlayResult>('play_notification_sound');
+	}, []);
 
-	// Convenience function for success sounds
 	const playSuccess = useCallback(async (): Promise<SoundPlayResult> => {
-		return await playSound(SoundType.HeroSimpleCelebration01);
-	}, [playSound]);
+		return await invoke<SoundPlayResult>('play_success_sound');
+	}, []);
 
-	// Convenience function for error sounds
 	const playError = useCallback(async (): Promise<SoundPlayResult> => {
-		return await playSound(SoundType.AlertSimple);
-	}, [playSound]);
+		return await invoke<SoundPlayResult>('play_error_sound');
+	}, []);
 
-	// Convenience function for alert sounds
 	const playAlert = useCallback(async (): Promise<SoundPlayResult> => {
-		return await playSound(SoundType.AlertHighIntensity);
-	}, [playSound]);
+		return await invoke<SoundPlayResult>('play_alert_sound');
+	}, []);
 
 	// Get list of available sounds
 	const getAvailableSounds = useCallback(async (): Promise<SoundType[]> => {
@@ -90,26 +87,24 @@ export function useSound(): SoundSystem {
 	};
 }
 
-// Additional hooks for specific sound scenarios
+// Additional hooks for specific sound scenarios - now use backend commands
 
 export function useAgentSounds() {
-	const { playSuccess, playError, playNotification, playAlert } = useSound();
+	const playAgentStart = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_agent_start_sound');
+	}, []);
 
-	const playAgentStart = useCallback(async () => {
-		return await playNotification();
-	}, [playNotification]);
+	const playAgentSuccess = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_agent_success_sound');
+	}, []);
 
-	const playAgentSuccess = useCallback(async () => {
-		return await playSuccess();
-	}, [playSuccess]);
+	const playAgentError = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_agent_error_sound');
+	}, []);
 
-	const playAgentError = useCallback(async () => {
-		return await playError();
-	}, [playError]);
-
-	const playAgentAttention = useCallback(async () => {
-		return await playAlert();
-	}, [playAlert]);
+	const playAgentAttention = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_agent_attention_sound');
+	}, []);
 
 	return {
 		playAgentStart,
@@ -120,27 +115,25 @@ export function useAgentSounds() {
 }
 
 export function useVoiceSounds() {
-	const { playSound } = useSound();
+	const playVoiceStart = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_voice_start_sound');
+	}, []);
 
-	const playVoiceStart = useCallback(async () => {
-		return await playSound(SoundType.NotificationAmbient); // Gentle start sound
-	}, [playSound]);
+	const playVoiceEnd = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_voice_end_sound');
+	}, []);
 
-	const playVoiceEnd = useCallback(async () => {
-		return await playSound(SoundType.NotificationDecorative01); // Pleasant end sound
-	}, [playSound]);
+	const playDictationStart = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_dictation_start_sound');
+	}, []);
 
-	const playDictationStart = useCallback(async () => {
-		return await playSound(SoundType.RingtoneMinimal); // Distinct dictation start
-	}, [playSound]);
+	const playDictationEnd = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_dictation_end_sound');
+	}, []);
 
-	const playDictationEnd = useCallback(async () => {
-		return await playSound(SoundType.NotificationDecorative02); // Different end sound
-	}, [playSound]);
-
-	const playVoiceError = useCallback(async () => {
-		return await playSound(SoundType.AlertSimple); // Error sound
-	}, [playSound]);
+	const playVoiceError = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_voice_error_sound');
+	}, []);
 
 	return {
 		playVoiceStart,
@@ -148,5 +141,32 @@ export function useVoiceSounds() {
 		playDictationStart,
 		playDictationEnd,
 		playVoiceError,
+	};
+}
+
+// Additional system sound hooks
+
+export function useSystemSounds() {
+	const playBootSound = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_boot_sound');
+	}, []);
+
+	const playSystemReady = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_system_ready_sound');
+	}, []);
+
+	const playConnectionSound = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_connection_sound');
+	}, []);
+
+	const playDisconnectionSound = useCallback(async (): Promise<SoundPlayResult> => {
+		return await invoke<SoundPlayResult>('play_disconnection_sound');
+	}, []);
+
+	return {
+		playBootSound,
+		playSystemReady,
+		playConnectionSound,
+		playDisconnectionSound,
 	};
 }
