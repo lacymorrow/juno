@@ -1220,16 +1220,12 @@ pub fn run() {
                                     NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
                                 );
 
-                                // Set initial ignore state based on visibility (handled by tray logic, but good initial state)
-                                if !window.is_visible().unwrap_or(false) {
-                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
-                                     info!("macOS Setup: Floating bar initially hidden, ignoring mouse events.");
-                                } else {
-                                     #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-                                     let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-                                     info!("macOS Setup: Floating bar initially visible, accepting mouse events.");
-                                }
+                                // Always ensure mouse events are enabled for visible window
+                                // This fixes the issue where first click doesn't work after app load
+                                #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
+                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
+                                info!("macOS Setup: Floating bar mouse events enabled.");
+
                                 info!("macOS standard styling applied to floating-bar.");
                             }
                         }
@@ -1239,6 +1235,45 @@ pub fn run() {
                     }
                      // --- Setup Mouse Tracking ---
                     macos_tracking::setup_tracking_area(&window, app_handle.clone());
+
+                    // --- Ensure window is properly activated after setup ---
+                    let window_clone = window.clone();
+                    let app_handle_clone = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // Longer delay to ensure all window setup is complete
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+                        // Force window to be activated and ready to receive events
+                        // Set focus multiple times to ensure window becomes active
+                        for _ in 0..3 {
+                            if let Err(e) = window_clone.set_focus() {
+                                warn!("Failed to set focus on floating bar window: {}", e);
+                            } else {
+                                info!("Floating bar window focus set successfully");
+                            }
+                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                        }
+
+                        // Additional window activation via backend to ensure event processing
+                        if let Ok(ns_window_ptr) = window_clone.ns_window() {
+                            let ns_window = ns_window_ptr as cocoa_id;
+                            unsafe {
+                                // Explicitly make the window the key window to ensure it can receive events
+                                #[allow(unexpected_cfgs)]
+                                let _: () = msg_send![ns_window, makeKeyWindow];
+
+                                // Make sure the window is truly active
+                                #[allow(unexpected_cfgs)]
+                                let _: () = msg_send![ns_window, orderFrontRegardless];
+
+                                // Final mouse event configuration
+                                #[allow(unexpected_cfgs)]
+                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
+
+                                info!("Additional window activation completed");
+                            }
+                        }
+                    });
 
                 } else {
                     eprintln!("Warning: floating-bar window not found during macOS specific setup.");
