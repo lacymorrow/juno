@@ -55,6 +55,9 @@ pub enum Error {
 
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    #[error("Control error: {0}")]
+    ControlError(String),
 }
 
 impl serde::Serialize for Error {
