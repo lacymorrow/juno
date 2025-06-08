@@ -5,10 +5,15 @@
 ### 1. Sound Files Not Working in Production ✅ **FIXED**
 **Problem**: Sound files were not being bundled with the production build, causing audio playback to fail.
 
-**Root Cause**: The `public/sounds/` directory was not included in the `bundle.resources` array in `src-tauri/tauri.conf.json`.
+**Root Cause**: Two issues were identified:
+1. The `public/sounds/` directory was not included in the `bundle.resources` array in `src-tauri/tauri.conf.json`
+2. The sound loading code was incorrectly trying to access bundled resources with a "public" prefix that doesn't exist in the bundled app
 
-**Solution**: Added `"../public/sounds/**/*"` to the `bundle.resources` array.
+**Solution**: 
+1. Added `"../public/sounds/**/*"` to the `bundle.resources` array
+2. Fixed the sound loading code in `src-tauri/src/commands/sound.rs` to access bundled resources directly without the "public" prefix
 
+<<<<<<< HEAD
 ### 2. App Icon Not Showing in Production ✅ **FIXED**
 **Problem**: App icon was not showing consistently in production builds on macOS.
 
@@ -119,6 +124,13 @@ This will create a fully functional production app with:
 ## Icon Configuration
 
 The app icons are properly configured in `tauri.conf.json`:
+=======
+**Technical Details**:
+When Tauri bundles `"../public/sounds/**/*"`, it copies the files to the resource directory as `sounds/...` (stripping the "public" prefix). The code was incorrectly looking for `resource_dir/public/sounds/...` instead of `resource_dir/sounds/...`.
+
+### 2. App Icon Configuration ✅ **Already Working**
+**Status**: The app icons were already properly configured in `tauri.conf.json`:
+>>>>>>> e8b1e5a10cae80c3232e5f10193284ce2711ef07
 
 ```json
 "icon": [
@@ -130,17 +142,35 @@ The app icons are properly configured in `tauri.conf.json`:
 ]
 ```
 
+<<<<<<< HEAD
 All referenced icon files exist in `src-tauri/icons/` directory and are properly bundled into the production app.
+=======
+All referenced icon files exist in `src-tauri/icons/` directory.
 
-## How Sound Bundling Works
+## Fix Applied
 
-1. **Development**: Sounds are served from `public/sounds/` via Vite dev server
-2. **Production**: Sounds are bundled into the app resources and accessed via:
-   ```rust
-   let resource_path = app.path().resource_dir()?;
-   let full_path = resource_path.join("public").join(&file_path);
-   ```
+### Updated `src-tauri/tauri.conf.json`
+```json
+{
+  "bundle": {
+    "resources": [
+      "../tauri-plugin-voice-transcription/models/*",
+      "../public/sounds/**/*",
+      "Info.plist"
+    ]
+  }
+}
+```
+>>>>>>> e8b1e5a10cae80c3232e5f10193284ce2711ef07
 
+### Updated `src-tauri/src/commands/sound.rs`
+Fixed the `play_sound_file` function to access bundled resources correctly:
+
+```rust
+// Before (incorrect):
+let full_path = resource_path.join("public").join(&file_path);
+
+<<<<<<< HEAD
 ## How Icon Bundling Works
 
 1. **Development**: Icon files are available in `src-tauri/icons/`
@@ -163,29 +193,55 @@ public/sounds/
     ├── 02 Alerts and Notifications/
     ├── 03 Primary System Sounds/
     └── 04 Secondary System Sounds/
+=======
+// After (correct):
+let full_path = resource_path.join(&file_path);
+>>>>>>> e8b1e5a10cae80c3232e5f10193284ce2711ef07
 ```
 
-## Platform-Specific Audio Handling
+## Testing
 
-- **macOS**: Uses `.caf` files with `afplay` command
-- **Windows**: Uses `.ogg` files with PowerShell SoundPlayer
-- **Linux**: Uses `.ogg` files with various audio players (paplay, aplay, mpg123, ffplay)
+To test the fix:
+1. Build the production app: `npm run tauri build`
+2. Run the built app and try playing sounds
+3. Sounds should now work correctly in the production build
 
+<<<<<<< HEAD
 ## Verification Commands
 
 ```bash
 # Verify bundle includes sounds and icons
+=======
+## How Tauri Resource Bundling Works
+
+When you specify `"../public/sounds/**/*"` in `bundle.resources`:
+- Source: `public/sounds/caf/hero_simple-celebration-01.caf`
+- Bundled as: `sounds/caf/hero_simple-celebration-01.caf` (in the app's resource directory)
+- The "public" prefix is automatically stripped during bundling
+
+This is why the sound loading code needed to be updated to not include the "public" prefix when accessing bundled resources.
+
+## Verification Commands
+
+```bash
+# Verify project compiles
+>>>>>>> e8b1e5a10cae80c3232e5f10193284ce2711ef07
 cargo check --manifest-path src-tauri/Cargo.toml
 
-# Build and test
+# Build for production
 bun run tauri build
 
+<<<<<<< HEAD
 # Check if sounds are in the built app resources
 # macOS: ls -la "src-tauri/target/release/bundle/macos/Juno.app/Contents/Resources/public/sounds/"
 
 # Check if icon is properly configured
 # macOS: cat "src-tauri/target/release/bundle/macos/Juno.app/Contents/Info.plist" | grep CFBundleIconFile
 # macOS: ls -la "src-tauri/target/release/bundle/macos/Juno.app/Contents/Resources/icon.icns"
+=======
+# Test the built app
+./src-tauri/target/release/bundle/macos/Juno.app/Contents/MacOS/Juno
+>>>>>>> e8b1e5a10cae80c3232e5f10193284ce2711ef07
 ```
 
 Both fixes ensure that sounds and icons are properly bundled and accessible in production builds across all supported platforms.
