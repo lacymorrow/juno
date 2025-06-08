@@ -149,21 +149,33 @@ pub async fn play_sound_file(
     if let Ok(resource_path) = app.path().resource_dir() {
         info!("Resource directory: {:?}", resource_path);
 
-        let bundled_path = resource_path.join(&file_path);
-        let alt_bundled_path = if file_path.starts_with("sounds/") {
-            resource_path.join(&file_path[7..]) // Remove "sounds/" prefix
-        } else {
-            resource_path.join(&file_path)
-        };
+        // Try multiple possible paths in the bundled resources
+        let possible_paths = vec![
+            // Primary bundled path in production builds (_up_ directory)
+            resource_path.join("_up_").join("public").join(&file_path),    // resources/_up_/public/sounds/caf/...
+            resource_path.join("_up_").join(&file_path),                   // resources/_up_/sounds/caf/...
+            // Legacy paths for development and backward compatibility
+            resource_path.join(&file_path),                                // Direct path: resources/sounds/caf/...
+            resource_path.join("sounds").join(&file_path),                 // With sounds prefix: resources/sounds/sounds/caf/...
+            if file_path.starts_with("sounds/") {
+                resource_path.join(&file_path[7..])                        // Remove "sounds/" prefix: resources/caf/...
+            } else {
+                resource_path.join(&file_path)
+            },
+            // Try with different sound directory structures
+            resource_path.join("public").join(&file_path),                 // resources/public/sounds/caf/...
+            resource_path.join("dist").join(&file_path),                   // resources/dist/sounds/caf/...
+        ];
 
-        if bundled_path.exists() {
-            info!("Found sound in bundled resources: {:?}", bundled_path);
-            final_path = Some(bundled_path);
-            found_path = Some(file_path.clone());
-        } else if alt_bundled_path != bundled_path && alt_bundled_path.exists() {
-            info!("Found sound in bundled resources (alt path): {:?}", alt_bundled_path);
-            final_path = Some(alt_bundled_path);
-            found_path = Some(file_path[7..].to_string());
+        for test_path in possible_paths.iter() {
+            if test_path.exists() {
+                info!("Found sound in bundled resources: {:?}", test_path);
+                final_path = Some(test_path.clone());
+                found_path = Some(file_path.clone());
+                break;
+            } else {
+                info!("Checked bundled path (not found): {:?}", test_path);
+            }
         }
     }
 

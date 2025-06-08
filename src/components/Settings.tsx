@@ -118,7 +118,7 @@ const Settings: React.FC<SettingsProps> = ({
   onNavigateToPermissions,
 }) => {
   // TTS Settings
-  const [ttsProvider, setTtsProvider] = useState<string>("off");
+  const [ttsProvider, setTtsProvider] = useState<string>("system");
 
   // AI Provider Settings
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -138,9 +138,13 @@ const Settings: React.FC<SettingsProps> = ({
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
   // Always Listening Settings
-  const [alwaysListeningActive, setAlwaysListeningActive] = useState<boolean>(false);
-  const [alwaysListeningSensitivity, setAlwaysListeningSensitivity] = useState<number>(0.5);
-  const [alwaysListeningWakeWords, setAlwaysListeningWakeWords] = useState<string[]>(["hey juno", "computer"]);
+  const [alwaysListeningActive, setAlwaysListeningActive] =
+    useState<boolean>(false);
+  const [alwaysListeningSensitivity, setAlwaysListeningSensitivity] =
+    useState<number>(0.5);
+  const [alwaysListeningWakeWords, setAlwaysListeningWakeWords] = useState<
+    string[]
+  >(["hey juno", "computer"]);
   const [wakeWordsInput, setWakeWordsInput] = useState<string>("");
 
   // Tool Configuration Settings
@@ -231,13 +235,19 @@ const Settings: React.FC<SettingsProps> = ({
       setSoundEnabled(currentSoundEnabled);
 
       // Load always listening settings
-      const alwaysListeningStatus = await invoke<boolean>("get_always_listening_status");
+      const alwaysListeningStatus = await invoke<boolean>(
+        "get_always_listening_status"
+      );
       setAlwaysListeningActive(alwaysListeningStatus);
 
-      const sensitivity = await invoke<number>("get_always_listening_sensitivity");
+      const sensitivity = await invoke<number>(
+        "get_always_listening_sensitivity"
+      );
       setAlwaysListeningSensitivity(sensitivity);
 
-      const wakeWords = await invoke<string[]>("get_always_listening_wake_words");
+      const wakeWords = await invoke<string[]>(
+        "get_always_listening_wake_words"
+      );
       setAlwaysListeningWakeWords(wakeWords);
       setWakeWordsInput(wakeWords.join(", "));
 
@@ -590,8 +600,8 @@ const Settings: React.FC<SettingsProps> = ({
     try {
       const wakeWords = wakeWordsInput
         .split(",")
-        .map(word => word.trim())
-        .filter(word => word.length > 0);
+        .map((word) => word.trim())
+        .filter((word) => word.length > 0);
 
       await invoke("set_always_listening_wake_words", { wakeWords });
       setAlwaysListeningWakeWords(wakeWords);
@@ -871,7 +881,9 @@ const Settings: React.FC<SettingsProps> = ({
                 <Button
                   variant={alwaysListeningActive ? "default" : "outline"}
                   size="sm"
-                  onClick={() => handleAlwaysListeningToggle(!alwaysListeningActive)}
+                  onClick={() =>
+                    handleAlwaysListeningToggle(!alwaysListeningActive)
+                  }
                   className="min-w-[80px]"
                 >
                   {alwaysListeningActive ? "Active" : "Inactive"}
@@ -881,14 +893,17 @@ const Settings: React.FC<SettingsProps> = ({
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">
-                When enabled, Juno will continuously listen for wake words like "hey juno" or "computer" to activate the AI assistant.
+                When enabled, Juno will continuously listen for wake words like
+                "hey juno" or "computer" to activate the AI assistant.
               </p>
             </div>
 
             {alwaysListeningActive && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="sensitivity">Sensitivity ({alwaysListeningSensitivity.toFixed(1)})</Label>
+                  <Label htmlFor="sensitivity">
+                    Sensitivity ({alwaysListeningSensitivity.toFixed(1)})
+                  </Label>
                   <div className="flex items-center gap-3">
                     <input
                       type="range"
@@ -896,17 +911,24 @@ const Settings: React.FC<SettingsProps> = ({
                       max="2.0"
                       step="0.1"
                       value={alwaysListeningSensitivity}
-                      onChange={(e) => handleSensitivityChange(parseFloat(e.target.value))}
+                      onChange={(e) =>
+                        handleSensitivityChange(parseFloat(e.target.value))
+                      }
                       className="flex-1"
                     />
                     <span className="text-sm text-muted-foreground min-w-[100px]">
-                      {alwaysListeningSensitivity < 0.5 ? "Very Sensitive" :
-                       alwaysListeningSensitivity < 1.0 ? "Normal" :
-                       alwaysListeningSensitivity < 1.5 ? "Less Sensitive" : "Very Low"}
+                      {alwaysListeningSensitivity < 0.5
+                        ? "Very Sensitive"
+                        : alwaysListeningSensitivity < 1.0
+                        ? "Normal"
+                        : alwaysListeningSensitivity < 1.5
+                        ? "Less Sensitive"
+                        : "Very Low"}
                     </span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Lower values make the system more sensitive to quiet sounds. Higher values require louder speech.
+                    Lower values make the system more sensitive to quiet sounds.
+                    Higher values require louder speech.
                   </p>
                 </div>
 
@@ -929,7 +951,8 @@ const Settings: React.FC<SettingsProps> = ({
                     </Button>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Comma-separated list of phrases that will activate the assistant. Current: {alwaysListeningWakeWords.join(", ")}
+                    Comma-separated list of phrases that will activate the
+                    assistant. Current: {alwaysListeningWakeWords.join(", ")}
                   </p>
                 </div>
               </>
