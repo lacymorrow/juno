@@ -3,7 +3,6 @@
 // Import necessary external crates and standard library items
 use clap::Parser;
 use computer_use_ai_sdk::Desktop;
-use dotenvy::dotenv;
 use std::env;
 use std::sync::Arc;
 use tauri::{
@@ -172,6 +171,156 @@ use commands::cloud::{
     execute_remote_command, get_cloud_connection_diagnostics,
 };
 
+/// Enhanced environment variable loading for both development and production builds
+fn load_environment_variables() {
+    // Try to load from current directory first (development)
+    match dotenvy::dotenv() {
+        Ok(path) => {
+            info!("Loaded environment variables from: {:?}", path);
+        }
+        Err(_) => {
+            // Try to load from common production locations
+            let mut potential_paths = vec![
+                std::path::PathBuf::from("./.env"),
+                std::path::PathBuf::from("../.env"),
+                std::path::PathBuf::from("../../.env"),
+            ];
+
+            // Add executable directory if available
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(parent) = exe.parent() {
+                    potential_paths.push(parent.join(".env"));
+                }
+            }
+
+            let mut loaded = false;
+            for path in potential_paths.iter() {
+                if path.exists() {
+                    match dotenvy::from_path(path) {
+                        Ok(_) => {
+                            info!("Loaded environment variables from: {:?}", path);
+                            loaded = true;
+                            break;
+                        }
+                        Err(e) => {
+                            warn!("Failed to load .env from {:?}: {}", path, e);
+                        }
+                    }
+                }
+            }
+
+            if !loaded {
+                warn!("No .env file found in any expected location");
+                info!("Environment variables will be loaded from system environment");
+            }
+        }
+    }
+
+    // Validate critical environment variables
+    validate_environment_variables();
+}
+
+/// Load environment variables from bundled .env file in production
+#[tauri::command]
+async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
+    match app.path().resource_dir() {
+        Ok(resource_dir) => {
+            // In production, the .env file is bundled in the _up_ directory
+            let bundled_env_path = resource_dir.join("_up_").join(".env");
+
+            if bundled_env_path.exists() {
+                match dotenvy::from_path(&bundled_env_path) {
+                    Ok(_) => {
+                        info!("Successfully loaded environment variables from bundled .env file: {:?}", bundled_env_path);
+                        validate_environment_variables();
+                        Ok(format!("Environment variables loaded from: {:?}", bundled_env_path))
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to load bundled .env file: {}", e);
+                        error!("{}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            } else {
+                let error_msg = format!("Bundled .env file not found at: {:?}", bundled_env_path);
+                warn!("{}", error_msg);
+                Err(error_msg)
+            }
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to get resource directory: {}", e);
+            error!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+/// Helper function to try getting app handle in early initialization
+fn try_get_app_handle() -> Option<AppHandle> {
+    // This will be None during early initialization, which is expected
+    None
+}
+
+/// Validate that critical environment variables are available
+fn validate_environment_variables() {
+    let critical_vars = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "ELEVENLABS_API_KEY",
+        "GEMINI_API_KEY",
+    ];
+
+    let mut missing_vars = Vec::new();
+
+    for var in critical_vars.iter() {
+        if env::var(var).is_err() {
+            missing_vars.push(*var);
+        }
+    }
+
+    if !missing_vars.is_empty() {
+        warn!("Missing environment variables: {:?}", missing_vars);
+        warn!("Some AI provider features may not work without proper API keys");
+        info!("You can set these in a .env file or as system environment variables");
+    } else {
+        info!("All critical environment variables are available");
+    }
+}
+
+/// Test environment variable loading (for debugging)
+#[tauri::command]
+async fn test_environment_variables() -> Result<serde_json::Value, String> {
+    let mut result = serde_json::Map::new();
+
+    // Test critical environment variables
+    let env_vars = [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "ELEVENLABS_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "GEMINI_API_KEY"
+    ];
+
+    for var_name in &env_vars {
+        match std::env::var(var_name) {
+            Ok(value) => {
+                // Only show first 8 characters for security
+                let masked_value = if value.len() > 8 {
+                    format!("{}...", &value[..8])
+                } else {
+                    "***".to_string()
+                };
+                result.insert(var_name.to_string(), serde_json::Value::String(masked_value));
+            }
+            Err(_) => {
+                result.insert(var_name.to_string(), serde_json::Value::String("NOT_SET".to_string()));
+            }
+        }
+    }
+
+    Ok(serde_json::Value::Object(result))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize enhanced tracing with Slack/Apple Messages style formatting
@@ -182,7 +331,10 @@ pub fn run() {
         .with_ansi(true) // Enable colors for better readability
         .compact() // Use compact format instead of full
         .init();
-    dotenv().ok();
+
+    // Enhanced environment loading for both development and production
+    load_environment_variables();
+
     let cli = cli::Cli::parse();
 
     // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
@@ -558,9 +710,23 @@ pub fn run() {
             set_audio_level_monitoring,
             test_whisper_model,
             force_transcription_test,
+            // Environment Commands
+            load_bundled_environment,
+            test_environment_variables,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
+
+            // --- Load Environment Variables from Bundled Resources ---
+            let env_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = load_bundled_environment(env_app_handle).await {
+                    tracing::warn!("Failed to load bundled environment: {}", e);
+                    tracing::info!("Using environment variables from system environment or development .env file");
+                } else {
+                    tracing::info!("Successfully loaded environment variables from bundled resources");
+                }
+            });
 
             // --- Load Keyboard Shortcuts from Configuration ---
             let shortcuts_app_handle = app_handle.clone();
