@@ -142,42 +142,74 @@ pub async fn play_sound_file(
         });
     }
 
-    // For Tauri v2, we can use the asset protocol or direct file system access
-    // First, let's try to resolve the path relative to the app's public directory
+    // For Tauri v2, bundled resources are accessed directly from the resource directory
+    // When we bundle "../public/sounds/**/*", the files are copied to "sounds/" in the resource dir
     let resource_path = app.path().resource_dir()
         .map_err(|e| format!("Failed to get resource directory: {}", e))?;
 
-    let full_path = resource_path.join("public").join(&file_path);
+    // Debug: Log resource directory and what it contains
+    info!("Resource directory: {:?}", resource_path);
+    if let Ok(entries) = std::fs::read_dir(&resource_path) {
+        info!("Resource directory contents:");
+        for entry in entries {
+            if let Ok(entry) = entry {
+                info!("  - {:?}", entry.path());
+            }
+        }
+    }
 
-    if !full_path.exists() {
-        let error_msg = format!("Sound file does not exist: {}", full_path.display());
+    let full_path = resource_path.join(&file_path);
+    info!("Trying to access sound file at: {:?}", full_path);
+
+    // Also try without the leading "sounds/" prefix in case the bundling strips it
+    let alt_path = if file_path.starts_with("sounds/") {
+        resource_path.join(&file_path[7..]) // Remove "sounds/" prefix
+    } else {
+        resource_path.join(&file_path)
+    };
+    info!("Alternative path (without sounds/ prefix): {:?}", alt_path);
+
+    // Check which path exists
+    let (final_path, found_path) = if full_path.exists() {
+        (full_path, file_path.clone())
+    } else if alt_path != full_path && alt_path.exists() {
+        info!("Original path not found, using alternative path");
+        (alt_path, file_path[7..].to_string())
+    } else {
+        let error_msg = format!(
+            "Sound file does not exist at either:\n  1. {}\n  2. {}", 
+            full_path.display(), 
+            alt_path.display()
+        );
         error!("{}", error_msg);
         return Ok(SoundPlayResult {
             success: false,
             message: error_msg,
             file_path: Some(file_path),
         });
-    }
+    };
+
+    info!("Playing sound from: {:?}", final_path);
 
     // For now, we'll use the system's default audio player
     // In a production app, you might want to use a more sophisticated audio library
-    match play_audio_file(&full_path) {
+    match play_audio_file(&final_path) {
         Ok(_) => {
-            let success_msg = format!("Successfully played sound: {}", file_path);
+            let success_msg = format!("Successfully played sound: {}", found_path);
             info!("{}", success_msg);
             Ok(SoundPlayResult {
                 success: true,
                 message: success_msg,
-                file_path: Some(file_path),
+                file_path: Some(found_path),
             })
         }
         Err(e) => {
-            let error_msg = format!("Failed to play sound {}: {}", file_path, e);
+            let error_msg = format!("Failed to play sound {}: {}", found_path, e);
             error!("{}", error_msg);
             Ok(SoundPlayResult {
                 success: false,
                 message: error_msg,
-                file_path: Some(file_path),
+                file_path: Some(found_path),
             })
         }
     }
