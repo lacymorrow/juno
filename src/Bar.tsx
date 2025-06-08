@@ -53,7 +53,6 @@ export function FloatingBar() {
   const [_isAgentWorking, setIsAgentWorking] = useState(false);
   const [_isDictationMode, setIsDictationMode] = useState(false);
   const [isWindowHovered, setIsWindowHovered] = useState(false);
-  const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Update window size based on bar state
@@ -88,16 +87,6 @@ export function FloatingBar() {
       }
     };
     resizeWindow();
-  }, [barState]);
-
-  // Handle animation state for conditional backdrop-blur
-  useEffect(() => {
-    console.log("Bar state changed to:", barState);
-    if (barState === "expanding" || barState === "shrinking") {
-      setIsAnimatingSize(true);
-    } else {
-      setIsAnimatingSize(false);
-    }
   }, [barState]);
 
   // Listen for backend state updates
