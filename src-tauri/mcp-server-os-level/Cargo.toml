@@ -20,6 +20,7 @@ chrono = "0.4"
 dotenvy = "0.15"
 reqwest = { version = "0.12", features = ["json"] }
 base64 = "0.22.1"
+arboard = "3.4.1"
 
 # Server dependencies
 axum = "0.6.20"
@@ -39,8 +40,8 @@ image = { version = "0.25.1", features = ["png"] }
 libc = "0.2"
 objc = "0.2.7"
 
-# Add clipboard crate back
-clipboard_macos = "0.1.0"
+# Clipboard functionality now implemented using arboard (cross-platform, modern)
+# objc still needed for other platform interactions
 
 # Add Windows dependencies if needed
 [target.'cfg(target_os = "windows")'.dependencies]
