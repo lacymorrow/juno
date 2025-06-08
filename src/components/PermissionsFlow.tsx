@@ -58,6 +58,7 @@ export function PermissionsFlow({
     string | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [skipped, setSkipped] = useState(false);
 
   // Check permissions status with optional auto-redirect
   const checkPermissions = async (useAutoRedirect = false) => {
@@ -246,6 +247,26 @@ export function PermissionsFlow({
     }
   };
 
+  // Stop monitoring permissions changes
+  const stopMonitoring = async () => {
+    try {
+      await invoke("stop_permissions_monitoring");
+    } catch (err) {
+      console.error("Error stopping permissions monitoring:", err);
+    }
+  };
+
+  // Handle skip with proper cleanup
+  const handleSkip = async () => {
+    setSkipped(true);
+    console.log("⚠️ [DEBUG] Starting handleSkip - stopping monitoring...");
+    await stopMonitoring();
+    console.log("⚠️ [DEBUG] Monitoring stopped, calling onSkip...");
+    if (onSkip) {
+      onSkip();
+    }
+  };
+
   // Set up permissions monitoring
   useEffect(() => {
     let unlistenPermissions: (() => void) | undefined;
@@ -274,6 +295,14 @@ export function PermissionsFlow({
     setupListeners();
 
     return () => {
+      // Cleanup: stop monitoring and remove event listener
+      // Since cleanup function cannot be async, we don't await but still call the async function
+      stopMonitoring().catch((err) => {
+        console.error(
+          "Error stopping permissions monitoring during cleanup:",
+          err
+        );
+      });
       unlistenPermissions?.();
     };
   }, [onComplete, autoRedirectEnabled]);
@@ -575,7 +604,7 @@ export function PermissionsFlow({
       {/* Skip Option */}
       {showSkipOption && !permissions.allGranted && onSkip && (
         <div className="text-center">
-          <Button variant="ghost" onClick={onSkip} size="sm">
+          <Button variant="ghost" onClick={handleSkip} size="sm">
             Skip for now (some features may not work)
           </Button>
         </div>
