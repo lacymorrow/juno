@@ -20,7 +20,7 @@ pub(crate) async fn dev_get_focused_element_info(app: tauri::AppHandle, _state: 
     let result = get_focused_element_ns_workspace(false, true);
 
     #[cfg(not(target_os = "macos"))]
-    let result: Result<computer_use_ai_sdk::UIElement, AutomationError> = Err(AutomationError::UnsupportedPlatform);
+    let result: Result<computer_use_ai_sdk::UIElement, AutomationError> = Err(AutomationError::UnsupportedPlatform("macOS specific functionality not available on this platform".to_string()));
 
     match result {
         Ok(element) => {
@@ -144,7 +144,7 @@ pub(crate) async fn dev_click_focused_element(
 
     #[cfg(not(target_os = "macos"))]
     {
-        Err(AutomationError::UnsupportedPlatform.to_string())
+        Err(AutomationError::UnsupportedPlatform("macOS specific functionality not available on this platform".to_string()).to_string())
     }
 }
 
