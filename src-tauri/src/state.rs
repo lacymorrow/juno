@@ -123,6 +123,9 @@ pub struct AppState {
     pub always_listening_active: Arc<Mutex<bool>>, // Track if Always Listening Mode is active
     pub always_listening_sensitivity: Arc<Mutex<f32>>, // Sensitivity threshold for activation
     pub always_listening_wake_words: Arc<Mutex<Vec<String>>>, // Configurable wake words
+    // Agent execution status tracking
+    pub agent_execution_active: Arc<Mutex<bool>>, // Track if an agent is currently executing
+    pub agent_execution_id: Arc<Mutex<Option<String>>>, // Track the current agent execution ID
 }
 
 impl AppState {
@@ -166,6 +169,9 @@ impl AppState {
             always_listening_active: Arc::new(Mutex::new(false)),
             always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
             always_listening_wake_words: Arc::new(Mutex::new(vec!["hey juno".to_string(), "computer".to_string()])),
+            // Initialize agent execution status tracking
+            agent_execution_active: Arc::new(Mutex::new(false)),
+            agent_execution_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -188,6 +194,44 @@ impl AppState {
         } else {
             log::info!("[AppState] reset_cancel: No reset needed (already false).");
         }
+    }
+
+    // Method to mark agent execution as started
+    pub fn mark_agent_execution_started(&self, execution_id: String) {
+        {
+            let mut active_guard = self.agent_execution_active.lock().unwrap();
+            *active_guard = true;
+        }
+        {
+            let mut id_guard = self.agent_execution_id.lock().unwrap();
+            *id_guard = Some(execution_id.clone());
+        }
+        log::info!("[AppState] Agent execution started with ID: {}", execution_id);
+    }
+
+    // Method to mark agent execution as finished
+    pub fn mark_agent_execution_finished(&self) {
+        {
+            let mut active_guard = self.agent_execution_active.lock().unwrap();
+            *active_guard = false;
+        }
+        {
+            let mut id_guard = self.agent_execution_id.lock().unwrap();
+            let execution_id = id_guard.take();
+            log::info!("[AppState] Agent execution finished for ID: {:?}", execution_id);
+        }
+    }
+
+    // Method to check if an agent is currently executing
+    pub fn is_agent_executing(&self) -> bool {
+        let active_guard = self.agent_execution_active.lock().unwrap();
+        *active_guard
+    }
+
+    // Method to get the current agent execution ID
+    pub fn get_current_agent_execution_id(&self) -> Option<String> {
+        let id_guard = self.agent_execution_id.lock().unwrap();
+        id_guard.clone()
     }
 
     // Method to get or initialize the Playwright driver
