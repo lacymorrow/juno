@@ -610,8 +610,7 @@ function App() {
 
         if (error) {
           console.error("Dictation error:", error);
-          // Play error sound for failed transcription
-          voiceSounds.playVoiceError().catch(console.error);
+          // Voice error sound is now played by the backend when transcription fails
           // Optionally, display this error to the user in the chat or via a notification
           setConversation((prev) => [
             ...prev,
@@ -653,16 +652,10 @@ function App() {
         const isNowDictating = await toggleDictation();
         console.log("Toggled dictation, now dictating:", isNowDictating);
 
-        // Play appropriate sound based on dictation state
-        if (isNowDictating) {
-          voiceSounds.playVoiceStart().catch(console.error);
-        } else {
-          voiceSounds.playVoiceEnd().catch(console.error);
-        }
+        // Voice start/end sounds are now played by the backend automatically
       } catch (error) {
         console.error("Failed to toggle dictation:", error);
-        // Play error sound for failed toggle
-        sound.playError().catch(console.error);
+        // Error sound for failed toggle is now played by the backend
         setConversation((prev) => [
           ...prev,
           {
@@ -1104,7 +1097,10 @@ function App() {
               className="flex-grow rounded-lg border overflow-hidden"
             >
               {/* Chat Panel */}
-              <ResizablePanel defaultSize={isDevPanelOpen ? 50 : 100} minSize={30}>
+              <ResizablePanel
+                defaultSize={isDevPanelOpen ? 50 : 100}
+                minSize={30}
+              >
                 <div className="flex flex-col h-full p-4">
                   {/* Conversation Area */}
                   <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
