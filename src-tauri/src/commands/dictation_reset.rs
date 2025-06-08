@@ -93,3 +93,24 @@ pub async fn get_dictation_transcription_status(
     info!("[Command] Dictation transcription status: {}", status);
     Ok(status)
 }
+
+/// Emergency cleanup for stuck dictation state (callable from frontend)
+#[tauri::command]
+pub async fn emergency_cleanup_dictation_state(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    warn!("[Command] emergency_cleanup_dictation_state called - performing comprehensive cleanup");
+
+    // Use the comprehensive emergency cleanup function from dictation_monitor
+    match crate::dictation_monitor::emergency_cleanup_dictation_state(&app).await {
+        Ok(()) => {
+            info!("[Command] Emergency cleanup completed successfully");
+            Ok("Emergency cleanup completed successfully".to_string())
+        }
+        Err(e) => {
+            error!("[Command] Emergency cleanup failed: {}", e);
+            Err(format!("Emergency cleanup failed: {}", e))
+        }
+    }
+}
