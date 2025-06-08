@@ -509,13 +509,13 @@ function App() {
   useEffect(() => {
     const unlisten = listen("toggle-dev-panel-requested", () => {
       console.log("Toggle dev panel requested from menu");
-      setIsDevPanelOpen(!isDevPanelOpen);
+      setIsDevPanelOpen((current) => !current);
     });
 
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, [isDevPanelOpen]);
+  }, []); // Remove dependency to avoid stale closure
 
   // Listen for permissions requests
   useEffect(() => {

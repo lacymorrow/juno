@@ -75,6 +75,18 @@ export const CloudTestPanel: React.FC = () => {
   );
   const [isRunningTests, setIsRunningTests] = useState(false);
 
+  // Remote command state variables
+  const [remoteCommand, setRemoteCommand] = useState("system_command");
+  const [remotePayload, setRemotePayload] = useState(
+    '{"action": "screenshot"}'
+  );
+  const [remoteTestResults, setRemoteTestResults] = useState<TestResult[]>([]);
+  const [connectionDiagnostics, setConnectionDiagnostics] = useState<any>(null);
+
+  // Cloud configuration editing state
+  const [editingConfig, setEditingConfig] = useState(false);
+  const [configForm, setConfigForm] = useState<CloudConfig | null>(null);
+
   useEffect(() => {
     loadCloudStatus();
     loadCloudConfig();
@@ -94,6 +106,7 @@ export const CloudTestPanel: React.FC = () => {
     try {
       const config = await invoke<CloudConfig>("get_cloud_config");
       setCloudConfig(config);
+      setConfigForm(config); // Initialize form with current config
     } catch (error) {
       console.error("Failed to load cloud config:", error);
     }
@@ -290,6 +303,68 @@ export const CloudTestPanel: React.FC = () => {
     }
   };
 
+  const executeRemoteCommand = async () => {
+    setIsLoading(true);
+    try {
+      const payload = JSON.parse(remotePayload);
+      const result = await invoke<TestResult>("execute_remote_command", {
+        commandType: remoteCommand,
+        payload,
+      });
+      setRemoteTestResults((prev) => [result, ...prev]);
+    } catch (error) {
+      console.error("Remote command failed:", error);
+      setRemoteTestResults((prev) => [
+        {
+          success: false,
+          error: error as string,
+          timestamp: Date.now(),
+        },
+        ...prev,
+      ]);
+    }
+    setIsLoading(false);
+  };
+
+  const loadConnectionDiagnostics = async () => {
+    try {
+      setIsLoading(true);
+      const diagnostics = await invoke("get_cloud_connection_diagnostics");
+      setConnectionDiagnostics(diagnostics);
+    } catch (error) {
+      console.error("Failed to load connection diagnostics:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateCloudConfig = async () => {
+    if (!configForm) return;
+
+    setIsLoading(true);
+    try {
+      await invoke("update_cloud_config", {
+        enabled: configForm.enabled,
+        serverUrl: configForm.server_url,
+        deviceName: configForm.device_name,
+        securityLevel: configForm.security_level.toLowerCase(),
+        autoConnect: configForm.auto_connect,
+      });
+
+      // Reload config and status after update
+      await Promise.all([loadCloudConfig(), loadCloudStatus()]);
+      setEditingConfig(false);
+    } catch (error) {
+      console.error("Failed to update cloud config:", error);
+    }
+    setIsLoading(false);
+  };
+
+  const resetConfigForm = () => {
+    setConfigForm(cloudConfig);
+    setEditingConfig(false);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -308,9 +383,11 @@ export const CloudTestPanel: React.FC = () => {
       </div>
 
       <Tabs defaultValue="status" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="status">Status</TabsTrigger>
+          <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="testing">Testing</TabsTrigger>
+          <TabsTrigger value="remote">Remote</TabsTrigger>
           <TabsTrigger value="diagnostics">Diagnostics</TabsTrigger>
           <TabsTrigger value="results">Results</TabsTrigger>
         </TabsList>
@@ -381,6 +458,214 @@ export const CloudTestPanel: React.FC = () => {
                   Stop Connector
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="config" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                Cloud Configuration
+                {!editingConfig && (
+                  <Button
+                    onClick={() => setEditingConfig(true)}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Edit Config
+                  </Button>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Configure cloud connection settings including server URL
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {editingConfig && configForm ? (
+                <div className="space-y-4">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="enabled"
+                      checked={configForm.enabled}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          enabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <Label htmlFor="enabled">Enable Cloud Connectivity</Label>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="server-url">Server URL</Label>
+                    <Input
+                      id="server-url"
+                      value={configForm.server_url}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          server_url: e.target.value,
+                        })
+                      }
+                      placeholder="wss://your-cloud-server.com"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="device-name">Device Name</Label>
+                    <Input
+                      id="device-name"
+                      value={configForm.device_name}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          device_name: e.target.value,
+                        })
+                      }
+                      placeholder="My Device"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="security-level">Security Level</Label>
+                    <select
+                      id="security-level"
+                      value={configForm.security_level}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          security_level: e.target.value,
+                        })
+                      }
+                      className="w-full p-2 border rounded"
+                    >
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="auto-connect"
+                      checked={configForm.auto_connect}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          auto_connect: e.target.checked,
+                        })
+                      }
+                    />
+                    <Label htmlFor="auto-connect">Auto Connect</Label>
+                  </div>
+
+                  <div className="flex gap-2 pt-4">
+                    <Button
+                      onClick={updateCloudConfig}
+                      disabled={isLoading}
+                      className="flex-1"
+                    >
+                      {isLoading ? "Saving..." : "Save Configuration"}
+                    </Button>
+                    <Button
+                      onClick={resetConfigForm}
+                      variant="outline"
+                      className="flex-1"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                cloudConfig && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Enabled</Label>
+                        <Badge
+                          variant={
+                            cloudConfig.enabled ? "default" : "secondary"
+                          }
+                        >
+                          {cloudConfig.enabled ? "Yes" : "No"}
+                        </Badge>
+                      </div>
+                      <div>
+                        <Label>Auto Connect</Label>
+                        <Badge
+                          variant={
+                            cloudConfig.auto_connect ? "default" : "secondary"
+                          }
+                        >
+                          {cloudConfig.auto_connect ? "Yes" : "No"}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label>Server URL</Label>
+                      <p className="text-sm font-mono bg-gray-100 p-2 rounded">
+                        {cloudConfig.server_url}
+                      </p>
+                    </div>
+
+                    <div>
+                      <Label>Device Name</Label>
+                      <p className="text-sm">{cloudConfig.device_name}</p>
+                    </div>
+
+                    <div>
+                      <Label>Device ID</Label>
+                      <p className="text-sm font-mono">
+                        {cloudConfig.device_id || "Not generated"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <Label>Security Level</Label>
+                      <Badge variant="outline">
+                        {cloudConfig.security_level}
+                      </Badge>
+                    </div>
+                  </div>
+                )
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Device Management</CardTitle>
+              <CardDescription>
+                Manage device identity and authentication
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Button
+                onClick={async () => {
+                  try {
+                    setIsLoading(true);
+                    const newDeviceId = await invoke<string>(
+                      "generate_device_id"
+                    );
+                    await loadCloudConfig();
+                    console.log("Generated new device ID:", newDeviceId);
+                  } catch (error) {
+                    console.error("Failed to generate device ID:", error);
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
+                disabled={isLoading}
+                variant="outline"
+                className="w-full"
+              >
+                Generate New Device ID
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -479,6 +764,68 @@ export const CloudTestPanel: React.FC = () => {
 
           <Card>
             <CardHeader>
+              <CardTitle>Remote Command Test</CardTitle>
+              <CardDescription>
+                Test remote system commands (screenshot, click, type, etc.)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="remote-command-type">Command Type</Label>
+                <select
+                  id="remote-command-type"
+                  value={remoteCommand}
+                  onChange={(e) => setRemoteCommand(e.target.value)}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="system_command">System Command</option>
+                  <option value="text_query">Text Query</option>
+                  <option value="screenshot">Screenshot</option>
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="remote-payload">Payload (JSON)</Label>
+                <Textarea
+                  id="remote-payload"
+                  value={remotePayload}
+                  onChange={(e) => setRemotePayload(e.target.value)}
+                  rows={4}
+                  placeholder='{"action": "screenshot"}'
+                />
+              </div>
+              <div className="text-xs text-gray-600 space-y-1">
+                <p>
+                  <strong>Available actions:</strong>
+                </p>
+                <p>• screenshot - Take a screenshot</p>
+                <p>
+                  • click - Click at coordinates:{" "}
+                  {`{"action": "click", "x": 100, "y": 200}`}
+                </p>
+                <p>
+                  • type - Type text:{" "}
+                  {`{"action": "type", "text": "Hello World"}`}
+                </p>
+                <p>• key - Press key: {`{"action": "key", "key": "Return"}`}</p>
+                <p>
+                  • execute - Run shell command:{" "}
+                  {`{"action": "execute", "command": "ls -la"}`}
+                </p>
+                <p>• status - Get system status</p>
+              </div>
+              <Button
+                onClick={executeRemoteCommand}
+                disabled={isLoading}
+                className="w-full"
+              >
+                <Play className="h-4 w-4 mr-2" />
+                Execute Remote Command
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Comprehensive Test Suite</CardTitle>
               <CardDescription>Run all WebSocket tests at once</CardDescription>
             </CardHeader>
@@ -496,6 +843,134 @@ export const CloudTestPanel: React.FC = () => {
                 />
                 {isRunningTests ? "Running Tests..." : "Run Test Suite"}
               </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="remote" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Remote System Control</CardTitle>
+              <CardDescription>
+                Execute system commands remotely via cloud connection
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="remote-cmd-type">Command Type</Label>
+                <select
+                  id="remote-cmd-type"
+                  value={remoteCommand}
+                  onChange={(e) => setRemoteCommand(e.target.value)}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="system_command">System Command</option>
+                  <option value="text_query">Text Query</option>
+                  <option value="screenshot">Screenshot</option>
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="remote-cmd-payload">Command Payload</Label>
+                <Textarea
+                  id="remote-cmd-payload"
+                  value={remotePayload}
+                  onChange={(e) => setRemotePayload(e.target.value)}
+                  rows={6}
+                  placeholder='{"action": "screenshot"}'
+                />
+              </div>
+              <div className="text-xs text-gray-600 bg-gray-50 p-3 rounded space-y-1">
+                <p>
+                  <strong>System Command Examples:</strong>
+                </p>
+                <div className="grid grid-cols-1 gap-1 font-mono">
+                  <p>{`{"action": "screenshot"}`}</p>
+                  <p>{`{"action": "click", "x": 100, "y": 200}`}</p>
+                  <p>{`{"action": "type", "text": "Hello World"}`}</p>
+                  <p>{`{"action": "key", "key": "Return"}`}</p>
+                  <p>{`{"action": "execute", "command": "ls -la"}`}</p>
+                  <p>{`{"action": "status"}`}</p>
+                </div>
+              </div>
+              <Button
+                onClick={executeRemoteCommand}
+                disabled={isLoading}
+                className="w-full"
+              >
+                <Play className="h-4 w-4 mr-2" />
+                Execute Remote Command
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Remote Command Results</CardTitle>
+              <CardDescription>
+                History of remote command executions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-64">
+                {remoteTestResults.length > 0 ? (
+                  <div className="space-y-2">
+                    {remoteTestResults.map((result, index) => (
+                      <div
+                        key={index}
+                        className="p-3 border rounded-lg space-y-2"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {getTestResultIcon(result.success)}
+                            <span className="font-medium">
+                              {result.test || "Remote Command"}
+                            </span>
+                          </div>
+                          {result.timestamp && (
+                            <span className="text-xs text-gray-500">
+                              {new Date(result.timestamp).toLocaleTimeString()}
+                            </span>
+                          )}
+                        </div>
+
+                        {result.error && (
+                          <Alert>
+                            <AlertTriangle className="h-4 w-4" />
+                            <AlertDescription>{result.error}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {result.response && (
+                          <details className="text-xs">
+                            <summary className="cursor-pointer text-blue-600">
+                              View Response
+                            </summary>
+                            <pre className="bg-gray-100 p-2 rounded mt-2 overflow-auto">
+                              {JSON.stringify(result.response, null, 2)}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-center py-8">
+                    No remote command results yet. Execute commands to see
+                    results here.
+                  </p>
+                )}
+              </ScrollArea>
+
+              {remoteTestResults.length > 0 && (
+                <Button
+                  onClick={() => setRemoteTestResults([])}
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                >
+                  Clear Results
+                </Button>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -545,6 +1020,100 @@ export const CloudTestPanel: React.FC = () => {
                 </div>
               ) : (
                 <p className="text-gray-500">Loading diagnostics...</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                Cloud Connection Diagnostics
+                <Button
+                  onClick={loadConnectionDiagnostics}
+                  disabled={isLoading}
+                  size="sm"
+                  variant="outline"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 mr-2 ${
+                      isLoading ? "animate-spin" : ""
+                    }`}
+                  />
+                  Refresh
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {connectionDiagnostics ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Connection Active</Label>
+                      <Badge
+                        variant={
+                          connectionDiagnostics.connection_active
+                            ? "default"
+                            : "destructive"
+                        }
+                      >
+                        {connectionDiagnostics.connection_active ? "Yes" : "No"}
+                      </Badge>
+                    </div>
+                    <div>
+                      <Label>Last Heartbeat</Label>
+                      <p className="text-sm">
+                        {connectionDiagnostics.last_heartbeat || "None"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {connectionDiagnostics.performance_metrics && (
+                    <div className="pt-4 border-t">
+                      <Label>Performance Metrics</Label>
+                      <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                        {JSON.stringify(
+                          connectionDiagnostics.performance_metrics,
+                          null,
+                          2
+                        )}
+                      </pre>
+                    </div>
+                  )}
+
+                  {connectionDiagnostics.error_history &&
+                    connectionDiagnostics.error_history.length > 0 && (
+                      <div className="pt-4 border-t">
+                        <Label>Recent Errors</Label>
+                        <div className="space-y-2 mt-2">
+                          {connectionDiagnostics.error_history.map(
+                            (error: any, index: number) => (
+                              <Alert key={index}>
+                                <AlertTriangle className="h-4 w-4" />
+                                <AlertDescription>
+                                  <span className="text-xs text-gray-500">
+                                    {error.timestamp}
+                                  </span>
+                                  <br />
+                                  {error.message}
+                                </AlertDescription>
+                              </Alert>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                  <div className="pt-4 border-t">
+                    <Label>Full Diagnostics</Label>
+                    <pre className="text-xs bg-gray-100 p-2 rounded mt-2">
+                      {JSON.stringify(connectionDiagnostics, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-gray-500">
+                  No connection diagnostics available. Click refresh to load.
+                </p>
               )}
             </CardContent>
           </Card>

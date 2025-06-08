@@ -12,16 +12,47 @@ use core_graphics::event::{
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
-use clipboard_macos::Clipboard; // Import clipboard_macos
 use std::collections::HashMap;
 use tracing::{debug, warn};
 use std::thread;
 use std::time::Duration;
- // Import AXValueCreate
+// Removed objc imports - now using arboard for clipboard
+use arboard::Clipboard;
 
 // Define key code constants for keyboard shortcuts
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
 const KEYCODE_A: CGKeyCode = 0;    // 'A' key
+
+// Native clipboard implementation using arboard (modern, cross-platform)
+struct NativeClipboard {
+    clipboard: Clipboard,
+}
+
+impl NativeClipboard {
+    fn new() -> Result<Self, AutomationError> {
+        let clipboard = Clipboard::new().map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to initialize clipboard: {}", e))
+        })?;
+        Ok(NativeClipboard { clipboard })
+    }
+
+    fn read(&self) -> Result<String, AutomationError> {
+        // Create a new clipboard instance for reading since arboard methods take &mut self
+        let mut clipboard = Clipboard::new().map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to access clipboard for reading: {}", e))
+        })?;
+
+        clipboard.get_text().map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to read from clipboard: {}", e))
+        })
+    }
+
+    fn write(&mut self, content: String) -> Result<(), AutomationError> {
+        self.clipboard.set_text(content).map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to write to clipboard: {}", e))
+        })
+    }
+}
 
 // --- Moved from element.rs --- //
 
@@ -553,7 +584,7 @@ struct ClipboardGuard {
 
 impl ClipboardGuard {
     fn new() -> Result<Self, AutomationError> {
-        let original_content = match Clipboard::new() {
+        let original_content = match NativeClipboard::new() {
             Ok(clipboard) => clipboard.read().ok(), // Ignore read errors, proceed without restore maybe? Or error out? Let's ignore for now.
             Err(_) => None, // Ignore errors getting clipboard instance
         };
@@ -564,7 +595,7 @@ impl ClipboardGuard {
 impl Drop for ClipboardGuard {
     fn drop(&mut self) {
         if let Some(content) = &self.original_content {
-            match Clipboard::new() {
+            match NativeClipboard::new() {
                 Ok(mut clipboard) => {
                     if let Err(e) = clipboard.write(content.clone()) {
                         warn!("Failed to restore clipboard content: {:?}", e);
@@ -624,7 +655,7 @@ pub(crate) fn type_text(element: &MacOSUIElement, text: &str) -> Result<(), Auto
     let _guard = ClipboardGuard::new()?; // Restore clipboard automatically on scope exit
 
     // Set clipboard
-    match Clipboard::new() {
+    match NativeClipboard::new() {
         Ok(mut clipboard) => {
             if let Err(e) = clipboard.write(text.to_string()) {
                 return Err(AutomationError::PlatformError(format!(
@@ -682,7 +713,7 @@ pub(crate) fn type_text_global(text: &str) -> Result<(), AutomationError> {
     let _guard = ClipboardGuard::new()?; // Restore clipboard automatically
 
     // Set clipboard
-    match Clipboard::new() {
+    match NativeClipboard::new() {
         Ok(mut clipboard) => {
              if let Err(e) = clipboard.write(text.to_string()) {
                 return Err(AutomationError::PlatformError(format!(
@@ -1031,7 +1062,7 @@ pub(crate) fn select_text(element: &MacOSUIElement) -> Result<(), AutomationErro
 
 /// Gets the current text content from the system clipboard.
 pub(crate) fn get_clipboard_contents() -> Result<String, AutomationError> {
-    match Clipboard::new() {
+    match NativeClipboard::new() {
         Ok(clipboard) => match clipboard.read() {
             Ok(content) => {
                 if content.is_empty() {
@@ -1057,7 +1088,7 @@ pub(crate) fn get_clipboard_contents() -> Result<String, AutomationError> {
 
 /// Sets the system clipboard text content.
 pub(crate) fn set_clipboard_contents(text: &str) -> Result<(), AutomationError> {
-    match Clipboard::new() {
+    match NativeClipboard::new() {
         Ok(mut clipboard) => match clipboard.write(text.to_string()) {
             Ok(_) => {
                 debug!("Set clipboard content (length: {})", text.len());
