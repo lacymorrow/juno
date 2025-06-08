@@ -58,6 +58,7 @@ export function PermissionsFlow({
     string | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [skipped, setSkipped] = useState(false);
 
   // Check permissions status with optional auto-redirect
   const checkPermissions = async (useAutoRedirect = false) => {
@@ -257,7 +258,10 @@ export function PermissionsFlow({
 
   // Handle skip with proper cleanup
   const handleSkip = async () => {
+    setSkipped(true);
+    console.log("⚠️ [DEBUG] Starting handleSkip - stopping monitoring...");
     await stopMonitoring();
+    console.log("⚠️ [DEBUG] Monitoring stopped, calling onSkip...");
     if (onSkip) {
       onSkip();
     }
@@ -292,7 +296,13 @@ export function PermissionsFlow({
 
     return () => {
       // Cleanup: stop monitoring and remove event listener
-      stopMonitoring();
+      // Since cleanup function cannot be async, we don't await but still call the async function
+      stopMonitoring().catch((err) => {
+        console.error(
+          "Error stopping permissions monitoring during cleanup:",
+          err
+        );
+      });
       unlistenPermissions?.();
     };
   }, [onComplete, autoRedirectEnabled]);

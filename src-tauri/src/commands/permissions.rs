@@ -1,18 +1,13 @@
 // macOS permissions management for accessibility, screen recording, and microphone
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use crate::state::AppState;
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::permissions::{
-    check_accessibility_permissions, 
+    check_accessibility_permissions,
     check_accessibility_permissions_with_auto_redirect,
-    check_screen_recording_permissions, 
-    check_microphone_permissions, 
-    check_input_monitoring_permissions,
     open_system_settings_for_permission
 };
-use tauri::{AppHandle, Manager, Emitter};
+use tauri::{AppHandle, Emitter};
 use tracing::{info, warn, error, debug};
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -20,6 +15,8 @@ use tokio::task::JoinHandle;
 use std::sync::Arc;
 use lazy_static::lazy_static;
 use tauri::State;
+use tokio_util::sync::CancellationToken;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,8 +39,11 @@ pub struct PermissionsState {
     pub app_name: String,
 }
 
-// Global monitoring task storage
-type MonitoringTask = Arc<Mutex<Option<JoinHandle<()>>>>;
+// Global monitoring task handle for cleanup
+type MonitoringTask = Arc<Mutex<Option<(JoinHandle<()>, CancellationToken)>>>;
+
+// Global flag to track monitoring state
+static MONITORING_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 lazy_static! {
     static ref MONITORING_TASK: MonitoringTask = Arc::new(Mutex::new(None));
@@ -285,18 +285,46 @@ pub async fn open_system_settings_enhanced(permission_type: String) -> Result<()
 pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> {
     info!("Starting permissions monitoring");
 
+    // Check if monitoring is already active
+    if MONITORING_ACTIVE.load(Ordering::SeqCst) {
+        warn!("Permissions monitoring is already active, stopping existing task first");
+        stop_permissions_monitoring().await?;
+    }
+
     // First, stop any existing monitoring task
     stop_permissions_monitoring().await?;
+
+    // Set monitoring as active
+    MONITORING_ACTIVE.store(true, Ordering::SeqCst);
+
+    // Create a cancellation token for this monitoring session
+    let cancellation_token = CancellationToken::new();
+    let token_clone = cancellation_token.clone();
 
     let app_clone = app.clone();
     let monitoring_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         let mut last_state: Option<PermissionsState> = None;
 
+        debug!("Permissions monitoring task started");
+
         loop {
+            // Double-check monitoring is still active
+            if !MONITORING_ACTIVE.load(Ordering::SeqCst) {
+                info!("Monitoring deactivated via flag, stopping task");
+                break;
+            }
+
             // Use select! to allow task cancellation
             tokio::select! {
                 _ = interval.tick() => {
+                    // Check if we're still supposed to be monitoring
+                    if !MONITORING_ACTIVE.load(Ordering::SeqCst) {
+                        debug!("Monitoring flag cleared during tick, breaking loop");
+                        break;
+                    }
+
+                    debug!("Checking permissions status during monitoring");
                     match check_permissions_status(app_clone.clone()).await {
                         Ok(current_state) => {
                             // Check if state has changed
@@ -324,19 +352,22 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
                         }
                     }
                 }
-                // Task can be cancelled by dropping the JoinHandle
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
-                    // Check if task should continue (this allows for clean cancellation)
-                    // The task will be cancelled when the JoinHandle is dropped
+                _ = token_clone.cancelled() => {
+                    info!("Permissions monitoring task cancelled via token");
+                    break;
                 }
             }
         }
+
+        // Clear the monitoring flag when task finishes
+        MONITORING_ACTIVE.store(false, Ordering::SeqCst);
+        info!("Permissions monitoring task finished");
     });
 
-    // Store the task handle for later cancellation
+    // Store the task handle and cancellation token for later cancellation
     {
         let mut task_guard = MONITORING_TASK.lock().await;
-        *task_guard = Some(monitoring_task);
+        *task_guard = Some((monitoring_task, cancellation_token));
     }
 
     info!("Permissions monitoring started successfully");
@@ -348,18 +379,50 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
 pub async fn stop_permissions_monitoring() -> Result<(), String> {
     info!("Stopping permissions monitoring");
 
-    let task_handle = {
+    // First, clear the monitoring flag to signal the task to stop
+    let was_active = MONITORING_ACTIVE.swap(false, Ordering::SeqCst);
+    if !was_active {
+        debug!("Monitoring was not active, nothing to stop");
+        return Ok(());
+    }
+
+    let task_data = {
         let mut task_guard = MONITORING_TASK.lock().await;
         task_guard.take()
     };
 
-    if let Some(handle) = task_handle {
-        handle.abort();
-        info!("Permissions monitoring task cancelled");
+    if let Some((handle, token)) = task_data {
+        debug!("Stopping monitoring task with cancellation token");
+
+        // Cancel the token first for graceful shutdown
+        token.cancel();
+
+        // Give the task a moment to finish gracefully
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // If task is still running, abort it
+        if !handle.is_finished() {
+            warn!("Monitoring task still running after cancellation, forcefully aborting");
+            handle.abort();
+
+            // Wait a bit more for cleanup
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+            if handle.is_finished() {
+                info!("Permissions monitoring task forcefully aborted successfully");
+            } else {
+                error!("Failed to abort permissions monitoring task");
+            }
+        } else {
+            info!("Permissions monitoring task finished gracefully");
+        }
     } else {
-        debug!("No permissions monitoring task was running");
+        debug!("No permissions monitoring task handle was found");
     }
 
+    // Ensure the flag is cleared (redundant but safe)
+    MONITORING_ACTIVE.store(false, Ordering::SeqCst);
+    info!("Permissions monitoring stopped successfully");
     Ok(())
 }
 
