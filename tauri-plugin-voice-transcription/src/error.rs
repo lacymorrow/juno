@@ -5,6 +5,9 @@ pub enum Error {
     #[error("Voice controller not initialized")]
     NotInitialized,
 
+    #[error("Initialization error: {0}")]
+    InitializationError(String),
+
     #[error("Model not found: {0}")]
     ModelNotFound(String),
 
