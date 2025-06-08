@@ -504,6 +504,16 @@ pub fn run() {
                 if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
                     eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
                 }
+
+                // Immediately signal floating bar manager about cancellation for quick UI feedback
+                let app_handle_for_bar = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::commands::floating_bar::handle_backend_response(
+                        &app_handle_for_bar,
+                        "Cancelled",
+                        Some("Agent execution was cancelled via escape key.".to_string())
+                    ).await;
+                });
             }
 
             // Handle dictation toggle shortcut (Alt+D / Option+D)
