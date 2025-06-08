@@ -687,6 +687,8 @@ pub fn run() {
             // Environment Commands
             load_bundled_environment,
             test_environment_variables,
+            // TTS Commands
+            anthropic::handle_tts_completion,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
