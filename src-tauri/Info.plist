@@ -20,6 +20,26 @@
     <key>NSCameraUsageDescription</key>
     <string>Juno needs camera access for screen recording and visual analysis features.</string>
 
+    <!-- Input Monitoring permission (CRITICAL for global shortcuts) -->
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Juno needs input monitoring permissions to register global keyboard shortcuts for voice control and automation features.</string>
+
+    <!-- Screen capture permission -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Juno needs screen capture permissions to take screenshots and analyze the desktop for automation tasks.</string>
+
+    <!-- Desktop folder access -->
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Juno needs access to your Desktop folder to help with file operations and automation tasks.</string>
+
+    <!-- Documents folder access -->
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Juno needs access to your Documents folder to help with file operations and automation tasks.</string>
+
+    <!-- Downloads folder access -->
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Juno needs access to your Downloads folder to help with file operations and automation tasks.</string>
+
     <key>LSUIElement</key>
     <false/>
 

@@ -32,6 +32,7 @@ interface PermissionsState {
   accessibility: PermissionStatus;
   screenRecording: PermissionStatus;
   microphone: PermissionStatus;
+  inputMonitoring: PermissionStatus;
   allGranted: boolean;
   appName: string;
 }
@@ -462,6 +463,12 @@ export function PermissionsFlow({
         {renderPermissionCard(
           permissions.microphone,
           undefined // No enhanced version yet for microphone
+        )}
+
+        {/* Input Monitoring Permission */}
+        {renderPermissionCard(
+          permissions.inputMonitoring,
+          undefined // No enhanced version yet for input monitoring
         )}
       </div>
 

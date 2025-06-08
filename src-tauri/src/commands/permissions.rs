@@ -20,6 +20,7 @@ pub struct PermissionsState {
     pub accessibility: PermissionStatus,
     pub screen_recording: PermissionStatus,
     pub microphone: PermissionStatus,
+    pub input_monitoring: PermissionStatus,
     pub all_granted: bool,
     pub app_name: String,
 }
@@ -40,12 +41,19 @@ pub async fn check_permissions_status(app: AppHandle) -> Result<PermissionsState
     // Check microphone permissions
     let microphone = check_microphone_permission().await?;
 
-    let all_granted = accessibility.granted && screen_recording.granted && microphone.granted;
+    // Check input monitoring permissions (CRITICAL for global shortcuts)
+    let input_monitoring = check_input_monitoring_permission().await?;
+
+    let all_granted = accessibility.granted &&
+                     screen_recording.granted &&
+                     microphone.granted &&
+                     input_monitoring.granted;
 
     let permissions_state = PermissionsState {
         accessibility,
         screen_recording,
         microphone,
+        input_monitoring,
         all_granted,
         app_name,
     };
@@ -67,13 +75,18 @@ pub async fn check_permissions_status_with_auto_redirect(app: AppHandle, auto_op
     // Check other permissions (for now using standard checking, but could be enhanced similarly)
     let screen_recording = check_screen_recording_permission().await?;
     let microphone = check_microphone_permission().await?;
+    let input_monitoring = check_input_monitoring_permission().await?;
 
-    let all_granted = accessibility.granted && screen_recording.granted && microphone.granted;
+    let all_granted = accessibility.granted &&
+                     screen_recording.granted &&
+                     microphone.granted &&
+                     input_monitoring.granted;
 
     let permissions_state = PermissionsState {
         accessibility,
         screen_recording,
         microphone,
+        input_monitoring,
         all_granted,
         app_name,
     };
@@ -263,7 +276,8 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
                         Some(last) => {
                             last.accessibility.granted != current_state.accessibility.granted ||
                             last.screen_recording.granted != current_state.screen_recording.granted ||
-                            last.microphone.granted != current_state.microphone.granted
+                            last.microphone.granted != current_state.microphone.granted ||
+                            last.input_monitoring.granted != current_state.input_monitoring.granted
                         }
                         None => true, // First check
                     };
@@ -402,17 +416,10 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
                 // Log additional debugging information
                 info!("Bundle ID being checked: {}", bundle_id);
 
-                // For built apps, try a different approach - check if we can actually perform accessibility operations
-                match try_accessibility_test() {
-                    Ok(test_result) => {
-                        info!("Accessibility test operation result: {}", test_result);
-                        test_result
-                    },
-                    Err(test_err) => {
-                        warn!("Accessibility test operation failed: {}", test_err);
-                        false
-                    }
-                }
+                // Instead of trying to create a Desktop instance (which can segfault),
+                // we'll safely assume permissions are not granted if the check failed
+                warn!("Permission check failed, assuming permissions not granted");
+                false
             }
         };
 
@@ -434,37 +441,6 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
             description: "Not required on this platform".to_string(),
             instructions: "".to_string(),
         })
-    }
-}
-
-/// Test if accessibility operations actually work
-/// This provides a more reliable check for built apps
-#[cfg(target_os = "macos")]
-fn try_accessibility_test() -> Result<bool, String> {
-    use computer_use_ai_sdk::Desktop;
-
-    info!("Attempting accessibility test operation");
-
-    // Try to create a Desktop instance and perform a basic operation
-    // Parameters: use_background_apps: false, activate_app: false
-    match Desktop::new(false, false) {
-        Ok(desktop) => {
-            // Try to get the list of applications - this requires accessibility permissions
-            match desktop.applications() {
-                Ok(apps) => {
-                    info!("Accessibility test passed - found {} applications", apps.len());
-                    Ok(true)
-                },
-                Err(e) => {
-                    warn!("Accessibility test failed - could not list applications: {}", e);
-                    Ok(false)
-                }
-            }
-        },
-        Err(e) => {
-            warn!("Could not create Desktop instance for accessibility test: {}", e);
-            Ok(false)
-        }
     }
 }
 
@@ -572,6 +548,34 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
     {
         Ok(PermissionStatus {
             permission_type: "microphone".to_string(),
+            granted: true,
+            required: false,
+            description: "Not required on this platform".to_string(),
+            instructions: "".to_string(),
+        })
+    }
+}
+
+async fn check_input_monitoring_permission() -> Result<PermissionStatus, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // For input monitoring permissions, we would typically use HIDDevice APIs
+        // For now, we'll assume it's granted if the input monitoring plugin is working
+        let granted = true; // This would need proper implementation with CoreFoundation
+
+        Ok(PermissionStatus {
+            permission_type: "input_monitoring".to_string(),
+            granted,
+            required: true,
+            description: "Required for input monitoring features".to_string(),
+            instructions: "Go to System Preferences > Security & Privacy > Input Monitoring and add Juno".to_string(),
+        })
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(PermissionStatus {
+            permission_type: "input_monitoring".to_string(),
             granted: true,
             required: false,
             description: "Not required on this platform".to_string(),
