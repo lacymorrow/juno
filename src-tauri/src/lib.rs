@@ -619,6 +619,22 @@ pub fn run() {
             get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
+            // Voice Control Sound Commands
+            play_voice_start_sound,
+            play_voice_end_sound,
+            play_dictation_start_sound,
+            play_dictation_end_sound,
+            play_voice_error_sound,
+            // Agent Sound Commands
+            play_agent_start_sound,
+            play_agent_success_sound,
+            play_agent_error_sound,
+            play_agent_attention_sound,
+            // Boot and System Sound Commands
+            play_boot_sound,
+            play_system_ready_sound,
+            play_connection_sound,
+            play_disconnection_sound,
             // Tool Configuration Commands
             get_tool_configurations,
             get_tool_config,
@@ -1250,7 +1266,7 @@ pub fn run() {
 
                 let state = app_handle_for_boot_sound.state::<crate::state::AppState>();
                 let app_handle_clone = app_handle_for_boot_sound.clone();
-                if let Err(e) = crate::commands::sound::play_notification_sound(app_handle_clone, state).await {
+                if let Err(e) = crate::commands::sound::play_boot_sound(app_handle_clone, state).await {
                     warn!("Failed to play boot sound: {}", e);
                 } else {
                     info!("Boot sound played successfully from backend");
