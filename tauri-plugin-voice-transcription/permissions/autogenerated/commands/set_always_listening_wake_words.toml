@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-set-always-listening-wake-words"
+description = "Enables the set_always_listening_wake_words command without any pre-configured scope."
+commands.allow = ["set_always_listening_wake_words"]
+
+[[permission]]
+identifier = "deny-set-always-listening-wake-words"
+description = "Denies the set_always_listening_wake_words command without any pre-configured scope."
+commands.deny = ["set_always_listening_wake_words"]

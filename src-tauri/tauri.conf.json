@@ -47,9 +47,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["../tauri-plugin-voice-transcription/models/*"],
+    "resources": [
+      "../tauri-plugin-voice-transcription/models/*", 
+      "Info.plist",
+      "../public/sounds/**/*"
+    ],
     "macOS": {
-      "entitlements": "juno.entitlements"
+      "entitlements": "juno.entitlements",
+      "files": {
+        "Info.plist": "Info.plist"
+      }
     }
   }
 }

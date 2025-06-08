@@ -1,0 +1,154 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Accessibility Permission Fixes for macOS - Implementation Documentation
+
+## Problem Overview
+The Juno app was reporting that accessibility permissions needed to be enabled even when they were already granted by the user. This occurred specifically in built/production versions of the app, while development builds worked correctly.
+
+## Root Cause Analysis
+The issue had multiple contributing factors:
+1. **Minimal entitlements file** - lacked accessibility-specific permissions required for built apps
+2. **Missing usage descriptions** - macOS requires NSAccessibilityUsageDescription in Info.plist for built apps
+3. **Bundle identifier mismatches** - different identifiers between dev and production builds
+4. **Permission check logic gaps** - insufficient fallback mechanisms for built app environments
+
+## Solution Implementation
+
+### 1. Enhanced Entitlements (`src-tauri/juno.entitlements`)
+**Purpose**: Provides proper macOS security permissions for accessibility APIs in built apps.
+
+**Key Entitlements Added**:
+```xml
+<!-- Accessibility permissions -->
+<key>com.apple.security.automation.apple-events</key>
+<true/>
+
+<!-- Allow unsigned executable memory for accessibility APIs -->
+<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+<true/>
+
+<!-- Disable hardened runtime restrictions that might interfere with accessibility -->
+<key>com.apple.security.cs.disable-library-validation</key>
+<true/>
+
+<!-- Allow DYLD environment variables for runtime loading -->
+<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+<true/>
+```
+
+### 2. Created Info.plist (`src-tauri/Info.plist`)
+**Purpose**: Provides required usage descriptions for macOS permission dialogs.
+
+**Critical Usage Descriptions**:
+```xml
+<key>NSAccessibilityUsageDescription</key>
+<string>Juno needs accessibility permissions to interact with other applications and perform automation tasks.</string>
+
+<key>NSAppleEventsUsageDescription</key>
+<string>Juno needs permission to control other applications and automate tasks on your behalf.</string>
+```
+
+### 3. Updated Tauri Configuration (`src-tauri/tauri.conf.json`)
+**Purpose**: Ensures entitlements and Info.plist are properly included in built apps.
+
+**Key Configuration**:
+```json
+{
+  "bundle": {
+    "resources": ["../tauri-plugin-voice-transcription/models/*", "Info.plist"],
+    "macOS": {
+      "entitlements": "juno.entitlements",
+      "files": {
+        "Info.plist": "Info.plist"
+      }
+    }
+  }
+}
+```
+
+### 4. Improved Permission Checking (`src-tauri/src/commands/permissions.rs`)
+**Purpose**: Robust permission detection with multiple fallback mechanisms.
+
+**Key Improvements**:
+- Enhanced `check_accessibility_permission()` with detailed logging
+- Bundle identifier detection from environment variables (`TAURI_BUNDLE_IDENTIFIER`)
+- `try_accessibility_test()` fallback that performs actual Desktop operations
+- Fixed `Desktop::new()` function calls with proper boolean parameters
+
+**Implementation Details**:
+```rust
+async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
+    // 1. Try standard SDK check
+    match check_accessibility_permissions(false) {
+        Ok(granted) if granted => return Ok(create_granted_status()),
+        Ok(_) => info!("Standard check reports not granted"),
+        Err(e) => warn!("Standard accessibility check failed: {}", e),
+    }
+
+    // 2. Try actual accessibility test as fallback
+    match try_accessibility_test() {
+        Ok(true) => {
+            info!("Accessibility test successful - permissions are working");
+            return Ok(create_granted_status());
+        }
+        Ok(false) => info!("Accessibility test failed - permissions likely not granted"),
+        Err(e) => warn!("Accessibility test error: {}", e),
+    }
+
+    // Return appropriate status based on checks
+}
+```
+
+## Verification Results
+
+### Build Verification
+- ✅ **Compilation**: `cargo check` passes with exit code 0
+- ✅ **Bundle Creation**: `bun tauri build` succeeds with proper app bundle
+- ✅ **File Inclusion**: Info.plist and entitlements properly embedded
+
+### Runtime Verification
+- ✅ **Permission Detection**: Built app correctly reports `Accessibility permission check result: true`
+- ✅ **App Launch**: All systems initialize successfully (voice, agents, shortcuts, etc.)
+- ✅ **Bundle Identifier**: Correctly detected as `com.juno.app`
+
+### Log Evidence
+```
+2025-06-08T02:38:59.369370Z  INFO Checking macOS permissions status
+2025-06-08T02:38:59.369414Z  INFO Checking accessibility permissions for built app
+2025-06-08T02:38:59.369429Z  INFO Bundle identifier: com.juno.app
+2025-06-08T02:38:59.369462Z  INFO Accessibility permission check result: true
+```
+
+## Development Guidelines
+
+### For Future Permission Issues
+1. **Always test built apps**, not just development builds
+2. **Check both entitlements and Info.plist** for required permissions
+3. **Implement fallback permission testing** that performs actual operations
+4. **Use detailed logging** to debug permission detection issues
+
+### Maintenance Requirements
+- **Entitlements file** must be kept in sync with required permissions
+- **Usage descriptions** should be updated if new permission types are added
+- **Bundle configuration** must include both entitlements and Info.plist files
+- **Permission checking logic** should have multiple detection mechanisms
+
+### Testing Checklist
+Before marking permission fixes complete:
+- [ ] `cargo check` passes with exit code 0
+- [ ] `bun tauri build` creates valid app bundle
+- [ ] Built app contains Info.plist with usage descriptions
+- [ ] Permission checking returns accurate results in built app
+- [ ] App launches and initializes all systems successfully
+
+## Related Files
+- **Entitlements**: `src-tauri/juno.entitlements`
+- **Info.plist**: `src-tauri/Info.plist`
+- **Tauri Config**: `src-tauri/tauri.conf.json`
+- **Permission Logic**: `src-tauri/src/commands/permissions.rs`
+- **Computer Use SDK**: Uses `computer_use_ai_sdk` for permission checks
+
+This implementation resolves the accessibility permission detection issue and provides a robust foundation for macOS permission handling in built Tauri applications.

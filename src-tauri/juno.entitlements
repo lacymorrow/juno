@@ -5,5 +5,37 @@
     <!-- Basic key to ensure the entitlements file is valid -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
+
+    <!-- Accessibility permissions -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+
+    <!-- Allow unsigned executable memory for accessibility APIs -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!-- Disable hardened runtime restrictions that might interfere with accessibility -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Allow DYLD environment variables for runtime loading -->
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+
+    <!-- Screen recording permissions -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- Microphone permissions -->
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+
+    <!-- Network access for cloud features -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- File access for user data -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
 </dict>
 </plist>

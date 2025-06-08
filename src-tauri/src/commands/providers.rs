@@ -23,7 +23,7 @@ pub(crate) async fn set_active_provider(provider_id: String) -> Result<(), Strin
     let mut config = ProviderConfig::load()
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
-    config.set_active_provider(&provider_id)
+    config.set_active_provider(provider_id.clone())
         .map_err(|e| format!("Failed to set active provider: {}", e))?;
 
     info!("Set active provider to: {}", provider_id);

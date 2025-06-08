@@ -382,8 +382,39 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
     {
         use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions;
 
-        let granted = check_accessibility_permissions(false)
-            .map_err(|e| format!("Failed to check accessibility permissions: {}", e))?;
+        // Add detailed logging for debugging
+        info!("Checking accessibility permissions for built app");
+
+        // Try to get bundle information for debugging
+        let bundle_id = std::env::var("TAURI_BUNDLE_IDENTIFIER")
+            .or_else(|_| std::env::var("CFBundleIdentifier"))
+            .unwrap_or_else(|_| "com.juno.app".to_string());
+
+        info!("Bundle identifier: {}", bundle_id);
+
+        let granted = match check_accessibility_permissions(false) {
+            Ok(granted) => {
+                info!("Accessibility permission check result: {}", granted);
+                granted
+            },
+            Err(e) => {
+                error!("Accessibility permission check failed: {}", e);
+                // Log additional debugging information
+                info!("Bundle ID being checked: {}", bundle_id);
+
+                // For built apps, try a different approach - check if we can actually perform accessibility operations
+                match try_accessibility_test() {
+                    Ok(test_result) => {
+                        info!("Accessibility test operation result: {}", test_result);
+                        test_result
+                    },
+                    Err(test_err) => {
+                        warn!("Accessibility test operation failed: {}", test_err);
+                        false
+                    }
+                }
+            }
+        };
 
         Ok(PermissionStatus {
             permission_type: "accessibility".to_string(),
@@ -403,6 +434,37 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
             description: "Not required on this platform".to_string(),
             instructions: "".to_string(),
         })
+    }
+}
+
+/// Test if accessibility operations actually work
+/// This provides a more reliable check for built apps
+#[cfg(target_os = "macos")]
+fn try_accessibility_test() -> Result<bool, String> {
+    use computer_use_ai_sdk::Desktop;
+
+    info!("Attempting accessibility test operation");
+
+    // Try to create a Desktop instance and perform a basic operation
+    // Parameters: use_background_apps: false, activate_app: false
+    match Desktop::new(false, false) {
+        Ok(desktop) => {
+            // Try to get the list of applications - this requires accessibility permissions
+            match desktop.applications() {
+                Ok(apps) => {
+                    info!("Accessibility test passed - found {} applications", apps.len());
+                    Ok(true)
+                },
+                Err(e) => {
+                    warn!("Accessibility test failed - could not list applications: {}", e);
+                    Ok(false)
+                }
+            }
+        },
+        Err(e) => {
+            warn!("Could not create Desktop instance for accessibility test: {}", e);
+            Ok(false)
+        }
     }
 }
 
