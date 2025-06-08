@@ -9,6 +9,10 @@
     "build:universal": "bun run tauri build --target universal-apple-darwin",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:dev:multi": "node scripts/dev-multi-instance.js",
+    "tauri:dev:instance2": "node scripts/dev-multi-instance.js --port=1422",
+    "tauri:dev:instance3": "node scripts/dev-multi-instance.js --port=1424",
     "test": "vitest run",
     "test:watch": "vitest"
   },
