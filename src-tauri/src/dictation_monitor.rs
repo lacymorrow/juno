@@ -9,7 +9,7 @@ const HOLD_DURATION_MS: u64 = 500; // Hold dictation input key for 500ms to comm
 const IMMEDIATE_START_MS: u64 = 0; // Start transcription immediately (0ms delay)
 const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds max transcription time
 const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
-const COOLDOWN_AFTER_CANCEL_MS: u64 = 300; // Cooldown period after cancellation to prevent double-tap issues
+const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // Reduced from 300ms to 150ms for better responsiveness
 
 // State for dictation input monitoring
 #[derive(Debug)]
@@ -72,9 +72,10 @@ impl DictationInputMonitorState {
         // If transcription was started but threshold wasn't reached, it means we're cancelling
         if transcription_was_started && !threshold_was_reached {
             self.last_cancellation_time = Some(Instant::now());
-            debug!("[DictationMonitor] Recording cancellation time for cooldown period");
+            warn!("[DictationMonitor] Cancelling transcription after {}ms - recording cancellation time for cooldown", duration.as_millis());
         }
 
+        // Force reset all state immediately to prevent stuck state
         self.hold_start_time = None;
         self.transcription_started = false;
         self.hold_threshold_reached = false;
@@ -314,4 +315,62 @@ pub async fn force_reset_dictation_input_state() {
     let mut state = DICTATION_INPUT_STATE.lock().await;
     state.force_reset();
     info!("[DictationMonitor] Dictation input state force reset completed");
+}
+
+// Emergency cleanup function that can be called from frontend when stuck
+pub async fn emergency_cleanup_dictation_state(app_handle: &AppHandle) -> Result<(), String> {
+    warn!("[DictationMonitor] Emergency cleanup requested - performing comprehensive state reset");
+
+    // First, reset the dictation input monitor state
+    force_reset_dictation_input_state().await;
+
+    // Force stop the voice controller if it exists
+    match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+        Some(controller_state) => {
+            // Use aggressive timeout for emergency cleanup
+            let stop_result = tokio::time::timeout(
+                std::time::Duration::from_millis(1000), // Very short timeout for emergency
+                tauri_plugin_voice_transcription::commands::stop_dictation(
+                    app_handle.clone(),
+                    controller_state
+                )
+            ).await;
+
+            match stop_result {
+                Ok(Ok(_)) => {
+                    info!("[DictationMonitor] Voice controller stopped successfully during emergency cleanup");
+                }
+                Ok(Err(e)) => {
+                    error!("[DictationMonitor] Voice controller stop failed during emergency cleanup: {}", e);
+                }
+                Err(_) => {
+                    error!("[DictationMonitor] Voice controller stop timed out during emergency cleanup - controller may be stuck");
+                }
+            }
+        }
+        None => {
+            info!("[DictationMonitor] Voice controller not available - skipping voice controller cleanup");
+        }
+    }
+
+    // Force clean up app state
+    let app_state = app_handle.state::<crate::state::AppState>();
+    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        *dictation_active = false;
+        info!("[DictationMonitor] App dictation state reset to false");
+    } else {
+        error!("[DictationMonitor] Failed to reset app dictation state - lock may be poisoned");
+    }
+
+    // Emit cleanup events for UI
+    if let Err(e) = app_handle.emit("dictation-active", false) {
+        error!("[DictationMonitor] Failed to emit dictation-active false event: {}", e);
+    }
+
+    if let Err(e) = app_handle.emit("dictation-emergency-cleanup", ()) {
+        error!("[DictationMonitor] Failed to emit emergency cleanup event: {}", e);
+    }
+
+    info!("[DictationMonitor] Emergency cleanup completed successfully");
+    Ok(())
 }
