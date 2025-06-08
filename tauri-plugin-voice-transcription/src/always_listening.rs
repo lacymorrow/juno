@@ -203,7 +203,7 @@ impl AlwaysListeningController {
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
                 2.0,
                 params,
-                1024,
+                32768, // Increased chunk size to handle larger audio buffers (was 1024)
                 1,
             ).ok();
         }
