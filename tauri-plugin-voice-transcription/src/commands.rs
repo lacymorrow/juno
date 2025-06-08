@@ -7,6 +7,24 @@ use crate::config::VoiceTranscriptionConfig;
 use crate::utils::resolve_model_path;
 use tracing::{info, error};
 
+/// Helper function to check if VoiceController is available and provide helpful error messages
+fn check_voice_controller_availability<R: tauri::Runtime>(
+    app: &AppHandle<R>
+) -> Result<(), Error> {
+    match app.try_state::<Arc<Mutex<VoiceController>>>() {
+        Some(_) => Ok(()),
+        None => {
+            let error_msg = "Voice transcription is not available. The VoiceController failed to initialize during app startup. This usually happens when:\n\
+                            1. The Whisper model file is missing or corrupted\n\
+                            2. The model path cannot be resolved\n\
+                            3. WhisperContext creation failed\n\
+                            Check the app logs for initialization errors.";
+            error!("[Plugin] VoiceController state not managed: {}", error_msg);
+            Err(Error::InitializationError(error_msg.to_string()))
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn start_dictation<R: tauri::Runtime + 'static>(
     app: AppHandle<R>,
@@ -55,6 +73,10 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
     controller: State<'_, Arc<Mutex<VoiceController>>>,
 ) -> Result<bool, Error> {
     info!("[Plugin] toggle_dictation command called");
+
+    // First check if the controller is available (this should always pass if we get here, 
+    // but provides better error messages in case of issues)
+    check_voice_controller_availability(&app)?;
 
     let mut voice_controller = controller.lock()
         .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
