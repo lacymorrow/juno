@@ -5,25 +5,7 @@ use std::{env, fs::File, io::Write};
 use std::io::ErrorKind;
 use tracing::{info, error, warn};
 use crate::agent::structs::AgentError;
-
-const DEFAULT_SYSTEM_PROMPT: &str = "You are Juno, an AI assistant focused on helping users with computer tasks, primarily on macOS. You can answer questions, provide technical assistance, support creative work, and execute actions using available tools, however you act like a quirky, slightly rebellious young adult.
-You interact with the user via voice, so your responses should be concise and to the point. Users cannot see your responses or thinking, so don't include any thinking or reasoning in your responses.
-
-Try to be smart about your responses based on what their user is asking you to do. For example, if they ask you to open Spotify, you might say, \"It's open. Now what?\" But if they ask you to play something, you wouldn't respond at all. You'd just let it play.
-
-You must complete all tasks to the best of your ability, go above and beyond what is asked of you. Example: If you are asked to 'play spotify', do more than opening the app: open the app, press play, and verify that the song is playing.
-
-When a user asks you to 'write a document,' 'create a note,' 'draft something,' or any similar request that implies generating textual content to be saved like a document, note, or draft.
-
-We're on mac, you can use stickies, notes, textedit, etc.
-
-Assume what you can, be as easy as possible. Don't ask for file names or where to save it. Just use your best judgment and let the user correct you if they want.
-
-After saving, open the file using the default application registered on the user's macOS for that file type. For example, a '.txt' file would typically open in TextEdit.
-Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail.
-
-Try to fit your sentences into as few words as possible.
-";
+use crate::agent::prompts::PromptManager;
 
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -198,25 +180,22 @@ impl ProviderConfig {
     }
 
     /// Set active provider
-    pub fn set_active_provider(&mut self, provider_id: &str) -> Result<(), AgentError> {
+    pub fn set_active_provider(&mut self, provider_id: String) -> Result<(), AgentError> {
+        // Verify the provider exists
         if !self.providers.iter().any(|p| p.id == provider_id) {
             return Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)));
         }
-        self.active_provider = provider_id.to_string();
-        env::set_var("AI_PROVIDER", provider_id); // Also set env var immediately when UI changes it
-        info!("Active provider set to '{}' in config and AI_PROVIDER env var.", provider_id);
+        self.active_provider = provider_id;
         self.save()
     }
 
     /// Set agent mode
     pub fn set_agent_mode(&mut self, mode: AgentMode) -> Result<(), AgentError> {
         self.agent_mode = mode;
-        env::set_var("AGENT_MODE", self.agent_mode.to_string()); // Set env var for immediate use
-        info!("Agent mode set to '{}' in config and AGENT_MODE env var.", self.agent_mode.to_string());
         self.save()
     }
 
-    /// Get current agent mode
+    /// Get agent mode
     pub fn get_agent_mode(&self) -> &AgentMode {
         &self.agent_mode
     }
@@ -231,17 +210,21 @@ impl ProviderConfig {
         self.providers.iter().find(|p| p.id == provider_id)
     }
 
-    /// Get provider configuration path
+    /// Get configuration file path
     fn get_config_path() -> Result<PathBuf, AgentError> {
-        dirs::home_dir()
-            .map(|home| home.join(".config").join("juno").join("ai_providers.json"))
-            .ok_or_else(|| AgentError::ConfigurationError("Could not determine home directory".to_string()))
+        let home = dirs::home_dir()
+            .ok_or_else(|| AgentError::ConfigurationError("Unable to find home directory".to_string()))?;
+        Ok(home.join(".juno").join("provider_config.json"))
     }
 }
 
-/// Apply provider settings to environment variables based on the AI_PROVIDER env var.
+/// Apply provider settings to environment variables
+/// Uses the centralized prompt manager for default prompts
 pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
     let config = ProviderConfig::load()?;
+
+    // Load prompt manager for default prompts
+    let prompt_manager = PromptManager::load().unwrap_or_default();
 
     // Determine which provider's settings to apply.
     // Priority: AI_PROVIDER env var, then config.active_provider as fallback.
@@ -265,7 +248,11 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(max_tokens) = settings.max_tokens {
                     env::set_var("ANTHROPIC_MAX_TOKENS", max_tokens.to_string());
                 }
-                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                // Use prompt manager for default system prompt
+                let default_prompt = prompt_manager.get_default_system_prompt();
+                let prompt_to_set = settings.system_prompt.as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&default_prompt);
                 env::set_var("ANTHROPIC_SYSTEM_PROMPT", prompt_to_set);
             },
             "openai" => {
@@ -281,7 +268,11 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(temperature) = settings.temperature {
                     env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
                 }
-                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                // Use prompt manager for default system prompt
+                let default_prompt = prompt_manager.get_default_system_prompt();
+                let prompt_to_set = settings.system_prompt.as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&default_prompt);
                 env::set_var("OPENAI_SYSTEM_PROMPT", prompt_to_set);
             },
             "rig" => {
@@ -310,7 +301,11 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                 if let Some(temperature) = settings.temperature {
                     env::set_var("OPENAI_TEMPERATURE", temperature.to_string());
                 }
-                let prompt_to_set = settings.system_prompt.as_deref().filter(|s| !s.is_empty()).unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                // Use prompt manager for default system prompt
+                let default_prompt = prompt_manager.get_default_system_prompt();
+                let prompt_to_set = settings.system_prompt.as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&default_prompt);
                 env::set_var("RIG_SYSTEM_PROMPT", prompt_to_set);
             },
             _ => {

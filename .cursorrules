@@ -36,11 +36,28 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ✅ MCP integration for extensibility
 ✅ Cloud control system and authentication
 ✅ Streaming AI responses
+✅ **macOS Accessibility Permission Fixes** - Built apps properly detect permissions
+
+### macOS Permission Handling
+**CRITICAL**: Always test built apps, not just development builds for permission issues.
+
+**Required Files for Built Apps**:
+- `src-tauri/juno.entitlements` - macOS security permissions
+- `src-tauri/Info.plist` - Usage descriptions for permission dialogs
+- `src-tauri/tauri.conf.json` - Bundle configuration including entitlements and Info.plist
+
+**Permission Check Architecture**:
+- Primary: `computer_use_ai_sdk` permission checks
+- Fallback: `try_accessibility_test()` with actual Desktop operations
+- Multiple detection mechanisms for robust permission validation
+
+See `.cursor/rules/accessibility-permission-fixes.mdc` for complete implementation details.
 
 ### Quick Reference
 - **Entry Point**: `src-tauri/src/anthropic.rs::submit_query()`
 - **Agent Tools**: `src-tauri/src/agent/tools/`
 - **macOS Integration**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
 - **Voice System**: `tauri-plugin-voice-transcription/`
+- **Permission System**: `src-tauri/src/commands/permissions.rs`
 
 See [LLMs.txt](LLMs.txt) for complete development guidelines, architecture details, and LLM-specific instructions.

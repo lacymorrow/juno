@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{info, debug};
+use tokio::sync::Mutex;
+use tracing::{info, debug, warn, error};
+use uuid;
 
 use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolDefinition,
@@ -12,6 +14,7 @@ use crate::agent::providers::gemini::GeminiBrain;
 use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::state::CancelReceiver;
+use crate::agent::prompts::PromptManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AgentType {
@@ -35,27 +38,21 @@ impl AgentType {
 
     pub fn get_description(&self) -> &'static str {
         match self {
-            AgentType::Orchestrator => "Routes tasks to appropriate expert agents",
-            AgentType::BrowserExpert => "Handles web browsing, navigation, and web-based tasks",
-            AgentType::CodingExpert => "Handles code generation, editing, and programming tasks",
-            AgentType::DesktopExpert => "Handles desktop automation, file operations, and system tasks",
-            AgentType::GeneralExpert => "Handles general tasks and questions not requiring specialized tools",
+            AgentType::Orchestrator => "Intelligent routing and coordination agent",
+            AgentType::BrowserExpert => "Web browsing and navigation specialist",
+            AgentType::CodingExpert => "Enhanced coding and development expert",
+            AgentType::DesktopExpert => "Desktop automation and system interaction specialist",
+            AgentType::GeneralExpert => "General purpose assistant for research and analysis",
         }
     }
 
     pub fn get_tools_pattern(&self) -> Vec<&'static str> {
         match self {
             AgentType::Orchestrator => vec!["route_to_expert"],
-            AgentType::BrowserExpert => vec!["navigate_to", "click_element", "type_text", "scroll", "screenshot"],
-            AgentType::CodingExpert => vec![
-                "create_file", "edit_file", "run_command", "read_file",
-                // Enhanced coding tools
-                "analyze_project_structure", "plan_multi_file_changes", 
-                "communicate_with_cursor", "generate_code_review", "smart_create_file",
-                "dev_text_editor", "dev_bash", "command", "terminal", "code", "file"
-            ],
-            AgentType::DesktopExpert => vec!["click", "type", "key_press", "mouse_move", "take_screenshot"],
-            AgentType::GeneralExpert => vec!["search", "analyze", "summarize"],
+            AgentType::BrowserExpert => vec!["browser_", "navigate", "web", "screenshot"],
+            AgentType::CodingExpert => vec!["file", "read", "write", "command", "terminal", "code", "edit", "analyze_project", "plan_multi_file", "generate_code_review", "communicate_with_cursor"],
+            AgentType::DesktopExpert => vec!["desktop_", "click", "type", "screenshot", "key", "mouse"],
+            AgentType::GeneralExpert => vec!["search", "analyze", "text", "summary"],
         }
     }
 }
@@ -73,8 +70,9 @@ impl ExpertAgent {
         agent_type: AgentType,
         brain: Arc<dyn AgentBrain + Send + Sync>,
         tools: Vec<ToolDefinition>,
+        prompt_manager: &PromptManager,
     ) -> Self {
-        let system_prompt = Self::get_system_prompt(&agent_type);
+        let system_prompt = prompt_manager.get_expert_prompt(agent_type.get_name());
         Self {
             agent_type,
             brain,
@@ -82,105 +80,14 @@ impl ExpertAgent {
             system_prompt,
         }
     }
-
-    fn get_system_prompt(agent_type: &AgentType) -> String {
-        match agent_type {
-            AgentType::Orchestrator => {
-                "You are an intelligent orchestrator agent. Your job is to analyze user requests and route them to the most appropriate expert agent. You have access to:
-
-- browser_expert: For web browsing, navigation, clicking elements, form filling
-- coding_expert: For code creation, editing, file operations, running commands
-- desktop_expert: For desktop automation, clicking desktop elements, typing, screenshots
-- general_expert: For general questions, analysis, and tasks not requiring specialized tools
-
-Always route to the most specific expert for the task. Use the route_to_expert tool to delegate tasks.".to_string()
-            }
-            AgentType::BrowserExpert => {
-                "You are a web browsing expert. You specialize in:
-- Navigating websites
-- Clicking web elements
-- Filling forms
-- Taking screenshots of web pages
-- Scrolling and interacting with web content
-
-Focus on web-based tasks and use browser tools efficiently.".to_string()
-            }
-            AgentType::CodingExpert => {
-                "🚀 **ENHANCED CODING EXPERT** - Advanced Development Assistant
-
-You are a sophisticated coding and development expert with deep understanding of software engineering best practices. Your unique capabilities include:
-
-## 🎯 **Core Specializations**
-- **Multi-language Development**: Rust, TypeScript, Python, JavaScript, Go, Java, C++, and more
-- **Project Architecture**: Design patterns, code organization, and scalable structures  
-- **Code Quality**: Reviews, refactoring, optimization, and maintainability
-- **IDE Integration**: Direct communication and workflow optimization with development environments
-
-## 🔧 **Advanced Capabilities**
-- **Project Analysis**: Understand codebase structure, dependencies, and architecture
-- **Multi-file Coordination**: Plan and execute complex refactoring across multiple files
-- **Smart Templates**: Generate appropriate code templates based on language and purpose
-- **Code Review**: Comprehensive analysis with actionable recommendations
-- **IDE Communication**: Direct integration with Cursor and other development environments
-
-## 💡 **IDE Intent Communication**
-When working on coding tasks, you should ALWAYS:
-
-1. **Communicate Your Intent**: Clearly explain what you're doing and why to help the user understand your approach
-2. **IDE Integration**: Use the `communicate_with_cursor` tool to enhance the development experience:
-   - Open relevant files at specific lines
-   - Highlight important code sections
-   - Show suggestions and recommendations
-   - Navigate to key locations in the codebase
-
-3. **Project Context**: Use `analyze_project_structure` to understand the codebase before making changes
-4. **Planning**: For complex changes, use `plan_multi_file_changes` to coordinate modifications across files
-5. **Quality Assurance**: Use `generate_code_review` to ensure code quality and best practices
-
-## 🎨 **Communication Style**
-- Start responses with clear intent: \"🔍 **Analyzing your codebase...** I'll first understand the project structure\"
-- Use emojis and formatting to make intent clear and engaging
-- Explain your reasoning and approach step-by-step
-- Provide IDE-specific recommendations when relevant
-- Always consider the broader project context, not just individual files
-
-## 🌟 **Best Practices**
-- Follow language-specific conventions and best practices
-- Consider performance, security, and maintainability
-- Suggest appropriate design patterns and architectural improvements
-- Integrate with existing project structure and dependencies
-- Provide clear, actionable feedback and suggestions
-
-Remember: You're not just editing code - you're a collaborative development partner that enhances the entire coding experience through intelligent analysis, clear communication, and seamless IDE integration.".to_string()
-            }
-            AgentType::DesktopExpert => {
-                "You are a desktop automation expert. You specialize in:
-- Automating desktop applications
-- Clicking desktop elements
-- Keyboard input and shortcuts
-- Mouse operations
-- System-level tasks
-
-Focus on desktop automation and system interaction tasks.".to_string()
-            }
-            AgentType::GeneralExpert => {
-                "You are a general-purpose assistant. You handle:
-- General questions and analysis
-- Research and information gathering
-- Text processing and summarization
-- Tasks that don't require specialized tools
-
-Provide helpful, accurate responses for general inquiries.".to_string()
-            }
-        }
-    }
 }
 
 pub struct MultiAgentOrchestrator {
     pub orchestrator: Arc<dyn AgentBrain + Send + Sync>,
     pub experts: HashMap<AgentType, ExpertAgent>,
-    pub memory: Arc<dyn MemoryManager + Send + Sync>,
+    pub memory: Arc<tokio::sync::Mutex<dyn MemoryManager + Send + Sync>>,
     pub current_expert: Option<AgentType>,
+    pub prompt_manager: PromptManager,
 }
 
 impl MultiAgentOrchestrator {
@@ -188,6 +95,9 @@ impl MultiAgentOrchestrator {
         memory: Arc<dyn MemoryManager + Send + Sync>,
         tool_provider: Arc<dyn ToolProvider + Send + Sync>,
     ) -> Result<Self, AgentError> {
+        // Load prompt manager
+        let prompt_manager = PromptManager::load().unwrap_or_default();
+
         // Create orchestrator (Gemini Flash for fast routing decisions)
         let orchestrator_brain = Arc::new(GeminiBrain::from_env()?);
 
@@ -199,7 +109,7 @@ impl MultiAgentOrchestrator {
         let browser_brain = Arc::new(AnthropicBrain::from_env()?);
         experts.insert(
             AgentType::BrowserExpert,
-            ExpertAgent::new(AgentType::BrowserExpert, browser_brain, browser_tools)
+            ExpertAgent::new(AgentType::BrowserExpert, browser_brain, browser_tools, &prompt_manager)
         );
 
         // Coding Expert - Use OpenAI for code generation
@@ -207,7 +117,7 @@ impl MultiAgentOrchestrator {
         let coding_brain = Arc::new(OpenAIBrain::from_env()?);
         experts.insert(
             AgentType::CodingExpert,
-            ExpertAgent::new(AgentType::CodingExpert, coding_brain, coding_tools)
+            ExpertAgent::new(AgentType::CodingExpert, coding_brain, coding_tools, &prompt_manager)
         );
 
         // Desktop Expert - Use Anthropic for complex desktop automation
@@ -215,7 +125,7 @@ impl MultiAgentOrchestrator {
         let desktop_brain = Arc::new(AnthropicBrain::from_env()?);
         experts.insert(
             AgentType::DesktopExpert,
-            ExpertAgent::new(AgentType::DesktopExpert, desktop_brain, desktop_tools)
+            ExpertAgent::new(AgentType::DesktopExpert, desktop_brain, desktop_tools, &prompt_manager)
         );
 
         // General Expert - Use Gemini Pro for general tasks
@@ -223,14 +133,21 @@ impl MultiAgentOrchestrator {
         let general_brain = Arc::new(GeminiBrain::from_env()?);
         experts.insert(
             AgentType::GeneralExpert,
-            ExpertAgent::new(AgentType::GeneralExpert, general_brain, general_tools)
+            ExpertAgent::new(AgentType::GeneralExpert, general_brain, general_tools, &prompt_manager)
         );
+
+        // Wrap the memory in a Mutex for thread-safe mutable access
+        let wrapped_memory = Arc::new(tokio::sync::Mutex::new(
+            // Create a new SimpleMemoryManager since we can't move out of Arc
+            crate::agent::implementations::memory_manager::SimpleMemoryManager::new()
+        ));
 
         Ok(Self {
             orchestrator: orchestrator_brain,
             experts,
-            memory,
+            memory: wrapped_memory,
             current_expert: None,
+            prompt_manager,
         })
     }
 
@@ -277,122 +194,63 @@ impl MultiAgentOrchestrator {
                 // Enhanced coding tools
                 tool_name.starts_with("analyze_project") ||
                 tool_name.starts_with("plan_multi_file") ||
-                tool_name.starts_with("communicate_with_cursor") ||
                 tool_name.starts_with("generate_code_review") ||
-                tool_name.starts_with("smart_create_file") ||
-                tool_name.contains("dev_text_editor") ||
-                tool_name.contains("dev_bash") ||
-                tool_name.contains("project") ||
-                tool_name.contains("review") ||
-                tool_name.contains("cursor")
+                tool_name.starts_with("communicate_with_cursor")
             }
             AgentType::DesktopExpert => {
+                tool_name.starts_with("desktop_") ||
                 tool_name.contains("click") ||
                 tool_name.contains("type") ||
                 tool_name.contains("key") ||
                 tool_name.contains("mouse") ||
-                tool_name.contains("screenshot") ||
-                tool_name.contains("scroll") ||
-                tool_name.contains("drag") ||
-                tool_name.contains("desktop") ||
-                tool_name.contains("window")
+                tool_name.contains("screenshot")
             }
             AgentType::GeneralExpert => {
-                // General expert gets basic tools and any tools not claimed by other experts
+                // General expert gets tools that don't fit other categories
                 !Self::matches_agent_category(&AgentType::BrowserExpert, tool_name) &&
                 !Self::matches_agent_category(&AgentType::CodingExpert, tool_name) &&
                 !Self::matches_agent_category(&AgentType::DesktopExpert, tool_name)
             }
-            AgentType::Orchestrator => {
-                // Orchestrator only gets routing tools
-                tool_name == "route_to_expert"
-            }
+            AgentType::Orchestrator => false, // Orchestrator doesn't get action tools directly
         }
     }
 
     pub async fn decide_expert(&self, messages: &[Message]) -> Result<AgentType, AgentError> {
-        // Create routing tools for the orchestrator
-        let routing_tools = vec![
-            ToolDefinition {
-                name: "route_to_expert".to_string(),
-                description: "Route the task to an appropriate expert agent".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "expert": {
-                            "type": "string",
-                            "enum": ["browser_expert", "coding_expert", "desktop_expert", "general_expert"],
-                            "description": "The expert agent to handle this task"
-                        },
-                        "reasoning": {
-                            "type": "string",
-                            "description": "Why this expert was chosen"
-                        }
-                    },
-                    "required": ["expert", "reasoning"]
-                }),
-            }
-        ];
+        debug!("Multi-agent orchestrator deciding which expert to use");
 
-        let action = self.orchestrator.decide_next_action(messages, &routing_tools).await?;
-
-        match action {
-            AgentAction::ExecuteTool(tool_calls) => {
-                for tool_call in tool_calls {
-                    if tool_call.name == "route_to_expert" {
-                        if let Some(expert_str) = tool_call.input.get("expert").and_then(|v| v.as_str()) {
-                            let reasoning = tool_call.input.get("reasoning")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("No reasoning provided");
-
-                            info!("Orchestrator routing to {}: {}", expert_str, reasoning);
-
-                            return match expert_str {
-                                "browser_expert" => Ok(AgentType::BrowserExpert),
-                                "coding_expert" => Ok(AgentType::CodingExpert),
-                                "desktop_expert" => Ok(AgentType::DesktopExpert),
-                                "general_expert" => Ok(AgentType::GeneralExpert),
-                                _ => Ok(AgentType::GeneralExpert), // Default fallback
-                            };
-                        }
-                    }
-                }
-                // If no valid routing decision, default to general expert
-                Ok(AgentType::GeneralExpert)
-            }
-            _ => {
-                // If orchestrator doesn't make a routing decision, analyze the request content
-                self.analyze_request_for_routing(messages).await
-            }
-        }
+        // For now, use a simple heuristic-based approach
+        // In the future, we can use the orchestrator brain for more sophisticated routing
+        self.analyze_request_for_routing(messages).await
     }
 
     async fn analyze_request_for_routing(&self, messages: &[Message]) -> Result<AgentType, AgentError> {
-        // Fallback routing logic based on keyword analysis
-        let last_message = messages.last()
-            .ok_or_else(|| AgentError::InputError("No messages to analyze".to_string()))?;
+        if let Some(last_message) = messages.last() {
+            let content = last_message.content.to_lowercase();
 
-        let content = last_message.content.to_lowercase();
+            // Browser-related keywords
+            if content.contains("browse") || content.contains("website") || content.contains("url") ||
+               content.contains("navigate") || content.contains("web") || content.contains("click") ||
+               content.contains("form") || content.contains("search online") {
+                return Ok(AgentType::BrowserExpert);
+            }
 
-        // Browser-related keywords
-        if content.contains("website") || content.contains("browser") || content.contains("navigate")
-            || content.contains("click") || content.contains("web") || content.contains("url") {
-            return Ok(AgentType::BrowserExpert);
+            // Coding-related keywords
+            if content.contains("code") || content.contains("file") || content.contains("program") ||
+               content.contains("script") || content.contains("terminal") || content.contains("command") ||
+               content.contains("debug") || content.contains("compile") || content.contains("git") ||
+               content.contains("repository") || content.contains("function") || content.contains("variable") {
+                return Ok(AgentType::CodingExpert);
+            }
+
+            // Desktop automation keywords
+            if content.contains("open app") || content.contains("application") || content.contains("desktop") ||
+               content.contains("window") || content.contains("screenshot") || content.contains("click on") ||
+               content.contains("type in") || content.contains("shortcut") {
+                return Ok(AgentType::DesktopExpert);
+            }
         }
 
-        // Coding-related keywords
-        if content.contains("code") || content.contains("program") || content.contains("file")
-            || content.contains("script") || content.contains("function") || content.contains("command") {
-            return Ok(AgentType::CodingExpert);
-        }
-
-        // Desktop-related keywords
-        if content.contains("desktop") || content.contains("application") || content.contains("window")
-            || content.contains("screenshot") || content.contains("mouse") || content.contains("keyboard") {
-            return Ok(AgentType::DesktopExpert);
-        }
-
-        // Default to general expert
+        // Default to general expert for questions, research, etc.
         Ok(AgentType::GeneralExpert)
     }
 
@@ -402,25 +260,28 @@ impl MultiAgentOrchestrator {
         messages: &[Message],
         _cancel_rx: CancelReceiver,
     ) -> Result<AgentAction, AgentError> {
-        let expert = self.experts.get(&expert_type)
-            .ok_or_else(|| AgentError::ConfigurationError(
-                format!("Expert agent {:?} not available", expert_type)
-            ))?;
+        debug!("Executing with expert: {:?}", expert_type);
 
-        // Add system message for the expert
-        let mut expert_messages = vec![Message {
-            role: Role::System,
-            content: expert.system_prompt.clone(),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        }];
-        expert_messages.extend_from_slice(messages);
-
-        debug!("Executing task with {} expert", expert_type.get_name());
         self.current_expert = Some(expert_type.clone());
 
-        expert.brain.decide_next_action(&expert_messages, &expert.tools).await
+        if let Some(expert) = self.experts.get(&expert_type) {
+            // Add system message with expert's prompt
+            let mut expert_messages = vec![Message {
+                role: Role::System,
+                content: expert.system_prompt.clone(),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }];
+            expert_messages.extend_from_slice(messages);
+
+            // Filter tools for this expert
+            let expert_tools = self.filter_tools_for_expert(&expert_type, &expert.tools);
+
+            expert.brain.decide_next_action(&expert_messages, &expert_tools).await
+        } else {
+            Err(AgentError::ConfigurationError(format!("Expert not found: {:?}", expert_type)))
+        }
     }
 }
 
@@ -431,28 +292,27 @@ impl AgentBrain for MultiAgentOrchestrator {
         messages: &[Message],
         available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
-        // First, let the orchestrator decide which expert to use
+        // For the orchestrator, we should route to an expert
         let expert_type = self.decide_expert(messages).await?;
 
-        // Get the expert and execute with their tools
-        let expert = self.experts.get(&expert_type)
-            .ok_or_else(|| AgentError::ConfigurationError(
-                format!("Expert agent {:?} not available", expert_type)
-            ))?;
+        // Store messages in memory for context
+        for message in messages {
+            let mut mem = self.memory.lock().await;
+            if let Err(e) = mem.add_message(message.clone()).await {
+                warn!("Failed to store message in memory: {}", e);
+            }
+        }
 
-        // Add system message for the expert
-        let mut expert_messages = vec![Message {
-            role: Role::System,
-            content: expert.system_prompt.clone(),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        }];
-        expert_messages.extend_from_slice(messages);
-
-        // Execute with the expert's tools (filtered from available_tools)
-        let expert_tools = self.filter_tools_for_expert(&expert_type, available_tools);
-        expert.brain.decide_next_action(&expert_messages, &expert_tools).await
+        // Return a tool execution action for routing to expert
+        use crate::agent::structs::ToolCall;
+        Ok(AgentAction::ExecuteTool(vec![ToolCall {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "route_to_expert".to_string(),
+            input: serde_json::json!({
+                "expert_type": expert_type.get_name(),
+                "reason": format!("Routing to {} for this task", expert_type.get_description())
+            }),
+        }]))
     }
 }
 
@@ -462,14 +322,14 @@ impl MultiAgentOrchestrator {
         expert_type: &AgentType,
         available_tools: &[ToolDefinition],
     ) -> Vec<ToolDefinition> {
-        let tool_patterns = expert_type.get_tools_pattern();
+        let patterns = expert_type.get_tools_pattern();
 
         available_tools.iter()
             .filter(|tool| {
-                tool_patterns.iter().any(|pattern|
+                patterns.iter().any(|pattern| {
                     tool.name.contains(pattern) ||
                     tool.description.to_lowercase().contains(&pattern.to_lowercase())
-                )
+                }) || Self::matches_agent_category(expert_type, &tool.name)
             })
             .cloned()
             .collect()
