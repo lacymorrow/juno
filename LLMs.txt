@@ -18,13 +18,21 @@ Orchestrator (src-tauri/src/anthropic.rs)
 ├── Desktop Agent (screen interaction, accessibility)
 ├── Browser Agent (web automation)
 ├── File Agent (filesystem operations)
-└── Tools (shared providers with lazy initialization)
+├── Tools (shared providers with lazy initialization)
+└── Prompts (centralized prompt management system)
 ```
 
 **Memory Management**:
 - Orchestrator: Persistent AppState with Arc-based cloning
 - Specialists: Fresh SimpleMemoryManager instances (isolated)
 - All agents use safe Arc-based memory manager cloning
+
+**Prompt Management**:
+- Centralized system in `src-tauri/src/agent/prompts/`
+- File persistence to `~/.juno/prompts.json`
+- Variable substitution with `{{variable_name}}` syntax
+- Template versioning and customization controls
+- Backwards compatibility with existing configurations
 
 ## Development Requirements
 
@@ -95,6 +103,7 @@ Located in: `src-tauri/src/commands/permissions.rs`
 - ✅ Cloud control system and authentication
 - ✅ Streaming AI responses with real-time updates
 - ✅ macOS accessibility permission fixes for built apps
+- ✅ Modular prompt configuration system with file persistence
 
 ### Voice System
 **Plugin**: `tauri-plugin-voice-transcription/`
@@ -109,12 +118,26 @@ Located in: `src-tauri/src/commands/permissions.rs`
 - Dynamic tool discovery and registration
 - Isolated execution environments
 
+### Prompt Management System
+**Centralized Configuration**: `src-tauri/src/agent/prompts/`
+- **Templates** (`templates.rs`): Default prompts for all agent types
+- **Manager** (`manager.rs`): Load/save, variable substitution, customization
+- **Types** (`types.rs`): Core data structures (PromptType, PromptTemplate, etc.)
+- **Persistence**: Configuration saved to `~/.juno/prompts.json`
+- **Features**:
+  - Variable substitution: `{{variable_name}}` placeholders
+  - Template versioning for prompt evolution
+  - Custom prompt overrides with inheritance
+  - Backwards compatibility with existing systems
+  - Integration with all agent types (Orchestrator, Browser, Desktop, Coding, General)
+
 ## File Structure & Entry Points
 
 ### Key Entry Points
 - **Main Agent**: `src-tauri/src/anthropic.rs::submit_query()`
 - **Permission System**: `src-tauri/src/commands/permissions.rs`
 - **Agent Tools**: `src-tauri/src/agent/tools/`
+- **Prompt System**: `src-tauri/src/agent/prompts/`
 - **macOS Integration**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
 - **Voice System**: `tauri-plugin-voice-transcription/`
 
@@ -179,8 +202,16 @@ Robust fallback mechanisms in place:
 
 ### Extension Guidelines
 - New tools go in `src-tauri/src/agent/tools/`
+- New prompts use `PromptManager::load()` and centralized templates
 - MCP servers for external integrations
 - Follow existing async patterns and error handling
 - Maintain state management through AppState getters
+
+### Prompt System Guidelines
+- **No hardcoded prompts**: All prompts must use `PromptManager`
+- **Template structure**: Use `DefaultPrompts` for new prompt types
+- **Variable substitution**: Support `{{var}}` syntax for dynamic content
+- **Integration pattern**: Load prompt manager with `PromptManager::load().unwrap_or_default()`
+- **Customization**: Allow user overrides while maintaining defaults
 
 This documentation provides comprehensive guidance for LLMs working with the Juno codebase, emphasizing critical patterns, recent fixes, and proper development practices.
