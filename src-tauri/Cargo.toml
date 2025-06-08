@@ -97,3 +97,6 @@ default = ["custom-protocol", "macos-proxy"]
 # mobile = ["tauri/mobile"] # Temporarily comment out if causing issues
 macos-proxy = ["tauri/macos-proxy", "cocoa", "objc"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+tokio-test = "0.4"
