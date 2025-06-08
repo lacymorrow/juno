@@ -123,7 +123,7 @@ use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, flo
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
-use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
+use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status, emergency_cleanup_dictation_state};
 
 // Import tool configuration commands explicitly
 use crate::commands::{
@@ -588,6 +588,7 @@ pub fn run() {
             // Dictation Reset Commands
             force_reset_dictation_transcription,
             get_dictation_transcription_status,
+            emergency_cleanup_dictation_state,
             // Permissions Commands
             check_permissions_status,
             request_accessibility_permission,
@@ -1542,23 +1543,34 @@ pub fn run() {
                 // Stop dictation and discard results
                 let app_handle_clone = app_handle_for_dictation_cancel.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Use the plugin command to stop dictation only if controller exists
+                    // Force stop the voice controller with aggressive timeout
                     match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
                         Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(_) => {
-                                    info!("[Dictation Mode] Cancelled transcription successfully");
+                            // Use shorter timeout for cancellation (more aggressive)
+                            let stop_with_timeout = tokio::time::timeout(
+                                std::time::Duration::from_millis(1500), // Reduced from 2000ms to 1500ms
+                                tauri_plugin_voice_transcription::commands::stop_dictation(
+                                    app_handle_clone.clone(),
+                                    controller_state
+                                )
+                            );
+
+                            match stop_with_timeout.await {
+                                Ok(Ok(_)) => {
+                                    info!("[Dictation Mode] Transcription cancelled successfully");
                                 }
-                                Err(e) => {
-                                    tracing::error!("[Dictation Mode] Failed to cancel transcription: {}", e);
+                                Ok(Err(e)) => {
+                                    error!("[Dictation Mode] Failed to cancel transcription: {}", e);
+                                    // Force cleanup even if stop failed
+                                }
+                                Err(_) => {
+                                    error!("[Dictation Mode] Transcription cancellation timed out - forcing cleanup");
+                                    // Force cleanup after timeout
                                 }
                             }
                         }
                         None => {
-                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot cancel transcription");
+                            warn!("[Dictation Mode] Voice controller not available - cannot cancel transcription");
                         }
                     }
 
@@ -1568,15 +1580,26 @@ pub fn run() {
                         *dictation_active = false;
                     }
 
+                    // Reset dictation input monitor state immediately
+                    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
                     // Update floating bar manager
                     let app_handle_for_bar = app_handle_clone.clone();
                     tauri::async_runtime::spawn(async move {
                         commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
                     });
 
+                    // Emit both dictation-active false and a specific cancellation event
                     if let Err(e) = app_handle_clone.emit("dictation-active", false) {
                         tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
+
+                    // Emit specific cancellation complete event for UI feedback
+                    if let Err(e) = app_handle_clone.emit("dictation-cancelled", ()) {
+                        tracing::error!("[Dictation Mode] Failed to emit dictation-cancelled event: {}", e);
+                    }
+
+                    info!("[Dictation Mode] Cancellation cleanup completed");
                 });
             });
 
