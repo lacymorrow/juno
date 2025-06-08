@@ -38,6 +38,13 @@ export type LoadingStates = {
   playbackAudio: boolean;
   setTtsProvider: boolean;
   testSystemContext: boolean;
+  // Always Listening Testing
+  debugAlwaysListening: boolean;
+  startAlwaysListening: boolean;
+  stopAlwaysListening: boolean;
+  toggleAlwaysListening: boolean;
+  setAlwaysListeningSensitivity: boolean;
+  setAlwaysListeningWakeWords: boolean;
 };
 
 export type FileEntry = {
