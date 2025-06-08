@@ -9,6 +9,7 @@ import React, { useState } from "react";
 import { toast } from "sonner";
 import { CloudTestPanel } from "./devtools/CloudTestPanel";
 import FileOperations from "./devtools/FileOperations";
+import HeatmapControls from "./devtools/HeatmapControls";
 import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
@@ -113,6 +114,12 @@ const DevToolsPanel: React.FC = () => {
             loadingStates={loadingStates}
             setLoadingStates={setLoadingStates}
           />
+        </div>
+
+        <div>
+          <h2 className="text-lg font-semibold">Cursor Heatmap</h2>
+          <Separator className="my-2" />
+          <HeatmapControls />
         </div>
 
         <div>
