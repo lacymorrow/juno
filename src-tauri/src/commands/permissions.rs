@@ -1,9 +1,25 @@
 // macOS permissions management for accessibility, screen recording, and microphone
 
-use tauri::{AppHandle, Emitter};
 use serde::{Deserialize, Serialize};
-use tracing::{info, error, debug, warn};
+use serde_json::Value;
+use crate::state::AppState;
+#[cfg(target_os = "macos")]
+use computer_use_ai_sdk::platforms::macos::permissions::{
+    check_accessibility_permissions, 
+    check_accessibility_permissions_with_auto_redirect,
+    check_screen_recording_permissions, 
+    check_microphone_permissions, 
+    check_input_monitoring_permissions,
+    open_system_settings_for_permission
+};
+use tauri::{AppHandle, Manager, Emitter};
+use tracing::{info, warn, error, debug};
 use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use std::sync::Arc;
+use lazy_static::lazy_static;
+use tauri::State;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +40,13 @@ pub struct PermissionsState {
     pub input_monitoring: PermissionStatus,
     pub all_granted: bool,
     pub app_name: String,
+}
+
+// Global monitoring task storage
+type MonitoringTask = Arc<Mutex<Option<JoinHandle<()>>>>;
+
+lazy_static! {
+    static ref MONITORING_TASK: MonitoringTask = Arc::new(Mutex::new(None));
 }
 
 /// Check the status of all required macOS permissions
@@ -257,57 +280,86 @@ pub async fn open_system_settings_enhanced(permission_type: String) -> Result<()
     }
 }
 
-/// Monitor permissions changes and emit events
+/// Start monitoring permissions changes with proper task management
 #[tauri::command]
 pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> {
     info!("Starting permissions monitoring");
 
+    // First, stop any existing monitoring task
+    stop_permissions_monitoring().await?;
+
     let app_clone = app.clone();
-    tokio::spawn(async move {
+    let monitoring_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
         let mut last_state: Option<PermissionsState> = None;
 
         loop {
-            interval.tick().await;
+            // Use select! to allow task cancellation
+            tokio::select! {
+                _ = interval.tick() => {
+                    match check_permissions_status(app_clone.clone()).await {
+                        Ok(current_state) => {
+                            // Check if state has changed
+                            let state_changed = match &last_state {
+                                Some(last) => {
+                                    last.accessibility.granted != current_state.accessibility.granted ||
+                                    last.screen_recording.granted != current_state.screen_recording.granted ||
+                                    last.microphone.granted != current_state.microphone.granted ||
+                                    last.input_monitoring.granted != current_state.input_monitoring.granted
+                                }
+                                None => true, // First check
+                            };
 
-            match check_permissions_status(app_clone.clone()).await {
-                Ok(current_state) => {
-                    // Check if state has changed
-                    let state_changed = match &last_state {
-                        Some(last) => {
-                            last.accessibility.granted != current_state.accessibility.granted ||
-                            last.screen_recording.granted != current_state.screen_recording.granted ||
-                            last.microphone.granted != current_state.microphone.granted ||
-                            last.input_monitoring.granted != current_state.input_monitoring.granted
+                            if state_changed {
+                                debug!("Permissions state changed, emitting event");
+                                if let Err(e) = app_clone.emit("permissions-changed", &current_state) {
+                                    error!("Failed to emit permissions-changed event: {}", e);
+                                }
+
+                                last_state = Some(current_state);
+                            }
                         }
-                        None => true, // First check
-                    };
-
-                    if state_changed {
-                        debug!("Permissions state changed, emitting event");
-                        if let Err(e) = app_clone.emit("permissions-changed", &current_state) {
-                            error!("Failed to emit permissions-changed event: {}", e);
+                        Err(e) => {
+                            error!("Error checking permissions during monitoring: {}", e);
                         }
-
-                        last_state = Some(current_state);
                     }
                 }
-                Err(e) => {
-                    error!("Error checking permissions during monitoring: {}", e);
+                // Task can be cancelled by dropping the JoinHandle
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
+                    // Check if task should continue (this allows for clean cancellation)
+                    // The task will be cancelled when the JoinHandle is dropped
                 }
             }
         }
     });
 
+    // Store the task handle for later cancellation
+    {
+        let mut task_guard = MONITORING_TASK.lock().await;
+        *task_guard = Some(monitoring_task);
+    }
+
+    info!("Permissions monitoring started successfully");
     Ok(())
 }
 
-/// Stop permissions monitoring (placeholder for cleanup if needed)
+/// Stop permissions monitoring and cleanup background task
 #[tauri::command]
 pub async fn stop_permissions_monitoring() -> Result<(), String> {
     info!("Stopping permissions monitoring");
-    // In a real implementation, you might want to store monitoring task handles
-    // and cancel them here. For now, this is a placeholder.
+
+    let task_handle = {
+        let mut task_guard = MONITORING_TASK.lock().await;
+        task_guard.take()
+    };
+
+    if let Some(handle) = task_handle {
+        handle.abort();
+        info!("Permissions monitoring task cancelled");
+    } else {
+        debug!("No permissions monitoring task was running");
+    }
+
     Ok(())
 }
 
