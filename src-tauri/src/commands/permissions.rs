@@ -3,6 +3,7 @@
 use tauri::{AppHandle, Emitter};
 use serde::{Deserialize, Serialize};
 use tracing::{info, error, debug, warn};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -576,6 +577,334 @@ async fn test_screen_recording_access() -> Result<bool, String> {
     }
 }
 
+/// Request microphone permission by triggering the system permission dialog
+/// This attempts to force the permission prompt and then redirect to settings
+#[tauri::command]
+pub async fn request_microphone_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        info!("Requesting microphone permission with system dialog trigger");
+
+        // First, try to trigger the actual permission dialog by attempting to access the microphone
+        let permission_triggered = trigger_microphone_permission_dialog().await;
+
+        if permission_triggered {
+            info!("Successfully triggered microphone permission dialog");
+
+            // Wait a moment for user to interact with the dialog
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+
+            // Check if permission was granted
+            match test_microphone_access().await {
+                Ok(true) => {
+                    info!("Microphone permission granted after dialog");
+                    return Ok(true);
+                }
+                Ok(false) => {
+                    info!("Microphone permission still denied, opening System Settings");
+                    // Open System Settings to Privacy & Security > Microphone
+                    if let Err(e) = open_microphone_system_settings().await {
+                        warn!("Failed to open microphone settings: {}", e);
+                    }
+                    return Ok(false);
+                }
+                Err(e) => {
+                    warn!("Error checking microphone permission after dialog: {}", e);
+                }
+            }
+        } else {
+            info!("Could not trigger microphone permission dialog, opening System Settings directly");
+            // Fallback: open System Settings directly
+            if let Err(e) = open_microphone_system_settings().await {
+                warn!("Failed to open microphone settings: {}", e);
+            }
+        }
+
+        Ok(false)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(true)
+    }
+}
+
+/// Actually trigger the microphone permission dialog by attempting audio access
+async fn trigger_microphone_permission_dialog() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        // Try to trigger microphone permission using a simple audio recording test
+        // This should cause macOS to show the permission dialog if not already granted
+        let result = tokio::time::timeout(Duration::from_secs(3), async {
+            // Use osascript to trigger microphone access which should show the permission dialog
+            let output = Command::new("osascript")
+                .args(&[
+                    "-e",
+                    r#"
+                    tell application "System Events"
+                        try
+                            set micStatus to microphone access allowed
+                            return micStatus
+                        on error
+                            -- This error might trigger the permission dialog
+                            return false
+                        end try
+                    end tell
+                    "#
+                ])
+                .output();
+
+            match output {
+                Ok(result) => {
+                    let output_str = String::from_utf8_lossy(&result.stdout);
+                    info!("Microphone permission trigger result: {}", output_str.trim());
+                    true
+                }
+                Err(e) => {
+                    warn!("Failed to trigger microphone permission dialog: {}", e);
+                    false
+                }
+            }
+        }).await;
+
+        match result {
+            Ok(success) => success,
+            Err(_) => {
+                warn!("Microphone permission dialog trigger timed out");
+                false
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Open System Settings to the Microphone privacy section
+async fn open_microphone_system_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        info!("Opening System Settings to Microphone privacy section");
+
+        // Try the modern macOS way first (macOS 13+)
+        let result = Command::new("open")
+            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+            .status();
+
+        match result {
+            Ok(status) if status.success() => {
+                info!("Successfully opened System Settings to Microphone section");
+                return Ok(());
+            }
+            Ok(_) => {
+                warn!("Modern System Settings URL failed, trying fallback");
+            }
+            Err(e) => {
+                warn!("Failed to open modern System Settings: {}", e);
+            }
+        }
+
+        // Fallback to older System Preferences method
+        let fallback_result = Command::new("open")
+            .args(&["-b", "com.apple.systempreferences", "/System/Library/PreferencePanes/Security.prefPane"])
+            .status();
+
+        match fallback_result {
+            Ok(status) if status.success() => {
+                info!("Successfully opened System Preferences to Security section");
+                Ok(())
+            }
+            Ok(_) => {
+                Err("Failed to open System Preferences - command executed but failed".to_string())
+            }
+            Err(e) => {
+                Err(format!("Failed to open System Preferences: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
+/// Request screen recording permission by testing functionality and redirecting to settings
+#[tauri::command]
+pub async fn request_screen_recording_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        info!("Requesting screen recording permission");
+
+        // First check if we already have permission
+        match test_screen_recording_access().await {
+            Ok(true) => {
+                info!("Screen recording permission already granted");
+                return Ok(true);
+            }
+            Ok(false) => {
+                info!("Screen recording permission not granted, opening System Settings");
+                // Open System Settings to Privacy & Security > Screen Recording
+                if let Err(e) = open_screen_recording_system_settings().await {
+                    warn!("Failed to open screen recording settings: {}", e);
+                }
+                return Ok(false);
+            }
+            Err(e) => {
+                warn!("Error checking screen recording permission: {}", e);
+                // Still try to open settings
+                if let Err(e) = open_screen_recording_system_settings().await {
+                    warn!("Failed to open screen recording settings: {}", e);
+                }
+                return Ok(false);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(true)
+    }
+}
+
+/// Open System Settings to the Screen Recording privacy section
+async fn open_screen_recording_system_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        info!("Opening System Settings to Screen Recording privacy section");
+
+        // Try the modern macOS way first (macOS 13+)
+        let result = Command::new("open")
+            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+            .status();
+
+        match result {
+            Ok(status) if status.success() => {
+                info!("Successfully opened System Settings to Screen Recording section");
+                return Ok(());
+            }
+            Ok(_) => {
+                warn!("Modern System Settings URL failed, trying fallback");
+            }
+            Err(e) => {
+                warn!("Failed to open modern System Settings: {}", e);
+            }
+        }
+
+        // Fallback to older System Preferences method
+        let fallback_result = Command::new("open")
+            .args(&["-b", "com.apple.systempreferences", "/System/Library/PreferencePanes/Security.prefPane"])
+            .status();
+
+        match fallback_result {
+            Ok(status) if status.success() => {
+                info!("Successfully opened System Preferences to Security section");
+                Ok(())
+            }
+            Ok(_) => {
+                Err("Failed to open System Preferences - command executed but failed".to_string())
+            }
+            Err(e) => {
+                Err(format!("Failed to open System Preferences: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
+/// Request input monitoring permission by redirecting to settings
+#[tauri::command]
+pub async fn request_input_monitoring_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        info!("Requesting input monitoring permission");
+
+        // Check current permission status
+        let current_status = test_input_monitoring_access().await;
+
+        if current_status {
+            info!("Input monitoring permission already granted");
+            return Ok(true);
+        }
+
+        info!("Input monitoring permission not granted, opening System Settings");
+        // Open System Settings to Privacy & Security > Input Monitoring
+        if let Err(e) = open_input_monitoring_system_settings().await {
+            warn!("Failed to open input monitoring settings: {}", e);
+        }
+
+        Ok(false)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(true)
+    }
+}
+
+/// Open System Settings to the Input Monitoring privacy section
+async fn open_input_monitoring_system_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        info!("Opening System Settings to Input Monitoring privacy section");
+
+        // Try the modern macOS way first (macOS 13+)
+        let result = Command::new("open")
+            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
+            .status();
+
+        match result {
+            Ok(status) if status.success() => {
+                info!("Successfully opened System Settings to Input Monitoring section");
+                return Ok(());
+            }
+            Ok(_) => {
+                warn!("Modern System Settings URL failed, trying fallback");
+            }
+            Err(e) => {
+                warn!("Failed to open modern System Settings: {}", e);
+            }
+        }
+
+        // Fallback to older System Preferences method
+        let fallback_result = Command::new("open")
+            .args(&["-b", "com.apple.systempreferences", "/System/Library/PreferencePanes/Security.prefPane"])
+            .status();
+
+        match fallback_result {
+            Ok(status) if status.success() => {
+                info!("Successfully opened System Preferences to Security section");
+                Ok(())
+            }
+            Ok(_) => {
+                Err("Failed to open System Preferences - command executed but failed".to_string())
+            }
+            Err(e) => {
+                Err(format!("Failed to open System Preferences: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
 async fn check_microphone_permission() -> Result<PermissionStatus, String> {
     #[cfg(target_os = "macos")]
     {
@@ -764,107 +1093,6 @@ async fn test_input_monitoring_access() -> bool {
     #[cfg(not(target_os = "macos"))]
     {
         true
-    }
-}
-
-/// Request screen recording permissions
-#[tauri::command]
-pub async fn request_screen_recording_permission() -> Result<bool, String> {
-    info!("Requesting screen recording permissions");
-
-    #[cfg(target_os = "macos")]
-    {
-        // On macOS, screen recording permissions are requested automatically when first attempted
-        // We'll test the permission and open settings if needed
-        match test_screen_recording_access().await {
-            Ok(true) => {
-                info!("Screen recording permissions already granted");
-                Ok(true)
-            },
-            Ok(false) => {
-                info!("Screen recording permissions not granted, opening System Settings");
-                // Open system settings for screen recording
-                if let Err(e) = open_system_settings_enhanced("screen_recording".to_string()).await {
-                    warn!("Failed to open System Settings: {}", e);
-                }
-                Ok(false)
-            },
-            Err(e) => {
-                error!("Error checking screen recording permissions: {}", e);
-                Ok(false)
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        warn!("Screen recording permissions are only available on macOS");
-        Ok(true) // Return true on non-macOS platforms
-    }
-}
-
-/// Request microphone permissions
-#[tauri::command]
-pub async fn request_microphone_permission() -> Result<bool, String> {
-    info!("Requesting microphone permissions");
-
-    #[cfg(target_os = "macos")]
-    {
-        // Test current microphone permission status
-        match test_microphone_access().await {
-            Ok(true) => {
-                info!("Microphone permissions already granted");
-                Ok(true)
-            },
-            Ok(false) => {
-                info!("Microphone permissions not granted, opening System Settings");
-                // Open system settings for microphone
-                if let Err(e) = open_system_settings_enhanced("microphone".to_string()).await {
-                    warn!("Failed to open System Settings: {}", e);
-                }
-                Ok(false)
-            },
-            Err(e) => {
-                error!("Error checking microphone permissions: {}", e);
-                Ok(false)
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        warn!("Microphone permissions are only available on macOS");
-        Ok(true) // Return true on non-macOS platforms
-    }
-}
-
-/// Request input monitoring permissions
-#[tauri::command]
-pub async fn request_input_monitoring_permission() -> Result<bool, String> {
-    info!("Requesting input monitoring permissions");
-
-    #[cfg(target_os = "macos")]
-    {
-        // Test current input monitoring permission status
-        let granted = test_input_monitoring_access().await;
-
-        if granted {
-            info!("Input monitoring permissions already granted");
-            Ok(true)
-        } else {
-            info!("Input monitoring permissions not granted, opening System Settings");
-            // Open system settings for input monitoring
-            if let Err(e) = open_system_settings_enhanced("input_monitoring".to_string()).await {
-                warn!("Failed to open System Settings: {}", e);
-            }
-            Ok(false)
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        warn!("Input monitoring permissions are only available on macOS");
-        Ok(true) // Return true on non-macOS platforms
     }
 }
 

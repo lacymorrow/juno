@@ -139,17 +139,24 @@ export function PermissionsFlow({
     }
   };
 
-  // Request screen recording permission
+  // Request screen recording permission with enhanced system settings navigation
   const requestScreenRecordingPermission = async () => {
     try {
       setIsRequestingPermission("screen_recording");
-      const granted = await invoke<boolean>("request_screen_recording_permission");
+      const granted = await invoke<boolean>(
+        "request_screen_recording_permission"
+      );
 
       if (granted) {
         // Refresh permissions status
         await checkPermissions();
+      } else {
+        // Permission not granted - System Settings should be open automatically
+        // Wait a moment and then refresh to see if user granted it
+        setTimeout(async () => {
+          await checkPermissions();
+        }, 2000);
       }
-      // If not granted, the system settings should be open for user to grant manually
     } catch (err) {
       setError(err as string);
       console.error("Error requesting screen recording permission:", err);
@@ -158,17 +165,22 @@ export function PermissionsFlow({
     }
   };
 
-  // Request microphone permission
+  // Request microphone permission with system dialog trigger and settings navigation
   const requestMicrophonePermission = async () => {
     try {
       setIsRequestingPermission("microphone");
       const granted = await invoke<boolean>("request_microphone_permission");
 
       if (granted) {
-        // Refresh permissions status
+        // Permission was granted immediately
         await checkPermissions();
+      } else {
+        // Permission dialog was shown or System Settings opened
+        // Wait a moment and then refresh to check if user granted it
+        setTimeout(async () => {
+          await checkPermissions();
+        }, 2000);
       }
-      // If not granted, the system settings should be open for user to grant manually
     } catch (err) {
       setError(err as string);
       console.error("Error requesting microphone permission:", err);
@@ -177,17 +189,24 @@ export function PermissionsFlow({
     }
   };
 
-  // Request input monitoring permission
+  // Request input monitoring permission with enhanced system settings navigation
   const requestInputMonitoringPermission = async () => {
     try {
       setIsRequestingPermission("input_monitoring");
-      const granted = await invoke<boolean>("request_input_monitoring_permission");
+      const granted = await invoke<boolean>(
+        "request_input_monitoring_permission"
+      );
 
       if (granted) {
-        // Refresh permissions status
+        // Permission was already granted
         await checkPermissions();
+      } else {
+        // System Settings should be open for user to grant permission
+        // Wait a moment and then refresh to check if user granted it
+        setTimeout(async () => {
+          await checkPermissions();
+        }, 2000);
       }
-      // If not granted, the system settings should be open for user to grant manually
     } catch (err) {
       setError(err as string);
       console.error("Error requesting input monitoring permission:", err);
