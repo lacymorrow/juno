@@ -65,7 +65,6 @@ export function EnhancedFloatingBar() {
 
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
-  const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [config] = useState<FloatingBarConfig>({
     showVoiceIndicator: true,
@@ -111,13 +110,6 @@ export function EnhancedFloatingBar() {
     };
     resizeWindow();
   }, [barState]);
-
-  // Handle animation state tracking
-  useEffect(() => {
-    if (config.enableAnimations) {
-      setIsAnimatingSize(["expanding", "shrinking"].includes(barState));
-    }
-  }, [barState, config.enableAnimations]);
 
   // Listen for backend state updates - using the existing event name
   useEffect(() => {

@@ -120,7 +120,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 }
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, always_listening::*};
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
@@ -544,6 +544,20 @@ pub fn run() {
             set_mcp_server_enabled,
             test_mcp_server_connection,
             initialize_mcp_servers,
+            // Always Listening Commands
+            start_always_listening_mode,
+            stop_always_listening_mode,
+            toggle_always_listening_mode,
+            get_always_listening_status,
+            set_always_listening_sensitivity,
+            get_always_listening_sensitivity,
+            set_always_listening_wake_words,
+            get_always_listening_wake_words,
+            debug_always_listening_status,
+            set_transcription_debugging,
+            set_audio_level_monitoring,
+            test_whisper_model,
+            force_transcription_test,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -1615,6 +1629,89 @@ pub fn run() {
                         // Emit state change event for UI
                         if let Err(e) = app_handle_clone.emit("dictation-active", false) {
                             error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
+                        }
+                    }
+                });
+            });
+
+            // Listen for always listening wake word activation
+            let app_handle_for_wake_word = app.handle().clone();
+            app.listen("always-listening:activated", move |_event| {
+                info!("[AlwaysListening] Wake word detected - preparing for agent activation");
+
+                let app_handle_clone = app_handle_for_wake_word.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Update floating bar to indicate agent mode is starting
+                    commands::floating_bar::handle_always_listening_change(&app_handle_clone, true).await;
+
+                    // Emit event to UI to show wake word was detected
+                    if let Err(e) = app_handle_clone.emit("always-listening:wake-word-detected", ()) {
+                        error!("[AlwaysListening] Failed to emit wake-word-detected event: {}", e);
+                    }
+
+                    info!("[AlwaysListening] Wake word activation handled - waiting for follow-up transcription");
+                });
+            });
+
+            // Listen for always listening transcription results (after wake word)
+            let app_handle_for_always_listening = app.handle().clone();
+            app.listen("always-listening:transcription", move |event| {
+                info!("[AlwaysListening] Received transcription after wake word: {:?}", event.payload());
+
+                let app_handle_clone = app_handle_for_always_listening.clone();
+                tauri::async_runtime::spawn(async move {
+                    let app_state = app_handle_clone.state::<state::AppState>();
+
+                    // Check if Dictation Mode is active - skip if so
+                    let is_dictation_active = app_state.dictation_active.lock()
+                        .map(|active| *active)
+                        .unwrap_or(false);
+
+                    if is_dictation_active {
+                        info!("[AlwaysListening] Dictation Mode is active - skipping agent activation");
+                        return;
+                    }
+
+                    // Parse the transcription result
+                    let payload_str = event.payload();
+                    match serde_json::from_str::<serde_json::Value>(payload_str) {
+                        Ok(payload_json) => {
+                            if let Some(text_value) = payload_json.get("text") {
+                                if let Some(text) = text_value.as_str() {
+                                    let trimmed_text = text.trim();
+                                    if !trimmed_text.is_empty() {
+                                        info!("[AlwaysListening] Activating agent with query: '{}'", trimmed_text);
+
+                                        // Update floating bar for agent query
+                                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(trimmed_text.to_string())).await;
+
+                                        // Submit query to agent system using the submit_query function
+                                        let state = app_state.clone();
+                                        let query = trimmed_text.to_string();
+
+                                        match crate::anthropic::submit_query(query, state, app_handle_clone.clone()).await {
+                                            Ok(()) => {
+                                                info!("[AlwaysListening] Agent query submitted successfully");
+                                            }
+                                            Err(e) => {
+                                                error!("[AlwaysListening] Failed to submit agent query: {}", e);
+
+                                                // Update floating bar to show error
+                                                commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(format!("Agent error: {}", e))).await;
+                                            }
+                                        }
+                                    } else {
+                                        info!("[AlwaysListening] Transcribed text was empty or whitespace only - ignoring");
+                                    }
+                                } else {
+                                    warn!("[AlwaysListening] Text field in transcription payload is not a string");
+                                }
+                            } else {
+                                warn!("[AlwaysListening] No 'text' field found in transcription payload");
+                            }
+                        }
+                        Err(e) => {
+                            error!("[AlwaysListening] Failed to parse transcription payload: {}", e);
                         }
                     }
                 });

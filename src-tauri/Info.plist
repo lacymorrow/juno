@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Juno needs permission to control other applications and automate tasks on your behalf.</string>
+
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>Juno needs permission to access system administration features for automation.</string>
+
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Juno needs accessibility permissions to interact with other applications and perform automation tasks.</string>
+
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Juno needs microphone access for voice transcription and dictation features.</string>
+
+    <key>NSCameraUsageDescription</key>
+    <string>Juno needs camera access for screen recording and visual analysis features.</string>
+
+    <key>LSUIElement</key>
+    <false/>
+
+    <key>LSBackgroundOnly</key>
+    <false/>
+
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+</dict>
+</plist>

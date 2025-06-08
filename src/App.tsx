@@ -1104,7 +1104,7 @@ function App() {
               className="flex-grow rounded-lg border overflow-hidden"
             >
               {/* Chat Panel */}
-              <ResizablePanel defaultSize={75} minSize={30}>
+              <ResizablePanel defaultSize={isDevPanelOpen ? 50 : 100} minSize={30}>
                 <div className="flex flex-col h-full p-4">
                   {/* Conversation Area */}
                   <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
@@ -1352,33 +1352,29 @@ function App() {
                 </div>
               </ResizablePanel>
 
-              {/* Resizable Handle */}
-              <ResizableHandle withHandle />
+              {/* Conditionally render the resizable handle and dev panel based on isDevPanelOpen */}
+              {isDevPanelOpen && (
+                <>
+                  {/* Resizable Handle */}
+                  <ResizableHandle withHandle />
 
-              {/* Dev Tools & Logs Panel (Collapsible) */}
-              <ResizablePanel
-                collapsible
-                collapsedSize={0} // Completely collapses
-                minSize={25} // Reduced minimum size for better responsiveness
-                defaultSize={isDevPanelOpen ? 50 : 0} // Dynamic default size based on state
-                className="overflow-hidden" // Ensure panel itself doesn't scroll
-              >
-                {/* Apply ScrollArea directly inside the panel */}
-                <ScrollArea className="h-full w-full p-3">
-                  {" "}
-                  {/* Full size and padding */}
-                  {/* Title (replaces CardHeader) */}
-                  <h2 className="text-lg font-semibold mb-3 border-b pb-2">
-                    Developer Tools & Logs
-                  </h2>
-                  {/* DevToolsPanel Component */}
-                  <div className="border-b pb-3 mb-3">
-                    <DevToolsPanel />
-                  </div>
-                  {/* Logs Area */}
-                  <div className="flex-grow">{/* Logs Area */}</div>
-                </ScrollArea>
-              </ResizablePanel>
+                  {/* Dev Tools & Logs Panel */}
+                  <ResizablePanel defaultSize={50} minSize={25}>
+                    <ScrollArea className="h-full w-full p-3">
+                      {/* Title (replaces CardHeader) */}
+                      <h2 className="text-lg font-semibold mb-3 border-b pb-2">
+                        Developer Tools & Logs
+                      </h2>
+                      {/* DevToolsPanel Component */}
+                      <div className="border-b pb-3 mb-3">
+                        <DevToolsPanel />
+                      </div>
+                      {/* Logs Area */}
+                      <div className="flex-grow">{/* Logs Area */}</div>
+                    </ScrollArea>
+                  </ResizablePanel>
+                </>
+              )}
             </ResizablePanelGroup>
           )}
         </div>

@@ -19,14 +19,6 @@ enum AudioThreadMessage {
     Stop,
 }
 
-#[derive(Clone)]
-enum TranscriptionEvent {
-    Started,
-    Stopped,
-    PartialResult(String),
-    FinalResult(String),
-}
-
 pub struct VoiceController {
     ctx: WhisperContext,
     pub model_path: String,
@@ -230,7 +222,7 @@ impl VoiceController {
         Ok(())
     }
 
-        fn audio_thread_worker<R: Runtime + 'static>(
+    fn audio_thread_worker<R: Runtime + 'static>(
         model_path: String,
         last_buffer_arc: Arc<Mutex<Option<Vec<f32>>>>,
         actual_rate: u32,

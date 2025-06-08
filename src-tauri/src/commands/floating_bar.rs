@@ -20,6 +20,7 @@ pub enum BarState {
     Transcribing,
     Speaking,
     Dictating,
+    AlwaysListening,
 }
 
 impl BarState {
@@ -37,6 +38,7 @@ impl BarState {
             BarState::Transcribing => "transcribing",
             BarState::Speaking => "speaking",
             BarState::Dictating => "dictating",
+            BarState::AlwaysListening => "always-listening",
         }
     }
 }
@@ -51,6 +53,7 @@ pub struct FloatingBarManager {
     spoken_text: String,
     is_agent_working: bool,
     is_dictation_mode: bool,
+    is_always_listening: bool,
     app_handle: AppHandle,
 }
 
@@ -65,6 +68,7 @@ impl FloatingBarManager {
             spoken_text: String::new(),
             is_agent_working: false,
             is_dictation_mode: false,
+            is_always_listening: false,
             app_handle,
         }
     }
@@ -80,6 +84,7 @@ impl FloatingBarManager {
             "spokenText": self.spoken_text,
             "isAgentWorking": self.is_agent_working,
             "isDictationMode": self.is_dictation_mode,
+            "isAlwaysListening": self.is_always_listening,
         });
 
         if let Err(e) = self.app_handle.emit("bar-state-update", state_data) {
@@ -364,12 +369,26 @@ impl FloatingBarManager {
         Ok(())
     }
 
+    // Handle always listening mode changes
+    pub async fn handle_always_listening_change(&mut self, is_active: bool) -> Result<(), String> {
+        debug!("FloatingBarManager: Handling always listening mode change: {}", is_active);
+        self.is_always_listening = is_active;
+
+        if is_active && self.current_state == BarState::Default {
+            self.set_state(BarState::AlwaysListening).await;
+        } else if !is_active && self.current_state == BarState::AlwaysListening {
+            self.set_state(BarState::Default).await;
+        }
+
+        Ok(())
+    }
+
     // Helper to check if bar should remain expanded
     fn should_remain_expanded_for_status(&self) -> bool {
         matches!(self.current_state,
             BarState::Loading | BarState::Finishing | BarState::Success |
             BarState::Speaking | BarState::Listening | BarState::Transcribing |
-            BarState::Dictating | BarState::Error
+            BarState::Dictating | BarState::AlwaysListening | BarState::Error
         ) || self.is_agent_working
     }
 }
@@ -510,6 +529,15 @@ pub async fn handle_dictation_mode_change(app_handle: &AppHandle, is_active: boo
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_dictation_mode_change(is_active).await {
             error!("Failed to handle dictation mode change: {}", e);
+        }
+    }
+}
+
+pub async fn handle_always_listening_change(app_handle: &AppHandle, is_active: bool) {
+    if let Some(manager) = get_bar_manager(app_handle).await {
+        let mut manager = manager.lock().await;
+        if let Err(e) = manager.handle_always_listening_change(is_active).await {
+            error!("Failed to handle always listening mode change: {}", e);
         }
     }
 }
