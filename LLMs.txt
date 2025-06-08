@@ -1,0 +1,186 @@
+# Juno AI Computer Use Agent - LLM Instructions
+
+## Project Overview
+Juno is a production-ready Tauri v2 desktop app implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, and comprehensive system integration.
+
+## Architecture Overview
+
+### Core Components
+- **Frontend**: React/TypeScript with Tauri v2 integration
+- **Backend**: Rust-based Tauri application with async/await patterns
+- **AI Integration**: Anthropic Claude with Computer Use API
+- **Voice System**: Custom Whisper-based transcription plugin
+- **Automation**: macOS accessibility APIs with Computer Use SDK
+
+### Agent Architecture (Hierarchical)
+```
+Orchestrator (src-tauri/src/anthropic.rs)
+├── Desktop Agent (screen interaction, accessibility)
+├── Browser Agent (web automation)
+├── File Agent (filesystem operations)
+└── Tools (shared providers with lazy initialization)
+```
+
+**Memory Management**:
+- Orchestrator: Persistent AppState with Arc-based cloning
+- Specialists: Fresh SimpleMemoryManager instances (isolated)
+- All agents use safe Arc-based memory manager cloning
+
+## Development Requirements
+
+### Mandatory Compilation Check
+**CRITICAL**: After every Rust change, run:
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+Project MUST compile with exit code 0. No exceptions.
+
+### Key Development Patterns
+- Use `AgentError` enum for errors, NEVER `std::process::exit()`
+- Dynamic escape key registration ONLY during agent execution
+- All persistent state in `AppState`, access via getters
+- Follow async/await patterns consistently throughout
+
+## macOS Permission System 🔧
+
+### Critical Requirement
+**ALWAYS test built apps**, not just development builds for permission issues. Built and dev apps have different bundle identifiers and permission contexts.
+
+### Required Files for Built Apps
+1. **`src-tauri/juno.entitlements`** - macOS security permissions
+   - `com.apple.security.automation.apple-events`
+   - `com.apple.security.cs.allow-unsigned-executable-memory`
+   - `com.apple.security.cs.disable-library-validation`
+   - `com.apple.security.cs.allow-dyld-environment-variables`
+
+2. **`src-tauri/Info.plist`** - Usage descriptions for permission dialogs
+   - `NSAccessibilityUsageDescription`
+   - `NSAppleEventsUsageDescription`
+   - `NSMicrophoneUsageDescription`
+   - `NSCameraUsageDescription`
+
+3. **`src-tauri/tauri.conf.json`** - Bundle configuration
+   ```json
+   {
+     "bundle": {
+       "resources": ["Info.plist"],
+       "macOS": {
+         "entitlements": "juno.entitlements",
+         "files": {"Info.plist": "Info.plist"}
+       }
+     }
+   }
+   ```
+
+### Permission Check Architecture
+Located in: `src-tauri/src/commands/permissions.rs`
+
+**Multi-layered Detection**:
+1. Primary: `computer_use_ai_sdk` permission checks
+2. Fallback: `try_accessibility_test()` with actual Desktop operations
+3. Bundle identifier detection from `TAURI_BUNDLE_IDENTIFIER` env var
+4. Detailed logging for debugging permission issues
+
+**Fixed Issues**: Built apps now correctly report `Accessibility permission check result: true`
+
+## Implementation Status ✅
+
+### Completed Features
+- ✅ All 17 Computer Use actions (click, type, screenshot, etc.)
+- ✅ Timer system with context resumption
+- ✅ Voice integration (Agent/Dictation modes)
+- ✅ Multi-agent orchestration with memory isolation
+- ✅ Browser automation with Selenium WebDriver
+- ✅ MCP integration for extensibility (`src-tauri/src/agent/tools/mcp_integration.rs`)
+- ✅ Cloud control system and authentication
+- ✅ Streaming AI responses with real-time updates
+- ✅ macOS accessibility permission fixes for built apps
+
+### Voice System
+**Plugin**: `tauri-plugin-voice-transcription/`
+- Whisper-based local transcription
+- Agent mode (AI commands) vs Dictation mode (text input)
+- Keyboard shortcuts: Option+D (agent), Option+Space (dictation)
+- Models: `models/ggml-tiny.en.bin` (bundled or local)
+
+### MCP Integration
+**External Tool Servers**: Extensible architecture for additional capabilities
+- Server management via `ToolConfigManager`
+- Dynamic tool discovery and registration
+- Isolated execution environments
+
+## File Structure & Entry Points
+
+### Key Entry Points
+- **Main Agent**: `src-tauri/src/anthropic.rs::submit_query()`
+- **Permission System**: `src-tauri/src/commands/permissions.rs`
+- **Agent Tools**: `src-tauri/src/agent/tools/`
+- **macOS Integration**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
+- **Voice System**: `tauri-plugin-voice-transcription/`
+
+### State Management
+- **AppState**: `src-tauri/src/state.rs` - Central application state
+- **Agent Memory**: Arc-based managers for safe cloning
+- **Configuration**: Tauri store for persistent settings
+
+### Frontend Integration
+- **Floating Bar**: `src/components/EnhancedFloatingBar.tsx`
+- **Agent Communication**: Event-based system with `bar-state-update` events
+- **Window Management**: Multiple windows (main, floating-bar)
+
+## Build & Testing
+
+### Development
+```bash
+bun run dev          # Frontend development
+cargo check         # Verify Rust compilation
+```
+
+### Production Build
+```bash
+bun tauri build     # Creates app bundle with entitlements
+```
+
+### Verification Checklist
+- [ ] `cargo check` passes (exit code 0)
+- [ ] Built app contains Info.plist with usage descriptions
+- [ ] Permission checking returns accurate results in built app
+- [ ] App launches and initializes all systems (voice, agents, shortcuts)
+
+## Error Handling
+
+### Agent Errors
+Use `AgentError` enum defined in agent traits:
+- `ToolExecutionError`
+- `MemoryError`
+- `ConfigurationError`
+- Never use `std::process::exit()` - always return proper errors
+
+### Permission Errors
+Robust fallback mechanisms in place:
+- Multiple detection methods prevent false negatives
+- Detailed logging helps debug permission issues
+- Graceful degradation when permissions unavailable
+
+## LLM-Specific Instructions
+
+### Code Modification Guidelines
+1. **Always run `cargo check`** after Rust changes
+2. **Test built apps** for permission-related changes
+3. **Use existing patterns** (AgentError, async/await, Arc cloning)
+4. **Maintain memory isolation** between agent types
+5. **Follow hierarchical architecture** (orchestrator → specialists → tools)
+
+### Debugging Approach
+- Check compilation first (`cargo check`)
+- Use tracing logs for runtime debugging
+- Test both dev and built apps for permission issues
+- Verify entitlements and Info.plist inclusion in bundles
+
+### Extension Guidelines
+- New tools go in `src-tauri/src/agent/tools/`
+- MCP servers for external integrations
+- Follow existing async patterns and error handling
+- Maintain state management through AppState getters
+
+This documentation provides comprehensive guidance for LLMs working with the Juno codebase, emphasizing critical patterns, recent fixes, and proper development practices.
