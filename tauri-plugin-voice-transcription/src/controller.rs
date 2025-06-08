@@ -528,6 +528,11 @@ impl VoiceController {
                 }
                 Err(e) => {
                     tracing::error!("Final transcription failed: {:?}", e);
+                    // Emit transcription error event for backend to handle
+                    let _ = app_handle.emit("voice-transcription:error", serde_json::json!({
+                        "type": "transcription_failed",
+                        "message": format!("Final transcription failed: {:?}", e)
+                    }));
                     let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
                 }
             }

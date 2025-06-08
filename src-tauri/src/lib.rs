@@ -619,6 +619,22 @@ pub fn run() {
             get_available_sounds,
             get_sound_enabled,
             set_sound_enabled,
+            // Voice Control Sound Commands
+            play_voice_start_sound,
+            play_voice_end_sound,
+            play_dictation_start_sound,
+            play_dictation_end_sound,
+            play_voice_error_sound,
+            // Agent Sound Commands
+            play_agent_start_sound,
+            play_agent_success_sound,
+            play_agent_error_sound,
+            play_agent_attention_sound,
+            // Boot and System Sound Commands
+            play_boot_sound,
+            play_system_ready_sound,
+            play_connection_sound,
+            play_disconnection_sound,
             // Tool Configuration Commands
             get_tool_configurations,
             get_tool_config,
@@ -1250,7 +1266,7 @@ pub fn run() {
 
                 let state = app_handle_for_boot_sound.state::<crate::state::AppState>();
                 let app_handle_clone = app_handle_for_boot_sound.clone();
-                if let Err(e) = crate::commands::sound::play_notification_sound(app_handle_clone, state).await {
+                if let Err(e) = crate::commands::sound::play_boot_sound(app_handle_clone, state).await {
                     warn!("Failed to play boot sound: {}", e);
                 } else {
                     info!("Boot sound played successfully from backend");
@@ -1327,6 +1343,15 @@ pub fn run() {
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:dictation-started", move |event| {
                 info!("[Event] Received voice-transcription:dictation-started event");
+
+                // Play voice start sound automatically when dictation starts
+                let app_handle_for_sound = app_handle_for_listener.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle_for_sound.state::<crate::state::AppState>();
+                    if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_for_sound.clone(), state).await {
+                        warn!("Failed to play voice start sound: {}", e);
+                    }
+                });
 
                 // Update floating bar manager
                 let app_handle_clone = app_handle_for_listener.clone();
@@ -1437,10 +1462,35 @@ pub fn run() {
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:dictation-stopped", move |event| {
                 info!("[Event] Received voice-transcription:dictation-stopped event");
+
+                // Play voice end sound automatically when dictation stops
+                let app_handle_for_sound = app_handle_for_listener.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle_for_sound.state::<crate::state::AppState>();
+                    if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle_for_sound.clone(), state).await {
+                        warn!("Failed to play voice end sound: {}", e);
+                    }
+                });
+
                 // Rebroadcast the event as app-dictation-stopped for backward compatibility
                 if let Err(e) = app_handle_for_listener.emit("app-dictation-stopped", event.payload()) {
                     tracing::error!("[Event] Failed to rebroadcast dictation-stopped event: {}", e);
                 }
+            });
+
+            // Listen for voice transcription error events
+            let app_handle_for_error_listener = app.handle().clone();
+            app.listen("voice-transcription:error", move |event| {
+                info!("[Event] Received voice-transcription:error event");
+
+                // Play voice error sound automatically when transcription fails
+                let app_handle_for_sound = app_handle_for_error_listener.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle_for_sound.state::<crate::state::AppState>();
+                    if let Err(e) = crate::commands::sound::play_voice_error_sound(app_handle_for_sound.clone(), state).await {
+                        warn!("Failed to play voice error sound: {}", e);
+                    }
+                });
             });
 
             // Listen for dictation transcription start events (immediate)

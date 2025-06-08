@@ -293,22 +293,22 @@ pub async fn submit_query(
             error!("Agent run failed: {}", e);
             let (state_str, msg) = match e {
                 AgentError::Terminated => {
-                    // Play notification sound for cancellation (less intrusive than error)
-                    if let Err(e) = crate::commands::sound::play_notification_sound(app_handle.clone(), state.clone()).await {
+                    // Play agent attention sound for cancellation (less intrusive than error)
+                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(app_handle.clone(), state.clone()).await {
                         warn!("Failed to play cancellation sound: {}", e);
                     }
                     ("Cancelled".to_string(), "Agent execution was cancelled.".to_string())
                 },
                 AgentError::MaxStepsReached => {
-                    // Play error sound for failure
-                    if let Err(e) = crate::commands::sound::play_error_sound(app_handle.clone(), state.clone()).await {
+                    // Play agent error sound for failure
+                    if let Err(e) = crate::commands::sound::play_agent_error_sound(app_handle.clone(), state.clone()).await {
                         warn!("Failed to play error sound: {}", e);
                     }
                     ("Failed".to_string(), "Agent reached maximum steps.".to_string())
                 },
                 _ => {
-                    // Play error sound for other failures
-                    if let Err(e) = crate::commands::sound::play_error_sound(app_handle.clone(), state.clone()).await {
+                    // Play agent error sound for other failures
+                    if let Err(e) = crate::commands::sound::play_agent_error_sound(app_handle.clone(), state.clone()).await {
                         warn!("Failed to play error sound: {}", e);
                     }
                     ("Failed".to_string(), format!("Agent error: {}", e))
@@ -352,9 +352,9 @@ pub async fn submit_query(
         }
     };
 
-    // Play success sound immediately if TTS is disabled, otherwise it will be played when TTS finishes
+    // Play agent success sound immediately if TTS is disabled, otherwise it will be played when TTS finishes
     if !tts_enabled && final_response.agent_state == "Finished" {
-        if let Err(e) = crate::commands::sound::play_success_sound(app_handle.clone(), state.clone()).await {
+        if let Err(e) = crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await {
             warn!("Failed to play success sound: {}", e);
         }
     }
@@ -391,8 +391,8 @@ pub async fn handle_tts_completion(
     // Update floating bar manager for TTS finish
     crate::commands::floating_bar::handle_tts_finished(&app_handle).await;
 
-    // Play success sound now that TTS has finished
-    if let Err(e) = crate::commands::sound::play_success_sound(app_handle.clone(), state.clone()).await {
+    // Play agent success sound now that TTS has finished
+    if let Err(e) = crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await {
         warn!("Failed to play success sound after TTS completion: {}", e);
     }
 

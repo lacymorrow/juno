@@ -5,7 +5,7 @@ use crate::always_listening::AlwaysListeningController;
 use crate::error::Error;
 use crate::config::VoiceTranscriptionConfig;
 use crate::utils::resolve_model_path;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 /// Helper function to check if VoiceController is available and provide helpful error messages
 fn check_voice_controller_availability<R: tauri::Runtime>(
@@ -37,7 +37,7 @@ pub async fn start_dictation<R: tauri::Runtime + 'static>(
 
     voice_controller.start_dictation(&app)?;
 
-    // Emit started event through the plugin system
+    // Emit started event through the plugin system - sound will be handled automatically by backend
     app.emit("plugin:voice-transcription:dictation-started", ())
         .map_err(|e| Error::EventError(format!("Failed to emit dictation-started event: {}", e)))?;
 
@@ -58,7 +58,7 @@ pub async fn stop_dictation<R: tauri::Runtime>(
     let result = voice_controller.stop_dictation()?;
 
     if result {
-        // Emit stopped event through the plugin system
+        // Emit stopped event through the plugin system - sound will be handled automatically by backend
         app.emit("plugin:voice-transcription:dictation-stopped", ())
             .map_err(|e| Error::EventError(format!("Failed to emit dictation-stopped event: {}", e)))?;
     }
@@ -85,14 +85,24 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
 
     if was_dictating {
         voice_controller.stop_dictation()?;
+
+        // Sound will be handled automatically by backend event listener
         app.emit("plugin:voice-transcription:dictation-stopped", ())
             .map_err(|e| Error::EventError(format!("Failed to emit dictation-stopped event: {}", e)))?;
         Ok(false)
     } else {
-        voice_controller.start_dictation(&app)?;
-        app.emit("plugin:voice-transcription:dictation-started", ())
-            .map_err(|e| Error::EventError(format!("Failed to emit dictation-started event: {}", e)))?;
-        Ok(true)
+        match voice_controller.start_dictation(&app) {
+            Ok(()) => {
+                // Sound will be handled automatically by backend event listener
+                app.emit("plugin:voice-transcription:dictation-started", ())
+                    .map_err(|e| Error::EventError(format!("Failed to emit dictation-started event: {}", e)))?;
+                Ok(true)
+            }
+            Err(e) => {
+                // Error sound will be handled automatically by backend when error event is emitted from controller
+                Err(e)
+            }
+        }
     }
 }
 
