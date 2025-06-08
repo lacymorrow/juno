@@ -255,7 +255,8 @@ where
                 self.transition_state(AgentState::Executing).await;
                 log::info!("Executing {} tool call(s)", tool_calls.len());
 
-                // Add assistant message indicating tool call(s)
+                // Add assistant message indicating tool call(s) BEFORE starting execution
+                // This ensures the conversation is in a consistent state even if interrupted
                 {
                     let mut mem = self.memory.lock().await;
                     // Clone the calls for the message
@@ -270,28 +271,34 @@ where
                     .await?;
                 }
 
-                // Track which tool calls have been completed to handle cancellation cleanup
-                let mut completed_tool_calls = Vec::new();
+                // Pre-populate cancelled results for all tool calls to maintain conversation consistency
+                // These will be overwritten with actual results as tools complete successfully
+                let mut tool_results_cache = Vec::new();
+                for tool_call in tool_calls.iter() {
+                    tool_results_cache.push((tool_call.clone(), None)); // None means not executed yet
+                }
 
                 // Execute tools sequentially for now
                 // TODO: Consider parallel execution if tools are independent
-                for tool_call in tool_calls.iter() {
+                for (index, tool_call) in tool_calls.iter().enumerate() {
                     // --- Cancellation Check (Before Tool Execution) ---
                     if *cancel_rx.borrow() {
-                        log::debug!("Cancellation detected before tool execution: {}", tool_call.name);
+                        log::info!("Cancellation detected before tool execution: {}", tool_call.name);
 
-                        // Add cancelled tool results for any remaining tool calls to maintain conversation consistency
+                        // Add cancelled tool results for all remaining tool calls (including this one)
                         let mut mem = self.memory.lock().await;
-                        for pending_tool_call in tool_calls.iter().skip(completed_tool_calls.len()) {
-                            log::debug!("Adding cancelled tool result for tool: {}", pending_tool_call.name);
-                            mem.add_message(Message {
-                                role: Role::Tool,
-                                content: "Tool execution was cancelled.".to_string(),
-                                tool_calls: None,
-                                tool_call_id: Some(pending_tool_call.id.clone()),
-                                name: Some(pending_tool_call.name.clone()),
-                            })
-                            .await?;
+                        for (remaining_tool_call, cached_result) in tool_results_cache.iter().skip(index) {
+                            if cached_result.is_none() {
+                                log::debug!("Adding cancelled tool result for tool: {}", remaining_tool_call.name);
+                                mem.add_message(Message {
+                                    role: Role::Tool,
+                                    content: "Tool execution was cancelled before completion.".to_string(),
+                                    tool_calls: None,
+                                    tool_call_id: Some(remaining_tool_call.id.clone()),
+                                    name: Some(remaining_tool_call.name.clone()),
+                                })
+                                .await?;
+                            }
                         }
 
                         return Err(AgentError::Terminated);
@@ -310,17 +317,22 @@ where
                         tool_call.name,
                         tool_call.id
                     );
+
+                    // Execute the tool
                     let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+
+                    // Cache the result for potential cleanup
+                    tool_results_cache[index].1 = Some(tool_result.clone());
 
                     // --- Cancellation Check (After Tool Execution) ---
                     // Check even if tool execution failed, to ensure timely termination
                     if *cancel_rx.borrow() {
-                        log::debug!("Cancellation detected after tool execution: {}", tool_call.name);
+                        log::info!("Cancellation detected after tool execution: {}", tool_call.name);
 
-                        // Add tool result for the current tool call first
+                        // Add tool result for the current tool call (completed or failed)
+                        let mut mem = self.memory.lock().await;
                         match tool_result {
                             Ok(result) => {
-                                let mut mem = self.memory.lock().await;
                                 mem.add_message(Message {
                                     role: Role::Tool,
                                     content: serde_json::to_string(&result.output)
@@ -335,10 +347,9 @@ where
                                 .await?;
                             }
                             Err(_) => {
-                                let mut mem = self.memory.lock().await;
                                 mem.add_message(Message {
                                     role: Role::Tool,
-                                    content: "Tool execution was cancelled.".to_string(),
+                                    content: "Tool execution failed and was cancelled.".to_string(),
                                     tool_calls: None,
                                     tool_call_id: Some(tool_call.id.clone()),
                                     name: Some(tool_call.name.clone()),
@@ -348,26 +359,27 @@ where
                         }
 
                         // Add cancelled tool results for any remaining tool calls
-                        let mut mem = self.memory.lock().await;
-                        for pending_tool_call in tool_calls.iter().skip(completed_tool_calls.len() + 1) {
-                            log::debug!("Adding cancelled tool result for remaining tool: {}", pending_tool_call.name);
-                            mem.add_message(Message {
-                                role: Role::Tool,
-                                content: "Tool execution was cancelled.".to_string(),
-                                tool_calls: None,
-                                tool_call_id: Some(pending_tool_call.id.clone()),
-                                name: Some(pending_tool_call.name.clone()),
-                            })
-                            .await?;
+                        for (remaining_tool_call, cached_result) in tool_results_cache.iter().skip(index + 1) {
+                            if cached_result.is_none() {
+                                log::debug!("Adding cancelled tool result for remaining tool: {}", remaining_tool_call.name);
+                                mem.add_message(Message {
+                                    role: Role::Tool,
+                                    content: "Tool execution was cancelled before completion.".to_string(),
+                                    tool_calls: None,
+                                    tool_call_id: Some(remaining_tool_call.id.clone()),
+                                    name: Some(remaining_tool_call.name.clone()),
+                                })
+                                .await?;
+                            }
                         }
 
                         return Err(AgentError::Terminated);
                     }
 
                     // Add tool result message to memory immediately after execution
+                    let mut mem = self.memory.lock().await;
                     match tool_result {
                         Ok(result) => {
-                            let mut mem = self.memory.lock().await;
                             log::debug!("Tool {} finished successfully.", tool_call.name);
 
                             // Emit tool call result event
@@ -401,7 +413,6 @@ where
                             .await?;
                         }
                         Err(e) => {
-                            let mut mem = self.memory.lock().await;
                             log::warn!("Tool {} failed with error: {}", tool_call.name, e);
 
                             // Emit tool call result event for failure
@@ -426,10 +437,11 @@ where
                             .await?;
                         }
                     }
-
-                    // Mark this tool call as completed
-                    completed_tool_calls.push(tool_call.clone());
                 }
+
+                // All tools completed successfully without cancellation
+                log::info!("All {} tool call(s) completed successfully", tool_calls.len());
+
                 // After executing all tools, transition back to Thinking for the next loop iteration
                 self.transition_state(AgentState::Thinking).await;
                 Ok(AgentAction::Think) // Indicate thinking should continue

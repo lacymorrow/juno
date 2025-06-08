@@ -94,6 +94,32 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
+    // --- Check if an agent is already running and cancel it ---
+    if state.is_agent_executing() {
+        let current_execution_id = state.get_current_agent_execution_id();
+        info!("Agent is currently executing (ID: {:?}), cancelling for new command", current_execution_id);
+
+        // Signal cancellation for the existing agent
+        state.signal_cancel();
+        info!("Signaled cancellation for existing agent execution");
+
+        // Give existing agent a brief moment to clean up gracefully
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+
+        // Reset the cancellation signal for the new agent
+        state.reset_cancel();
+        info!("Reset cancellation signal for new agent");
+    } else {
+        // No agent currently running, ensure cancellation signal is reset
+        state.reset_cancel();
+        info!("No existing agent detected, proceeding with new execution");
+    }
+
+    // Generate a unique execution ID for this agent run
+    let execution_id = uuid::Uuid::new_v4().to_string();
+    state.mark_agent_execution_started(execution_id.clone());
+    info!("Starting new agent execution with ID: {}", execution_id);
+
     // --- Gather System Context ---
     let system_context = match gather_system_context(Some(&*state)).await {
         Ok(context) => {
@@ -276,6 +302,10 @@ pub async fn submit_query(
 
     state.reset_cancel();
     info!("Agent cancellation signal reset.");
+
+    // Mark agent execution as finished
+    state.mark_agent_execution_finished();
+    info!("Agent execution marked as finished for ID: {}", execution_id);
 
     // --- Process Agent Result ---
     let mut final_response = match agent_result {
