@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Get current directory in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -44,7 +49,7 @@ const tauriProcess = spawn('bunx', ['tauri', 'dev', '--config', tempConfigPath],
 const cleanup = () => {
   console.log('\n🧹 Cleaning up...');
   tauriProcess.kill();
-  
+
   // Remove temporary config file
   try {
     fs.unlinkSync(tempConfigPath);
@@ -52,7 +57,7 @@ const cleanup = () => {
   } catch (err) {
     console.log('⚠️  Could not remove temporary config (might not exist)');
   }
-  
+
   process.exit(0);
 };
 
