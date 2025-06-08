@@ -89,7 +89,7 @@ pub(crate) async fn dev_scroll_window(
 
     #[cfg(not(target_os = "macos"))]
     {
-        result = Err(AutomationError::UnsupportedPlatform);
+        result = Err(AutomationError::UnsupportedPlatform("macOS specific functionality not available on this platform".to_string()));
         action_desc = "Scroll (Unsupported Platform)".to_string(); // Assign here
     }
 

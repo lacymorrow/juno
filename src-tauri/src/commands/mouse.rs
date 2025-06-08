@@ -1,6 +1,6 @@
 // Commands related to mouse actions (clicks, movement, position)
 
-use tauri::{AppHandle, State, Emitter};
+use tauri::{AppHandle, State, Emitter, Manager};
 use crate::state::AppState;
 use tracing::{info, error};
 use crate::utils::coordinates;
@@ -11,6 +11,19 @@ fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> R
     // Send an event to the frontend to display a visual indicator
     app.emit("click-visualization", (x, y, color))
         .map_err(|e| format!("Failed to emit click visualization event: {}", e))?;
+    Ok(())
+}
+
+// Helper function to ensure the main window has focus for mouse operations
+async fn ensure_main_window_focus(app: &AppHandle) -> Result<(), String> {
+    if let Some(main_window) = app.get_webview_window("main") {
+        if let Err(e) = main_window.set_focus() {
+            error!("Failed to focus main window before mouse operation: {}", e);
+            // Don't fail the operation, just log the warning
+        }
+        // Small delay to ensure focus is established
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
     Ok(())
 }
 
@@ -349,6 +362,10 @@ pub(crate) async fn dev_right_click(
     modifier: Option<String>,
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Right clicking at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+    
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+    
     create_click_visualization(&app, x, y, "#0000FF")?; // Blue for right click
     match state.desktop.right_click(x, y, modifier.as_deref()) {
         Ok(_) => {
@@ -372,6 +389,10 @@ pub(crate) async fn dev_middle_click(
     modifier: Option<String>,
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Middle clicking at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+    
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+    
     create_click_visualization(&app, x, y, "#FFFF00")?; // Yellow for middle click (Adjusted from tools2 green)
     match state.desktop.middle_click(x, y, modifier.as_deref()) {
         Ok(_) => {
@@ -395,6 +416,10 @@ pub(crate) async fn dev_double_click(
     modifier: Option<String>,
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Double clicking at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+    
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+    
     create_click_visualization(&app, x, y, "#FFA500")?; // Orange for double click
     match state.desktop.double_click(x, y, modifier.as_deref()) {
         Ok(_) => {
@@ -418,6 +443,10 @@ pub(crate) async fn dev_triple_click(
     modifier: Option<String>,
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Triple clicking at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+    
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+    
     create_click_visualization(&app, x, y, "#800080")?; // Purple for triple click
     match state.desktop.triple_click(x, y, modifier.as_deref()) { // Use main's logic
         Ok(_) => {
@@ -504,6 +533,10 @@ pub(crate) async fn dev_left_click(
     modifier: Option<String>,
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Left clicking at screen coordinates ({}, {}) Modifier: {:?}", x, y, modifier);
+    
+    // Ensure main window has focus before performing mouse action
+    ensure_main_window_focus(&app).await?;
+    
     create_click_visualization(&app, x, y, "#FF0000")?; // Red for left click
     match state.desktop.left_click(x, y, modifier.as_deref()) { // Use main's version
         Ok(_) => {
