@@ -142,6 +142,22 @@ pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), 
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
             "x-apple.systemsettings:com.apple.preference.security?Privacy_Microphone",
         ],
+        "input_monitoring" => vec![
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+            "x-apple.systemsettings:com.apple.preference.security?Privacy_ListenEvent",
+        ],
+        "full_disk_access" => vec![
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+            "x-apple.systemsettings:com.apple.preference.security?Privacy_AllFiles",
+        ],
+        "camera" => vec![
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
+            "x-apple.systemsettings:com.apple.preference.security?Privacy_Camera",
+        ],
+        "automation" => vec![
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+            "x-apple.systemsettings:com.apple.preference.security?Privacy_Automation",
+        ],
         _ => {
             return Err(format!("Unknown permission type: {}", permission_type));
         }

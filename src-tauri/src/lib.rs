@@ -347,7 +347,16 @@ pub fn run() {
         Err(e) => {
             tracing::warn!("Failed to initialize Desktop Automation Engine: {}", e);
             tracing::info!("App will start with limited functionality - desktop automation features will be disabled");
-            tracing::info!("System Settings should have opened automatically if permissions are needed");
+            tracing::info!("The app will still open and show the permission flow to guide you through setup");
+
+            // Check if this is specifically a permission error
+            let error_str = e.to_string();
+            if error_str.contains("permission") || error_str.contains("accessibility") || error_str.contains("denied") {
+                tracing::info!("Permission-related error detected - the app's permission flow will guide you through setup");
+                tracing::info!("System Settings may have opened automatically to grant permissions");
+            } else {
+                tracing::warn!("Unexpected Desktop initialization error: {}", e);
+            }
             None
         }
     };
@@ -368,12 +377,21 @@ pub fn run() {
             return; // Exit early if a CLI command was handled
         }
     } else {
-        // Handle CLI commands without desktop instance
-        if cli::runner::handle_cli_commands(&cli, &Desktop::new_with_auto_redirect(false, false, false).unwrap_or_else(|_| {
-            // Create a minimal desktop instance for CLI processing
-            panic!("Unable to create desktop instance for CLI commands")
-        })) {
-            return;
+        // Handle CLI commands without desktop instance - create minimal instance for CLI only
+        // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
+        match Desktop::new(false, false) {
+            Ok(minimal_desktop) => {
+                if cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
+                    return;
+                }
+            },
+            Err(_) => {
+                // If CLI commands require desktop and can't create minimal instance,
+                // only handle non-desktop CLI commands
+                if cli::runner::handle_non_desktop_cli_commands(&cli) {
+                    return;
+                }
+            }
         }
     }
 
@@ -416,97 +434,40 @@ pub fn run() {
             let dictation_toggle_shortcut = parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
             let dictation_input_shortcut = parse_shortcut_string(&current_shortcuts.dictation_input);
 
-            if shortcut == &escape_shortcut && event.state() == ShortcutState::Pressed {
-                println!("[GlobalShortcut] Escape pressed! Signaling agent stop and checking for active transcription.");
-                let app_state_instance = app.state::<state::AppState>();
+            // Handle escape key press
+            if escape_shortcut.id() == shortcut.id() {
+                info!("[GlobalShortcut] Escape shortcut triggered - attempting to stop agent");
 
-                // Cancel any running AI agent
-                app_state_instance.signal_cancel();
-                info!("[GlobalShortcut] Agent cancellation signal sent via Escape.");
+                // Check if agent is active and stop it
+                let app_state = app.state::<state::AppState>();
 
-                // Stop any active TTS
-                crate::tts::stop_speech();
-                info!("[GlobalShortcut] TTS stop signal sent via Escape.");
-
-                // Check if dictation mode is active and cancel it if so
-                let is_dictation_active = app_state_instance.dictation_active.lock()
-                    .map(|active| *active)
-                    .unwrap_or(false);
-
-                if is_dictation_active {
-                    info!("[GlobalShortcut] Dictation mode is active - cancelling transcription");
-
-                    // Emit dictation cancellation event
-                    if let Err(e) = app.emit("dictation-transcription-cancel", ()) {
-                        error!("[GlobalShortcut] Failed to emit dictation-transcription-cancel: {}", e);
-                    }
-
-                    // Force stop voice controller
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        // Try to stop the voice transcription plugin
-                        if let Some(controller_state) = app_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                            if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_clone.clone(),
-                                controller_state
-                            ).await {
-                                error!("[GlobalShortcut] Failed to stop voice transcription: {}", e);
-                            } else {
-                                info!("[GlobalShortcut] Voice transcription stopped successfully via Escape");
-                            }
-                        } else {
-                            warn!("[GlobalShortcut] Voice controller not available - cannot stop transcription");
-                        }
-
-                        // Clean up app state
-                        let app_state = app_clone.state::<state::AppState>();
-                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                            *dictation_active = false;
-                        }
-
-                        // Update floating bar manager
-                        if let Err(e) = app_clone.emit("dictation-active", false) {
-                            error!("[GlobalShortcut] Failed to emit dictation-active event: {}", e);
-                        }
-
-                        // Reset dictation input monitor state
-                        crate::dictation_monitor::force_reset_dictation_input_state().await;
-                    });
+                // Check if there's an ongoing cancellation already
+                let cancel_requested = *app_state.cancel_rx.borrow();
+                if !cancel_requested {
+                    info!("[GlobalShortcut] Stopping active agent task");
+                    // Use the signal_cancel method instead of direct field access
+                    app_state.signal_cancel();
                 }
 
-                // Always check if there's any voice activity to stop (handles both Agent Mode and edge cases)
+                // Check if dictation is active and stop it
                 if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                    // Check if dictation is active and stop it synchronously if possible
                     if let Ok(voice_controller) = voice_controller_state.lock() {
                         if voice_controller.is_dictating() {
-                            info!("[GlobalShortcut] Voice controller is active - stopping transcription");
-                            drop(voice_controller); // Release the lock before async operation
+                            info!("[GlobalShortcut] Dictation active - will attempt to stop it");
+                            drop(voice_controller); // Release the lock before the async operation
 
-                            let app_clone = app.clone();
-                            tauri::async_runtime::spawn(async move {
-                                if let Some(controller_state) = app_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                                    if let Err(e) = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                        app_clone.clone(),
-                                        controller_state
-                                    ).await {
-                                        error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
-                                    } else {
-                                        info!("[GlobalShortcut] Voice controller stopped successfully via Escape");
-                                    }
-                                } else {
-                                    warn!("[GlobalShortcut] Voice controller not available - cannot stop voice controller");
-                                }
-                            });
+                            // Instead of spawning, try to stop dictation directly using the app handle
+                            // This is a simpler approach that avoids lifetime issues
+                            let _ = app.emit("stop_dictation", serde_json::Value::Null);
                         }
                     }
                 }
 
-                // Emit agent stopping event for any running AI agents
-                if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
-                    eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
-                }
+                return; // Exit early for escape shortcut
             }
 
-            // Handle dictation toggle shortcut (Alt+D / Option+D)
+            // Handle dictation toggle shortcut (Option+D / Alt+D)
             if let Some(ref toggle_shortcut) = dictation_toggle_shortcut {
                 if shortcut == toggle_shortcut && event.state() == ShortcutState::Pressed {
                     info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
@@ -1238,40 +1199,22 @@ pub fn run() {
 
                     // --- Ensure window is properly activated after setup ---
                     let window_clone = window.clone();
-                    let app_handle_clone = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        // Longer delay to ensure all window setup is complete
-                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        // Small delay to ensure window setup is complete
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-                        // Force window to be activated and ready to receive events
-                        // Set focus multiple times to ensure window becomes active
-                        for _ in 0..3 {
-                            if let Err(e) = window_clone.set_focus() {
-                                warn!("Failed to set focus on floating bar window: {}", e);
-                            } else {
-                                info!("Floating bar window focus set successfully");
-                            }
-                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                        // Single, safe focus attempt without aggressive looping
+                        if let Err(e) = window_clone.set_focus() {
+                            warn!("Failed to set focus on floating bar window: {}", e);
+                        } else {
+                            info!("Floating bar window focus set successfully");
                         }
 
-                        // Additional window activation via backend to ensure event processing
-                        if let Ok(ns_window_ptr) = window_clone.ns_window() {
-                            let ns_window = ns_window_ptr as cocoa_id;
-                            unsafe {
-                                // Explicitly make the window the key window to ensure it can receive events
-                                #[allow(unexpected_cfgs)]
-                                let _: () = msg_send![ns_window, makeKeyWindow];
-
-                                // Make sure the window is truly active
-                                #[allow(unexpected_cfgs)]
-                                let _: () = msg_send![ns_window, orderFrontRegardless];
-
-                                // Final mouse event configuration
-                                #[allow(unexpected_cfgs)]
-                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-
-                                info!("Additional window activation completed");
-                            }
+                        // Simple window show to ensure visibility - much safer than NSWindow API calls
+                        if let Err(e) = window_clone.show() {
+                            warn!("Failed to show floating bar window: {}", e);
+                        } else {
+                            info!("Floating bar window shown successfully");
                         }
                     });
 
@@ -1921,9 +1864,27 @@ pub fn run() {
             Ok(())
         });
 
-    builder
-        .run(tauri::generate_context!()) // Use context relative to lib.rs now
-        .expect("error while running tauri application");
+    // Enhanced error handling to prevent crashes due to permission issues
+    match builder.run(tauri::generate_context!()) {
+        Ok(()) => {
+            info!("Tauri application exited successfully");
+        }
+        Err(e) => {
+            error!("Error while running tauri application: {}", e);
+            // Log the error but don't panic - this allows for graceful handling of permission issues
+            eprintln!("Juno failed to start properly. This is often due to missing system permissions.");
+            eprintln!("Please ensure you have granted the following permissions:");
+            eprintln!("- Accessibility (System Settings > Privacy & Security > Accessibility)");
+            eprintln!("- Screen Recording (System Settings > Privacy & Security > Screen Recording)");
+            eprintln!("- Microphone (System Settings > Privacy & Security > Microphone)");
+            eprintln!("");
+            eprintln!("If permissions are already granted, try restarting the app.");
+            eprintln!("Error details: {}", e);
+
+            // Exit with error code but don't panic
+            std::process::exit(1);
+        }
+    }
 }
 
 // Unit tests module

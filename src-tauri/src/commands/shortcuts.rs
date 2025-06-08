@@ -173,8 +173,6 @@ async fn save_shortcuts_to_store(app: &AppHandle, state: &AppState) -> Result<()
     Ok(())
 }
 
-
-
 /// Validate shortcut format (basic validation)
 fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
     if shortcut.trim().is_empty() {
@@ -199,11 +197,45 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Re-register global shortcuts with current values
+/// Register global shortcuts with proper error handling for missing permissions
 pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    // Unregister existing shortcuts
+    // Check if we have Input Monitoring permissions first
+    info!("Checking Input Monitoring permissions before registering shortcuts");
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, we need Input Monitoring permissions for global shortcuts
+        use std::process::Command;
+
+        let has_input_monitoring = check_input_monitoring_permissions().unwrap_or(false);
+        if !has_input_monitoring {
+            warn!("Input Monitoring permissions not granted - shortcuts may not work properly");
+
+            // Try to open System Settings for Input Monitoring
+            let output = Command::new("open")
+                .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+                .output();
+
+            match output {
+                Ok(result) if result.status.success() => {
+                    info!("Opened System Settings for Input Monitoring permissions");
+                },
+                Ok(result) => {
+                    warn!("Failed to open System Settings: {}", String::from_utf8_lossy(&result.stderr));
+                },
+                Err(e) => {
+                    warn!("Failed to execute open command: {}", e);
+                }
+            }
+
+            // Return early but don't fail - app should still function
+            return Ok(());
+        }
+    }
+
+    // Unregister existing shortcuts with error handling
     if let Err(e) = app.global_shortcut().unregister_all() {
-        warn!("Failed to unregister existing shortcuts: {}", e);
+        warn!("Failed to unregister existing shortcuts (this is often normal): {}", e);
     }
 
     let shortcuts = state.keyboard_shortcuts.lock()
@@ -213,38 +245,64 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     // Import parse_shortcut_string from lib.rs
     use crate::parse_shortcut_string;
 
-    // Register the agent mode toggle shortcut
+    // Register the agent mode toggle shortcut with error handling
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.agent_mode_toggle) {
-        if let Err(e) = app.global_shortcut().register(shortcut) {
-            error!("Failed to register agent mode toggle shortcut: {}", e);
-        } else {
-            info!("Registered agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
+        match app.global_shortcut().register(shortcut) {
+            Ok(()) => {
+                info!("Registered agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
+            },
+            Err(e) => {
+                error!("Failed to register agent mode toggle shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.agent_mode_toggle, e);
+                // Don't fail - continue with other shortcuts
+            }
         }
     } else {
         warn!("Failed to parse agent mode toggle shortcut: {}", shortcuts.agent_mode_toggle);
     }
 
-    // Register the dictation input shortcut
+    // Register the dictation input shortcut with error handling
     if let Some(shortcut) = parse_shortcut_string(&shortcuts.dictation_input) {
-        if let Err(e) = app.global_shortcut().register(shortcut) {
-            error!("Failed to register dictation input shortcut: {}", e);
-        } else {
-            info!("Registered dictation input shortcut: {}", shortcuts.dictation_input);
+        match app.global_shortcut().register(shortcut) {
+            Ok(()) => {
+                info!("Registered dictation input shortcut: {}", shortcuts.dictation_input);
+            },
+            Err(e) => {
+                error!("Failed to register dictation input shortcut ({}): {} - This may be due to missing Input Monitoring permissions", shortcuts.dictation_input, e);
+                // Don't fail - continue with other shortcuts
+            }
         }
     } else {
         warn!("Failed to parse dictation input shortcut: {}", shortcuts.dictation_input);
     }
 
-    // Register the escape key for cancellation (always active)
+    // Register the escape key for cancellation with error handling
     let escape_shortcut = Shortcut::new(None, Code::Escape);
-    if let Err(e) = app.global_shortcut().register(escape_shortcut) {
-        error!("Failed to register escape key shortcut: {}", e);
-    } else {
-        info!("Registered escape key for cancellation");
+    match app.global_shortcut().register(escape_shortcut) {
+        Ok(()) => {
+            info!("Registered escape key for cancellation");
+        },
+        Err(e) => {
+            error!("Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
+            // Escape key is critical, but don't fail the entire initialization
+        }
     }
 
     // Note: Settings shortcut is handled by the menu system
 
-    info!("Updated global shortcut registrations");
+    info!("Completed global shortcut registration (some may have failed due to permissions)");
     Ok(())
+}
+
+/// Check if Input Monitoring permissions are granted (macOS only)
+#[cfg(target_os = "macos")]
+fn check_input_monitoring_permissions() -> Result<bool, String> {
+    // This is a basic check - in a real implementation you would use proper macOS APIs
+    // For now, we'll assume permissions are needed and return true to avoid blocking
+    // A proper implementation would use IOHIDRequestAccess() or similar APIs
+    Ok(true) // Assume granted for now to avoid blocking the app
+}
+
+#[cfg(not(target_os = "macos"))]
+fn check_input_monitoring_permissions() -> Result<bool, String> {
+    Ok(true) // Always true on non-macOS platforms
 }

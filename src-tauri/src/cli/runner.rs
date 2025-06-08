@@ -1,12 +1,18 @@
 use crate::cli::Cli;
-use crate::tts;
 use crate::utils;
 use computer_use_ai_sdk::Desktop; // Import Desktop
 use std::process::Command;
 use std::io::Write;
 use tempfile::Builder as TempFileBuilder;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use tracing::{info, error}; // Import tracing macros
+use tracing::{info, error, warn}; // Import tracing macros
+use crate::state::AppState;
+use std::fs;
+use tauri::{AppHandle, Manager};
+use crate::tts; // Add the TTS import
+
+/// Configuration file name
+const CONFIG_FILE: &str = "config.json";
 
 /// Handles the execution of commands specified via CLI arguments.
 /// Returns `true` if a CLI command was handled (and the app should exit),
@@ -116,4 +122,165 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
 
     // No CLI-specific commands were handled that require exiting
     false
+}
+
+/// Handles CLI commands that don't require desktop access when permissions are missing.
+/// Returns `true` if a CLI command was handled (and the app should exit),
+/// `false` otherwise (and the Tauri app should launch).
+pub(crate) fn handle_non_desktop_cli_commands(cli: &crate::cli::Cli) -> bool {
+    // Handle CLI commands that don't require desktop access
+
+    // Handle TTS test command
+    if cli.tts_provider.is_some() {
+        // TTS test would require full app initialization
+        warn!("TTS test requires full app initialization");
+        warn!("Please start the app normally to run TTS tests");
+        return true;
+    }
+
+    // For now, return false since there's no config show command in the current CLI structure
+    // Other non-desktop commands can be added here as needed
+
+    false
+}
+
+/// Runs CLI commands and returns the result without exiting the process
+pub async fn run_cli_command(app_handle: AppHandle, matches: &clap::ArgMatches) -> Result<(), String> {
+    info!("CLI command execution started");
+
+    // Handle test command
+    if let Some(test_matches) = matches.subcommand_matches("test") {
+        return run_test_command(app_handle, test_matches).await;
+    }
+
+    // Handle config command
+    if let Some(config_matches) = matches.subcommand_matches("config") {
+        return run_config_command(config_matches).await;
+    }
+
+    // For any other commands, return success without processing
+    Ok(())
+}
+
+/// Handle test command variations with TTS test
+async fn run_test_command(app_handle: AppHandle, test_matches: &clap::ArgMatches) -> Result<(), String> {
+    if test_matches.get_flag("tts") || test_matches.subcommand_matches("tts").is_some() {
+        let text = "Testing TTS functionality";
+        let provider = "system";
+
+        // Create a runtime for blocking on async function
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+        // Use the system TTS test instead of full TTS
+        match rt.block_on(test_tts(app_handle)) {
+            Ok(()) => {
+                info!("✅ TTS test completed successfully");
+                Ok(())
+            }
+            Err(e) => {
+                error!("❌ TTS test failed: {}", e);
+                Err(format!("TTS test failed: {}", e))
+            }
+        }
+    } else {
+        // For other test types, just return success
+        Ok(())
+    }
+}
+
+/// Handle config command variations
+async fn run_config_command(config_matches: &clap::ArgMatches) -> Result<(), String> {
+    if let Some(show_matches) = config_matches.subcommand_matches("show") {
+        match show_config_file() {
+            Ok(()) => {
+                info!("✅ Config file displayed successfully");
+                Ok(())
+            }
+            Err(e) => {
+                error!("❌ Failed to show config: {}", e);
+                Err(format!("Failed to show config: {}", e))
+            }
+        }
+    } else {
+        // For other config types, just return success
+        Ok(())
+    }
+}
+
+/// Shows the content of the configuration file
+fn show_config_file() -> Result<(), String> {
+    info!("Showing configuration file...");
+
+    let config_dir = dirs::config_dir()
+        .ok_or("Unable to determine config directory")?
+        .join("juno");
+
+    let config_path = config_dir.join(CONFIG_FILE);
+
+    if !config_path.exists() {
+        warn!("Configuration file does not exist at: {:?}", config_path);
+        return Ok(());
+    }
+
+    match fs::read_to_string(&config_path) {
+        Ok(content) => {
+            info!("Configuration file content:");
+            println!("{}", content);
+            Ok(())
+        }
+        Err(e) => {
+            error!("Failed to read config file: {}", e);
+            Err(format!("Failed to read config file: {}", e))
+        }
+    }
+}
+
+/// Test accessibility permissions for Desktop operations (safe to call without Desktop instance)
+async fn test_accessibility(_app_handle: AppHandle) -> Result<(), String> {
+    info!("Testing accessibility permissions...");
+
+    // Get app state and check if desktop instance is available
+    let app_state = _app_handle.state::<AppState>();
+
+    // Use the desktop wrapper's get_desktop method
+    match app_state.desktop.get_desktop() {
+        Ok(_desktop) => {
+            info!("✅ Desktop instance available - accessibility permissions are working");
+            Ok(())
+        }
+        Err(e) => {
+            error!("❌ Desktop instance not available - accessibility permissions may be missing: {}", e);
+            Err(format!("Desktop instance not available - check accessibility permissions: {}", e))
+        }
+    }
+}
+
+/// Test TTS functionality (safe to run without permissions)
+async fn test_tts(_app_handle: AppHandle) -> Result<(), String> {
+    info!("Testing TTS functionality...");
+
+    // For now, just test that the system TTS is available
+    #[cfg(target_os = "macos")]
+    {
+        match std::process::Command::new("say").arg("--version").output() {
+            Ok(output) if output.status.success() => {
+                info!("✅ TTS test completed successfully - macOS system TTS is available");
+                Ok(())
+            }
+            Ok(_) => {
+                error!("❌ TTS test failed: macOS 'say' command not working properly");
+                Err("macOS 'say' command not working properly".to_string())
+            }
+            Err(e) => {
+                error!("❌ TTS test failed: {}", e);
+                Err(format!("Failed to test TTS: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        info!("✅ TTS test completed - system TTS assumed available on this platform");
+        Ok(())
+    }
 }

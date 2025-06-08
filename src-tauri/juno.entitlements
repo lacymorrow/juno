@@ -37,5 +37,21 @@
     <!-- File access for user data -->
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
+
+    <!-- Input monitoring for global shortcuts (CRITICAL) -->
+    <key>com.apple.security.input-monitoring</key>
+    <true/>
+
+    <!-- Allow system extension loading for low-level system access -->
+    <key>com.apple.security.system-extension</key>
+    <true/>
+
+    <!-- Full disk access (optional but helps with file operations) -->
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+
+    <!-- Additional automation permissions -->
+    <key>com.apple.security.automation.scripting-targets</key>
+    <true/>
 </dict>
 </plist>
