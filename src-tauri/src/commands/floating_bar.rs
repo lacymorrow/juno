@@ -360,6 +360,12 @@ impl FloatingBarManager {
 
         if is_active {
             self.set_state(BarState::Dictating).await;
+        } else {
+            // When dictation mode becomes inactive, return to default state
+            // This ensures the orange UI disappears when keys are released before threshold
+            if self.current_state == BarState::Dictating {
+                self.set_state(BarState::Default).await;
+            }
         }
 
         Ok(())
