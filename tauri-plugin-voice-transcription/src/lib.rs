@@ -24,6 +24,7 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
             commands::stop_dictation,
             commands::toggle_dictation,
             commands::get_dictation_status,
+            commands::get_initialization_status,
             commands::transcribe_file,
             commands::set_model_path,
             commands::get_model_path,
@@ -72,30 +73,39 @@ pub fn init<R: Runtime + 'static>() -> TauriPlugin<R> {
 
             // Initialize voice controller with resolved model path
             tracing::info!("Attempting to create VoiceController with path: {}", resolved_model_path);
-            match VoiceController::new(&resolved_model_path) {
+            let controller = match VoiceController::new(&resolved_model_path) {
                 Ok(controller) => {
-                    app.manage(Arc::new(Mutex::new(controller)));
                     tracing::info!("✅ Voice transcription plugin initialized successfully with model: {}", resolved_model_path);
+                    controller
                 }
                 Err(e) => {
-                    tracing::error!("❌ Failed to initialize voice controller: {}. Voice transcription will be unavailable.", e);
+                    tracing::error!("❌ Failed to initialize voice controller: {}. Creating uninitialized controller.", e);
                     tracing::error!("Error details: {:?}", e);
-                    // Note: We don't insert a controller here, so commands will need to handle the missing state
+                    // Create an uninitialized controller so commands can handle the error gracefully
+                    VoiceController::new_uninitialized(&resolved_model_path, e.to_string())
                 }
-            }
+            };
+            
+            // Always manage the controller state, even if uninitialized
+            app.manage(Arc::new(Mutex::new(controller)));
 
             // Initialize always listening controller with the same model path
             tracing::info!("Attempting to create AlwaysListeningController with path: {}", resolved_model_path);
-            match AlwaysListeningController::new(&resolved_model_path) {
+            let always_listening_controller = match AlwaysListeningController::new(&resolved_model_path) {
                 Ok(always_listening_controller) => {
-                    app.manage(Arc::new(Mutex::new(always_listening_controller)));
                     tracing::info!("✅ Always listening controller initialized successfully with model: {}", resolved_model_path);
+                    always_listening_controller
                 }
                 Err(e) => {
                     tracing::error!("❌ Failed to initialize always listening controller: {}. Always listening will be unavailable.", e);
                     tracing::error!("Error details: {:?}", e);
+                    // For now, we don't create an uninitialized always listening controller
+                    // as it might not have the same pattern - this could be added later if needed
+                    return Ok(());
                 }
-            }
+            };
+            
+            app.manage(Arc::new(Mutex::new(always_listening_controller)));
 
             tracing::info!("=== Voice Transcription Plugin Initialization Complete ===");
             Ok(())

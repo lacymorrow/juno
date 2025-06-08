@@ -20,12 +20,14 @@ enum AudioThreadMessage {
 }
 
 pub struct VoiceController {
-    ctx: WhisperContext,
+    ctx: Option<WhisperContext>,
     pub model_path: String,
     is_dictating: bool,
     audio_thread: Option<(thread::JoinHandle<()>, Sender<AudioThreadMessage>)>,
     last_processed_audio_buffer: Arc<Mutex<Option<Vec<f32>>>>,
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>,
+    is_initialized: bool,
+    initialization_error: Option<String>,
 }
 
 impl VoiceController {
@@ -40,22 +42,65 @@ impl VoiceController {
             .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
 
         Ok(Self {
-            ctx,
+            ctx: Some(ctx),
             model_path: model_path_str.to_string(),
             is_dictating: false,
             audio_thread: None,
             last_processed_audio_buffer: Arc::new(Mutex::new(None)),
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
+            is_initialized: true,
+            initialization_error: None,
         })
     }
 
+    /// Create an uninitialized controller that can be managed by Tauri but will return errors for operations
+    pub fn new_uninitialized(model_path_str: &str, error_message: String) -> Self {
+        Self {
+            ctx: None,
+            model_path: model_path_str.to_string(),
+            is_dictating: false,
+            audio_thread: None,
+            last_processed_audio_buffer: Arc::new(Mutex::new(None)),
+            actual_recording_sample_rate: Arc::new(Mutex::new(None)),
+            is_initialized: false,
+            initialization_error: Some(error_message),
+        }
+    }
+
+    /// Check if the controller was successfully initialized
+    pub fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
+
+    /// Get the initialization error if any
+    pub fn get_initialization_error(&self) -> Option<&String> {
+        self.initialization_error.as_ref()
+    }
+
+    /// Helper method to check initialization before performing operations
+    fn ensure_initialized(&self) -> Result<&WhisperContext> {
+        if !self.is_initialized {
+            let error_msg = self.initialization_error
+                .as_ref()
+                .map(|e| format!("Voice controller not initialized: {}", e))
+                .unwrap_or_else(|| "Voice controller not initialized".to_string());
+            return Err(Error::NotInitialized);
+        }
+        self.ctx.as_ref().ok_or(Error::NotInitialized)
+    }
+
     pub fn transcribe_audio_file(&self, audio_path_str: &str) -> std::result::Result<String, String> {
+        let ctx = match self.ensure_initialized() {
+            Ok(ctx) => ctx,
+            Err(e) => return Err(e.to_string()),
+        };
+
         let audio_path = Path::new(audio_path_str);
         if !audio_path.exists() {
             return Err(format!("Audio file not found: {}", audio_path_str));
         }
 
-        let mut state = self.ctx.create_state()
+        let mut state = ctx.create_state()
             .map_err(|e| format!("Failed to create WhisperState: {:?}", e))?;
 
         let params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
@@ -136,6 +181,9 @@ impl VoiceController {
     }
 
     pub fn start_dictation<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
+        // Check if controller is initialized before starting dictation
+        self.ensure_initialized()?;
+        
         if self.is_dictating {
             return Err(Error::AlreadyDictating);
         }
