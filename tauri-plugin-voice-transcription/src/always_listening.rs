@@ -15,11 +15,12 @@ use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const INTENT_DETECTION_BUFFER_MS: u64 = 3000; // Buffer for intent detection (increased from 1500)
-const VOLUME_THRESHOLD: f32 = 0.003; // Volume threshold for activation (lowered from 0.005)
-const VOLUME_THRESHOLD_END: f32 = 0.002; // Lower threshold for ending activity (hysteresis)
+const VOLUME_THRESHOLD: f32 = 0.01; // Increased from 0.003 to reduce false triggers
+const VOLUME_THRESHOLD_END: f32 = 0.005; // Increased from 0.002
 const SILENCE_TIMEOUT_MS: u64 = 3000; // Return to monitoring after silence
-const MIN_TRANSCRIPTION_DURATION_MS: u64 = 500; // Minimum audio duration before attempting transcription
+const MIN_TRANSCRIPTION_DURATION_MS: u64 = 1000; // Increased from 500ms to 1000ms for better speech capture
 const VOLUME_DROP_TOLERANCE_MS: u64 = 200; // Allow brief volume drops during activity
+const MIN_SPEECH_VOLUME: f32 = 0.02; // Minimum volume required for speech processing
 
 enum AlwaysListeningMessage {
     Stop,
@@ -189,24 +190,7 @@ impl AlwaysListeningController {
 
         info!("[AlwaysListening] Audio monitoring started");
 
-        // Initialize resampler if needed
-        let mut resampler: Option<SincFixedIn<f32>> = None;
-        if sample_rate != WHISPER_SAMPLE_RATE {
-            let params = SincInterpolationParameters {
-                sinc_len: 256,
-                f_cutoff: 0.95,
-                interpolation: SincInterpolationType::Linear,
-                oversampling_factor: 256,
-                window: WindowFunction::BlackmanHarris2,
-            };
-            resampler = SincFixedIn::new(
-                WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
-                2.0,
-                params,
-                32768, // Increased chunk size to handle larger audio buffers (was 1024)
-                1,
-            ).ok();
-        }
+        // Resampling will be done on-demand with custom resamplers
 
         let mut audio_buffer: Vec<f32> = Vec::new();
         let mut current_state = AlwaysListeningState::Monitoring;
@@ -287,33 +271,45 @@ impl AlwaysListeningController {
                                     if activity_duration >= MIN_TRANSCRIPTION_DURATION_MS as u128 &&
                                        audio_buffer.len() >= min_transcription_samples {
 
-                                        info!("[AlwaysListening] Sufficient audio accumulated: {}ms, {} samples",
-                                               activity_duration, audio_buffer.len());
+                                        // Check if the accumulated audio has sufficient volume for speech
+                                        let buffer_volume = Self::calculate_rms_volume(&audio_buffer);
 
-                                        // Check for wake words or speech
-                                        if Self::detect_intent(&mut whisper_state, &audio_buffer, sample_rate, resampler.as_mut(), &wake_words, &app_handle) {
-                                            current_state = AlwaysListeningState::Activated;
-                                            info!("[AlwaysListening] Intent detected - activating transcription");
+                                        if buffer_volume >= MIN_SPEECH_VOLUME {
+                                            info!("[AlwaysListening] Sufficient audio accumulated: {}ms, {} samples, volume: {:.6}",
+                                                   activity_duration, audio_buffer.len(), buffer_volume);
 
-                                            // Update last activity
-                                            if let Ok(mut activity) = last_activity.lock() {
-                                                *activity = Some(Instant::now());
+                                            // Check for wake words or speech
+                                            if Self::detect_intent(&mut whisper_state, &audio_buffer, sample_rate, &wake_words, &app_handle) {
+                                                current_state = AlwaysListeningState::Activated;
+                                                info!("[AlwaysListening] Intent detected - activating transcription");
+
+                                                // Update last activity
+                                                if let Ok(mut activity) = last_activity.lock() {
+                                                    *activity = Some(Instant::now());
+                                                }
+
+                                                // Emit activation event
+                                                if let Err(e) = app_handle.emit("always-listening:activated", ()) {
+                                                    error!("[AlwaysListening] Failed to emit activation event: {}", e);
+                                                }
+
+                                                // Start active transcription
+                                                audio_buffer.clear();
+                                                audio_activity_start = None; // Reset activity tracking
+                                                last_volume_drop = None; // Reset drop tracking
+                                            } else {
+                                                // No wake word detected, keep monitoring but maintain shorter buffer
+                                                audio_buffer.clear();
+                                                audio_activity_start = None; // Reset activity tracking
+                                                last_volume_drop = None; // Reset drop tracking
                                             }
-
-                                            // Emit activation event
-                                            if let Err(e) = app_handle.emit("always-listening:activated", ()) {
-                                                error!("[AlwaysListening] Failed to emit activation event: {}", e);
-                                            }
-
-                                            // Start active transcription
-                                            audio_buffer.clear();
-                                            audio_activity_start = None; // Reset activity tracking
-                                            last_volume_drop = None; // Reset drop tracking
                                         } else {
-                                            // No wake word detected, keep monitoring but maintain shorter buffer
+                                            info!("[AlwaysListening] Audio accumulated but volume too low for speech: {:.6} < {:.6}",
+                                                   buffer_volume, MIN_SPEECH_VOLUME);
+                                            // Reset and wait for higher volume audio
                                             audio_buffer.clear();
-                                            audio_activity_start = None; // Reset activity tracking
-                                            last_volume_drop = None; // Reset drop tracking
+                                            audio_activity_start = None;
+                                            last_volume_drop = None;
                                         }
                                     }
                                 }
@@ -341,8 +337,8 @@ impl AlwaysListeningController {
                                 // Log volume levels more frequently for debugging
                                 static mut LAST_VOLUME_LOG: Option<Instant> = None;
                                 unsafe {
-                                    if LAST_VOLUME_LOG.map_or(true, |last| last.elapsed().as_secs() > 2) {
-                                        info!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (start threshold, sensitivity: {:.1})", volume, volume_threshold, sensitivity);
+                                    if LAST_VOLUME_LOG.map_or(true, |last| last.elapsed().as_secs() > 5) { // Reduced frequency
+                                        debug!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (start threshold, sensitivity: {:.1})", volume, volume_threshold, sensitivity);
                                         LAST_VOLUME_LOG = Some(Instant::now());
                                     }
                                 }
@@ -385,7 +381,7 @@ impl AlwaysListeningController {
 
                             // Process transcription for activated mode
                             if audio_buffer.len() >= buffer_capacity {
-                                Self::process_active_transcription(&mut whisper_state, &audio_buffer, sample_rate, resampler.as_mut(), &app_handle);
+                                Self::process_active_transcription(&mut whisper_state, &audio_buffer, sample_rate, &app_handle);
                                 audio_buffer.clear();
                             }
                         }
@@ -417,7 +413,6 @@ impl AlwaysListeningController {
         whisper_state: &mut whisper_rs::WhisperState,
         audio_buffer: &[f32],
         sample_rate: u32,
-        resampler: Option<&mut SincFixedIn<f32>>,
         wake_words: &[String],
         _app_handle: &AppHandle<R>,
     ) -> bool {
@@ -441,34 +436,60 @@ impl AlwaysListeningController {
             return false;
         }
 
+        // Check audio quality - ensure it has sufficient volume for speech
+        let avg_volume = Self::calculate_rms_volume(audio_buffer);
+        if avg_volume < MIN_SPEECH_VOLUME {
+            info!("[AlwaysListening] detect_intent: Audio volume too low for speech ({:.6} < {:.6}), skipping transcription",
+                   avg_volume, MIN_SPEECH_VOLUME);
+            return false;
+        }
+
         // Resample if necessary
         info!("[AlwaysListening] Sample rate check: {} -> {} (needs resampling: {})",
               sample_rate, WHISPER_SAMPLE_RATE, sample_rate != WHISPER_SAMPLE_RATE);
         let audio_to_process = if sample_rate != WHISPER_SAMPLE_RATE {
-            if let Some(r) = resampler {
-                match r.process(&[audio_buffer.to_vec()], None) {
-                    Ok(mut resampled) if !resampled.is_empty() => {
-                        info!("[AlwaysListening] Audio resampled: {} -> {} samples", audio_buffer.len(), resampled[0].len());
-                        resampled.remove(0)
-                    },
-                    Ok(_) => {
-                        info!("[AlwaysListening] Resampling produced empty output");
-                        return false;
-                    },
-                    Err(e) => {
-                        warn!("[AlwaysListening] Resampling failed: {:?}", e);
-                        return false;
+            // Create a custom resampler for this specific buffer size
+            let params = SincInterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: SincInterpolationType::Linear,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            };
+
+            match SincFixedIn::new(
+                WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
+                2.0,
+                params,
+                audio_buffer.len(), // Use exact buffer size as chunk size
+                1,
+            ) {
+                Ok(mut custom_resampler) => {
+                    match custom_resampler.process(&[audio_buffer.to_vec()], None) {
+                        Ok(mut resampled) if !resampled.is_empty() => {
+                            info!("[AlwaysListening] Audio resampled: {} -> {} samples", audio_buffer.len(), resampled[0].len());
+                            resampled.remove(0)
+                        },
+                        Ok(_) => {
+                            warn!("[AlwaysListening] Resampling produced empty output");
+                            return false;
+                        },
+                        Err(e) => {
+                            warn!("[AlwaysListening] Resampling failed: {:?}", e);
+                            return false;
+                        }
                     }
+                },
+                Err(e) => {
+                    warn!("[AlwaysListening] Failed to create custom resampler: {:?}", e);
+                    return false;
                 }
-            } else {
-                warn!("[AlwaysListening] No resampler available for rate conversion");
-                return false;
             }
         } else {
             audio_buffer.to_vec()
         };
 
-        // Ensure resampled audio also meets minimum duration
+        // Ensure resampled audio also meets minimum duration and quality
         let resampled_duration_ms = (audio_to_process.len() as f32 / WHISPER_SAMPLE_RATE as f32 * 1000.0) as u32;
         if resampled_duration_ms < min_duration_for_transcription {
             info!("[AlwaysListening] detect_intent: Resampled audio duration too short ({}ms < {}ms), skipping transcription",
@@ -476,31 +497,52 @@ impl AlwaysListeningController {
             return false;
         }
 
+        let resampled_volume = Self::calculate_rms_volume(&audio_to_process);
+        if resampled_volume < MIN_SPEECH_VOLUME * 0.5 { // Allow slightly lower volume after resampling
+            info!("[AlwaysListening] detect_intent: Resampled audio volume too low ({:.6} < {:.6}), skipping transcription",
+                   resampled_volume, MIN_SPEECH_VOLUME * 0.5);
+            return false;
+        }
+
         // Quick transcription for wake word detection
-        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
+        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
         params.set_n_threads(4); // Increased from 2 for better performance
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_language(Some("en"));
+        params.set_translate(false);
+        params.set_no_context(true); // Improve reliability for short audio
+        params.set_single_segment(false); // Allow multiple segments
 
-        info!("[AlwaysListening] Starting Whisper transcription with {}ms of audio...", resampled_duration_ms);
+        info!("[AlwaysListening] Starting Whisper transcription with {}ms of audio (volume: {:.6})...",
+               resampled_duration_ms, resampled_volume);
 
         match whisper_state.full(params, &audio_to_process) {
             Ok(_) => {
                 let num_segments = whisper_state.full_n_segments().unwrap_or(0);
                 let mut transcribed_text = String::new();
 
+                info!("[AlwaysListening] Whisper processing completed, {} segments found", num_segments);
+
                 for i in 0..num_segments {
                     if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
-                        transcribed_text.push_str(&segment_text);
+                        let segment_string = segment_text.to_string();
+                        info!("[AlwaysListening] Segment {}: '{}'", i, segment_string);
+                        transcribed_text.push_str(&segment_string);
                         transcribed_text.push(' ');
                     }
                 }
 
                 let text_lower = transcribed_text.trim().to_lowercase();
                 info!("[AlwaysListening] Transcription result: '{}' (length: {})", text_lower, text_lower.len());
+
+                // If we get no transcription, this might indicate a model issue
+                if text_lower.is_empty() {
+                    warn!("[AlwaysListening] Empty transcription result despite audio presence - check model and audio format");
+                    return false;
+                }
 
                 // Check for wake words
                 for wake_word in wake_words {
@@ -527,7 +569,7 @@ impl AlwaysListeningController {
                 false
             }
             Err(e) => {
-                warn!("[AlwaysListening] Whisper transcription failed: {:?}", e);
+                error!("[AlwaysListening] Whisper transcription failed: {:?}", e);
                 false
             }
         }
@@ -537,7 +579,6 @@ impl AlwaysListeningController {
         whisper_state: &mut whisper_rs::WhisperState,
         audio_buffer: &[f32],
         sample_rate: u32,
-        resampler: Option<&mut SincFixedIn<f32>>,
         app_handle: &AppHandle<R>,
     ) {
         if audio_buffer.is_empty() {
@@ -545,13 +586,29 @@ impl AlwaysListeningController {
         }
 
         let audio_to_transcribe = if sample_rate != WHISPER_SAMPLE_RATE {
-            if let Some(r) = resampler {
-                match r.process(&[audio_buffer.to_vec()], None) {
-                    Ok(mut resampled) if !resampled.is_empty() => resampled.remove(0),
-                    _ => return,
-                }
-            } else {
-                return;
+            // Create a custom resampler for this specific buffer size
+            let params = SincInterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: SincInterpolationType::Linear,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            };
+
+            match SincFixedIn::new(
+                WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
+                2.0,
+                params,
+                audio_buffer.len(),
+                1,
+            ) {
+                Ok(mut custom_resampler) => {
+                    match custom_resampler.process(&[audio_buffer.to_vec()], None) {
+                        Ok(mut resampled) if !resampled.is_empty() => resampled.remove(0),
+                        _ => return,
+                    }
+                },
+                Err(_) => return,
             }
         } else {
             audio_buffer.to_vec()
@@ -571,7 +628,9 @@ impl AlwaysListeningController {
 
                 for i in 0..num_segments {
                     if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
-                        transcribed_text.push_str(&segment_text);
+                        let segment_string = segment_text.to_string();
+                        info!("[AlwaysListening] Segment {}: '{}'", i, segment_string);
+                        transcribed_text.push_str(&segment_string);
                     }
                 }
 
@@ -697,102 +756,79 @@ impl AlwaysListeningController {
     }
 
     pub fn test_whisper_model(&self) -> Result<serde_json::Value> {
-        info!("[AlwaysListeningController] Testing Whisper model...");
+        info!("[AlwaysListening] Testing Whisper model at path: {}", self.model_path);
 
-        // Create a test audio buffer (1 second of silence + beep)
-        let sample_rate = WHISPER_SAMPLE_RATE;
-        let duration_seconds = 1.0;
-        let samples = (sample_rate as f64 * duration_seconds) as usize;
-        let mut test_audio = vec![0.0f32; samples];
+        // Test model loading
+        let whisper_context = WhisperContext::new_with_params(&self.model_path, WhisperContextParameters::default())
+            .map_err(|e| Error::Whisper(format!("Failed to load Whisper model: {:?}", e)))?;
 
-        // Add a simple beep pattern (440Hz sine wave for last 0.1 seconds)
-        let beep_start = (samples as f32 * 0.9) as usize;
-        for i in beep_start..samples {
-            let t = (i - beep_start) as f32 / sample_rate as f32;
-            test_audio[i] = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+        let mut whisper_state = whisper_context.create_state()
+            .map_err(|e| Error::Whisper(format!("Failed to create Whisper state: {:?}", e)))?;
+
+        // Create test audio - a simple sine wave that should be detectable
+        let sample_rate = 16000;
+        let duration_samples = sample_rate; // 1 second
+        let frequency = 440.0; // A4 note
+        let mut test_audio: Vec<f32> = Vec::with_capacity(duration_samples);
+
+        for i in 0..duration_samples {
+            let t = i as f32 / sample_rate as f32;
+            let sample = (2.0 * std::f32::consts::PI * frequency * t).sin() * 0.1; // Low amplitude sine wave
+            test_audio.push(sample);
         }
 
-        // Initialize Whisper context and state for testing (same pattern as the worker)
-        match WhisperContext::new_with_params(&self.model_path, WhisperContextParameters::default()) {
-            Ok(whisper_context) => {
-                match whisper_context.create_state() {
-                    Ok(mut whisper_state) => {
-                        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
-                        params.set_n_threads(4);
-                        params.set_print_special(false);
-                        params.set_print_progress(false);
-                        params.set_print_realtime(false);
-                        params.set_print_timestamps(false);
-                        params.set_language(Some("en"));
-                        params.set_temperature(0.0);
+        // Test volume calculation
+        let test_volume = Self::calculate_rms_volume(&test_audio);
 
-                        info!("[AlwaysListeningController] Running Whisper model test with {} samples", test_audio.len());
+        // Test transcription with the test audio
+        let mut params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+        params.set_n_threads(4);
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+        params.set_language(Some("en"));
+        params.set_translate(false);
 
-                        match whisper_state.full(params, &test_audio) {
-                            Ok(_) => {
-                                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                                let mut transcribed_text = String::new();
+        let transcription_result = match whisper_state.full(params, &test_audio) {
+            Ok(_) => {
+                let num_segments = whisper_state.full_n_segments().unwrap_or(0);
+                let mut transcribed_text = String::new();
 
-                                for i in 0..num_segments {
-                                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
-                                        transcribed_text.push_str(&segment_text);
-                                        transcribed_text.push(' ');
-                                    }
-                                }
-
-                                let result = serde_json::json!({
-                                    "status": "success",
-                                    "model_path": self.model_path,
-                                    "audio_samples": test_audio.len(),
-                                    "sample_rate": sample_rate,
-                                    "segments": num_segments,
-                                    "transcription": transcribed_text.trim(),
-                                    "whisper_initialized": true,
-                                    "test_type": "synthetic_beep"
-                                });
-
-                                info!("[AlwaysListeningController] Whisper model test completed: {} segments, '{}' transcribed",
-                                      num_segments, transcribed_text.trim());
-                                Ok(result)
-                            }
-                            Err(e) => {
-                                let error_msg = format!("Whisper transcription failed: {:?}", e);
-                                error!("[AlwaysListeningController] {}", error_msg);
-                                Ok(serde_json::json!({
-                                    "status": "error",
-                                    "error": error_msg,
-                                    "model_path": self.model_path,
-                                    "whisper_initialized": true,
-                                    "test_type": "synthetic_beep"
-                                }))
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let error_msg = format!("Failed to create Whisper state: {:?}", e);
-                        error!("[AlwaysListeningController] {}", error_msg);
-                        Ok(serde_json::json!({
-                            "status": "error",
-                            "error": error_msg,
-                            "model_path": self.model_path,
-                            "whisper_initialized": false,
-                            "test_type": "synthetic_beep"
-                        }))
+                for i in 0..num_segments {
+                    if let Ok(segment_text) = whisper_state.full_get_segment_text(i) {
+                        let segment_string = segment_text.to_string();
+                        info!("[AlwaysListening] Segment {}: '{}'", i, segment_string);
+                        transcribed_text.push_str(&segment_string);
+                        transcribed_text.push(' ');
                     }
                 }
+
+                format!("SUCCESS: {} segments, text: '{}'", num_segments, transcribed_text.trim())
             }
-            Err(e) => {
-                let error_msg = format!("Failed to initialize Whisper context: {:?}", e);
-                error!("[AlwaysListeningController] {}", error_msg);
-                Ok(serde_json::json!({
-                    "status": "error",
-                    "error": error_msg,
-                    "model_path": self.model_path,
-                    "whisper_initialized": false,
-                    "test_type": "synthetic_beep"
-                }))
-            }
-        }
+            Err(e) => format!("FAILED: {:?}", e)
+        };
+
+        // Create test result
+        let test_result = serde_json::json!({
+            "model_path": self.model_path,
+            "model_exists": std::path::Path::new(&self.model_path).exists(),
+            "model_loaded": true,
+            "state_created": true,
+            "test_audio_samples": test_audio.len(),
+            "test_audio_duration_ms": (test_audio.len() as f32 / sample_rate as f32 * 1000.0) as u32,
+            "test_audio_volume": test_volume,
+            "volume_threshold": VOLUME_THRESHOLD,
+            "min_speech_volume": MIN_SPEECH_VOLUME,
+            "min_transcription_duration_ms": MIN_TRANSCRIPTION_DURATION_MS,
+            "transcription_test": transcription_result,
+            "wake_words": self.wake_words,
+            "sensitivity": self.sensitivity,
+            "status": "Model test completed"
+        });
+
+        info!("[AlwaysListening] Model test result: {}", serde_json::to_string_pretty(&test_result).unwrap_or_default());
+        Ok(test_result)
     }
 
     pub fn force_transcription_test<R: Runtime>(&mut self, _app_handle: &AppHandle<R>) -> Result<serde_json::Value> {
