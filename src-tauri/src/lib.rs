@@ -592,6 +592,9 @@ pub fn run() {
             // Permissions Commands
             check_permissions_status,
             request_accessibility_permission,
+            request_microphone_permission,
+            request_screen_recording_permission,
+            request_input_monitoring_permission,
             open_system_preferences,
             start_permissions_monitoring,
             stop_permissions_monitoring,
