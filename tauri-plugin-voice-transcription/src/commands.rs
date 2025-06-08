@@ -6,18 +6,38 @@ use crate::error::Error;
 use crate::config::VoiceTranscriptionConfig;
 use crate::utils::resolve_model_path;
 use tracing::{info, error, warn};
+use serde_json::json;
 
-/// Helper function to check if VoiceController is available and provide helpful error messages
+/// Enhanced helper function to check VoiceController status and provide comprehensive error messages
 fn check_voice_controller_availability<R: tauri::Runtime>(
     app: &AppHandle<R>
 ) -> Result<(), Error> {
     match app.try_state::<Arc<Mutex<VoiceController>>>() {
-        Some(_) => Ok(()),
+        Some(controller_state) => {
+            // State is managed, but check if controller is actually initialized
+            let controller = controller_state.lock()
+                .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+            
+            if !controller.is_initialized() {
+                let error_msg = if let Some(init_error) = controller.get_initialization_error() {
+                    format!("Voice transcription is not available. Initialization failed: {}\n\
+                             This usually happens when:\n\
+                             1. The Whisper model file is missing or corrupted\n\
+                             2. The model path cannot be resolved\n\
+                             3. WhisperContext creation failed\n\
+                             Check the app logs for detailed initialization errors.", init_error)
+                } else {
+                    "Voice transcription is not available. VoiceController failed to initialize.\n\
+                     Check the app logs for initialization errors.".to_string()
+                };
+                error!("[Plugin] VoiceController not initialized: {}", error_msg);
+                return Err(Error::InitializationError(error_msg));
+            }
+            Ok(())
+        }
         None => {
-            let error_msg = "Voice transcription is not available. The VoiceController failed to initialize during app startup. This usually happens when:\n\
-                            1. The Whisper model file is missing or corrupted\n\
-                            2. The model path cannot be resolved\n\
-                            3. WhisperContext creation failed\n\
+            let error_msg = "Voice transcription is not available. The VoiceController state is not managed by Tauri.\n\
+                            This indicates a critical plugin initialization failure.\n\
                             Check the app logs for initialization errors.";
             error!("[Plugin] VoiceController state not managed: {}", error_msg);
             Err(Error::InitializationError(error_msg.to_string()))
@@ -26,11 +46,35 @@ fn check_voice_controller_availability<R: tauri::Runtime>(
 }
 
 #[tauri::command]
+pub async fn get_initialization_status(
+    controller: State<'_, Arc<Mutex<VoiceController>>>,
+) -> Result<serde_json::Value, Error> {
+    info!("[Plugin] get_initialization_status command called");
+
+    let voice_controller = controller.lock()
+        .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
+
+    let status = json!({
+        "is_initialized": voice_controller.is_initialized(),
+        "model_path": voice_controller.model_path,
+        "initialization_error": voice_controller.get_initialization_error(),
+        "is_dictating": voice_controller.is_dictating(),
+        "state_managed": true  // If we get here, state is definitely managed
+    });
+
+    info!("[Plugin] Initialization status: {}", status);
+    Ok(status)
+}
+
+#[tauri::command]
 pub async fn start_dictation<R: tauri::Runtime + 'static>(
     app: AppHandle<R>,
     controller: State<'_, Arc<Mutex<VoiceController>>>,
 ) -> Result<(), Error> {
     info!("[Plugin] start_dictation command called");
+
+    // Check initialization status before proceeding
+    check_voice_controller_availability(&app)?;
 
     let mut voice_controller = controller.lock()
         .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
@@ -74,8 +118,7 @@ pub async fn toggle_dictation<R: tauri::Runtime + 'static>(
 ) -> Result<bool, Error> {
     info!("[Plugin] toggle_dictation command called");
 
-    // First check if the controller is available (this should always pass if we get here, 
-    // but provides better error messages in case of issues)
+    // Enhanced check that verifies both state management and initialization status
     check_voice_controller_availability(&app)?;
 
     let mut voice_controller = controller.lock()
@@ -119,11 +162,15 @@ pub async fn get_dictation_status(
 }
 
 #[tauri::command]
-pub async fn transcribe_file(
+pub async fn transcribe_file<R: tauri::Runtime>(
     path: String,
+    app: AppHandle<R>,
     controller: State<'_, Arc<Mutex<VoiceController>>>,
 ) -> Result<String, Error> {
     info!("[Plugin] transcribe_file command called for path: {}", path);
+
+    // Check initialization status before proceeding
+    check_voice_controller_availability(&app)?;
 
     let voice_controller = controller.lock()
         .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;

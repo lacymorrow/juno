@@ -1,159 +1,151 @@
-# Juno Cursor Rules Documentation
+# Juno AI Computer Use Agent - Cursor Rules Documentation
 
 This directory contains **consolidated cursor rules** for the Juno AI Computer Use Agent project - a complete implementation of Anthropic's Computer Use API with hierarchical agent architecture and advanced voice transcription.
 
-## Consolidated Rules Structure
+## 📁 Rules Directory Structure
 
-### [01-juno-essentials.mdc](01-juno-essentials.mdc) ✅
-**Complete project overview** covering implementation status, tech stack, core features, key files, and platform requirements. Essential for understanding what the project is and what's implemented.
+### 🎯 Core Architecture & Development
+- **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** ✅ - Hierarchical agent system, state management patterns, tool system architecture, and development guidelines
+- **[README.md](README.md)** ✅ - This documentation file providing complete overview of rules structure
 
-### [02-development-guidelines.mdc](02-development-guidelines.mdc) ✅  
-**Critical development patterns** including mandatory compilation checks, architecture patterns, tool implementation, voice system, error handling, and testing protocols.
+### 🔧 System Integration & Features
+- **[mcp-integration-system.mdc](mcp-integration-system.mdc)** ✅ - Complete MCP (Model Context Protocol) integration system with external tool servers, protocol compliance, and UI management
+- **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** ✅ - macOS permission handling fixes, built app permission detection, and system settings automation
+- **[streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)** ✅ - AI response streaming system with real-time UI updates and event handling
+- **[cloud-control-system.mdc](cloud-control-system.mdc)** ✅ - Cloud connectivity and remote control capabilities
 
-### [03-ui-frontend-patterns.mdc](03-ui-frontend-patterns.mdc) ✅
-**Frontend implementation guidance** covering React/TypeScript patterns, voice UI states, Tauri integration, component styling, and performance optimizations.
+### 🎤 Voice System Documentation (Complete Three-Mode Implementation)
+- **[voice-modes-clarification.mdc](voice-modes-clarification.mdc)** ✅ - Complete three-mode voice system: Dictation Mode, Agent Mode, and Always Listening Mode with terminology standards
+- **[06-always-listening-mode.mdc](06-always-listening-mode.mdc)** ✅ - Always Listening Mode technical implementation with wake word detection and continuous monitoring
+- **[07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)** ✅ - Production-ready Always Listening Mode documentation with validation and testing
 
-### [sound_system.mdc](sound_system.mdc) ✅
-**Centralized sound system architecture** with backend-driven control patterns, context-aware sound selection, and duplication prevention guidelines.
+### 🐛 Testing & Debugging
+- **[cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)** ✅ - WebSocket debugging tools, cloud test panel implementation, and connection testing patterns
+- **[successful-merge-documentation.mdc](successful-merge-documentation.mdc)** ✅ - Documentation of successful feature merges and integration patterns
 
-### [backend-event-coordination.mdc](backend-event-coordination.mdc) ✅
-**Backend-frontend coordination patterns** preventing duplicate triggers, ensuring clean separation of concerns, and establishing single sources of truth.
+## 🚀 Quick Start Guide
 
-## Voice System Documentation (Complete Three-Mode Implementation)
+### Essential Understanding
+1. **Project Status**: ✅ PRODUCTION READY with complete Computer Use API implementation
+2. **Architecture**: Hierarchical AI agents with persistent memory and task delegation
+3. **Voice System**: Three distinct modes (Dictation, Agent, Always Listening) with shared infrastructure
+4. **Platform**: Tauri v2 desktop app with React/TypeScript frontend and Rust backend
 
-### [voice-modes-clarification.mdc](voice-modes-clarification.mdc) ✅
-**Complete voice mode documentation** covering all three voice modes: Dictation Mode (voice typing), Agent Mode (AI conversations), and Always Listening Mode (wake word detection), including terminology standards and implementation patterns.
-
-### [06-always-listening-mode.mdc](06-always-listening-mode.mdc) ✅
-**Always Listening Mode - Continuous Intent Detection** covering background monitoring, wake word detection, volume threshold processing, and three-mode voice system coordination.
-
-### [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc) ✅ **NEW**
-**Implementation Complete Documentation** providing comprehensive overview of the fully implemented always-listening mode, including production-ready status, technical details, integration points, and testing validation.
-
-### [chat-event-handling.mdc](chat-event-handling.mdc) ✅
-**Chat event handling and message flow patterns** including TypeScript type safety, duplicate prevention, proper event listener management, and clean conversation display.
-
-## Additional Rules (Permission Handling & State Management)
-
-### [macos-permission-handling.mdc](macos-permission-handling.mdc) ✅
-**Comprehensive guide for graceful permission management** including:
-- Graceful degradation architecture
-- Permission request patterns
-- Safe desktop access methods
-- Error handling for permission failures
-
-### [error-handling-patterns.mdc](error-handling-patterns.mdc) ✅
-**Complete error handling strategy** including:
-- Graceful degradation philosophy
-- Logging strategies and best practices
-- Error recovery mechanisms
-- Testing error scenarios
-
-### [app-state-management.mdc](app-state-management.mdc) ✅
-**Centralized state management** including:
-- Safe desktop access patterns
-- Memory manager integration
-- Timer management
-- Command integration patterns
-
-### [04-enhanced-timer-system.mdc](04-enhanced-timer-system.mdc) ✅
-**Enhanced Timer System - Agent pause/resume capabilities** including:
-- Screen monitoring for visual change detection
-- File monitoring for filesystem events
-- Application monitoring for app lifecycle events
-- Background task management and event emission
-
-### [05-timer-usage-patterns.mdc](05-timer-usage-patterns.mdc) ✅
-**Timer System usage patterns and best practices** including:
-- Gaming and interactive application scenarios
-- File processing and automation workflows
-- Performance optimization guidelines
-- Error recovery and debugging techniques
-
-## Implementation Status ✅ PRODUCTION READY
-
-### AI Computer Use (100% Complete)
-- All 17 Anthropic Computer Use actions implemented
-- File operations with str_replace_based_edit_tool
-- Shell command execution with session management
-- Enhanced timer system with monitoring capabilities (screen/file/app)
-
-### Voice Interaction (Complete Three-Mode Implementation ✅)  
-- **Agent Mode (Alt+D)**: Voice input for AI agent conversations and task execution
-- **Dictation Mode (Configurable Key)**: Immediate voice-to-text typing at cursor location
-- **Always Listening Mode (Production Ready)**: Continuous background monitoring with wake word detection
-- Three distinct workflows sharing voice transcription infrastructure
-- Intelligent timing with 0ms transcription start, 500ms commitment threshold
-- Configurable sensitivity and wake words with real-time updates
-
-### Hierarchical Agent System (Production Ready)
-- Orchestrator agent with persistent memory and personality
-- Specialist agents for browser, desktop, and file operations
-- Intelligent task delegation and response integration
-
-## Quick Development Reference
-
-### Critical Requirements
+### Critical Development Requirements
 ```bash
-# ALWAYS run after Rust changes
+# MANDATORY after every Rust change
 cargo check --manifest-path src-tauri/Cargo.toml
+# Must exit with code 0 for successful compilation
 ```
 
-### Complete Voice System Overview
+### Voice System Overview
 | Mode | Trigger | Purpose | UI State | Processing | Memory | Priority |
 |------|---------|---------|-----------|------------|---------|----------|
 | **Dictation Mode** | Hold configured key (default spacebar) | Voice-to-text typing | Orange mic | Transcription only | None | Highest |
 | **Agent Mode** | Alt+D toggle | AI conversations and task execution | Blue mic + chat | Full AI agent system | Persistent | On-demand |
 | **Always Listening** | Continuous background | Wake word detection and intent monitoring | Background indicator | Wake word detection | None | Background |
 
-### Essential Commands
+### Essential Keyboard Shortcuts
 - **Alt+D**: Toggle Agent Mode for AI conversations and task execution
 - **Configurable Key (Default Spacebar)**: Hold for Dictation Mode - immediate voice typing
 - **Wake Words (Default: "hey juno", "computer")**: Activate Always Listening intent detection
 - **Escape**: Cancel current AI agent operation
 
-### Essential Files
-- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Application setup and event handling
-- [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - Orchestrator agent implementation
-- [src-tauri/src/spacebar_monitor.rs](mdc:src-tauri/src/spacebar_monitor.rs) - Dictation mode key handling
-- [src-tauri/src/commands/always_listening.rs](mdc:src-tauri/src/commands/always_listening.rs) - Always listening mode commands
-- [tauri-plugin-voice-transcription/src/always_listening.rs](mdc:tauri-plugin-voice-transcription/src/always_listening.rs) - Always listening controller
-- [src/Bar.tsx](mdc:src/Bar.tsx) - Main floating bar UI with state management
+## 📋 Implementation Status
 
-### Platform Requirements
-- **macOS**: Accessibility + Screen Recording + Microphone permissions
-- **Voice**: Custom Whisper.cpp-based transcription plugin  
-- **AI**: Multi-provider support (Anthropic, OpenAI, Gemini)
+### ✅ Complete Features
+- **AI Computer Use**: All 17 Anthropic Computer Use actions implemented
+- **Voice Interaction**: Complete three-mode voice system with production-ready functionality
+- **Hierarchical Agents**: Orchestrator with specialist agents for different domains
+- **MCP Integration**: External tool server support with protocol compliance
+- **Cloud Control**: Remote connectivity and command execution
+- **macOS Permissions**: Robust permission handling with graceful degradation
+- **Streaming Responses**: Real-time AI response display with event coordination
 
-## Usage Guidelines
+### 🏗️ Architecture Components
+- **Orchestrator Agent**: Main agent with persistent memory and conversation continuity
+- **Specialist Agents**: Domain-specific agents (browser, desktop, file) with isolated memory
+- **Tool Providers**: Shared tool execution system with lazy initialization
+- **State Management**: Centralized AppState with thread-safe access patterns
+- **Voice Plugin**: Custom Whisper.cpp-based transcription with multi-mode support
+
+## 🛠️ Development Guidelines
+
+### File Organization Patterns
+- **Core Files**: Entry points and main application logic in [src-tauri/src/](../src-tauri/src/)
+- **Agent System**: Hierarchical agent implementations in [src-tauri/src/agents/](../src-tauri/src/agents/)
+- **Commands**: Tauri command handlers in [src-tauri/src/commands/](../src-tauri/src/commands/)
+- **Voice System**: Voice transcription plugin in [tauri-plugin-voice-transcription/](../tauri-plugin-voice-transcription/)
+- **Frontend**: React components and UI in [src/](../src/)
+
+### Error Handling Standards
+- Use `AgentError` enum for all agent-related errors
+- Never use `std::process::exit()` - return proper error results
+- Implement graceful degradation for permission and feature failures
+- Provide clear error messages with actionable instructions
+
+### State Management Patterns
+- Access AppState through Arc-based thread-safe patterns
+- Use `Arc<TokioMutex<T>>` for async access, `Arc<Mutex<T>>` for sync
+- Clone Arc references for function parameters
+- Implement proper cleanup and resource management
+
+### Testing Requirements
+- Test all three voice modes independently and in combination
+- Validate Computer Use actions with actual system interaction
+- Verify permission handling on both development and built applications
+- Test MCP server integration with real external tools
+
+## 📖 Documentation Usage Guide
 
 ### For New Features
-1. Check [02-development-guidelines.mdc](02-development-guidelines.mdc) for basic requirements
-2. Follow [app-state-management.mdc](app-state-management.mdc) for state integration
-3. Implement [error-handling-patterns.mdc](error-handling-patterns.mdc) consistently
-4. Use [macos-permission-handling.mdc](macos-permission-handling.mdc) for system permissions
+1. **Start with** [core-architecture-patterns.mdc](core-architecture-patterns.mdc) for architectural understanding
+2. **Review relevant system docs** (MCP, voice, permissions) based on feature requirements
+3. **Follow established patterns** for state management, error handling, and tool integration
+4. **Test comprehensively** with real-world scenarios and edge cases
 
-### Voice System Development
-1. **Review voice modes** - [voice-modes-clarification.mdc](voice-modes-clarification.mdc) for complete three-mode system understanding
-2. **Always listening development** - [06-always-listening-mode.mdc](06-always-listening-mode.mdc) for technical implementation details
-3. **Implementation reference** - [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc) for production-ready patterns
-4. **Event coordination** - Ensure proper separation and priority handling between all three voice modes
-5. **State management** - Follow established patterns for voice state handling and configuration
+### For Bug Fixes
+1. **Check debugging docs** ([cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc) for network issues)
+2. **Review permission fixes** ([accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc) for macOS issues)
+3. **Follow error patterns** for proper error handling and user feedback
+4. **Test on built applications** not just development builds
 
-### Development Workflow
-1. **Start with essentials** - Understand project status and architecture
-2. **Follow development guidelines** - Use established patterns and requirements  
-3. **Apply UI patterns** - Implement consistent frontend components and interactions
-4. **Test thoroughly** - All three voice modes, computer use actions, and agent delegation
-5. **Always run cargo check** - Ensure compilation success before changes
+### For Voice System Development
+1. **Understand all three modes** - [voice-modes-clarification.mdc](voice-modes-clarification.mdc) for complete system overview
+2. **Technical implementation** - [06-always-listening-mode.mdc](06-always-listening-mode.mdc) for Always Listening details
+3. **Production patterns** - [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc) for proven approaches
+4. **Ensure mode separation** - Proper priority handling and state isolation between modes
 
-## Benefits of Consolidation
+### For System Integration
+1. **MCP Integration** - [mcp-integration-system.mdc](mcp-integration-system.mdc) for external tool server support
+2. **Cloud Features** - [cloud-control-system.mdc](cloud-control-system.mdc) for remote connectivity
+3. **Streaming UI** - [streaming-responses-implementation.mdc](streaming-responses-implementation.mdc) for real-time updates
+4. **Platform Requirements** - Permission and system-level integration patterns
 
-✅ **Reduced Context Usage**: Focused rules instead of overlapping documents  
-✅ **Essential Information**: Only critical guidance for effective development  
-✅ **Clear Organization**: Logical separation of concerns (essentials, development, UI)  
-✅ **Comprehensive Coverage**: All important patterns and requirements included  
-✅ **Easy Maintenance**: Single source of truth for each topic area  
-✅ **Production Ready**: Complete implementation with validated functionality
+## 💡 Key Benefits of This Documentation Structure
 
-This consolidated structure provides all essential guidance for maintaining and extending the production-ready AI Computer Use implementation with complete three-mode voice interaction capabilities.
+✅ **Comprehensive Coverage**: All major system components and patterns documented  
+✅ **Practical Guidance**: Real implementation patterns with working code examples  
+✅ **Production Focus**: Validated approaches from successfully implemented features  
+✅ **Clear Organization**: Logical separation by system area and development phase  
+✅ **Maintenance Ready**: Single source of truth for each technical domain  
+✅ **Context Efficient**: Focused documentation for AI assistant development workflow  
+
+This documentation structure provides everything needed to maintain, extend, and debug the production-ready Juno AI Computer Use Agent implementation.
+
+## 🔄 File Maintenance
+
+### When to Update Rules
+- **After major feature implementation**: Document new patterns and architectural decisions
+- **After bug fixes**: Update debugging guides and error handling patterns
+- **After system changes**: Modify integration and configuration documentation
+- **After testing discoveries**: Add validation patterns and edge case handling
+
+### Documentation Standards
+- Use `.mdc` extension for detailed implementation guides
+- Include ✅ status indicators for completed features
+- Provide code examples for all documented patterns
+- Reference actual file paths and line numbers where applicable
+- Keep implementation status current with actual codebase state
+
+This rules directory serves as the definitive guide for maintaining and extending the Juno AI Computer Use Agent project while ensuring consistency, quality, and production readiness.
