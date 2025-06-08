@@ -26,7 +26,7 @@ use std::sync::Mutex; // Added for VoiceController state access
 use {
     cocoa::{
         appkit::{NSWindow, NSWindowCollectionBehavior},
-        base::{id as cocoa_id, nil, YES, NO, BOOL},
+        base::{id as cocoa_id, nil, NO, BOOL},
         foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
@@ -562,12 +562,12 @@ pub fn run() {
             dev_get_cursor_position,
             dev_test_click_visualization,
             // Heatmap Commands
-            start_heatmap_tracking,
-            stop_heatmap_tracking,
-            clear_heatmap_data,
-            get_heatmap_data,
-            is_heatmap_tracking,
-            get_heatmap_grid,
+            commands::start_heatmap_tracking,
+            commands::stop_heatmap_tracking,
+            commands::clear_heatmap_data,
+            commands::get_heatmap_data,
+            commands::is_heatmap_tracking,
+            commands::get_heatmap_grid,
             dev_bash_command,
             dev_list_files,
             dev_get_file_content,

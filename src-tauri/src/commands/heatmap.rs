@@ -1,8 +1,6 @@
-use tauri::{AppHandle, State, Emitter, Manager};
-use crate::state::AppState;
+use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, debug, error};
 use std::sync::Mutex;
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,7 +61,7 @@ impl HeatmapTracker {
     pub fn add_point(&self, x: f64, y: f64, event_type: &str, intensity: f64) {
         let mut data = self.data.lock().unwrap();
         let is_tracking = *self.is_tracking.lock().unwrap();
-        
+
         if !is_tracking {
             return;
         }
@@ -124,14 +122,7 @@ impl HeatmapTracker {
     }
 }
 
-// Add heatmap tracking to AppState
-impl AppState {
-    pub fn get_heatmap_tracker(&self) -> &HeatmapTracker {
-        // For now, we'll add this to AppState in a separate modification
-        // This is a placeholder that will be updated when we modify AppState
-        unimplemented!("Heatmap tracker will be added to AppState")
-    }
-}
+
 
 // Helper function to record click events in heatmap
 pub fn record_click_heatmap(app: &AppHandle, x: f64, y: f64, click_type: &str) {
@@ -145,7 +136,7 @@ pub fn record_click_heatmap(app: &AppHandle, x: f64, y: f64, click_type: &str) {
             _ => 1.0,
         };
         tracker.add_point(x, y, "click", intensity);
-        
+
         // Emit heatmap update event
         if let Err(e) = app.emit("heatmap-point-added", (x, y, intensity, "click")) {
             error!("Failed to emit heatmap point event: {}", e);
@@ -168,7 +159,7 @@ pub fn record_move_heatmap(app: &AppHandle, x: f64, y: f64) {
         if should_record {
             tracker.add_point(x, y, "move", 0.3);
             *tracker.last_position.lock().unwrap() = Some((x, y));
-            
+
             // Emit heatmap update event (less frequently for moves)
             if let Err(e) = app.emit("heatmap-point-added", (x, y, 0.3, "move")) {
                 error!("Failed to emit heatmap move event: {}", e);
@@ -184,14 +175,14 @@ pub async fn start_heatmap_tracking(
     screen_height: f64,
 ) -> Result<(), String> {
     info!("Starting heatmap tracking with dimensions: {}x{}", screen_width, screen_height);
-    
+
     if let Some(tracker) = app.try_state::<HeatmapTracker>() {
         tracker.start_tracking(screen_width, screen_height);
-        
+
         // Emit event to frontend
         app.emit("heatmap-tracking-started", (screen_width, screen_height))
             .map_err(|e| format!("Failed to emit heatmap tracking started event: {}", e))?;
-        
+
         Ok(())
     } else {
         Err("Heatmap tracker not initialized".to_string())
@@ -201,14 +192,14 @@ pub async fn start_heatmap_tracking(
 #[tauri::command]
 pub async fn stop_heatmap_tracking(app: AppHandle) -> Result<(), String> {
     info!("Stopping heatmap tracking");
-    
+
     if let Some(tracker) = app.try_state::<HeatmapTracker>() {
         tracker.stop_tracking();
-        
+
         // Emit event to frontend
         app.emit("heatmap-tracking-stopped", ())
             .map_err(|e| format!("Failed to emit heatmap tracking stopped event: {}", e))?;
-        
+
         Ok(())
     } else {
         Err("Heatmap tracker not initialized".to_string())
@@ -218,14 +209,14 @@ pub async fn stop_heatmap_tracking(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn clear_heatmap_data(app: AppHandle) -> Result<(), String> {
     info!("Clearing heatmap data");
-    
+
     if let Some(tracker) = app.try_state::<HeatmapTracker>() {
         tracker.clear_data();
-        
+
         // Emit event to frontend
         app.emit("heatmap-data-cleared", ())
             .map_err(|e| format!("Failed to emit heatmap data cleared event: {}", e))?;
-        
+
         Ok(())
     } else {
         Err("Heatmap tracker not initialized".to_string())
@@ -257,19 +248,19 @@ pub async fn get_heatmap_grid(app: AppHandle, grid_size: Option<u32>) -> Result<
     if let Some(tracker) = app.try_state::<HeatmapTracker>() {
         let data = tracker.data.lock().unwrap();
         let grid_size = grid_size.unwrap_or(data.grid_size);
-        
+
         let cols = (data.screen_width / grid_size as f64).ceil() as usize;
         let rows = (data.screen_height / grid_size as f64).ceil() as usize;
-        
+
         let mut grid = vec![vec![0.0; cols]; rows];
-        
+
         // Aggregate points into grid cells
         for point in &data.points {
             let col = ((point.x / grid_size as f64) as usize).min(cols - 1);
             let row = ((point.y / grid_size as f64) as usize).min(rows - 1);
             grid[row][col] += point.intensity;
         }
-        
+
         Ok(grid)
     } else {
         Err("Heatmap tracker not initialized".to_string())
