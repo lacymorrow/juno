@@ -464,9 +464,6 @@ pub fn run() {
                     }
                 }
 
-<<<<<<< HEAD
-                return; // Exit early for escape shortcut
-=======
                 // Emit agent stopping event for any running AI agents
                 if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
                     eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
@@ -481,7 +478,6 @@ pub fn run() {
                         Some("Agent execution was cancelled via escape key.".to_string())
                     ).await;
                 });
->>>>>>> cfee2f58212677794a16d394d31257b36f740065
             }
 
             // Handle dictation toggle shortcut (Option+D / Alt+D)
