@@ -28,3 +28,5 @@ state() called before manage() for alloc::sync::Arc<std::sync::poison::mutex::Mu
 FATAL: Failed to initialize Desktop Automation Engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
 2025-06-04T18:35:54.603918Z ERROR Failed to initialize Desktop Automation Engine: Permission denied: Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.
 error: script "tauri" exited with code 1
+
+[clap]
