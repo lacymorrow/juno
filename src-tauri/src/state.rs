@@ -119,6 +119,10 @@ pub struct AppState {
     pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
     // Tool provider registry for refreshing MCP tools
     pub tool_provider_registry: Arc<Mutex<Vec<Arc<tokio::sync::Mutex<LocalToolProvider>>>>>, // Track active tool providers
+    // Always listening mode state
+    pub always_listening_active: Arc<Mutex<bool>>, // Track if Always Listening Mode is active
+    pub always_listening_sensitivity: Arc<Mutex<f32>>, // Sensitivity threshold for activation
+    pub always_listening_wake_words: Arc<Mutex<Vec<String>>>, // Configurable wake words
 }
 
 impl AppState {
@@ -158,6 +162,10 @@ impl AppState {
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             // Initialize tool provider registry
             tool_provider_registry: Arc::new(Mutex::new(Vec::new())),
+            // Initialize Always Listening mode state
+            always_listening_active: Arc::new(Mutex::new(false)),
+            always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
+            always_listening_wake_words: Arc::new(Mutex::new(vec!["hey juno".to_string(), "computer".to_string()])),
         }
     }
 

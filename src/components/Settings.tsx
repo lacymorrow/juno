@@ -137,6 +137,12 @@ const Settings: React.FC<SettingsProps> = ({
   // Sound Settings
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
+  // Always Listening Settings
+  const [alwaysListeningActive, setAlwaysListeningActive] = useState<boolean>(false);
+  const [alwaysListeningSensitivity, setAlwaysListeningSensitivity] = useState<number>(0.5);
+  const [alwaysListeningWakeWords, setAlwaysListeningWakeWords] = useState<string[]>(["hey juno", "computer"]);
+  const [wakeWordsInput, setWakeWordsInput] = useState<string>("");
+
   // Tool Configuration Settings
   const [toolConfigurations, setToolConfigurations] = useState<
     Record<string, ToolCategory>
@@ -223,6 +229,17 @@ const Settings: React.FC<SettingsProps> = ({
       // Load sound settings
       const currentSoundEnabled = await invoke<boolean>("get_sound_enabled");
       setSoundEnabled(currentSoundEnabled);
+
+      // Load always listening settings
+      const alwaysListeningStatus = await invoke<boolean>("get_always_listening_status");
+      setAlwaysListeningActive(alwaysListeningStatus);
+
+      const sensitivity = await invoke<number>("get_always_listening_sensitivity");
+      setAlwaysListeningSensitivity(sensitivity);
+
+      const wakeWords = await invoke<string[]>("get_always_listening_wake_words");
+      setAlwaysListeningWakeWords(wakeWords);
+      setWakeWordsInput(wakeWords.join(", "));
 
       if (currentActiveProvider) {
         const settings = await invoke<ProviderSettings>(
@@ -543,6 +560,48 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const handleAlwaysListeningToggle = async (enabled: boolean) => {
+    try {
+      if (enabled) {
+        await invoke("start_always_listening_mode");
+      } else {
+        await invoke("stop_always_listening_mode");
+      }
+      setAlwaysListeningActive(enabled);
+      toast.success(`Always listening ${enabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      console.error("Failed to toggle always listening:", error);
+      toast.error("Failed to toggle always listening");
+    }
+  };
+
+  const handleSensitivityChange = async (sensitivity: number) => {
+    try {
+      await invoke("set_always_listening_sensitivity", { sensitivity });
+      setAlwaysListeningSensitivity(sensitivity);
+      toast.success("Sensitivity updated successfully");
+    } catch (error) {
+      console.error("Failed to update sensitivity:", error);
+      toast.error("Failed to update sensitivity");
+    }
+  };
+
+  const handleWakeWordsChange = async () => {
+    try {
+      const wakeWords = wakeWordsInput
+        .split(",")
+        .map(word => word.trim())
+        .filter(word => word.length > 0);
+
+      await invoke("set_always_listening_wake_words", { wakeWords });
+      setAlwaysListeningWakeWords(wakeWords);
+      toast.success("Wake words updated successfully");
+    } catch (error) {
+      console.error("Failed to update wake words:", error);
+      toast.error("Failed to update wake words");
+    }
+  };
+
   const loadToolConfigurations = async () => {
     try {
       setToolConfigLoading(true);
@@ -803,6 +862,78 @@ const Settings: React.FC<SettingsProps> = ({
               When enabled, the app will play sound effects for various
               notifications, successes, errors, and other feedback events.
             </p>
+          </div>
+
+          <div className="space-y-4 pt-4 border-t">
+            <div className="space-y-2">
+              <Label htmlFor="always-listening">Always Listening Mode</Label>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant={alwaysListeningActive ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => handleAlwaysListeningToggle(!alwaysListeningActive)}
+                  className="min-w-[80px]"
+                >
+                  {alwaysListeningActive ? "Active" : "Inactive"}
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Continuously monitor for wake words
+                </span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                When enabled, Juno will continuously listen for wake words like "hey juno" or "computer" to activate the AI assistant.
+              </p>
+            </div>
+
+            {alwaysListeningActive && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="sensitivity">Sensitivity ({alwaysListeningSensitivity.toFixed(1)})</Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="2.0"
+                      step="0.1"
+                      value={alwaysListeningSensitivity}
+                      onChange={(e) => handleSensitivityChange(parseFloat(e.target.value))}
+                      className="flex-1"
+                    />
+                    <span className="text-sm text-muted-foreground min-w-[100px]">
+                      {alwaysListeningSensitivity < 0.5 ? "Very Sensitive" :
+                       alwaysListeningSensitivity < 1.0 ? "Normal" :
+                       alwaysListeningSensitivity < 1.5 ? "Less Sensitive" : "Very Low"}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Lower values make the system more sensitive to quiet sounds. Higher values require louder speech.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="wake-words">Wake Words</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="wake-words"
+                      value={wakeWordsInput}
+                      onChange={(e) => setWakeWordsInput(e.target.value)}
+                      placeholder="hey juno, computer"
+                      className="flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={handleWakeWordsChange}
+                      variant="outline"
+                    >
+                      <Save size={16} />
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Comma-separated list of phrases that will activate the assistant. Current: {alwaysListeningWakeWords.join(", ")}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
