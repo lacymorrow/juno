@@ -13,15 +13,6 @@ use crate::cloud::security::CloudSecurity;
 use crate::cloud::commands::CloudCommandProcessor;
 use serde_json::json;
 
-use super::types::{
-    CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
-    ConnectionState as CloudConnectionState, ResponseStatus, ResponseData,
-};
-use super::config::CloudConfig;
-use super::auth::DeviceAuth;
-use super::security::CloudSecurity;
-use super::commands::CloudCommandProcessor;
-
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
 pub struct ProductionCloudConnector {
@@ -124,7 +115,7 @@ impl HardwareMonitor {
         #[cfg(target_os = "macos")]
         {
             use std::process::Command;
-            
+
             match Command::new("top")
                 .args(&["-l", "1", "-n", "0"])
                 .output()
@@ -172,7 +163,7 @@ impl HardwareMonitor {
         }
     }
 
-    /// Get current memory usage percentage  
+    /// Get current memory usage percentage
     async fn get_memory_usage() -> Option<f32> {
         #[cfg(target_os = "macos")]
         {
@@ -213,7 +204,7 @@ impl HardwareMonitor {
 
                     let total_pages = free_pages + active_pages + inactive_pages + speculative_pages + wired_pages;
                     let used_pages = total_pages - free_pages;
-                    
+
                     if total_pages > 0 {
                         let usage_percentage = (used_pages as f32 / total_pages as f32) * 100.0;
                         Some(usage_percentage)
@@ -315,7 +306,7 @@ impl HardwareMonitor {
     /// Get comprehensive hardware information
     async fn get_comprehensive_hardware_info() -> HardwareInfo {
         log::debug!("🔍 Gathering comprehensive hardware information...");
-        
+
         let (cpu_usage, memory_usage, disk_usage, screen_resolution) = tokio::join!(
             Self::get_cpu_usage(),
             Self::get_memory_usage(),
@@ -749,7 +740,7 @@ impl ProductionCloudConnector {
         // Try to get current task from agent state
         // This could be implemented by checking if an agent operation is in progress
         let app_state = self.app_handle.state::<crate::state::AppState>();
-        
+
         // Check if any agent is currently active
         if app_state.is_agent_mode_active() {
             Some("Agent interaction in progress".to_string())
@@ -792,15 +783,15 @@ impl ProductionCloudConnector {
     async fn get_hardware_info(&self) -> crate::cloud::types::HardwareInfo {
         log::info!("🔍 Collecting real-time hardware information...");
         let start_time = Instant::now();
-        
+
         let hardware_info = HardwareMonitor::get_comprehensive_hardware_info().await;
         let collection_time = start_time.elapsed();
-        
+
         log::info!(
             "✅ Hardware information collected in {:?} - CPU: {:?}%, Memory: {:?}%, Disk: {:?}%",
             collection_time,
             hardware_info.cpu_usage,
-            hardware_info.memory_usage, 
+            hardware_info.memory_usage,
             hardware_info.disk_usage
         );
 
@@ -921,7 +912,7 @@ impl ProductionCloudConnector {
     /// Track command execution for statistics
     async fn track_command_execution(&self, success: bool, execution_time: Duration) {
         let mut stats = self.command_statistics.lock().await;
-        
+
         stats.total_commands += 1;
         if success {
             stats.successful_commands += 1;
