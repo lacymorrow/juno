@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { KeyboardShortcuts } from "@/types/keyboard";
+import { AUDIO } from "@/lib/constants";
 
 interface ProviderInfo {
   id: string;
@@ -9,6 +10,15 @@ interface ProviderInfo {
   description: string;
   models: string[];
   default_model: string;
+  model_info: {
+    id: string;
+    name: string;
+    supports_computer_use: boolean;
+    is_recommended: boolean;
+  }[];
+  is_available: boolean;
+  is_default: boolean;
+  computer_use_supported: boolean;
 }
 
 interface ProviderSettings {
@@ -89,7 +99,7 @@ export function useSettings() {
   // Always Listening Settings
   const [alwaysListeningActive, setAlwaysListeningActive] = useState<boolean>(false);
   const [alwaysListeningSensitivity, setAlwaysListeningSensitivity] = useState<number>(0.5);
-  const [alwaysListeningWakeWords, setAlwaysListeningWakeWords] = useState<string[]>(["hey juno", "computer"]);
+  const [alwaysListeningWakeWords, setAlwaysListeningWakeWords] = useState<string[]>([...AUDIO.DEFAULT_WAKE_WORDS]);
   const [wakeWordsInput, setWakeWordsInput] = useState<string>("");
 
   // Tool Configuration Settings

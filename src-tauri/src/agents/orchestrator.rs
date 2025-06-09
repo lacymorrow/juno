@@ -239,7 +239,7 @@ impl Orchestrator {
     }
 
     /// Determine the best agent type for a given task description
-    async fn determine_agent_type(&self, description: &str) -> AgentType {
+    pub async fn determine_agent_type(&self, description: &str) -> AgentType {
         let description_lower = description.to_lowercase();
 
         // Simple keyword-based classification

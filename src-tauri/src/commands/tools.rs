@@ -3,96 +3,52 @@ use serde_json::{json, Value};
 use tracing::info;
 
 use crate::state::AppState;
-
+use crate::agent::tools::{ToolCategory, ToolConfig};
 
 /// Get all tool configurations organized by category
 #[tauri::command]
 pub async fn get_tool_configurations(
-    _app_handle: AppHandle,
-    _state: State<'_, AppState>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
 ) -> Result<Value, String> {
     info!("Getting tool configurations");
 
-    // Return placeholder data for now
+    // Load tool configuration from file if needed
+    if let Err(e) = state.load_tool_config(&app_handle).await {
+        tracing::warn!("Failed to load tool config: {}, using defaults", e);
+    }
+
+    let config_manager = state.get_tool_config_manager().await;
+    let config_guard = config_manager.lock().await;
+
     let mut result = serde_json::Map::new();
 
-    // Create some sample categories with tools
-    let anthropic_tools = json!({
-        "name": "Anthropic Computer Use",
-        "description": "Official Anthropic computer control tools",
-        "enabled": true,
-        "tools": [
-            {
-                "name": "computer_use_screenshot",
-                "category": "AnthropicComputerUse",
-                "enabled": true,
-                "description": "Take screenshots of the screen",
-                "required": true
-            },
-            {
-                "name": "computer_use_click",
-                "category": "AnthropicComputerUse",
-                "enabled": true,
-                "description": "Click on screen coordinates",
-                "required": true
-            },
-            {
-                "name": "computer_use_type",
-                "category": "AnthropicComputerUse",
-                "enabled": true,
-                "description": "Type text input",
-                "required": true
-            }
-        ]
+    // Organize tools by category
+    for category in ToolCategory::all_categories() {
+        let tools_in_category = config_guard.get_tools_by_category(&category);
+        let category_enabled = config_guard.category_enabled.get(&category).unwrap_or(&true);
+
+        let mut category_tools = Vec::new();
+        for tool_config in tools_in_category {
+            category_tools.push(json!({
+                "name": tool_config.name,
+                "category": format!("{:?}", tool_config.category),
+                "enabled": tool_config.enabled,
+                "description": tool_config.description.as_deref().unwrap_or("No description"),
+                "required": tool_config.required,
+                "server_id": tool_config.server_id
+            }));
+        }
+
+        let category_info = json!({
+            "name": category.display_name(),
+            "description": category.description(),
+            "enabled": category_enabled,
+            "tools": category_tools
     });
 
-    let desktop_tools = json!({
-        "name": "Desktop Automation",
-        "description": "System-level desktop automation tools",
-        "enabled": true,
-        "tools": [
-            {
-                "name": "get_applications",
-                "category": "Desktop",
-                "enabled": true,
-                "description": "List running applications",
-                "required": false
-            },
-            {
-                "name": "focus_application",
-                "category": "Desktop",
-                "enabled": true,
-                "description": "Bring application to foreground",
-                "required": false
-            }
-        ]
-    });
-
-    let browser_tools = json!({
-        "name": "Browser Automation",
-        "description": "Web browser interaction and automation tools",
-        "enabled": true,
-        "tools": [
-            {
-                "name": "navigate_to_url",
-                "category": "Browser",
-                "enabled": true,
-                "description": "Navigate to a specific URL",
-                "required": false
-            },
-            {
-                "name": "click_element",
-                "category": "Browser",
-                "enabled": true,
-                "description": "Click on web page elements",
-                "required": false
-            }
-        ]
-    });
-
-    result.insert("Anthropic Computer Use".to_string(), anthropic_tools);
-    result.insert("Desktop Automation".to_string(), desktop_tools);
-    result.insert("Browser Automation".to_string(), browser_tools);
+        result.insert(category.display_name().to_string(), category_info);
+    }
 
     Ok(Value::Object(result))
 }
@@ -101,18 +57,25 @@ pub async fn get_tool_configurations(
 #[tauri::command]
 pub async fn get_tool_config(
     tool_name: String,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Value, String> {
     info!("Getting tool config for: {}", tool_name);
 
-    // Return placeholder tool config
+    let config_manager = state.get_tool_config_manager().await;
+    let config_guard = config_manager.lock().await;
+
+    if let Some(tool_config) = config_guard.get_tool_config(&tool_name) {
     Ok(json!({
-        "name": tool_name,
-        "category": "Unknown",
-        "enabled": true,
-        "description": "Tool configuration",
-        "required": false
-    }))
+            "name": tool_config.name,
+            "category": format!("{:?}", tool_config.category),
+            "enabled": tool_config.enabled,
+            "description": tool_config.description.as_deref().unwrap_or("No description"),
+            "required": tool_config.required,
+            "server_id": tool_config.server_id
+        }))
+    } else {
+        Err(format!("Tool '{}' not found", tool_name))
+    }
 }
 
 /// Set tool enabled status
@@ -120,12 +83,20 @@ pub async fn get_tool_config(
 pub async fn set_tool_enabled(
     tool_name: String,
     enabled: bool,
-    _state: State<'_, AppState>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     info!("Setting tool {} enabled: {}", tool_name, enabled);
 
-    // For now, just log the change
-    // TODO: Actually update the tool configuration
+    let config_manager = state.get_tool_config_manager().await;
+    {
+        let mut config_guard = config_manager.lock().await;
+        config_guard.set_tool_enabled(&tool_name, enabled);
+    }
+
+    // Save configuration to file
+    state.save_tool_config(&app_handle).await?;
+
     Ok(())
 }
 
@@ -134,70 +105,106 @@ pub async fn set_tool_enabled(
 pub async fn set_tool_category_enabled(
     category: String,
     enabled: bool,
-    _state: State<'_, AppState>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     info!("Setting category {} enabled: {}", category, enabled);
 
-    // For now, just log the change
-    // TODO: Actually update the category configuration
+    // Parse category from string
+    let tool_category = match category.as_str() {
+        "AnthropicComputerUse" => ToolCategory::AnthropicComputerUse,
+        "Desktop" => ToolCategory::Desktop,
+        "Browser" => ToolCategory::Browser,
+        "Timer" => ToolCategory::Timer,
+        "Basic" => ToolCategory::Basic,
+        "MCP" => ToolCategory::MCP,
+        _ => return Err(format!("Unknown category: {}", category)),
+    };
+
+    let config_manager = state.get_tool_config_manager().await;
+    {
+        let mut config_guard = config_manager.lock().await;
+        config_guard.set_category_enabled(&tool_category, enabled);
+    }
+
+    // Save configuration to file
+    state.save_tool_config(&app_handle).await?;
+
     Ok(())
 }
 
 /// Get list of enabled tools
 #[tauri::command]
 pub async fn get_enabled_tools(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     info!("Getting enabled tools");
 
-    // Return placeholder list
-    Ok(vec![
-        "computer_use_screenshot".to_string(),
-        "computer_use_click".to_string(),
-        "computer_use_type".to_string(),
-        "get_applications".to_string(),
-        "navigate_to_url".to_string(),
-    ])
+    let config_manager = state.get_tool_config_manager().await;
+    let config_guard = config_manager.lock().await;
+
+    Ok(config_guard.get_enabled_tool_names())
 }
 
 /// Check if a specific tool is enabled
 #[tauri::command]
 pub async fn is_tool_enabled(
     tool_name: String,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<bool, String> {
     info!("Checking if tool {} is enabled", tool_name);
 
-    // For now, return true for most tools
-    Ok(true)
+    let config_manager = state.get_tool_config_manager().await;
+    let config_guard = config_manager.lock().await;
+
+    Ok(config_guard.is_tool_enabled(&tool_name))
 }
 
 /// Reset tool configuration to defaults
 #[tauri::command]
 pub async fn reset_tool_configuration(
-    _state: State<'_, AppState>,
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
     info!("Resetting tool configuration to defaults");
 
-    // For now, just log the reset
-    // TODO: Actually reset the configuration
+    let config_manager = state.get_tool_config_manager().await;
+    {
+        let mut config_guard = config_manager.lock().await;
+        config_guard.reset_to_defaults();
+    }
+
+    // Save configuration to file
+    state.save_tool_config(&app_handle).await?;
+
     Ok(())
 }
 
 /// Get a summary of tool configuration
 #[tauri::command]
 pub async fn get_tool_configuration_summary(
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Value, String> {
     info!("Getting tool configuration summary");
 
-    // Return placeholder summary
+    let config_manager = state.get_tool_config_manager().await;
+    let config_guard = config_manager.lock().await;
+
+    let enabled_tools = config_guard.get_enabled_tools();
+    let total_tools = config_guard.tools.len();
+    let enabled_tool_count = enabled_tools.len();
+    let total_categories = config_guard.category_enabled.len();
+    let enabled_categories = config_guard.category_enabled.values().filter(|&&enabled| enabled).count();
+    let required_tools = config_guard.tools.values().filter(|tool| tool.required).count();
+
     Ok(json!({
-        "total_tools": 8,
-        "enabled_tools": 8,
-        "total_categories": 3,
-        "enabled_categories": 3,
-        "required_tools": 3
+        "total_tools": total_tools,
+        "enabled_tools": enabled_tool_count,
+        "total_categories": total_categories,
+        "enabled_categories": enabled_categories,
+        "required_tools": required_tools,
+        "mcp_servers": config_guard.mcp_servers.len(),
+        "enabled_mcp_servers": config_guard.mcp_servers.values().filter(|server| server.enabled).count()
     }))
 }
 
@@ -213,6 +220,7 @@ pub async fn test_tool_config(
 
     let tool_count = config_guard.tools.len();
     let category_count = config_guard.category_enabled.len();
+    let enabled_count = config_guard.get_enabled_tools().len();
 
-    Ok(format!("Tool config system working! {} tools, {} categories", tool_count, category_count))
+    Ok(format!("Tool config system working! {} tools ({} enabled), {} categories", tool_count, enabled_count, category_count))
 }

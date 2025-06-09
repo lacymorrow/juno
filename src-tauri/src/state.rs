@@ -27,6 +27,8 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::MCPManager;
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
+use crate::constants::app_identity;
+use crate::constants::permission_types;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,7 +175,9 @@ impl AppState {
             // Initialize Always Listening mode state
             always_listening_active: Arc::new(Mutex::new(false)),
             always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
-            always_listening_wake_words: Arc::new(Mutex::new(vec!["hey juno".to_string(), "computer".to_string()])),
+            always_listening_wake_words: Arc::new(Mutex::new(
+                app_identity::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect()
+            )),
             // Initialize agent execution status tracking
             agent_execution_active: Arc::new(Mutex::new(false)),
             agent_execution_id: Arc::new(Mutex::new(None)),
@@ -297,6 +301,16 @@ impl AppState {
         let current_step = self.get_agent_current_step();
         let max_steps = self.get_agent_max_steps();
         (current_step, max_steps)
+    }
+
+    /// Check if agent mode is currently active
+    pub fn is_agent_mode_active(&self) -> bool {
+        *self.agent_execution_active.lock().unwrap()
+    }
+
+    /// Check if dictation mode is currently active
+    pub fn is_dictation_active(&self) -> bool {
+        *self.dictation_active.lock().unwrap()
     }
 
     // Method to get or initialize the Playwright driver
@@ -722,21 +736,21 @@ mod tests {
     #[test]
     fn test_keyboard_shortcuts_default() {
         let shortcuts = KeyboardShortcuts::default();
-        
+
         #[cfg(target_os = "macos")]
         {
             assert_eq!(shortcuts.agent_mode_toggle, "Option+D");
             assert_eq!(shortcuts.dictation_input, "Option+Space");
             assert_eq!(shortcuts.open_settings, "Cmd+,");
         }
-        
+
         #[cfg(not(target_os = "macos"))]
         {
             assert_eq!(shortcuts.agent_mode_toggle, "Alt+D");
             assert_eq!(shortcuts.dictation_input, "Alt+Space");
             assert_eq!(shortcuts.open_settings, "Ctrl+,");
         }
-        
+
         assert_eq!(shortcuts.stop_current_task, "Escape");
     }
 
@@ -745,7 +759,7 @@ mod tests {
         let shortcuts = KeyboardShortcuts::default();
         let serialized = serde_json::to_string(&shortcuts).unwrap();
         let deserialized: KeyboardShortcuts = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(shortcuts.agent_mode_toggle, deserialized.agent_mode_toggle);
         assert_eq!(shortcuts.dictation_input, deserialized.dictation_input);
         assert_eq!(shortcuts.stop_current_task, deserialized.stop_current_task);
@@ -762,21 +776,21 @@ mod tests {
     #[test]
     fn test_timestamp_tracker_record_event() {
         let mut tracker = TimestampTracker::new();
-        
+
         // Record event with timestamp shown
         tracker.record_event(1000, true);
         assert_eq!(tracker.last_timestamp_shown, Some(1000));
         assert_eq!(tracker.events_since_last_timestamp, 0);
-        
+
         // Record event without timestamp shown
         tracker.record_event(2000, false);
         assert_eq!(tracker.last_timestamp_shown, Some(1000)); // Should remain unchanged
         assert_eq!(tracker.events_since_last_timestamp, 1);
-        
+
         // Record another event without timestamp
         tracker.record_event(3000, false);
         assert_eq!(tracker.events_since_last_timestamp, 2);
-        
+
         // Record event with timestamp shown again
         tracker.record_event(4000, true);
         assert_eq!(tracker.last_timestamp_shown, Some(4000));
@@ -786,29 +800,29 @@ mod tests {
     #[tokio::test]
     async fn test_app_state_creation() {
         let state = AppState::new(None);
-        
+
         // Test initial state values
         assert!(!state.is_agent_executing());
         assert!(state.get_current_agent_execution_id().is_none());
         assert!(!state.are_permissions_checked());
         assert!(!state.is_cloud_enabled());
-        
+
         // Test Arc-wrapped values
         {
             let tts_provider = state.tts_provider.lock().unwrap();
             assert_eq!(*tts_provider, "system");
         }
-        
+
         {
             let dictation_active = state.dictation_active.lock().unwrap();
             assert!(!*dictation_active);
         }
-        
+
         {
             let sound_enabled = state.sound_enabled.lock().unwrap();
             assert!(*sound_enabled);
         }
-        
+
         {
             let always_listening = state.always_listening_active.lock().unwrap();
             assert!(!*always_listening);
@@ -819,16 +833,16 @@ mod tests {
     async fn test_agent_execution_tracking() {
         let state = AppState::new(None);
         let execution_id = "test-execution-123".to_string();
-        
+
         // Initially not executing
         assert!(!state.is_agent_executing());
         assert!(state.get_current_agent_execution_id().is_none());
-        
+
         // Mark as started
         state.mark_agent_execution_started(execution_id.clone());
         assert!(state.is_agent_executing());
         assert_eq!(state.get_current_agent_execution_id(), Some(execution_id));
-        
+
         // Mark as finished
         state.mark_agent_execution_finished();
         assert!(!state.is_agent_executing());
@@ -838,19 +852,19 @@ mod tests {
     #[tokio::test]
     async fn test_cancellation_signaling() {
         let state = AppState::new(None);
-        
+
         // Initially not cancelled
         assert!(!*state.cancel_rx.borrow());
-        
+
         // Signal cancellation
         state.signal_cancel();
-        
+
         // Should be cancelled now
         assert!(*state.cancel_rx.borrow());
-        
+
         // Reset cancellation
         state.reset_cancel();
-        
+
         // Should not be cancelled anymore
         assert!(!*state.cancel_rx.borrow());
     }
@@ -859,22 +873,22 @@ mod tests {
     async fn test_cancel_receiver_watch() {
         let state = AppState::new(None);
         let mut cancel_rx = state.cancel_rx.clone();
-        
+
         // Test that we can watch for changes
         let initial_value = *cancel_rx.borrow();
         assert!(!initial_value);
-        
+
         // Signal cancellation in a separate task
         let state_clone = state.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(10)).await;
             state_clone.signal_cancel();
         });
-        
+
         // Wait for the change
         let changed = timeout(Duration::from_millis(100), cancel_rx.changed()).await;
         assert!(changed.is_ok());
-        
+
         // Value should now be true
         assert!(*cancel_rx.borrow());
     }
@@ -882,7 +896,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_manager_access() {
         let state = AppState::new(None);
-        
+
         let memory_manager = state.get_memory_manager().await;
         assert!(memory_manager.try_lock().is_ok());
     }
@@ -890,10 +904,10 @@ mod tests {
     #[test]
     fn test_permissions_tracking() {
         let state = AppState::new(None);
-        
+
         // Initially not checked
         assert!(!state.are_permissions_checked());
-        
+
         // Mark as checked
         state.mark_permissions_checked();
         assert!(state.are_permissions_checked());
@@ -902,48 +916,55 @@ mod tests {
     #[tokio::test]
     async fn test_permissions_state_update() {
         let state = AppState::new(None);
-        
+
         // Initially no permissions state
         assert!(state.get_permissions_state().await.is_none());
-        
+
         // Create a mock permissions state with correct structure
         use crate::commands::permissions::{PermissionsState, PermissionStatus};
-        let permissions_state = PermissionsState {
-            accessibility: PermissionStatus {
-                permission_type: "accessibility".to_string(),
+        let mock_permissions = vec![
+            PermissionStatus {
+                permission_type: permission_types::ACCESSIBILITY.to_string(),
                 granted: true,
                 required: true,
-                description: "Accessibility control".to_string(),
-                instructions: "Grant in System Preferences".to_string(),
+                description: "Accessibility permission is granted".to_string(),
+                instructions: "No action needed".to_string(),
             },
-            screen_recording: PermissionStatus {
-                permission_type: "screen_recording".to_string(),
+            PermissionStatus {
+                permission_type: permission_types::SCREEN_RECORDING.to_string(),
                 granted: false,
                 required: true,
-                description: "Screen recording".to_string(),
+                description: "Screen recording permission is denied".to_string(),
                 instructions: "Grant in System Preferences".to_string(),
             },
-            microphone: PermissionStatus {
-                permission_type: "microphone".to_string(),
+            PermissionStatus {
+                permission_type: permission_types::MICROPHONE.to_string(),
                 granted: true,
                 required: false,
-                description: "Microphone access".to_string(),
-                instructions: "Grant in System Preferences".to_string(),
+                description: "Microphone permission not determined".to_string(),
+                instructions: "Will prompt when needed".to_string(),
             },
-            input_monitoring: PermissionStatus {
-                permission_type: "input_monitoring".to_string(),
+            PermissionStatus {
+                permission_type: permission_types::INPUT_MONITORING.to_string(),
                 granted: true,
                 required: true,
-                description: "Input monitoring".to_string(),
-                instructions: "Grant in System Preferences".to_string(),
+                description: "Input monitoring permission is granted".to_string(),
+                instructions: "No action needed".to_string(),
             },
+        ];
+        
+        let permissions_state = PermissionsState {
+            accessibility: mock_permissions[0].clone(),
+            screen_recording: mock_permissions[1].clone(),
+            microphone: mock_permissions[2].clone(),
+            input_monitoring: mock_permissions[3].clone(),
             all_granted: false,
             app_name: "TestApp".to_string(),
         };
-        
+
         // Update permissions state
         state.update_permissions_state(permissions_state.clone()).await;
-        
+
         // Should now have the permissions state
         let retrieved_state = state.get_permissions_state().await;
         assert!(retrieved_state.is_some());
@@ -957,7 +978,7 @@ mod tests {
     #[test]
     fn test_desktop_availability() {
         let state = AppState::new(None);
-        
+
         // With no desktop instance provided, should not be available
         assert!(!state.is_desktop_available());
         assert!(state.try_get_desktop().is_none());
@@ -967,29 +988,29 @@ mod tests {
     #[test]
     fn test_state_components_storage() {
         let state = AppState::new(None);
-        
+
         // Test inserting and retrieving a component
         #[derive(Clone, Debug, PartialEq)]
         struct TestComponent {
             value: String,
         };
-        
+
         let test_component = TestComponent {
             value: "test_value".to_string(),
         };
-        
+
         // Insert component
         state.insert(test_component.clone());
-        
+
         // Retrieve component
         let retrieved = state.get::<TestComponent>();
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().value, "test_value");
-        
+
         // Try to retrieve non-existent component
         #[derive(Clone)]
         struct OtherComponent;
-        
+
         let other = state.get::<OtherComponent>();
         assert!(other.is_none());
     }
@@ -997,19 +1018,19 @@ mod tests {
     #[test]
     fn test_tts_provider_management() {
         let state = AppState::new(None);
-        
+
         // Check initial value
         {
             let tts_provider = state.tts_provider.lock().unwrap();
             assert_eq!(*tts_provider, "system");
         }
-        
+
         // Update TTS provider
         {
             let mut tts_provider = state.tts_provider.lock().unwrap();
             *tts_provider = "openai".to_string();
         }
-        
+
         // Verify update
         {
             let tts_provider = state.tts_provider.lock().unwrap();
@@ -1020,35 +1041,35 @@ mod tests {
     #[test]
     fn test_dictation_state_management() {
         let state = AppState::new(None);
-        
+
         // Check initial state
         {
             let dictation_active = state.dictation_active.lock().unwrap();
             assert!(!*dictation_active);
         }
-        
+
         {
             let clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
             assert!(*clipboard_enabled);
         }
-        
+
         // Update dictation state
         {
             let mut dictation_active = state.dictation_active.lock().unwrap();
             *dictation_active = true;
         }
-        
+
         {
             let mut clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
             *clipboard_enabled = false;
         }
-        
+
         // Verify updates
         {
             let dictation_active = state.dictation_active.lock().unwrap();
             assert!(*dictation_active);
         }
-        
+
         {
             let clipboard_enabled = state.dictation_clipboard_enabled.lock().unwrap();
             assert!(!*clipboard_enabled);
@@ -1058,52 +1079,52 @@ mod tests {
     #[test]
     fn test_always_listening_configuration() {
         let state = AppState::new(None);
-        
+
         // Check initial values
         {
             let active = state.always_listening_active.lock().unwrap();
             assert!(!*active);
         }
-        
+
         {
             let sensitivity = state.always_listening_sensitivity.lock().unwrap();
             assert_eq!(*sensitivity, 0.5);
         }
-        
+
         {
             let wake_words = state.always_listening_wake_words.lock().unwrap();
             assert_eq!(wake_words.len(), 2);
-            assert!(wake_words.contains(&"hey juno".to_string()));
-            assert!(wake_words.contains(&"computer".to_string()));
+            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[0].to_string()));
+            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[1].to_string()));
         }
-        
+
         // Update configuration
         {
             let mut active = state.always_listening_active.lock().unwrap();
             *active = true;
         }
-        
+
         {
             let mut sensitivity = state.always_listening_sensitivity.lock().unwrap();
             *sensitivity = 0.8;
         }
-        
+
         {
             let mut wake_words = state.always_listening_wake_words.lock().unwrap();
             wake_words.push("assistant".to_string());
         }
-        
+
         // Verify updates
         {
             let active = state.always_listening_active.lock().unwrap();
             assert!(*active);
         }
-        
+
         {
             let sensitivity = state.always_listening_sensitivity.lock().unwrap();
             assert_eq!(*sensitivity, 0.8);
         }
-        
+
         {
             let wake_words = state.always_listening_wake_words.lock().unwrap();
             assert_eq!(wake_words.len(), 3);
@@ -1115,12 +1136,12 @@ mod tests {
     fn test_app_state_clone() {
         let state1 = AppState::new(None);
         let state2 = state1.clone();
-        
+
         // Both should track the same agent execution state
         state1.mark_agent_execution_started("test-123".to_string());
         assert!(state2.is_agent_executing());
         assert_eq!(state2.get_current_agent_execution_id(), Some("test-123".to_string()));
-        
+
         // Both should respond to cancellation signals
         state1.signal_cancel();
         assert!(*state2.cancel_rx.borrow());
@@ -1129,13 +1150,13 @@ mod tests {
     #[tokio::test]
     async fn test_browser_controller_lazy_initialization() {
         let state = AppState::new(None);
-        
+
         // Initially no browser controller
         {
             let controller_guard = state.browser_controller.lock().await;
             assert!(controller_guard.is_none());
         }
-        
+
         // get_or_init_browser_controller should fail without Playwright
         // but should not panic
         let result = state.get_or_init_browser_controller().await;
@@ -1145,10 +1166,10 @@ mod tests {
     #[tokio::test]
     async fn test_cloud_configuration() {
         let state = AppState::new(None);
-        
+
         // Initially cloud should be disabled
         assert!(!state.is_cloud_enabled());
-        
+
         // Get initial cloud config
         let config = state.get_cloud_config().await;
         assert!(!config.enabled);

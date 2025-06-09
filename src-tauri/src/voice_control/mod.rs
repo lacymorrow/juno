@@ -16,6 +16,7 @@ pub mod types;
 pub use types::{VoiceControllerConfig, AudioThreadMessage, TranscriptionResult};
 
 use std::path::Path;
+use crate::constants::audio;
 
 /// Create a new VoiceController with default configuration
 // pub fn new_voice_controller(model_path: &str) -> Result<VoiceController, String> {
@@ -43,8 +44,8 @@ pub fn validate_model_path(model_path: &str) -> Result<(), String> {
 }
 
 /// Get the recommended sample rate for Whisper transcription
-pub const fn whisper_sample_rate() -> u32 {
-    16000
+pub fn whisper_sample_rate() -> u32 {
+    audio::WHISPER_SAMPLE_RATE
 }
 
 #[cfg(test)]
@@ -53,7 +54,7 @@ mod tests {
 
     #[test]
     fn test_whisper_sample_rate() {
-        assert_eq!(whisper_sample_rate(), 16000);
+        assert_eq!(whisper_sample_rate(), audio::WHISPER_SAMPLE_RATE);
     }
 
     #[test]
