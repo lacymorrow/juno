@@ -1,48 +1,6 @@
-//! Browser Controller for Juno AI Computer Use Agent
-//!
-//! This module provides comprehensive browser automation capabilities using Playwright,
-//! enabling the agent to interact with web content, navigate pages, extract data, and
-//! perform complex web-based tasks.
-//!
-//! ## Core Features
-//!
-//! - **Multi-Strategy Connection**: CDP, persistent profiles, and fresh instances
-//! - **Cross-Platform Support**: macOS, Windows, and Linux browser detection
-//! - **Content Extraction**: Text, HTML, and structured data extraction
-//! - **Interactive Automation**: Clicking, typing, scrolling, and form interaction
-//! - **Screenshot Capture**: Full page and element-specific screenshots
-//! - **Navigation Control**: URL navigation with timeout and wait conditions
-//!
-//! ## Connection Strategies
-//!
-//! 1. **CDP Connection** - Fastest (~1-2 seconds) - Connects to existing browser via Chrome DevTools Protocol
-//! 2. **Persistent Profile** - Fast (~10-15 seconds) - Launches with user profile data
-//! 3. **Fresh Instance** - Fallback (~90+ seconds) - Clean browser launch
-//!
-//! ## Browser Support
-//!
-//! - Google Chrome
-//! - Microsoft Edge
-//! - Brave Browser
-//! - Chromium
-//!
-//! ## Tools Integration
-//!
-//! This controller powers the browser tools in `browser_tools.rs` and provides
-//! the underlying automation capabilities for web-based agent interactions.
-//!
-//! ## Used By
-//!
-//! - `browser_tools.rs` for high-level browser tool implementations
-//! - Main agent for web navigation and data extraction tasks
-//! - Enhanced coding tools for web development workflows
-//! - Research and information gathering workflows
-//!
-//! ## Security
-//!
-//! - Isolated browser contexts for security
-//! - Configurable download handling
-//! - User profile isolation options
+//! Browser automation controller using Playwright for web interaction.
+//! Provides content extraction, navigation, screenshots, and interactive automation.
+//! Used by: Browser tools for web automation and data extraction tasks.
 
 use playwright::Playwright;
 use playwright::api::{Browser, BrowserContext, Page};
@@ -52,6 +10,13 @@ use tokio::sync::Mutex;
 use base64;
 use std::path::PathBuf;
 use std::env;
+use std::collections::HashMap;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::time::timeout;
+use tracing::{info, warn, error, debug};
 
 use crate::agent::structs::{AgentError, ToolResult};
 
@@ -61,13 +26,9 @@ type ControllerResult<T> = Result<T, AgentError>;
 // Timeout defaults
 const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
 
-/// Browser automation controller using Playwright
-/// 
-/// Provides comprehensive browser automation capabilities with multiple connection
-/// strategies for optimal performance and reliability across different environments.
-/// 
-/// Used by: Browser tools and main agent for web automation tasks
-#[derive(Clone)]
+/// Main browser automation controller with multiple connection strategies.
+/// Manages browser instances, page navigation, and web content interaction.
+/// Used by: Browser tools for all web automation tasks.
 pub struct BrowserController {
     // Store Playwright components
     _playwright: Arc<Playwright>, // Keep playwright instance alive
@@ -77,6 +38,18 @@ pub struct BrowserController {
     page: Arc<Mutex<Option<Page>>>,
     // Track connection method for debugging
     connection_method: String,
+    browser_process: Option<Arc<Mutex<Child>>>,
+    page_context: Option<String>,
+    connection_type: BrowserConnectionType,
+}
+
+/// Connection strategies for browser automation.
+/// Used by: Browser controller for determining connection method.
+#[derive(Debug, Clone)]
+pub enum BrowserConnectionType {
+    CDP,           // Chrome DevTools Protocol
+    Persistent,    // Persistent browser profile
+    Fresh,         // New browser instance
 }
 
 impl BrowserController {
@@ -181,6 +154,9 @@ impl BrowserController {
                         context: Arc::new(context),
                         page: Arc::new(Mutex::new(page)),
                         connection_method: format!("CDP:{}", endpoint),
+                        browser_process: None,
+                        page_context: None,
+                        connection_type: BrowserConnectionType::CDP,
                     });
                 },
                 Ok(Err(e)) => {
@@ -273,6 +249,9 @@ impl BrowserController {
                     context: Arc::new(context),
                     page: Arc::new(Mutex::new(page)),
                     connection_method: format!("Persistent:{}", user_data_dir),
+                    browser_process: None,
+                    page_context: None,
+                    connection_type: BrowserConnectionType::Persistent,
                 })
             },
             Err(e) => {
@@ -466,6 +445,9 @@ impl BrowserController {
             context: Arc::new(context),
             page,
             connection_method: "Fresh".to_string(),
+            browser_process: None,
+            page_context: None,
+            connection_type: BrowserConnectionType::Fresh,
         })
     }
 
