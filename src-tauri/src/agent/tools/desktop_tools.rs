@@ -1,3 +1,25 @@
+//! # Desktop Tools Module
+//! 
+//! Cross-platform desktop automation tools for computer use agents.
+//! Provides comprehensive desktop interaction capabilities including mouse control,
+//! keyboard input, screen capture, UI element interaction, and clipboard operations.
+//! 
+//! ## Core Capabilities:
+//! - Screen capture and element screenshots
+//! - Mouse control (click, drag, move, up/down)
+//! - Keyboard input (typing, key presses, modifiers)
+//! - UI element accessibility and interaction
+//! - Clipboard operations (get/set)
+//! - Window scrolling and focus management
+//! 
+//! ## Platform Support:
+//! - macOS: Full support via computer_use_ai_sdk
+//! - Other platforms: Limited support, some features may not be available
+//! 
+//! ## Usage
+//! Used by: Anthropic Computer Use agents, desktop automation workflows, UI testing
+//! Registration: Called via `register_desktop_tools()` and `setup_tools()` during agent setup
+
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::structs::ToolDefinition;
 use crate::state::AppState;
@@ -18,6 +40,30 @@ use std::sync::Arc;
 // Ensure all necessary command modules are imported - keep even if some are unused for now
 // as they might be needed by the stubbed function later.
 
+/// Registers additional computer use tools beyond the basic desktop tools.
+/// 
+/// This function provides advanced desktop automation tools including scrolling,
+/// waiting, key control, and mouse operations. These tools extend the basic
+/// desktop capabilities with more sophisticated interaction patterns.
+/// 
+/// Used by: Advanced computer use workflows, complex automation scenarios
+/// 
+/// # Arguments
+/// * `provider` - Mutable reference to LocalToolProvider for tool registration
+/// * `app_handle` - Tauri app handle for state access and command execution
+/// 
+/// # Returns
+/// `Result<(), String>` - Success or error message
+/// 
+/// # Tools Registered
+/// - `scroll`: Window/element scrolling with direction and amount
+/// - `wait`: Pause execution for specified duration
+/// - `press_key`: Single key or key combination presses
+/// - `hold_key`: Hold key down for duration or until released
+/// - `release_key`: Release previously held keys
+/// - `left_mouse_down`: Press left mouse button down at coordinates
+/// - `left_mouse_up`: Release left mouse button at coordinates  
+/// - `triple_click`: Perform triple-click at coordinates
 // Stub function to resolve compilation error
 async fn register_additional_computer_use_tools(
     provider: &mut LocalToolProvider,
@@ -336,6 +382,29 @@ async fn register_additional_computer_use_tools(
     Ok(())
 }
 
+/// Registers core desktop tools with the tool provider.
+/// 
+/// This function provides fundamental desktop automation capabilities including
+/// UI element interaction, screen capture, text input, clipboard operations,
+/// and mouse control. These are the essential tools for desktop automation.
+/// 
+/// Used by: Agent initialization, desktop automation workflows, UI testing
+/// 
+/// # Arguments
+/// * `provider` - Mutable reference to LocalToolProvider for tool registration
+/// * `_state` - App state (currently unused but kept for interface consistency)
+/// * `app_handle` - Tauri app handle for state access and command execution
+/// 
+/// # Tools Registered
+/// - `get_focused_element_info`: Get accessibility info for focused UI element
+/// - `capture_screenshot`: Take full desktop screenshot
+/// - `capture_element_screenshot`: Screenshot of focused element
+/// - `type_text`: Type text into active application
+/// - `get_clipboard`: Get current clipboard text content
+/// - `set_clipboard`: Set clipboard text content  
+/// - `desktop_click`: Click at screen coordinates with modifiers
+/// - `mouse_position`: Get current mouse cursor position
+/// - `mouse_drag`: Drag from start to end coordinates
 // Function to register all desktop tools with the tool provider
 pub async fn register_desktop_tools(
     provider: &mut LocalToolProvider,
@@ -346,6 +415,8 @@ pub async fn register_desktop_tools(
 
     // --- Element Tools ---
 
+    /// Tool for getting accessibility information about the currently focused UI element.
+    /// Used by: UI automation, accessibility testing, element interaction workflows
     // get_focused_element_info
     let get_focused_def = ToolDefinition {
         name: "get_focused_element_info".to_string(),
@@ -375,6 +446,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(get_focused_def, get_focused_exec).await;
     info!("Registered tool: get_focused_element_info");
 
+    /// Tool for capturing full desktop screenshots.
+    /// Used by: Computer use agents, visual analysis, UI state documentation
     // capture_screenshot
     let capture_screenshot_def = ToolDefinition {
         name: "capture_screenshot".to_string(),
@@ -407,6 +480,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(capture_screenshot_def, capture_screenshot_exec).await;
     info!("Registered tool: capture_screenshot");
 
+    /// Tool for capturing screenshots of specific UI elements.
+    /// Used by: Element-focused automation, accessibility testing, targeted analysis
     // capture_element_screenshot
     let capture_element_screenshot_def = ToolDefinition {
         name: "capture_element_screenshot".to_string(),
@@ -436,6 +511,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(capture_element_screenshot_def, capture_element_screenshot_exec).await;
     info!("Registered tool: capture_element_screenshot");
 
+    /// Tool for typing text into the active desktop application.
+    /// Used by: Text input automation, form filling, content creation
     // type_text
     #[derive(serde::Deserialize)]
     #[allow(dead_code)] // Allow unused fields for now
@@ -476,6 +553,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(type_text_def, type_text_exec).await;
     info!("Registered tool: type_text");
 
+    /// Tool for getting current clipboard text content.
+    /// Used by: Data extraction, clipboard monitoring, text analysis workflows
     // Get Clipboard Tool
     let get_clipboard_def = ToolDefinition {
         name: "get_clipboard".to_string(),
@@ -502,21 +581,26 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(get_clipboard_def, get_clipboard_exec).await;
     info!("Registered tool: get_clipboard");
 
+    /// Tool for setting clipboard text content.
+    /// Used by: Data injection, automated copying, content sharing workflows
     // Set Clipboard Tool
-    #[derive(serde::Deserialize)]
-    struct SetClipboardContentInput { content: String }
-
     let set_clipboard_def = ToolDefinition {
-        name: "set_clipboard_content".to_string(),
-        description: "Sets the operating system clipboard content to the provided text.".to_string(),
+        name: "set_clipboard".to_string(),
+        description: "Set the contents of the operating system clipboard to the specified text.".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
-                "content": { "type": "string" }
+                "content": {
+                    "type": "string",
+                    "description": "The text content to set in the clipboard"
+                }
             },
             "required": ["content"]
         }),
     };
+
+    #[derive(serde::Deserialize)]
+    struct SetClipboardContentInput { content: String }
 
     let app_handle_clone = app_handle.clone();
     let set_clipboard_exec = move |input: Value| {
@@ -524,7 +608,7 @@ pub async fn register_desktop_tools(
         async move {
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<SetClipboardContentInput>(input)
-                .map_err(|e| format!("Failed to parse set_clipboard_content input: {}", e))?;
+                .map_err(|e| format!("Failed to parse set_clipboard input: {}", e))?;
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
@@ -538,8 +622,10 @@ pub async fn register_desktop_tools(
         }
     };
     provider.register_async_tool(set_clipboard_def, set_clipboard_exec).await;
-    info!("Registered tool: set_clipboard_content");
+    info!("Registered tool: set_clipboard");
 
+    /// Tool for performing mouse clicks at specified desktop coordinates.
+    /// Used by: Computer use agents, UI automation, element interaction workflows
     // Desktop click tool
     #[derive(serde::Deserialize)]
     #[allow(dead_code)] // Allow unused fields for now
@@ -617,6 +703,8 @@ pub async fn register_desktop_tools(
 
     // Note: left_mouse_down and left_mouse_up tools are already registered in register_additional_computer_use_tools
 
+    /// Tool for moving the mouse cursor to specified coordinates.
+    /// Used by: Mouse positioning, cursor setup for subsequent actions
     // mouse_move
     let mouse_move_def = ToolDefinition {
         name: "mouse_move".to_string(),
@@ -654,6 +742,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(mouse_move_def, mouse_move_exec).await;
     info!("Registered tool: mouse_move");
 
+    /// Tool for performing left mouse clicks at specified coordinates.
+    /// Used by: Basic UI interaction, button clicking, element selection
     // left_click
     let left_click_def = ToolDefinition {
         name: "left_click".to_string(),
@@ -691,6 +781,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(left_click_def, left_click_exec).await;
     info!("Registered tool: left_click");
 
+    /// Tool for performing right mouse clicks (context menu activation).
+    /// Used by: Context menu access, right-click interactions, alternate UI actions
     // right_click
     let right_click_def = ToolDefinition {
         name: "right_click".to_string(),
@@ -728,6 +820,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(right_click_def, right_click_exec).await;
     info!("Registered tool: right_click");
 
+    /// Tool for performing middle mouse clicks (scroll wheel click).
+    /// Used by: Middle-click paste, opening links in new tabs, special interactions
     // middle_click
     let middle_click_def = ToolDefinition {
         name: "middle_click".to_string(),
@@ -765,6 +859,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(middle_click_def, middle_click_exec).await;
     info!("Registered tool: middle_click");
 
+    /// Tool for performing double-clicks (rapid successive clicks).
+    /// Used by: File opening, text selection, application launching
     // double_click
     let double_click_def = ToolDefinition {
         name: "double_click".to_string(),
@@ -802,6 +898,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(double_click_def, double_click_exec).await;
     info!("Registered tool: double_click");
 
+    /// Tool for performing click-and-drag operations.
+    /// Used by: Object moving, selection areas, dragging items between locations
     // left_click_drag
     let left_click_drag_def = ToolDefinition {
         name: "left_click_drag".to_string(),
@@ -849,6 +947,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(left_click_drag_def, left_click_drag_exec).await;
     info!("Registered tool: left_click_drag");
 
+    /// Tool for getting current mouse cursor position.
+    /// Used by: Position tracking, relative movement calculations, cursor state queries
     // cursor_position
     let cursor_position_def = ToolDefinition {
         name: "cursor_position".to_string(),
@@ -881,6 +981,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(cursor_position_def, cursor_position_exec).await;
     info!("Registered tool: cursor_position");
 
+    /// Tool for listing all open windows in the system.
+    /// Used by: Window discovery, application targeting, desktop state analysis
     // window_management
     let window_list_def = ToolDefinition {
         name: "list_windows".to_string(),
@@ -912,6 +1014,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(window_list_def, window_list_exec).await;
     info!("Registered tool: list_windows");
 
+    /// Tool for getting detailed information about a specific window.
+    /// Used by: Window analysis, specific window targeting, window state queries
     let window_info_def = ToolDefinition {
         name: "get_window_info".to_string(),
         description: "Get detailed information about a specific window by its ID.".to_string(),
@@ -954,6 +1058,27 @@ pub async fn register_desktop_tools(
     info!("Desktop tool registration completed.");
 }
 
+/// Sets up the complete tool provider with desktop tools and MCP integration.
+/// 
+/// This is the main setup function that initializes all desktop automation capabilities
+/// and integrates with Model Context Protocol (MCP) servers for extensibility.
+/// It serves as a wrapper for register_desktop_tools with additional MCP setup.
+/// 
+/// Used by: Agent initialization, main tool provider setup in application startup
+/// 
+/// # Arguments
+/// * `provider` - Mutable reference to LocalToolProvider for tool registration
+/// * `state` - App state containing MCP manager and configuration
+/// * `app_handle` - Tauri app handle for state access and command execution
+/// 
+/// # Returns
+/// `Arc<Mutex<LocalToolProvider>>` - Thread-safe shared tool provider instance
+/// 
+/// # Features
+/// - Registers all desktop automation tools
+/// - Initializes MCP server connections
+/// - Sets up MCP tool refresh capabilities
+/// - Returns shared provider instance for multi-threaded access
 // Function to set up tools (wrapper for register_desktop_tools for backwards compatibility)
 pub async fn setup_tools(
     provider: &mut LocalToolProvider,

@@ -1,3 +1,7 @@
+//! Official Anthropic Computer Use tools for desktop screen interaction.
+//! Implements the complete Computer Use API with mouse, keyboard, and text editing.
+//! Used by: Main agent orchestrator for all computer interaction tasks.
+
 use crate::agent::structs::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
@@ -8,7 +12,8 @@ use tracing::{info, warn};
 // Computer Use Tool for Anthropic Claude
 // Based on official specification: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
 
-/// Helper function to verify that an input element is focused after clicking
+/// Verifies that an input element is focused after clicking with timeout and retry logic.
+/// Used by: Computer tool click actions for input verification.
 async fn verify_input_focus_after_click(
     x: f64,
     y: f64,
@@ -65,7 +70,8 @@ async fn verify_input_focus_after_click(
     Ok(false) // Timeout reached without successful verification
 }
 
-/// Helper function to verify that the currently focused element is ready for text input
+/// Verifies that the currently focused element is ready for text input.
+/// Used by: Computer tool type action for input readiness verification.
 fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String> {
     match state_manager.desktop.focused_element() {
         Ok(focused_element) => {
@@ -119,7 +125,9 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
     }
 }
 
-/// Register the official Anthropic Computer Use tools with exact API specification
+/// Registers the official Anthropic Computer Use tools with exact API specification.
+/// Provides computer, text editor, and bash tools with the local tool provider.
+/// Used by: Agent initialization system during tool registration.
 pub async fn register_anthropic_computer_use_tools(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
