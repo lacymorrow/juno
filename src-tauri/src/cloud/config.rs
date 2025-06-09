@@ -34,7 +34,7 @@ impl Default for CloudConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            server_url: "wss://juno-cloud.shipkit.io/ws".to_string(),
+            server_url: "wss://juno-cloud-backend.fly.dev/ws".to_string(),
             device_id: None,
             device_name: format!("Juno-{}", gethostname::gethostname().to_string_lossy()),
             api_key: None,
