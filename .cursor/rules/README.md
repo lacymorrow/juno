@@ -13,6 +13,7 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 - **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** ✅ - macOS permission handling fixes, built app permission detection, and system settings automation
 - **[streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)** ✅ - AI response streaming system with real-time UI updates and event handling
 - **[cloud-control-system.mdc](cloud-control-system.mdc)** ✅ - Cloud connectivity and remote control capabilities
+- **[settings-system-modular-cleanup.mdc](settings-system-modular-cleanup.mdc)** ✅ - Modular settings architecture with component-based organization and full functionality preservation
 
 ### 🎤 Voice System Documentation (Complete Three-Mode Implementation)
 - **[voice-modes-clarification.mdc](voice-modes-clarification.mdc)** ✅ - Complete three-mode voice system: Dictation Mode, Agent Mode, and Always Listening Mode with terminology standards
@@ -61,6 +62,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **Cloud Control**: Remote connectivity and command execution
 - **macOS Permissions**: Robust permission handling with graceful degradation
 - **Streaming Responses**: Real-time AI response display with event coordination
+- **Settings System**: Modular, maintainable settings architecture with TypeScript integration
 
 ### 🏗️ Architecture Components
 - **Orchestrator Agent**: Main agent with persistent memory and conversation continuity

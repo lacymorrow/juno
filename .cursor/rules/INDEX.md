@@ -18,6 +18,7 @@
 - **macOS Permissions** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)
 - **Cloud Connectivity** → [cloud-control-system.mcp](cloud-control-system.mdc)
 - **Streaming Responses** → [streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)
+- **Settings System** → [settings-system-modular-cleanup.mdc](settings-system-modular-cleanup.mdc)
 
 ### Testing & Debugging
 - **WebSocket Debugging** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)
@@ -31,6 +32,11 @@
 1. **Architecture patterns** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc)
 2. **MCP integration** → [mcp-integration-system.mdc](mcp-integration-system.mdc)
 3. **State management** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc)
+
+#### Modify settings/UI components
+1. **Settings architecture** → [settings-system-modular-cleanup.mdc](settings-system-modular-cleanup.mdc)
+2. **Component patterns** → [settings-system-modular-cleanup.mdc](settings-system-modular-cleanup.mdc)
+3. **TypeScript integration** → [settings-system-modular-cleanup.mdc](settings-system-modular-cleanup.mdc)
 
 #### Work with voice features
 1. **Voice mode overview** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc)
@@ -60,6 +66,7 @@
 | Cloud Connectivity | ✅ Complete | ✅ Complete | ✅ Validated | ✅ Ready |
 | Streaming Responses | ✅ Complete | ✅ Complete | ✅ Validated | ✅ Ready |
 | Debug/Testing Tools | ✅ Complete | ✅ Complete | ✅ Validated | ✅ Ready |
+| Settings System | ✅ Complete | ✅ Complete | ✅ Validated | ✅ Ready |
 
 ## 🔍 Quick Implementation Checks
 
