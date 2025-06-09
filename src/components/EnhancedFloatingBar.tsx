@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
+import { AgentStatusIndicator } from "./AgentStatusIndicator";
 
 // Use the existing BarState type from the backend
 type BarState =
@@ -66,6 +67,7 @@ export function EnhancedFloatingBar() {
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
+  const [showAgentStatus, setShowAgentStatus] = useState(false);
   const [config] = useState<FloatingBarConfig>({
     showVoiceIndicator: true,
     enableAnimations: true,
@@ -348,6 +350,29 @@ export function EnhancedFloatingBar() {
     return cn(baseStyles, bgColor, sizeStyles, hoverEffect, clickable);
   };
 
+  // Toggle agent status display
+  const toggleAgentStatus = () => {
+    setShowAgentStatus(!showAgentStatus);
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showAgentStatus) {
+        const target = event.target as Element;
+        // Check if the click is outside the agent status popup
+        const popup = document.querySelector('[data-agent-status-popup]');
+        const button = document.querySelector('[data-agent-status-button]');
+        
+        if (popup && !popup.contains(target) && button && !button.contains(target)) {
+          setShowAgentStatus(false);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showAgentStatus]);
+
   return (
     <div className="w-screen h-screen flex items-start justify-start relative bg-transparent">
       {/* Enhanced Tooltip */}
@@ -355,6 +380,24 @@ export function EnhancedFloatingBar() {
         <div className="absolute top-16 left-8 z-50 animate-fade-in">
           <div className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs">
             {getStatusText()}
+          </div>
+        </div>
+      )}
+
+      {/* Agent Status Popup */}
+      {showAgentStatus && (
+        <div className="absolute top-16 left-8 z-50 animate-fade-in" data-agent-status-popup>
+          <div className="bg-black/95 text-white p-4 rounded-lg border border-white/20 backdrop-blur-md min-w-[280px] shadow-xl">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white">Agent Call Limits</h3>
+              <button
+                onClick={toggleAgentStatus}
+                className="text-white/60 hover:text-white transition-colors duration-200"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <AgentStatusIndicator className="text-white" />
           </div>
         </div>
       )}
@@ -374,6 +417,18 @@ export function EnhancedFloatingBar() {
                 (isDictationMode || isAgentWorking) && (
                   <VoiceStatusIndicator variant="compact" className="ml-1" />
                 )}
+              {/* Compact Agent Status Indicator */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleAgentStatus();
+                }}
+                className="text-white/60 hover:text-white transition-colors duration-200"
+                title="Agent status and call limits"
+                data-agent-status-button
+              >
+                <AgentStatusIndicator compact className="ml-1" />
+              </button>
             </div>
           )}
 
