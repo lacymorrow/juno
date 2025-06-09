@@ -122,11 +122,11 @@ export default function SettingsWindow() {
     };
 
     setupWindow();
-  }, []);
+  }, [window]);
 
   const handleCloseWindow = async () => {
     try {
-      await window.hide();
+      await invoke("close_settings_window");
     } catch (error) {
       console.error("Failed to close settings window:", error);
     }
@@ -343,7 +343,8 @@ function VoiceSettings({
                 <SelectContent>
                   <SelectItem value="off">Off</SelectItem>
                   <SelectItem value="system">System</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
+                  <SelectItem value="elevenlabs">ElevenLabs</SelectItem>
+                  <SelectItem value="replicate">Replicate</SelectItem>
                 </SelectContent>
               </Select>
             </div>
