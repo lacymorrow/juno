@@ -4,7 +4,7 @@ pub mod system;
 
 use tauri::State;
 use crate::state::AppState;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // Global flag to indicate if TTS should be stopped
@@ -100,9 +100,8 @@ pub async fn invoke_tts(
     }
 
     info!("Using TTS provider from state: {}", provider_from_state);
-    // The _state argument in invoke_tts_for_provider is not strictly needed now since the provider is explicit,
-    // but keeping it for now to minimize changes to that function's signature if it's used elsewhere.
-    invoke_tts_for_provider(text, Some(state), &provider_from_state).await
+    // Use fallback mechanism to try alternative providers if the primary fails
+    invoke_tts_with_fallback(text, &provider_from_state).await
 }
 
 // Invoke TTS for a specific provider name
@@ -132,4 +131,69 @@ pub async fn invoke_tts_for_provider(
             Err(format!("Unknown TTS provider: {}", provider))
         }
     }
+}
+
+// Invoke TTS with automatic fallback to alternative providers
+pub async fn invoke_tts_with_fallback(
+    text: String,
+    primary_provider: &str,
+) -> Result<String, String> {
+    info!("Invoking TTS with fallback, primary provider: {}", primary_provider);
+
+    // Check if stop was requested before starting
+    if is_tts_stop_requested() {
+        info!("TTS stop was requested before starting TTS with fallback, aborting");
+        return Ok("TTS_STOPPED_BY_USER".to_string());
+    }
+
+    // Define the provider fallback order based on the primary provider
+    let fallback_providers = match primary_provider.to_lowercase().as_str() {
+        "replicate" => vec!["replicate", "elevenlabs", "system"],
+        "elevenlabs" => vec!["elevenlabs", "system"],
+        "system" => vec!["system", "elevenlabs", "replicate"],
+        "off" => {
+            return Ok("TTS_DISABLED_BY_SETTING".to_string());
+        }
+        _ => {
+            warn!("Unknown primary TTS provider: '{}'. Using default fallback order.", primary_provider);
+            vec!["system", "elevenlabs", "replicate"]
+        }
+    };
+
+    let mut last_error = String::new();
+
+    for (index, provider) in fallback_providers.iter().enumerate() {
+        // Check if stop was requested before each attempt
+        if is_tts_stop_requested() {
+            info!("TTS stop was requested during fallback attempts, aborting");
+            return Ok("TTS_STOPPED_BY_USER".to_string());
+        }
+
+        let is_primary = index == 0;
+        info!("Attempting TTS with provider: {} ({})", provider, if is_primary { "primary" } else { "fallback" });
+
+        match invoke_tts_for_provider(text.clone(), None, provider).await {
+            Ok(result) => {
+                if result == "TTS_STOPPED_BY_USER" {
+                    return Ok(result);
+                }
+                if !is_primary {
+                    warn!("Primary TTS provider '{}' failed, but fallback '{}' succeeded", primary_provider, provider);
+                }
+                return Ok(result);
+            }
+            Err(e) => {
+                last_error = e.clone();
+                if is_primary {
+                    warn!("Primary TTS provider '{}' failed: {}", provider, e);
+                } else {
+                    warn!("Fallback TTS provider '{}' also failed: {}", provider, e);
+                }
+            }
+        }
+    }
+
+    let final_error = format!("All TTS providers failed. Last error: {}", last_error);
+    error!("{}", final_error);
+    Err(final_error)
 }

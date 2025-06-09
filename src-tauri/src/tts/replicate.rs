@@ -6,6 +6,9 @@ use tracing::{error, info, warn}; // Import tracing macros
 use std::env;
 use base64::Engine;
 
+// Maximum time to wait for Replicate prediction to complete (5 minutes)
+const REPLICATE_TIMEOUT_SECONDS: u64 = 300;
+
 // --- Replicate API Structures ---
 #[derive(Serialize)]
 pub(crate) struct ReplicateInput { // Make pub(crate) if only used within the crate
@@ -150,12 +153,22 @@ pub async fn invoke_replicate_tts(
     let get_url = initial_data.urls.get;
     info!("Replicate prediction started (ID: {}). Polling status at: {}", initial_data.id, get_url);
 
-    // 2. Poll for the result
+    // 2. Poll for the result with timeout
+    let start_time = std::time::Instant::now();
+    let timeout_duration = Duration::from_secs(REPLICATE_TIMEOUT_SECONDS);
+
     loop {
         // Check if stop was requested before each polling iteration
         if crate::tts::is_tts_stop_requested() {
             info!("TTS stop was requested during Replicate polling, aborting");
             return Ok("TTS_STOPPED_BY_USER".to_string());
+        }
+
+        // Check for timeout
+        if start_time.elapsed() > timeout_duration {
+            let err_msg = format!("Replicate prediction timed out after {} seconds (prediction ID: {})", REPLICATE_TIMEOUT_SECONDS, initial_data.id);
+            error!("{}", err_msg);
+            return Err(err_msg);
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await; // Wait before polling
@@ -189,7 +202,7 @@ pub async fn invoke_replicate_tts(
             }
         };
 
-        info!("Current Replicate prediction status: {:?}", status_data.status);
+        info!("Current Replicate prediction status: {:?} (elapsed: {:.1}s)", status_data.status, start_time.elapsed().as_secs_f32());
 
         match status_data.status.as_str() {
             "succeeded" => {
