@@ -283,7 +283,16 @@ impl FloatingBarManager {
         debug!("FloatingBarManager: Handling dictation started");
         self.input_value.clear();
         self.transcription_text.clear();
-        self.set_state(BarState::Listening).await;
+
+        // Set appropriate initial state based on dictation mode
+        // If dictation mode is active, go directly to Dictating (orange)
+        // Otherwise, go to Listening (blue) for agent mode
+        if self.is_dictation_mode {
+            self.set_state(BarState::Dictating).await;
+        } else {
+            self.set_state(BarState::Listening).await;
+        }
+
         Ok(())
     }
 
@@ -360,6 +369,12 @@ impl FloatingBarManager {
 
         if is_active {
             self.set_state(BarState::Dictating).await;
+        } else {
+            // When dictation mode becomes inactive, return to default state
+            // This ensures the orange UI disappears when keys are released before threshold
+            if self.current_state == BarState::Dictating {
+                self.set_state(BarState::Default).await;
+            }
         }
 
         Ok(())
