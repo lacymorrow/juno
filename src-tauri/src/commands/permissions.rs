@@ -1156,9 +1156,9 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
         Ok(PermissionStatus {
             permission_type: "input_monitoring".to_string(),
             granted,
-            required: true,
-            description: "Required for global keyboard shortcuts and input monitoring".to_string(),
-            instructions: "Go to System Preferences > Privacy & Security > Input Monitoring and add Juno".to_string(),
+            required: false,
+            description: "Required for global keyboard shortcuts (Cmd+Shift+J, Cmd+Shift+D, Escape key) when other apps are focused".to_string(),
+            instructions: "Optional: Go to System Preferences > Privacy & Security > Input Monitoring and add Juno to enable global shortcuts".to_string(),
         })
     }
 
