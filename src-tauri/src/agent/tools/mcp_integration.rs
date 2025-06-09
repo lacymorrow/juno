@@ -1,7 +1,3 @@
-//! MCP (Model Context Protocol) integration for external tool servers.
-//! Enables discovery, connection, and execution of tools from external MCP servers.
-//! Used by: Main agent orchestrator for accessing external tools and capabilities.
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -9,23 +5,16 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio::time::timeout;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use async_trait::async_trait;
 
-use crate::agent::structs::{AgentError, ToolDefinition, ToolResult, ToolCall};
-use crate::agent::traits::ToolProvider;
+use crate::agent::structs::{AgentError, ToolDefinition, ToolResult};
 
 /// Configuration for an external MCP server
-/// 
-/// Defines all settings needed to connect to and manage an external MCP server,
-/// including execution parameters, environment setup, and connection options.
-/// 
-/// Used by: MCPManager for server initialization and tool_config for persistence
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPServerConfig {
     pub id: String,
@@ -42,14 +31,6 @@ pub struct MCPServerConfig {
 }
 
 impl MCPServerConfig {
-    /// Creates a new MCP server configuration with default settings
-    /// 
-    /// Used by: Settings UI and configuration management when adding new servers
-    /// 
-    /// # Arguments
-    /// * `name` - Human-readable name for the server
-    /// * `command` - Executable command to start the server
-    /// * `args` - Command line arguments for the server
     pub fn new(name: String, command: String, args: Vec<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -66,25 +47,16 @@ impl MCPServerConfig {
         }
     }
 
-    /// Adds a description to the server configuration
-    /// 
-    /// Used by: Configuration builders for documentation purposes
     pub fn with_description(mut self, description: String) -> Self {
         self.description = Some(description);
         self
     }
 
-    /// Sets the working directory for the server process
-    /// 
-    /// Used by: Configuration when server needs specific working directory
     pub fn with_working_directory(mut self, working_directory: PathBuf) -> Self {
         self.working_directory = Some(working_directory);
         self
     }
 
-    /// Adds an environment variable to the server configuration
-    /// 
-    /// Used by: Configuration when server requires specific environment setup
     pub fn with_environment_variable(mut self, key: String, value: String) -> Self {
         self.environment_variables.insert(key, value);
         self
@@ -92,11 +64,6 @@ impl MCPServerConfig {
 }
 
 /// Status of an MCP server connection
-/// 
-/// Represents the current state of connection to an external MCP server,
-/// used for monitoring and debugging connection health.
-/// 
-/// Used by: MCPManager and UI for displaying connection status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MCPServerStatus {
     Disconnected,
@@ -107,11 +74,6 @@ pub enum MCPServerStatus {
 }
 
 /// Information about a discovered MCP tool
-/// 
-/// Contains metadata about tools discovered from external MCP servers,
-/// including server origin and enablement status.
-/// 
-/// Used by: Tool discovery system and configuration management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPToolInfo {
     pub server_id: String,
@@ -120,192 +82,470 @@ pub struct MCPToolInfo {
     pub enabled: bool,
 }
 
-/// Manages connections to MCP servers and external tool providers.
-/// Handles server lifecycle, tool discovery, and protocol communication.
-/// Used by: Tool configuration system for external tool integration.
-pub struct MCPServer {
-    pub id: String,
-    pub name: String,
-    pub command: String,
-    pub args: Vec<String>,
-    pub tools: Vec<ToolDefinition>,
-    pub status: MCPServerStatus,
-    process: Option<Arc<Mutex<Child>>>,
-    stdin: Option<Arc<Mutex<ChildStdin>>>,
-    stdout: Option<Arc<Mutex<BufReader<ChildStdout>>>>,
-    request_id: Arc<Mutex<u64>>,
+/// An active MCP server connection
+pub struct MCPServerConnection {
+    config: MCPServerConfig,
+    process: Option<Child>,
+    status: MCPServerStatus,
+    tools: Vec<ToolDefinition>,
+    request_id_counter: u64,
+    stdin_writer: Option<BufWriter<tokio::process::ChildStdin>>,
+    stdout_reader: Option<BufReader<tokio::process::ChildStdout>>,
 }
 
-/// Main MCP integration provider for external tool management.
-/// Coordinates multiple MCP servers and provides unified tool access.
-/// Used by: Agent tool system for accessing external capabilities.
-pub struct MCPIntegrationProvider {
-    servers: Arc<RwLock<HashMap<String, Arc<Mutex<MCPServer>>>>>,
-}
-
-impl MCPIntegrationProvider {
-    /// Creates a new MCP integration provider.
-    /// Used by: Tool registration system during agent initialization.
-    pub fn new() -> Self {
+impl MCPServerConnection {
+    pub fn new(config: MCPServerConfig) -> Self {
         Self {
-            servers: Arc::new(RwLock::new(HashMap::new())),
+            config,
+            process: None,
+            status: MCPServerStatus::Disconnected,
+            tools: Vec::new(),
+            request_id_counter: 0,
+            stdin_writer: None,
+            stdout_reader: None,
         }
     }
 
-    /// Adds a new MCP server configuration to the provider.
-    /// Used by: Tool configuration loading when setting up external servers.
-    pub async fn add_server(&self, server: MCPServer) -> Result<(), AgentError> {
-        let server_id = server.id.clone();
-
-        // Store the configuration
-        {
-            let mut servers = self.servers.write().await;
-            servers.insert(server_id.clone(), Arc::new(Mutex::new(server)));
+    /// Start the MCP server process and establish connection
+    pub async fn connect(&mut self) -> Result<(), String> {
+        if matches!(self.status, MCPServerStatus::Connected) {
+            return Ok(());
         }
 
-        if server.auto_start && server.enabled {
-            self.start_server(&server_id).await?;
+        self.status = MCPServerStatus::Connecting;
+        info!("Starting MCP server: {}", self.config.name);
+
+        // Start the server process
+        let mut command = Command::new(&self.config.command);
+        command.args(&self.config.args);
+        command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+
+        if let Some(working_dir) = &self.config.working_directory {
+            command.current_dir(working_dir);
         }
 
-        info!("Added MCP server configuration: {}", server.name);
+        for (key, value) in &self.config.environment_variables {
+            command.env(key, value);
+        }
+
+        let mut child = command.spawn()
+            .map_err(|e| {
+                let err = format!("Failed to start MCP server '{}': {}", self.config.name, e);
+                self.status = MCPServerStatus::Error(err.clone());
+                err
+            })?;
+
+        // Setup STDIO communication
+        let stdin = child.stdin.take().ok_or_else(|| {
+            let err = "Failed to get stdin for MCP server".to_string();
+            self.status = MCPServerStatus::Error(err.clone());
+            err
+        })?;
+
+        let stdout = child.stdout.take().ok_or_else(|| {
+            let err = "Failed to get stdout for MCP server".to_string();
+            self.status = MCPServerStatus::Error(err.clone());
+            err
+        })?;
+
+        self.stdin_writer = Some(BufWriter::new(stdin));
+        self.stdout_reader = Some(BufReader::new(stdout));
+        self.process = Some(child);
+
+        // Initialize the MCP connection
+        self.initialize().await?;
+
+        // Send initialized notification
+        self.send_initialized_notification().await?;
+
+        // Discover available tools
+        self.discover_tools().await?;
+
+        self.status = MCPServerStatus::Connected;
+        info!("Successfully connected to MCP server: {}", self.config.name);
         Ok(())
     }
 
-    /// Starts an MCP server and establishes JSON-RPC communication.
-    /// Used by: Server management when activating external tool servers.
-    pub async fn start_server(&self, server_id: &str) -> Result<(), AgentError> {
-        let mut servers = self.servers.write().await;
-        if let Some(server) = servers.get_mut(server_id) {
-            server.lock().await.connect().await?;
-            Ok(())
-        } else {
-            Err(AgentError::ServerNotFound(server_id.to_string()))
+    /// Send the MCP initialize request
+    async fn initialize(&mut self) -> Result<(), String> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": self.next_request_id(),
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {
+                    "tools": {
+                        "execution": true
+                    }
+                },
+                "clientInfo": {
+                    "name": "Juno AI Agent",
+                    "version": "1.0.0"
+                }
+            }
+        });
+
+        let response = self.send_request(request).await?;
+
+        if response.get("error").is_some() {
+            return Err(format!("MCP server initialization failed: {}", response));
         }
+
+        debug!("MCP server '{}' initialized successfully", self.config.name);
+        Ok(())
     }
 
-    /// Stops an MCP server and cleans up resources.
-    /// Used by: Server management when deactivating external tool servers.
-    pub async fn stop_server(&self, server_id: &str) -> Result<(), AgentError> {
-        let mut servers = self.servers.write().await;
-        if let Some(server) = servers.get_mut(server_id) {
-            server.lock().await.disconnect().await;
-            Ok(())
+    /// Send initialized notification
+    async fn send_initialized_notification(&mut self) -> Result<(), String> {
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+        });
+
+        let notification_str = serde_json::to_string(&notification)
+            .map_err(|e| format!("Failed to serialize notification: {}", e))?;
+
+        // Send notification (no response expected)
+        if let Some(ref mut writer) = self.stdin_writer {
+            writer.write_all(notification_str.as_bytes()).await
+                .map_err(|e| format!("Failed to write notification: {}", e))?;
+            writer.write_all(b"\n").await
+                .map_err(|e| format!("Failed to write newline: {}", e))?;
+            writer.flush().await
+                .map_err(|e| format!("Failed to flush notification: {}", e))?;
         } else {
-            Err(AgentError::ServerNotFound(server_id.to_string()))
+            return Err("No stdin writer available".to_string());
         }
+
+        debug!("MCP server '{}' initialized notification sent successfully", self.config.name);
+        Ok(())
     }
 
-    /// Lists all available tools from connected MCP servers.
-    /// Used by: Tool discovery system for building available tool catalog.
-    pub async fn list_all_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
-        let servers = self.servers.read().await;
-        let mut all_tools = Vec::new();
+    /// Discover available tools from the MCP server
+    async fn discover_tools(&mut self) -> Result<(), String> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": self.next_request_id(),
+            "method": "tools/list",
+            "params": {}
+        });
 
-        for (server_id, server) in servers.iter() {
-            if matches!(server.lock().await.status, MCPServerStatus::Connected) {
-                all_tools.extend(server.lock().await.tools.iter().cloned());
+        let response = self.send_request(request).await?;
+
+        if let Some(error) = response.get("error") {
+            return Err(format!("Failed to list tools from MCP server: {}", error));
+        }
+
+        let tools_array = response
+            .get("result")
+            .and_then(|r| r.get("tools"))
+            .and_then(|t| t.as_array())
+            .ok_or_else(|| "Invalid tools response format".to_string())?;
+
+        self.tools.clear();
+        for tool_json in tools_array {
+            match self.parse_tool_definition(tool_json) {
+                Ok(tool_def) => {
+                    debug!("Discovered tool '{}' from server '{}'", tool_def.name, self.config.name);
+                    self.tools.push(tool_def);
+                }
+                Err(e) => {
+                    warn!("Failed to parse tool definition: {} - {}", e, tool_json);
+                }
             }
         }
 
-        Ok(all_tools)
+        info!("Discovered {} tools from MCP server '{}'", self.tools.len(), self.config.name);
+        Ok(())
     }
 
-    /// Executes a tool on the appropriate MCP server.
-    /// Used by: Agent tool execution when invoking external tools.
-    pub async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
+    /// Parse a tool definition from MCP server response
+    fn parse_tool_definition(&self, tool_json: &Value) -> Result<ToolDefinition, String> {
+        let name = tool_json.get("name")
+            .and_then(|n| n.as_str())
+            .ok_or_else(|| "Tool missing name".to_string())?
+            .to_string();
+
+        let description = tool_json.get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let input_schema = tool_json.get("inputSchema")
+            .unwrap_or(&json!({"type": "object", "properties": {}}))
+            .clone();
+
+        // Prefix tool name with server name to avoid conflicts
+        let prefixed_name = format!("{}_{}", self.config.name, name);
+
+        Ok(ToolDefinition {
+            name: prefixed_name,
+            description: format!("[{}] {}", self.config.name, description),
+            input_schema,
+        })
+    }
+
+    /// Execute a tool on the MCP server
+    pub async fn execute_tool(&mut self, tool_name: &str, input: Value, call_id: String) -> Result<ToolResult, String> {
+        // Remove the server prefix from the tool name
+        let original_tool_name = tool_name.strip_prefix(&format!("{}_", self.config.name))
+            .unwrap_or(tool_name);
+
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": self.next_request_id(),
+            "method": "tools/call",
+            "params": {
+                "name": original_tool_name,
+                "arguments": input
+            }
+        });
+
+        let response = self.send_request(request).await?;
+
+        if let Some(error) = response.get("error") {
+            return Err(format!("Tool execution failed: {}", error));
+        }
+
+        let result = response.get("result")
+            .unwrap_or(&json!({}))
+            .clone();
+
+        Ok(ToolResult {
+            call_id,
+            output: result,
+        })
+    }
+
+    /// Send a JSON-RPC request and wait for response
+    async fn send_request(&mut self, request: Value) -> Result<Value, String> {
+        let request_str = serde_json::to_string(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?;
+
+        // Send request
+        if let Some(ref mut writer) = self.stdin_writer {
+            writer.write_all(request_str.as_bytes()).await
+                .map_err(|e| format!("Failed to write request: {}", e))?;
+            writer.write_all(b"\n").await
+                .map_err(|e| format!("Failed to write newline: {}", e))?;
+            writer.flush().await
+                .map_err(|e| format!("Failed to flush request: {}", e))?;
+        } else {
+            return Err("No stdin writer available".to_string());
+        }
+
+        // Read response with timeout
+        let response_future = async {
+            if let Some(ref mut reader) = self.stdout_reader {
+                let mut line = String::new();
+                reader.read_line(&mut line).await
+                    .map_err(|e| format!("Failed to read response: {}", e))?;
+
+                serde_json::from_str::<Value>(&line)
+                    .map_err(|e| format!("Failed to parse response JSON: {}", e))
+            } else {
+                Err("No stdout reader available".to_string())
+            }
+        };
+
+        timeout(Duration::from_secs(self.config.timeout_seconds), response_future)
+            .await
+            .map_err(|_| {
+                self.status = MCPServerStatus::Timeout;
+                "Request timeout".to_string()
+            })?
+    }
+
+    /// Disconnect from the MCP server
+    pub async fn disconnect(&mut self) {
+        if let Some(mut process) = self.process.take() {
+            let _ = process.kill().await;
+        }
+        self.stdin_writer = None;
+        self.stdout_reader = None;
+        self.status = MCPServerStatus::Disconnected;
+        info!("Disconnected from MCP server: {}", self.config.name);
+    }
+
+    fn next_request_id(&mut self) -> u64 {
+        self.request_id_counter += 1;
+        self.request_id_counter
+    }
+
+    pub fn get_status(&self) -> &MCPServerStatus {
+        &self.status
+    }
+
+    pub fn get_tools(&self) -> &[ToolDefinition] {
+        &self.tools
+    }
+
+    pub fn get_config(&self) -> &MCPServerConfig {
+        &self.config
+    }
+}
+
+/// Manager for all MCP server connections
+pub struct MCPManager {
+    servers: Arc<RwLock<HashMap<String, MCPServerConnection>>>,
+    configs: Arc<RwLock<HashMap<String, MCPServerConfig>>>,
+}
+
+impl MCPManager {
+    pub fn new() -> Self {
+        Self {
+            servers: Arc::new(RwLock::new(HashMap::new())),
+            configs: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Add a new MCP server configuration
+    pub async fn add_server(&self, config: MCPServerConfig) -> Result<(), String> {
+        let server_id = config.id.clone();
+
+        // Store the configuration
+        {
+            let mut configs = self.configs.write().await;
+            configs.insert(server_id.clone(), config.clone());
+        }
+
+        // Create and optionally start the connection
+        let connection = MCPServerConnection::new(config.clone());
+        {
+            let mut servers = self.servers.write().await;
+            servers.insert(server_id.clone(), connection);
+        }
+
+        if config.auto_start && config.enabled {
+            self.start_server(&server_id).await?;
+        }
+
+        info!("Added MCP server configuration: {}", config.name);
+        Ok(())
+    }
+
+    /// Start a specific MCP server
+    pub async fn start_server(&self, server_id: &str) -> Result<(), String> {
+        let mut servers = self.servers.write().await;
+        if let Some(connection) = servers.get_mut(server_id) {
+            connection.connect().await
+        } else {
+            Err(format!("MCP server not found: {}", server_id))
+        }
+    }
+
+    /// Stop a specific MCP server
+    pub async fn stop_server(&self, server_id: &str) -> Result<(), String> {
+        let mut servers = self.servers.write().await;
+        if let Some(connection) = servers.get_mut(server_id) {
+            connection.disconnect().await;
+            Ok(())
+        } else {
+            Err(format!("MCP server not found: {}", server_id))
+        }
+    }
+
+    /// Get all available tools from all connected servers
+    pub async fn get_all_tools(&self) -> Vec<MCPToolInfo> {
+        let servers = self.servers.read().await;
+        let mut all_tools = Vec::new();
+
+        for (server_id, connection) in servers.iter() {
+            if matches!(connection.get_status(), MCPServerStatus::Connected) {
+                for tool_def in connection.get_tools() {
+                    all_tools.push(MCPToolInfo {
+                        server_id: server_id.clone(),
+                        server_name: connection.get_config().name.clone(),
+                        tool_definition: tool_def.clone(),
+                        enabled: true, // TODO: Get from configuration
+                    });
+                }
+            }
+        }
+
+        all_tools
+    }
+
+    /// Execute a tool on the appropriate MCP server
+    pub async fn execute_tool(&self, tool_name: &str, input: Value, call_id: String) -> Result<ToolResult, AgentError> {
         let mut servers = self.servers.write().await;
 
         // Find the server that has this tool
-        for (server_id, server) in servers.iter_mut() {
-            if server.lock().await.tools.iter().any(|t| t.name == tool_call.name) {
-                match server.lock().await.execute_tool(tool_call.name, tool_call.input, tool_call.id.clone()).await {
+        for (_, connection) in servers.iter_mut() {
+            if connection.get_tools().iter().any(|t| t.name == tool_name) {
+                match connection.execute_tool(tool_name, input, call_id).await {
                     Ok(result) => return Ok(result),
                     Err(e) => return Err(AgentError::ToolError(e)),
                 }
             }
         }
 
-        Err(AgentError::ToolNotFound(tool_call.name))
+        Err(AgentError::ToolNotFound(tool_name.to_string()))
     }
 
-    /// Sends a JSON-RPC request to the specified MCP server.
-    /// Used by: Tool execution and server communication for protocol handling.
-    async fn send_request(&self, server_id: &str, method: &str, params: Value) -> Result<Value, AgentError> {
-        let mut servers = self.servers.write().await;
-        if let Some(server) = servers.get_mut(server_id) {
-            let server = server.lock().await;
-            let request = json!({
-                "jsonrpc": "2.0",
-                "id": server.next_request_id(),
-                "method": method,
-                "params": params
-            });
-            server.send_request(request).await
-        } else {
-            Err(AgentError::ServerNotFound(server_id.to_string()))
+    /// Get status of all servers
+    pub async fn get_server_statuses(&self) -> HashMap<String, MCPServerStatus> {
+        let servers = self.servers.read().await;
+        let mut statuses = HashMap::new();
+
+        for (server_id, connection) in servers.iter() {
+            statuses.insert(server_id.clone(), connection.get_status().clone());
         }
+
+        statuses
     }
 
-    /// Reads response from MCP server stdout with timeout handling.
-    /// Used by: JSON-RPC communication for receiving server responses.
-    async fn read_response(&self, server_id: &str) -> Result<Value, AgentError> {
-        let mut servers = self.servers.write().await;
-        if let Some(server) = servers.get_mut(server_id) {
-            let server = server.lock().await;
-            server.read_response().await
-        } else {
-            Err(AgentError::ServerNotFound(server_id.to_string()))
+    /// Remove an MCP server
+    pub async fn remove_server(&self, server_id: &str) -> Result<(), String> {
+        // Stop the server first
+        self.stop_server(server_id).await?;
+
+        // Remove from both configs and servers
+        {
+            let mut configs = self.configs.write().await;
+            configs.remove(server_id);
         }
+        {
+            let mut servers = self.servers.write().await;
+            servers.remove(server_id);
+        }
+
+        info!("Removed MCP server: {}", server_id);
+        Ok(())
     }
 
-    /// Discovers available tools from an MCP server after connection.
-    /// Used by: Server startup to populate tool catalog from external server.
-    async fn discover_tools(&self, server_id: &str) -> Result<Vec<ToolDefinition>, AgentError> {
-        let mut servers = self.servers.write().await;
-        if let Some(server) = servers.get_mut(server_id) {
-            server.lock().await.discover_tools().await
-        } else {
-            Err(AgentError::ServerNotFound(server_id.to_string()))
+    /// Start all enabled servers
+    pub async fn start_all_enabled_servers(&self) -> Result<(), String> {
+        let configs = self.configs.read().await;
+        let server_ids: Vec<String> = configs
+            .values()
+            .filter(|config| config.enabled && config.auto_start)
+            .map(|config| config.id.clone())
+            .collect();
+
+        drop(configs); // Release the read lock
+
+        for server_id in server_ids {
+            if let Err(e) = self.start_server(&server_id).await {
+                error!("Failed to start MCP server {}: {}", server_id, e);
+            }
         }
+
+        Ok(())
+    }
+
+    /// Get all server configurations
+    pub async fn get_server_configs(&self) -> Vec<MCPServerConfig> {
+        let configs = self.configs.read().await;
+        configs.values().cloned().collect()
     }
 }
 
-impl MCPServer {
-    /// Creates a new MCP server configuration.
-    /// Used by: Server configuration when setting up external tool providers.
-    pub fn new(id: String, name: String, command: String, args: Vec<String>) -> Self {
-        Self {
-            id,
-            name,
-            command,
-            args,
-            tools: Vec::new(),
-            status: MCPServerStatus::Disconnected,
-            process: None,
-            stdin: None,
-            stdout: None,
-            request_id: Arc::new(Mutex::new(0)),
-        }
-    }
-
-    /// Checks if the MCP server is currently connected and operational.
-    /// Used by: Server management for connection status verification.
-    pub fn is_connected(&self) -> bool {
-        matches!(self.status, MCPServerStatus::Connected)
-    }
-}
-
-#[async_trait]
-impl ToolProvider for MCPIntegrationProvider {
-    /// Executes tools on external MCP servers.
-    /// Used by: Agent tool execution system for external tool invocation.
-    async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
-        self.execute_tool(tool_call).await
-    }
-
-    /// Lists all tools available from connected MCP servers.
-    /// Used by: Tool discovery and agent initialization systems.
-    async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
-        self.list_all_tools().await
+impl Default for MCPManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
