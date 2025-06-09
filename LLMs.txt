@@ -82,6 +82,87 @@ Juno implements a comprehensive three-mode voice interaction system:
 - Configure sensitivity and wake words
 - Debug status and audio level monitoring
 
+## JSX Visual Response System 🎨 NEW
+
+### Rich Visual Agent Responses
+**Location**: `src/components/ui/jsx-message-renderer.tsx`, UI integration in `src/App.tsx`
+
+**Capabilities**:
+- Agent responds with rich, interactive React components instead of plain text
+- Real-time JSX rendering with automatic incomplete tag completion
+- Extensive component library for visual communication
+- Automatic JSX detection and parsing during streaming
+
+**Available Visual Components**:
+
+#### Layout & Structure
+- `<Card>`, `<CardHeader>`, `<CardTitle>`, `<CardContent>`, `<CardFooter>` - Organized content containers
+- `<Alert>`, `<AlertTitle>`, `<AlertDescription>` - Important messages and notifications
+- `<div>`, `<span>`, `<p>`, `<h1>`-`<h6>` - Basic HTML elements with styling
+- `<Separator>` - Visual content dividers
+
+#### Interactive Elements
+- `<Button>` - Interactive elements (display only)
+- `<Badge>` - Tags, labels, and status indicators
+- `<Input>`, `<Label>`, `<Textarea>` - Form elements
+- `<Tabs>`, `<TabsContent>`, `<TabsList>`, `<TabsTrigger>` - Tabbed content
+
+#### Visual Feedback
+- `<StatusCard status="success|warning|error|info" message="..." icon={<CheckCircle />} />` - Status messages
+- `<ProgressBar progress={75} label="Progress" />` - Progress indicators
+- `<ColorShowcase color="bg-blue-500" name="Blue" />` - Color demonstrations
+
+#### Shape Components 🎯 SOLVES RAW SVG PROBLEM
+- `<Circle size={100} color="blue" borderColor="black" borderWidth={2} />` - Visual circles
+- `<Rectangle width={100} height={60} color="green" borderColor="darkgreen" />` - Rectangles
+- `<Triangle size={100} color="red" direction="up|down|left|right" />` - Triangles
+
+**Critical Feature**: When users request visual shapes (circles, squares, triangles), the agent now responds with actual rendered components instead of typing raw SVG/HTML code.
+
+#### Icon Library
+Extensive Lucide React icon set: `CheckCircle`, `XCircle`, `AlertCircle`, `AlertTriangle`, `Info`, `Star`, `Heart`, `ThumbsUp`, `ThumbsDown`, `Lightbulb`, `Zap`, `Sparkles`, `Palette`, `Rainbow`, and more.
+
+### Agent Prompt Integration
+**System Prompts Updated**: Both default and development system prompts now include comprehensive JSX capabilities documentation with explicit instructions to use visual components instead of raw code.
+
+**Key Agent Instructions**:
+- Use JSX components for status updates, visual demonstrations, and structured information
+- **NEVER type raw SVG or HTML code** - always use the provided shape components
+- Automatically engage visual mode for color/design tasks, progress indicators, and shape requests
+- Enhance responses with appropriate icons and visual hierarchy
+
+### Technical Implementation
+**JSX Detection**: Automatic detection of JSX content in agent responses via regex pattern matching
+**Streaming Support**: Incomplete JSX tags automatically completed during streaming responses
+**Component Safety**: Type-safe component library with proper TypeScript integration
+**Error Handling**: Graceful fallback to text rendering if JSX parsing fails
+
+**Integration Pattern**:
+```typescript
+// Automatic JSX detection in streaming responses
+if (isJsxContent(message.content) || message.isJsx) {
+  return <JsxMessageRenderer jsx={message.content} />
+} else {
+  return <div className="message-content">{message.content}</div>
+}
+```
+
+### Usage Examples
+**Before (Raw Code Problem)**:
+```
+Agent types: <!DOCTYPE svg><svg><circle cx="50" cy="50" r="40"/></svg>
+```
+
+**After (Visual Solution)**:
+```jsx
+<Card>
+  <CardHeader><CardTitle>Here's your circle!</CardTitle></CardHeader>
+  <CardContent>
+    <Circle size={100} color="blue" borderColor="black" borderWidth={2} />
+  </CardContent>
+</Card>
+```
+
 ## AI Response Streaming 🌊 NEW
 
 ### Real-Time Streaming Implementation
@@ -239,6 +320,7 @@ src-tauri/src/agent/
 ### Recently Completed Features (Since Rollback)
 - ✅ **Always Listening Mode** with wake word detection
 - ✅ **Streaming AI Responses** with real-time text updates
+- ✅ **JSX Visual Response System** with rich React component rendering
 - ✅ **MCP Integration** for external tool servers
 - ✅ **Production Cloud Connector** with enterprise security
 - ✅ **Accessibility Permission Fixes** with real permission testing
