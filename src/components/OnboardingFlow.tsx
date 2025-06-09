@@ -1,8 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
@@ -16,24 +22,19 @@ import {
   Zap,
   Brain,
   Mic,
-  Monitor,
   Globe,
   FileText,
-  Code,
-  Camera,
   Shield,
   Volume2,
   Keyboard,
-  MousePointer,
   MessageSquare,
   Star,
   Rocket,
   Play,
   Settings,
   Info,
-  Heart
+  Heart,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -59,7 +60,6 @@ interface FeatureCard {
 export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("welcome");
   const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(new Set());
-  const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const steps: OnboardingStep[] = ["welcome", "features", "permissions", "voice-setup", "examples", "completion"];
@@ -88,15 +88,6 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
 
   const skipToStep = (step: OnboardingStep) => {
     setCurrentStep(step);
-  };
-
-  // Handle permissions completion
-  const handlePermissionsComplete = () => {
-    setPermissionsGranted(true);
-    markStepCompleted("permissions");
-    setTimeout(() => {
-      setCurrentStep("voice-setup");
-    }, 1000);
   };
 
   // Handle example prompt selection
@@ -293,7 +284,12 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
       </Alert>
 
       <PermissionsFlow 
-        onComplete={handlePermissionsComplete}
+        onComplete={() => {
+          markStepCompleted("permissions");
+          setTimeout(() => {
+            setCurrentStep("voice-setup");
+          }, 1000);
+        }}
         showSkipOption={true}
         onSkip={() => {
           markStepCompleted("permissions");
