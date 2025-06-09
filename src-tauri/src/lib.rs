@@ -1363,9 +1363,21 @@ pub fn run() {
                     }
                 });
 
-                // Update floating bar manager
+                // Check if this is dictation mode and update floating bar manager accordingly
                 let app_handle_clone = app_handle_for_listener.clone();
                 tauri::async_runtime::spawn(async move {
+                    // Check if Dictation Mode is active
+                    let app_state = app_handle_clone.state::<state::AppState>();
+                    let is_dictation_mode = app_state.dictation_active.lock()
+                        .map(|active| *active)
+                        .unwrap_or(false);
+
+                    // If it's dictation mode, set the flag in floating bar manager first
+                    if is_dictation_mode {
+                        commands::floating_bar::handle_dictation_mode_change(&app_handle_clone, true).await;
+                    }
+
+                    // Then handle the dictation started event
                     commands::floating_bar::handle_dictation_started(&app_handle_clone).await;
                 });
 
@@ -1511,6 +1523,19 @@ pub fn run() {
                 // Start dictation using the voice transcription plugin command
                 let app_handle_clone = app_handle_for_dictation_start.clone();
                 tauri::async_runtime::spawn(async move {
+                    // Mark this as Dictation Mode in AppState BEFORE starting transcription
+                    // This prevents race condition where voice controller emits events before we set the flag
+                    let app_state = app_handle_clone.state::<state::AppState>();
+                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                        *dictation_active = true;
+                    }
+
+                    // Update floating bar manager to set dictation mode
+                    let app_handle_for_bar = app_handle_clone.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
+                    });
+
                     // Use the plugin command to start dictation only if controller exists
                     match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
                         Some(controller_state) => {
@@ -1520,17 +1545,6 @@ pub fn run() {
                             ).await {
                                 Ok(()) => {
                                     info!("[Dictation Mode] Started immediate transcription successfully");
-                                    // Mark this as Dictation Mode in AppState
-                                    let app_state = app_handle_clone.state::<state::AppState>();
-                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                                        *dictation_active = true;
-                                    }
-
-                                    // Update floating bar manager
-                                    let app_handle_for_bar = app_handle_clone.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
-                                    });
 
                                     if let Err(e) = app_handle_clone.emit("dictation-active", true) {
                                         tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);

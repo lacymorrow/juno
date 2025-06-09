@@ -3,10 +3,121 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
 use serde_json::{json, Value};
 use tauri::Manager;
-use tracing::info;
+use tracing::{info, warn};
 
 // Computer Use Tool for Anthropic Claude
 // Based on official specification: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
+
+/// Helper function to verify that an input element is focused after clicking
+async fn verify_input_focus_after_click(
+    x: f64,
+    y: f64,
+    state_manager: &AppState,
+    timeout_ms: u64,
+) -> Result<bool, String> {
+    // Wait a bit for the click to take effect
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    
+    let max_attempts = timeout_ms / 50; // Check every 50ms
+    
+    for attempt in 0..max_attempts {
+        // Get the focused element
+        match state_manager.desktop.focused_element() {
+            Ok(focused_element) => {
+                let attrs = focused_element.attributes();
+                
+                // Check if this looks like a text input element
+                let is_text_input = attrs.role.contains("TextField") ||
+                    attrs.role.contains("TextArea") ||
+                    attrs.role.contains("ComboBox") ||
+                    attrs.role.contains("SearchField") ||
+                    attrs.properties.contains_key("AXValue");
+                
+                if is_text_input {
+                    // Verify the element is actually focused
+                    match focused_element.is_focused() {
+                        Ok(true) => {
+                            info!("Verification: Input element is properly focused after click at ({}, {})", x, y);
+                            return Ok(true);
+                        }
+                        Ok(false) => {
+                            warn!("Verification: Input element at ({}, {}) is not focused (attempt {}/{})", x, y, attempt + 1, max_attempts);
+                        }
+                        Err(e) => {
+                            warn!("Verification: Failed to check focus state: {}", e);
+                        }
+                    }
+                } else {
+                    // Non-input elements don't need focus verification
+                    return Ok(true);
+                }
+            }
+            Err(e) => {
+                warn!("Verification: Failed to get focused element: {}", e);
+            }
+        }
+        
+        if attempt < max_attempts - 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+    
+    Ok(false) // Timeout reached without successful verification
+}
+
+/// Helper function to verify that the currently focused element is ready for text input
+fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String> {
+    match state_manager.desktop.focused_element() {
+        Ok(focused_element) => {
+            let attrs = focused_element.attributes();
+            
+            // Check if this is a text input element
+            let is_text_input = attrs.role.contains("TextField") ||
+                attrs.role.contains("TextArea") ||
+                attrs.role.contains("ComboBox") ||
+                attrs.role.contains("SearchField") ||
+                attrs.properties.contains_key("AXValue");
+            
+            if !is_text_input {
+                warn!("Verification: Currently focused element is not a text input (role: {})", attrs.role);
+                return Ok(false);
+            }
+            
+            // Verify the element is focused
+            match focused_element.is_focused() {
+                Ok(true) => {
+                    // Check if the element is enabled
+                    match focused_element.is_enabled() {
+                        Ok(true) => {
+                            info!("Verification: Text input element is focused and enabled for typing");
+                            Ok(true)
+                        }
+                        Ok(false) => {
+                            warn!("Verification: Text input element is focused but disabled");
+                            Ok(false)
+                        }
+                        Err(e) => {
+                            warn!("Verification: Failed to check if element is enabled: {}", e);
+                            Ok(false)
+                        }
+                    }
+                }
+                Ok(false) => {
+                    warn!("Verification: Text input element is not focused");
+                    Ok(false)
+                }
+                Err(e) => {
+                    warn!("Verification: Failed to check focus state: {}", e);
+                    Ok(false)
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Verification: Failed to get focused element: {}", e);
+            Ok(false)
+        }
+    }
+}
 
 /// Register the official Anthropic Computer Use tools with exact API specification
 pub async fn register_anthropic_computer_use_tools(
@@ -233,6 +344,22 @@ pub async fn register_anthropic_computer_use_tools(
                     };
 
                     click_result.map_err(|e| format!("Left click failed: {}", e))?;
+
+                    // VERIFICATION: Check if clicking an input resulted in proper focus
+                    match verify_input_focus_after_click(x, y, &state_manager, 500).await {
+                        Ok(true) => {
+                            info!("Action verification: Click at ({}, {}) successful", x, y);
+                        }
+                        Ok(false) => {
+                            warn!("Action verification: Click at ({}, {}) may not have achieved expected focus", x, y);
+                            // Continue anyway - not all clicks need to result in focus
+                        }
+                        Err(e) => {
+                            warn!("Action verification: Failed to verify click at ({}, {}): {}", x, y, e);
+                            // Continue anyway - verification failure shouldn't block the action
+                        }
+                    }
+
                     Ok(json!({"success": true}))
                 },
                 "right_click" => {
@@ -380,6 +507,22 @@ pub async fn register_anthropic_computer_use_tools(
                     };
 
                     click_result.map_err(|e| format!("Double click failed: {}", e))?;
+
+                    // VERIFICATION: Check if double-clicking an input resulted in proper focus
+                    match verify_input_focus_after_click(x, y, &state_manager, 500).await {
+                        Ok(true) => {
+                            info!("Action verification: Double-click at ({}, {}) successful", x, y);
+                        }
+                        Ok(false) => {
+                            warn!("Action verification: Double-click at ({}, {}) may not have achieved expected focus", x, y);
+                            // Continue anyway - not all clicks need to result in focus
+                        }
+                        Err(e) => {
+                            warn!("Action verification: Failed to verify double-click at ({}, {}): {}", x, y, e);
+                            // Continue anyway - verification failure shouldn't block the action
+                        }
+                    }
+
                     Ok(json!({"success": true}))
                 },
                 "triple_click" => {
@@ -429,6 +572,22 @@ pub async fn register_anthropic_computer_use_tools(
                     };
 
                     click_result.map_err(|e| format!("Triple click failed: {}", e))?;
+
+                    // VERIFICATION: Check if triple-clicking an input resulted in proper focus
+                    match verify_input_focus_after_click(x, y, &state_manager, 500).await {
+                        Ok(true) => {
+                            info!("Action verification: Triple-click at ({}, {}) successful", x, y);
+                        }
+                        Ok(false) => {
+                            warn!("Action verification: Triple-click at ({}, {}) may not have achieved expected focus", x, y);
+                            // Continue anyway - not all clicks need to result in focus
+                        }
+                        Err(e) => {
+                            warn!("Action verification: Failed to verify triple-click at ({}, {}): {}", x, y, e);
+                            // Continue anyway - verification failure shouldn't block the action
+                        }
+                    }
+
                     Ok(json!({"success": true}))
                 },
                 "left_click_drag" => {
@@ -478,8 +637,25 @@ pub async fn register_anthropic_computer_use_tools(
                         .as_str()
                         .ok_or_else(|| "Missing or invalid 'text' parameter".to_string())?;
 
+                    // VERIFICATION: Ensure we have a focused, enabled text input before typing
+                    match verify_ready_for_text_input(&state_manager) {
+                        Ok(true) => {
+                            info!("Action verification: Ready to type text: '{}'", text);
+                        }
+                        Ok(false) => {
+                            warn!("Action verification: No properly focused text input for typing. Attempting anyway...");
+                            // Continue anyway but warn - sometimes global typing is intended
+                        }
+                        Err(e) => {
+                            warn!("Action verification: Failed to verify text input readiness: {}", e);
+                            // Continue anyway - verification failure shouldn't block typing
+                        }
+                    }
+
                     state_manager.desktop.type_text(text)
                         .map_err(|e| format!("Type text failed: {}", e))?;
+                    
+                    info!("Action completed: Successfully typed {} characters", text.len());
                     Ok(json!({"success": true}))
                 },
                 "key" => {

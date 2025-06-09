@@ -58,7 +58,6 @@ export function PermissionsFlow({
     string | null
   >(null);
   const [error, setError] = useState<string | null>(null);
-  const [skipped, setSkipped] = useState(false);
 
   // Check permissions status with optional auto-redirect
   const checkPermissions = async (useAutoRedirect = false) => {
@@ -258,7 +257,6 @@ export function PermissionsFlow({
 
   // Handle skip with proper cleanup
   const handleSkip = async () => {
-    setSkipped(true);
     console.log("⚠️ [DEBUG] Starting handleSkip - stopping monitoring...");
     await stopMonitoring();
     console.log("⚠️ [DEBUG] Monitoring stopped, calling onSkip...");
