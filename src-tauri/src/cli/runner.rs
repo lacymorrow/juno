@@ -1,13 +1,12 @@
 use crate::cli::Cli;
-use crate::utils;
 use computer_use_ai_sdk::Desktop; // Import Desktop
-use std::process::Command;
 use std::io::Write;
+use std::process::Command;
+use std::fs;
 use tempfile::Builder as TempFileBuilder;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use tracing::{info, error, warn}; // Import tracing macros
 use crate::state::AppState;
-use std::fs;
 use tauri::{AppHandle, Manager};
 use crate::tts; // Add the TTS import
 
@@ -97,11 +96,21 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
     let mut test_result: Result<(), String> = Ok(());
 
     if cli.test_focused_element_ns {
-        #[cfg(target_os = "macos")] { test_result = utils::run_test_focused_element_ns(); ran_test = true; }
+        #[cfg(target_os = "macos")] { 
+            // utils::run_test_focused_element_ns() was removed - this CLI flag is no longer functional
+            warn!("test_focused_element_ns CLI flag is no longer functional"); 
+            test_result = Err("Function not available".to_string()); 
+            ran_test = true; 
+        }
         #[cfg(not(target_os = "macos"))] { eprintln!("Error: --test-focused-element-ns is only supported on macOS."); test_result = Err("Unsupported platform".to_string()); ran_test = true; }
     }
     if cli.check_accessibility {
-        #[cfg(target_os = "macos")] { test_result = utils::run_check_accessibility(); ran_test = true; }
+        #[cfg(target_os = "macos")] { 
+            // utils::run_check_accessibility() was removed - this CLI flag is no longer functional
+            warn!("check_accessibility CLI flag is no longer functional"); 
+            test_result = Err("Function not available".to_string()); 
+            ran_test = true; 
+        }
         #[cfg(not(target_os = "macos"))] { println!("Warning: --check-accessibility is macOS-specific. Skipping check."); ran_test = true; /* Treat as success on other platforms for now */ }
     }
 

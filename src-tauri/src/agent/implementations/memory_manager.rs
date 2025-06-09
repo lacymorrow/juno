@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::collections::HashSet;
 use tokio::sync::RwLock;
 
-use crate::agent::structs::{AgentError, Message, Role, ToolCall};
+use crate::agent::structs::{AgentError, Message, Role};
 use crate::agent::traits::MemoryManager;
 
 /// A simple in-memory implementation of the MemoryManager trait.
