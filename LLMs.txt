@@ -49,6 +49,118 @@ Project MUST compile with exit code 0. No exceptions.
 - All persistent state in `AppState`, access via getters
 - Follow async/await patterns consistently throughout
 
+## Voice System - Three-Mode Architecture 🎙️
+
+### Complete Voice Mode System
+Juno implements a comprehensive three-mode voice interaction system:
+
+| Mode | Trigger | Purpose | State | Implementation |
+|------|---------|---------|-------|----------------|
+| **Dictation Mode** | Hold configured key | Voice-to-text typing | Orange mic | `tauri-plugin-voice-transcription` |
+| **Agent Mode** | Option+D toggle | AI conversations | Blue mic + chat | Orchestrator integration |
+| **Always Listening** | Background continuous | Intent detection | Background active | Wake word detection |
+
+### Always Listening Mode ✨ NEW
+**Location**: `tauri-plugin-voice-transcription/src/always_listening.rs`
+
+**Features**:
+- Continuous background monitoring for user intent
+- Wake word detection using Whisper transcription
+- Volume threshold-based activation
+- Configurable sensitivity (0.1-2.0) and custom wake words
+- Two-state system: Monitoring → Activated
+- Integration with existing voice infrastructure
+
+**Configuration**:
+- Default wake words: `["hey juno", "computer"]`
+- Sensitivity: 0.5 (balanced detection)
+- Silence timeout: 3 seconds
+- Audio sample rate: 16kHz for Whisper compatibility
+
+**Commands**: Available in `src-tauri/src/commands/always_listening.rs`
+- Start/stop/toggle always listening mode
+- Configure sensitivity and wake words
+- Debug status and audio level monitoring
+
+## AI Response Streaming 🌊 NEW
+
+### Real-Time Streaming Implementation
+**Location**: Backend in `src-tauri/src/agent/providers/anthropic.rs`, Frontend in `src/App.tsx`
+
+**Architecture**:
+- Server-Sent Events (SSE) parsing from Anthropic API
+- Progressive text chunks emitted via Tauri events
+- Real-time UI updates as AI generates responses
+- Duplicate prevention with time-based detection
+
+**Event System**:
+```rust
+// Backend events
+pub const AGENT_STREAM_START: &str = "agent-stream-start";
+pub const AGENT_TEXT_STREAM: &str = "agent-text-stream"; 
+pub const AGENT_STREAM_END: &str = "agent-stream-end";
+```
+
+**Features**:
+- Automatic streaming detection for compatible providers
+- Fallback to standard responses for non-streaming providers
+- Integration with TTS system
+- Visual typing indicator with auto-scroll
+
+## MCP Integration System 🔌 NEW
+
+### External Tool Server Support
+**Location**: `src-tauri/src/agent/tools/mcp_integration.rs`
+
+**Capabilities**:
+- Add/remove external MCP servers dynamically
+- Automatic tool discovery and registration
+- Seamless execution alongside built-in tools
+- Persistent configuration storage
+
+**Server Management**:
+```rust
+struct MCPServerConfig {
+    name: String,
+    command: String,
+    args: Vec<String>,
+    environment_variables: HashMap<String, String>,
+    enabled: bool,
+    auto_start: bool,
+    timeout_seconds: u64,
+}
+```
+
+**Features**:
+- JSON-RPC 2.0 communication over STDIO
+- Process isolation with automatic cleanup
+- Tool namespacing to prevent conflicts
+- Configuration UI in settings panel
+
+## Production Cloud Connector ☁️ NEW
+
+### Enterprise Remote Control
+**Location**: `src-tauri/src/cloud/connector.rs`
+
+**Features**:
+- Official Tauri WebSocket plugin integration
+- HMAC-signed authentication with device-specific API keys
+- Command validation with configurable security levels
+- Rate limiting and audit logging
+- Exponential backoff reconnection with health monitoring
+
+**Supported Remote Commands**:
+- Text and voice queries to AI agent
+- Screenshot capture and retrieval
+- System status and configuration updates
+- Real-time connection monitoring
+
+**Security**:
+- TLS/WebSocket Secure (WSS) encryption
+- Multi-layer security (Low/Medium/High levels)
+- Comprehensive audit trail
+- Enterprise-grade authentication
+
 ## macOS Permission System 🔧
 
 ### Critical Requirement
@@ -80,43 +192,52 @@ Project MUST compile with exit code 0. No exceptions.
    }
    ```
 
-### Permission Check Architecture
+### Permission Check Architecture ✅ FIXED
 Located in: `src-tauri/src/commands/permissions.rs`
+
+**Major Fixes Since Rollback**:
+- Fixed fake permission checks that always returned `true`
+- Implemented real permission testing using actual system capabilities
+- Enhanced permission request system with guided system settings navigation
+- Automatic redirection to specific Privacy & Security sections
 
 **Multi-layered Detection**:
 1. Primary: `computer_use_ai_sdk` permission checks
-2. Fallback: `try_accessibility_test()` with actual Desktop operations
+2. Fallback: Real functionality tests (screenshot, microphone, etc.)
 3. Bundle identifier detection from `TAURI_BUNDLE_IDENTIFIER` env var
 4. Detailed logging for debugging permission issues
 
-**Fixed Issues**: Built apps now correctly report `Accessibility permission check result: true`
-
 ## Implementation Status ✅
 
-### Completed Features
+### Recently Completed Features (Since Rollback)
+- ✅ **Always Listening Mode** with wake word detection
+- ✅ **Streaming AI Responses** with real-time text updates
+- ✅ **MCP Integration** for external tool servers
+- ✅ **Production Cloud Connector** with enterprise security
+- ✅ **Accessibility Permission Fixes** with real permission testing
+- ✅ **Tech Debt Cleanup** (37% warning reduction, compilation fixes)
+- ✅ **Enhanced Voice Transcription** with improved state management
+- ✅ **Multi-instance Development** support for concurrent testing
+- ✅ **Settings Window** with comprehensive configuration options
+- ✅ **Keyboard Shortcut Management** with customizable bindings
+
+### Previously Completed Features
 - ✅ All 17 Computer Use actions (click, type, screenshot, etc.)
 - ✅ Timer system with context resumption
 - ✅ Voice integration (Agent/Dictation modes)
 - ✅ Multi-agent orchestration with memory isolation
 - ✅ Browser automation with Selenium WebDriver
-- ✅ MCP integration for extensibility (`src-tauri/src/agent/tools/mcp_integration.rs`)
 - ✅ Cloud control system and authentication
-- ✅ Streaming AI responses with real-time updates
 - ✅ macOS accessibility permission fixes for built apps
 - ✅ Modular prompt configuration system with file persistence
 
 ### Voice System
 **Plugin**: `tauri-plugin-voice-transcription/`
 - Whisper-based local transcription
-- Agent mode (AI commands) vs Dictation mode (text input)
+- Three modes: Always Listening, Dictation (text input), Agent (AI commands)
 - Keyboard shortcuts: Option+D (agent), Option+Space (dictation)
+- Enhanced with always listening controller and wake word detection
 - Models: `models/ggml-tiny.en.bin` (bundled or local)
-
-### MCP Integration
-**External Tool Servers**: Extensible architecture for additional capabilities
-- Server management via `ToolConfigManager`
-- Dynamic tool discovery and registration
-- Isolated execution environments
 
 ### Prompt Management System
 **Centralized Configuration**: `src-tauri/src/agent/prompts/`
@@ -138,18 +259,24 @@ Located in: `src-tauri/src/commands/permissions.rs`
 - **Permission System**: `src-tauri/src/commands/permissions.rs`
 - **Agent Tools**: `src-tauri/src/agent/tools/`
 - **Prompt System**: `src-tauri/src/agent/prompts/`
+- **Always Listening**: `tauri-plugin-voice-transcription/src/always_listening.rs`
+- **MCP Integration**: `src-tauri/src/agent/tools/mcp_integration.rs`
+- **Cloud Connector**: `src-tauri/src/cloud/connector.rs`
 - **macOS Integration**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
 - **Voice System**: `tauri-plugin-voice-transcription/`
 
 ### State Management
 - **AppState**: `src-tauri/src/state.rs` - Central application state
+- **Enhanced Fields**: Always listening state, cloud configuration, MCP manager
 - **Agent Memory**: Arc-based managers for safe cloning
 - **Configuration**: Tauri store for persistent settings
 
 ### Frontend Integration
 - **Floating Bar**: `src/components/EnhancedFloatingBar.tsx`
+- **Settings Window**: Native settings with comprehensive configuration
 - **Agent Communication**: Event-based system with `bar-state-update` events
-- **Window Management**: Multiple windows (main, floating-bar)
+- **Streaming Integration**: Real-time text updates in `src/App.tsx`
+- **Window Management**: Multiple windows (main, floating-bar, settings)
 
 ## Build & Testing
 
@@ -168,6 +295,10 @@ bun tauri build     # Creates app bundle with entitlements
 - [ ] `cargo check` passes (exit code 0)
 - [ ] Built app contains Info.plist with usage descriptions
 - [ ] Permission checking returns accurate results in built app
+- [ ] Always listening mode activates with wake words
+- [ ] Streaming responses work with real-time updates
+- [ ] MCP servers connect and provide tools
+- [ ] Cloud connector establishes secure WebSocket connection
 - [ ] App launches and initializes all systems (voice, agents, shortcuts)
 
 ## Error Handling
@@ -182,6 +313,7 @@ Use `AgentError` enum defined in agent traits:
 ### Permission Errors
 Robust fallback mechanisms in place:
 - Multiple detection methods prevent false negatives
+- Real functionality testing prevents false positives
 - Detailed logging helps debug permission issues
 - Graceful degradation when permissions unavailable
 
@@ -193,19 +325,33 @@ Robust fallback mechanisms in place:
 3. **Use existing patterns** (AgentError, async/await, Arc cloning)
 4. **Maintain memory isolation** between agent types
 5. **Follow hierarchical architecture** (orchestrator → specialists → tools)
+6. **Respect voice mode separation** (Always Listening ≠ Dictation ≠ Agent)
 
 ### Debugging Approach
 - Check compilation first (`cargo check`)
 - Use tracing logs for runtime debugging
 - Test both dev and built apps for permission issues
 - Verify entitlements and Info.plist inclusion in bundles
+- Monitor streaming events for AI response issues
+- Check MCP server connectivity and tool discovery
+- Verify cloud connector WebSocket connection status
 
 ### Extension Guidelines
 - New tools go in `src-tauri/src/agent/tools/`
 - New prompts use `PromptManager::load()` and centralized templates
-- MCP servers for external integrations
+- MCP servers for external integrations via `MCPManager`
+- Always listening features use `AlwaysListeningController`
+- Streaming capabilities leverage existing SSE infrastructure
+- Cloud features extend `ProductionCloudConnector`
 - Follow existing async patterns and error handling
 - Maintain state management through AppState getters
+
+### Recent Architecture Additions
+- **Always Listening**: Background voice monitoring with wake word detection
+- **Streaming**: Progressive AI response updates with real-time UI
+- **MCP Integration**: External tool server management and execution
+- **Cloud Connector**: Enterprise remote control with WebSocket security
+- **Permission System**: Real permission testing with guided setup flows
 
 ### Prompt System Guidelines
 - **No hardcoded prompts**: All prompts must use `PromptManager`
@@ -214,4 +360,4 @@ Robust fallback mechanisms in place:
 - **Integration pattern**: Load prompt manager with `PromptManager::load().unwrap_or_default()`
 - **Customization**: Allow user overrides while maintaining defaults
 
-This documentation provides comprehensive guidance for LLMs working with the Juno codebase, emphasizing critical patterns, recent fixes, and proper development practices.
+This documentation provides comprehensive guidance for LLMs working with the Juno codebase, emphasizing recent major additions since rollback-2025-06-06, critical patterns, and proper development practices.
