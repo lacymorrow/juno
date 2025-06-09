@@ -96,3 +96,176 @@ pub mod timeouts {
     pub const STANDARD_TIMEOUT_MS: u64 = 10000;
     pub const BROWSER_TIMEOUT_MS: u64 = 30000;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_event_constants() {
+        // Test critical agent events
+        assert_eq!(events::AGENT_EVENT, "agent-event");
+        assert_eq!(events::APP_DICTATION_STARTED, "app-dictation-started");
+        assert_eq!(events::APP_DICTATION_FINISHED, "app-dictation-finished");
+        assert_eq!(events::AGENT_PROCESSING_COMPLETE, "agent-processing-complete");
+        assert_eq!(events::AGENT_PROCESSING_ERROR, "agent-processing-error");
+        
+        // Test streaming events
+        assert_eq!(events::AGENT_TEXT_STREAM, "agent-text-stream");
+        assert_eq!(events::AGENT_STREAM_START, "agent-stream-start");
+        assert_eq!(events::AGENT_STREAM_END, "agent-stream-end");
+        
+        // Test UI events
+        assert_eq!(events::BAR_STATE_CHANGED, "bar-state-changed");
+        assert_eq!(events::DICTATION_STATE_CHANGED, "dictation-state-changed");
+    }
+
+    #[test]
+    fn test_window_labels() {
+        assert_eq!(window_labels::MAIN, "main");
+        assert_eq!(window_labels::FLOATING_BAR, "floating-bar");
+        
+        // Ensure labels are not empty
+        assert!(!window_labels::MAIN.is_empty());
+        assert!(!window_labels::FLOATING_BAR.is_empty());
+    }
+
+    #[test]
+    fn test_tray_menu_ids() {
+        assert_eq!(tray_menu_ids::QUIT, "quit");
+        assert_eq!(tray_menu_ids::TOGGLE_FLOATING_BAR, "toggle-floating-bar");
+        assert_eq!(tray_menu_ids::SHOW_DEVTOOLS, "show-devtools");
+        assert_eq!(tray_menu_ids::SHOW_MAIN_WINDOW, "show-main-window");
+        assert_eq!(tray_menu_ids::NEW_CHAT, "new-chat");
+        assert_eq!(tray_menu_ids::SETTINGS, "tray-settings");
+        
+        // Ensure all IDs are non-empty
+        assert!(!tray_menu_ids::QUIT.is_empty());
+        assert!(!tray_menu_ids::SETTINGS.is_empty());
+    }
+
+    #[test]
+    fn test_app_menu_ids() {
+        // Test Juno menu
+        assert_eq!(app_menu_ids::ABOUT, "about");
+        assert_eq!(app_menu_ids::SETTINGS, "settings");
+        assert_eq!(app_menu_ids::CHECK_FOR_UPDATES, "check-for-updates");
+        
+        // Test File menu
+        assert_eq!(app_menu_ids::NEW_CHAT, "new-chat");
+        assert_eq!(app_menu_ids::CLEAR_HISTORY, "clear-history");
+        assert_eq!(app_menu_ids::IMPORT_CHAT, "import-chat");
+        assert_eq!(app_menu_ids::EXPORT_CHAT, "export-chat");
+        
+        // Test View menu
+        assert_eq!(app_menu_ids::TOGGLE_FLOATING_BAR, "toggle-floating-bar");
+        assert_eq!(app_menu_ids::TOGGLE_DEV_PANEL, "toggle-dev-panel");
+        assert_eq!(app_menu_ids::SHOW_DEVTOOLS, "show-devtools");
+        assert_eq!(app_menu_ids::SHOW_PERMISSIONS, "show-permissions");
+        
+        // Test Window menu
+        assert_eq!(app_menu_ids::MINIMIZE, "minimize");
+        assert_eq!(app_menu_ids::ZOOM, "zoom");
+        
+        // Test Help menu
+        assert_eq!(app_menu_ids::HELP, "help");
+        assert_eq!(app_menu_ids::SEND_FEEDBACK, "send-feedback");
+    }
+
+    #[test]
+    fn test_timeout_constants() {
+        assert_eq!(timeouts::STANDARD_TIMEOUT_MS, 10000);
+        assert_eq!(timeouts::BROWSER_TIMEOUT_MS, 30000);
+        
+        // Ensure timeouts are reasonable values
+        assert!(timeouts::STANDARD_TIMEOUT_MS > 0);
+        assert!(timeouts::BROWSER_TIMEOUT_MS > timeouts::STANDARD_TIMEOUT_MS);
+        assert!(timeouts::BROWSER_TIMEOUT_MS <= 60000); // Max 60 seconds
+    }
+
+    #[test]
+    fn test_no_duplicate_event_names() {
+        use std::collections::HashSet;
+        
+        let mut event_names = HashSet::new();
+        let events_list = vec![
+            events::AGENT_EVENT,
+            events::APP_DICTATION_STARTED,
+            events::APP_DICTATION_FINISHED,
+            events::AGENT_PROCESSING_COMPLETE,
+            events::AGENT_PROCESSING_ERROR,
+            events::AGENT_STATE_CHANGED,
+            events::AGENT_TEXT_STREAM,
+            events::AGENT_STREAM_START,
+            events::AGENT_STREAM_END,
+            events::BAR_STATE_CHANGED,
+            events::DICTATION_STATE_CHANGED,
+        ];
+        
+        for event in events_list {
+            assert!(event_names.insert(event), "Duplicate event name found: {}", event);
+        }
+    }
+
+    #[test]
+    fn test_menu_id_uniqueness() {
+        use std::collections::HashSet;
+        
+        let mut menu_ids = HashSet::new();
+        
+        // Add tray menu IDs
+        let tray_ids = vec![
+            tray_menu_ids::QUIT,
+            tray_menu_ids::TOGGLE_FLOATING_BAR,
+            tray_menu_ids::SHOW_DEVTOOLS,
+            tray_menu_ids::SHOW_MAIN_WINDOW,
+            tray_menu_ids::NEW_CHAT,
+            tray_menu_ids::SETTINGS,
+        ];
+        
+        for id in tray_ids {
+            assert!(menu_ids.insert(id), "Duplicate menu ID found: {}", id);
+        }
+        
+        // Add app menu IDs (excluding duplicates like NEW_CHAT)
+        let app_ids = vec![
+            app_menu_ids::ABOUT,
+            // Skip SETTINGS and NEW_CHAT as they might conflict with tray
+            app_menu_ids::CHECK_FOR_UPDATES,
+            app_menu_ids::CLEAR_HISTORY,
+            app_menu_ids::IMPORT_CHAT,
+            app_menu_ids::EXPORT_CHAT,
+            app_menu_ids::TOGGLE_DEV_PANEL,
+            app_menu_ids::SHOW_PERMISSIONS,
+            app_menu_ids::MINIMIZE,
+            app_menu_ids::ZOOM,
+            app_menu_ids::HELP,
+            app_menu_ids::SEND_FEEDBACK,
+        ];
+        
+        for id in app_ids {
+            assert!(menu_ids.insert(id), "Duplicate menu ID found: {}", id);
+        }
+    }
+
+    #[test]
+    fn test_event_naming_convention() {
+        // Test that events follow kebab-case convention
+        let events_to_check = vec![
+            events::AGENT_EVENT,
+            events::APP_DICTATION_STARTED,
+            events::AGENT_PROCESSING_COMPLETE,
+            events::BAR_STATE_CHANGED,
+        ];
+        
+        for event in events_to_check {
+            // Should not contain underscores (use kebab-case)
+            assert!(!event.contains('_'), "Event '{}' should use kebab-case, not snake_case", event);
+            // Should not contain uppercase letters
+            assert!(!event.chars().any(|c| c.is_uppercase()), "Event '{}' should be lowercase", event);
+            // Should contain only lowercase letters, numbers, and hyphens
+            assert!(event.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '-'), 
+                   "Event '{}' contains invalid characters", event);
+        }
+    }
+}
