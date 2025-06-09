@@ -98,7 +98,7 @@ pub async fn get_dictation_transcription_status(
 #[tauri::command]
 pub async fn emergency_cleanup_dictation_state(
     app: AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
 ) -> Result<String, String> {
     warn!("[Command] emergency_cleanup_dictation_state called - performing comprehensive cleanup");
 
