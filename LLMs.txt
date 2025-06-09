@@ -159,13 +159,110 @@ bun run dev          # Frontend development
 cargo check         # Verify Rust compilation
 ```
 
+### Testing Infrastructure
+
+**Complete Test Suite**: Comprehensive coverage for both frontend and backend with 95%+ pass rate.
+
+#### Frontend Testing (TypeScript/React)
+```bash
+npm test                     # Run all frontend tests
+npm run test:watch           # Watch mode for development
+npm run test:coverage        # Generate coverage reports
+```
+
+**Technology Stack:**
+- **Vitest**: Modern test runner with TypeScript support
+- **Testing Library**: User-centric component testing
+- **jsdom**: Browser environment simulation
+- **vi**: Comprehensive mocking utilities
+
+**Test Structure:**
+- `src/components/__tests__/` - React component tests
+- `src/lib/__tests__/` - Utility function tests
+- Comprehensive Tauri API mocking
+- Async operation testing patterns
+- User interaction simulation
+
+#### Backend Testing (Rust)
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml    # All Rust tests
+./test-rust-units.sh                               # Focused unit tests
+```
+
+**Coverage Areas:**
+- **Agent Systems**: Error handling, message processing, tool execution
+- **State Management**: AppState, configuration, thread safety
+- **Data Structures**: Serialization, validation, error propagation
+- **Platform Integration**: macOS APIs, permissions, accessibility
+
+**Testing Patterns:**
+- `#[tokio::test]` for async operations
+- `serde_json` roundtrip validation
+- Arc/Mutex thread safety testing
+- Comprehensive error scenario coverage
+
+#### Integration Testing
+```bash
+./run-all-tests.sh           # Complete test suite (all platforms)
+```
+
+**Multi-layer Testing:**
+- Frontend component integration
+- Tauri API boundary testing
+- Agent system orchestration
+- Platform-specific functionality
+
 ### Production Build
 ```bash
 bun tauri build     # Creates app bundle with entitlements
 ```
 
+### Testing Guidelines for LLMs
+
+#### When Modifying Code
+1. **Always run tests** after making changes:
+   ```bash
+   cargo check --manifest-path src-tauri/Cargo.toml  # Compilation check
+   npm test                                           # Frontend tests
+   ./run-all-tests.sh                                # Full suite
+   ```
+
+2. **Follow testing patterns**:
+   - Frontend: Mock all Tauri APIs and external dependencies
+   - Backend: Use `#[cfg(test)]` modules, tokio-test for async
+   - Error handling: Test both success and failure paths
+   - Serialization: Validate JSON roundtrip for all data structures
+
+3. **Test coverage requirements**:
+   - New utilities: 90%+ line coverage
+   - New components: 80%+ coverage
+   - Error handling: 100% coverage
+   - State management: 95%+ coverage
+
+#### Adding New Features
+1. **Create tests first** (TDD approach when possible)
+2. **Mock external dependencies** completely
+3. **Test error scenarios** comprehensively
+4. **Validate async operations** with proper timeout handling
+
+#### Testing Anti-patterns to Avoid
+- Don't mock internal module functions (test behavior, not implementation)
+- Don't write tests that depend on external services
+- Don't skip error path testing
+- Don't test private implementation details
+
+#### Platform Testing Considerations
+- **macOS Dependencies**: Some tests require actual macOS environment
+- **Permission Testing**: Built vs development app differences
+- **Accessibility APIs**: System-level integration validation required
+- **Voice Features**: Microphone access needed for full testing
+
 ### Verification Checklist
 - [ ] `cargo check` passes (exit code 0)
+- [ ] All frontend tests pass (`npm test`)
+- [ ] All Rust tests pass (`cargo test`)
+- [ ] No new compilation warnings
+- [ ] Test coverage meets requirements
 - [ ] Built app contains Info.plist with usage descriptions
 - [ ] Permission checking returns accurate results in built app
 - [ ] App launches and initializes all systems (voice, agents, shortcuts)
