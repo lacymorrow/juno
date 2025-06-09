@@ -20,7 +20,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   ArrowLeft,
-  Brain,
   DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -28,13 +27,13 @@ import {
   Send,
   Server,
   Trash2,
-  Type,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
+import { ExamplePrompts } from "@/components/ExamplePrompts";
 import "./styles/globals.css";
 
 // Type for conversation messages
@@ -1007,6 +1006,18 @@ function App() {
     return <FloatingBar />;
   }
 
+  // Function to handle example prompt selection
+  const handleExamplePromptSelect = useCallback((prompt: string) => {
+    setQuery(prompt);
+    // Auto-submit the selected prompt
+    setTimeout(() => {
+      const syntheticEvent = {
+        preventDefault: () => {},
+      } as React.FormEvent<HTMLFormElement>;
+      handleSubmit(syntheticEvent);
+    }, 100); // Small delay to ensure state is updated
+  }, [handleSubmit]);
+
   return (
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
@@ -1169,65 +1180,15 @@ function App() {
                             <h2 className="text-2xl font-bold mb-2">
                               Welcome to Juno AI Assistant
                             </h2>
-                            <p className="text-muted-foreground">
+                            <p className="text-muted-foreground mb-6">
                               Your intelligent desktop companion with advanced
                               voice capabilities
                             </p>
                           </div>
                         </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
-                          <div className="p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                            <div className="flex items-center gap-3 mb-2">
-                              <Type className="h-5 w-5 text-orange-600 dark:text-orange-400" />
-                              <span className="font-semibold text-orange-900 dark:text-orange-100">
-                                Quick Dictation
-                              </span>
-                            </div>
-                            <p className="text-sm text-orange-700 dark:text-orange-300 mb-2">
-                              Hold{" "}
-                              <kbd className="px-1 py-0.5 bg-orange-200 dark:bg-orange-800 rounded text-xs">
-                                ⌥+Space
-                              </kbd>{" "}
-                              to instantly type your speech anywhere
-                            </p>
-                            <p className="text-xs text-orange-600 dark:text-orange-400">
-                              Perfect for emails, documents, and quick text
-                              input
-                            </p>
-                          </div>
-
-                          <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                            <div className="flex items-center gap-3 mb-2">
-                              <Brain className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                              <span className="font-semibold text-blue-900 dark:text-blue-100">
-                                AI Conversations
-                              </span>
-                            </div>
-                            <p className="text-sm text-blue-700 dark:text-blue-300 mb-2">
-                              Press{" "}
-                              <kbd className="px-1 py-0.5 bg-blue-200 dark:bg-blue-800 rounded text-xs">
-                                ⌥+D
-                              </kbd>{" "}
-                              to chat with your AI assistant
-                            </p>
-                            <p className="text-xs text-blue-600 dark:text-blue-400">
-                              Get help with tasks, research, and complex
-                              questions
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="text-xs text-muted-foreground">
-                          <p>
-                            💡 <strong>Pro tip:</strong> The floating status bar
-                            shows real-time voice feedback
-                          </p>
-                          <p>
-                            Use the input field below or try the voice shortcuts
-                            to get started
-                          </p>
-                        </div>
+                        
+                        {/* Example Prompts */}
+                        <ExamplePrompts onPromptSelect={handleExamplePromptSelect} />
                       </div>
                     ) : (
                       conversation.map((msg, index) => {
