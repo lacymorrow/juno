@@ -44,6 +44,25 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  supports_computer_use: boolean;
+  is_recommended: boolean;
+}
+
+interface ProviderInfo {
+  id: string;
+  name: string;
+  description: string;
+  models: string[];
+  model_info: ModelInfo[];
+  default_model: string;
+  is_available: boolean;
+  is_default: boolean;
+  computer_use_supported: boolean;
+}
+
 interface SettingsCategory {
   id: string;
   name: string;
@@ -481,11 +500,31 @@ function AIProviderSettings({
                 <SelectContent>
                   {settings.providers.map((provider) => (
                     <SelectItem key={provider.id} value={provider.id}>
-                      {provider.name}
+                      <div className="flex items-center gap-2">
+                        <span>{provider.name}</span>
+                        {provider.computer_use_supported && (
+                          <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                            Computer Use
+                          </Badge>
+                        )}
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {settings.providers.find(p => p.id === settings.activeProvider) && (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">
+                    {settings.providers.find(p => p.id === settings.activeProvider)?.description}
+                  </p>
+                  {settings.providers.find(p => p.id === settings.activeProvider)?.computer_use_supported && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      <span className="text-green-700">Computer use capabilities available</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -516,7 +555,14 @@ function AIProviderSettings({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="model">Model</Label>
+                <Label htmlFor="model">
+                  Model
+                  {settings.providers.find(p => p.id === settings.activeProvider)?.computer_use_supported && (
+                    <span className="text-xs text-gray-500 ml-2">
+                      (🖥️ = Computer Use)
+                    </span>
+                  )}
+                </Label>
                 <Select
                   value={settings.formData.model}
                   onValueChange={(value) =>
@@ -527,15 +573,92 @@ function AIProviderSettings({
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
-                    {settings.providers
-                      .find((p) => p.id === settings.activeProvider)
-                      ?.models.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      ))}
+                    {(() => {
+                      const currentProvider = settings.providers.find(p => p.id === settings.activeProvider);
+                      
+                      if (currentProvider?.model_info) {
+                        return (
+                          <>
+                            {/* Computer Use Models */}
+                            {currentProvider.model_info.filter(model => model.supports_computer_use).length > 0 && (
+                              <>
+                                <div className="px-2 py-1 text-xs font-medium text-gray-500 bg-blue-50 border-b">
+                                  Computer Use Models
+                                </div>
+                                {currentProvider.model_info
+                                  .filter(model => model.supports_computer_use)
+                                  .map((model) => (
+                                    <SelectItem key={model.id} value={model.id}>
+                                      <div className="flex items-center gap-2">
+                                        <span>🖥️</span>
+                                        <span>{model.name}</span>
+                                        {model.is_recommended && (
+                                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                            Recommended
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                              </>
+                            )}
+                            
+                            {/* General Chat Models */}
+                            {currentProvider.model_info.filter(model => !model.supports_computer_use).length > 0 && (
+                              <>
+                                <div className="px-2 py-1 text-xs font-medium text-gray-500 bg-gray-50 border-b">
+                                  General Chat Models
+                                </div>
+                                {currentProvider.model_info
+                                  .filter(model => !model.supports_computer_use)
+                                  .map((model) => (
+                                    <SelectItem key={model.id} value={model.id}>
+                                      <div className="flex items-center gap-2">
+                                        <span>💬</span>
+                                        <span>{model.name}</span>
+                                        {model.is_recommended && (
+                                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                            Recommended
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                              </>
+                            )}
+                          </>
+                        );
+                      } else {
+                        // Fallback to old format
+                        return currentProvider?.models?.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        ));
+                      }
+                    })()}
                   </SelectContent>
                 </Select>
+                {(() => {
+                  const currentProvider = settings.providers.find(p => p.id === settings.activeProvider);
+                  if (settings.formData.model && currentProvider?.model_info) {
+                    const selectedModel = currentProvider.model_info.find(m => m.id === settings.formData.model);
+                    if (selectedModel?.supports_computer_use) {
+                      return (
+                        <div className="text-xs text-gray-500">
+                          ✅ This model supports computer use automation
+                        </div>
+                      );
+                    } else if (selectedModel) {
+                      return (
+                        <div className="text-xs text-gray-500">
+                          ⚠️ This model is for general chat only
+                        </div>
+                      );
+                    }
+                  }
+                  return null;
+                })()}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

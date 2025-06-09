@@ -21,6 +21,23 @@ pub enum AgentRuntime {
     Multi(MultiAgentOrchestrator),
 }
 
+/// Model categories based on capabilities
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum ModelCategory {
+    ComputerUse,   // Models that support computer automation
+    GeneralChat,   // Models for general conversation and text generation
+}
+
+/// Model information with capabilities
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub category: ModelCategory,
+    pub supports_computer_use: bool,
+    pub is_recommended: bool,
+}
+
 impl AgentRuntime {
     pub async fn run(
         &mut self,
@@ -85,18 +102,21 @@ impl Provider {
     pub fn models(&self) -> Vec<String> {
         match self {
             Provider::Anthropic => vec![
-                // Claude 4 models (latest)
+                // Claude 4 models (latest) - Computer Use Capable
                 "claude-opus-4-20250514".to_string(),
                 "claude-sonnet-4-20250514".to_string(),
-                // Claude 3.7 models
+                // Claude 3.7 models - Computer Use Capable
                 "claude-3-7-sonnet-20250219".to_string(),
-                // Claude 3.5 models
+                // Claude 3.5 models - Computer Use Capable
                 "claude-3-5-sonnet-20241022".to_string(),
                 "claude-3-5-haiku-20241022".to_string(),
                 // Claude 3 models (legacy but still supported)
                 "claude-3-opus-20240229".to_string(),
             ],
             Provider::OpenAI => vec![
+                // Computer Use Agent (CUA) - Computer Use Capable
+                "computer-use-preview".to_string(),
+                // Standard GPT models - General Chat
                 "gpt-4o".to_string(),
                 "gpt-4o-mini".to_string(),
                 "gpt-4-turbo".to_string(),
@@ -116,11 +136,49 @@ impl Provider {
         }
     }
 
+    /// Check if a model supports computer use capabilities
+    pub fn model_supports_computer_use(&self, model: &str) -> bool {
+        match self {
+            Provider::Anthropic => {
+                // All current Claude models support computer use
+                matches!(model,
+                    "claude-opus-4-20250514" |
+                    "claude-sonnet-4-20250514" |
+                    "claude-3-7-sonnet-20250219" |
+                    "claude-3-5-sonnet-20241022" |
+                    "claude-3-5-haiku-20241022" |
+                    "claude-3-opus-20240229"
+                )
+            },
+            Provider::OpenAI => {
+                // Only CUA model supports computer use for OpenAI
+                model == "computer-use-preview"
+            },
+            Provider::Rig => {
+                // Rig supports computer use through Claude models
+                model == "claude-3-5-sonnet-20241022"
+            },
+            Provider::Gemini => {
+                // Gemini models don't currently support computer use
+                false
+            },
+        }
+    }
+
+    /// Get model category (ComputerUse or GeneralChat)
+    pub fn get_model_category(&self, model: &str) -> ModelCategory {
+        if self.model_supports_computer_use(model) {
+            ModelCategory::ComputerUse
+        } else {
+            ModelCategory::GeneralChat
+        }
+    }
+
     /// Get default model for the provider
     pub fn default_model(&self) -> &'static str {
         match self {
             Provider::Anthropic => "claude-3-7-sonnet-20250219", // Use the current working model as default
-            Provider::OpenAI => "gpt-4o",
+            Provider::OpenAI => "computer-use-preview", // Default to computer use for OpenAI since this is a computer use app
             Provider::Rig => "gpt-4o",
             Provider::Gemini => "gemini-1.5-pro",
         }
@@ -135,6 +193,156 @@ impl Provider {
             Provider::Gemini => "gemini",
         }
     }
+
+    /// Get detailed model information with capabilities
+    pub fn get_model_info(&self) -> Vec<ModelInfo> {
+        match self {
+            Provider::Anthropic => vec![
+                ModelInfo {
+                    id: "claude-opus-4-20250514".to_string(),
+                    name: "Claude 4 Opus".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
+                ModelInfo {
+                    id: "claude-sonnet-4-20250514".to_string(),
+                    name: "Claude 4 Sonnet".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
+                ModelInfo {
+                    id: "claude-3-7-sonnet-20250219".to_string(),
+                    name: "Claude 3.7 Sonnet".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
+                ModelInfo {
+                    id: "claude-3-5-sonnet-20241022".to_string(),
+                    name: "Claude 3.5 Sonnet".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "claude-3-5-haiku-20241022".to_string(),
+                    name: "Claude 3.5 Haiku".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "claude-3-opus-20240229".to_string(),
+                    name: "Claude 3 Opus (Legacy)".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: false,
+                },
+            ],
+            Provider::OpenAI => vec![
+                ModelInfo {
+                    id: "computer-use-preview".to_string(),
+                    name: "Computer-Using Agent (CUA)".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
+                ModelInfo {
+                    id: "gpt-4o".to_string(),
+                    name: "GPT-4o".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "gpt-4o-mini".to_string(),
+                    name: "GPT-4o Mini".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "gpt-4-turbo".to_string(),
+                    name: "GPT-4 Turbo".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "gpt-3.5-turbo".to_string(),
+                    name: "GPT-3.5 Turbo".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+            ],
+            Provider::Rig => vec![
+                ModelInfo {
+                    id: "claude-3-5-sonnet-20241022".to_string(),
+                    name: "Claude 3.5 Sonnet (Rig)".to_string(),
+                    category: ModelCategory::ComputerUse,
+                    supports_computer_use: true,
+                    is_recommended: true,
+                },
+                ModelInfo {
+                    id: "gpt-4o".to_string(),
+                    name: "GPT-4o (Rig)".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "gpt-4o-mini".to_string(),
+                    name: "GPT-4o Mini (Rig)".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+            ],
+            Provider::Gemini => vec![
+                ModelInfo {
+                    id: "gemini-1.5-pro".to_string(),
+                    name: "Gemini 1.5 Pro".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: true,
+                },
+                ModelInfo {
+                    id: "gemini-1.5-flash".to_string(),
+                    name: "Gemini 1.5 Flash".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "gemini-pro".to_string(),
+                    name: "Gemini Pro".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+                ModelInfo {
+                    id: "gemini-pro-vision".to_string(),
+                    name: "Gemini Pro Vision".to_string(),
+                    category: ModelCategory::GeneralChat,
+                    supports_computer_use: false,
+                    is_recommended: false,
+                },
+            ],
+        }
+    }
+
+    /// Check if provider supports computer use capabilities
+    pub fn supports_computer_use(&self) -> bool {
+        match self {
+            Provider::Anthropic => true,
+            Provider::OpenAI => true,  // Now has CUA model
+            Provider::Rig => true,     // Through Claude models
+            Provider::Gemini => false,
+        }
+    }
 }
 
 /// Struct containing provider information for UI display
@@ -144,9 +352,11 @@ pub struct ProviderInfo {
     pub name: String,
     pub description: String,
     pub models: Vec<String>,
+    pub model_info: Vec<ModelInfo>, // Enhanced model information
     pub default_model: String,
     pub is_available: bool,
     pub is_default: bool,
+    pub computer_use_supported: bool, // Whether this provider supports computer use at all
 }
 
 /// Factory for creating provider-specific AgentBrain implementations
@@ -253,9 +463,11 @@ impl BrainFactory {
                 name: provider.display_name().to_string(),
                 description: provider.description().to_string(),
                 models: provider.models(),
+                model_info: provider.get_model_info(),
                 default_model: provider.default_model().to_string(),
                 is_available,
                 is_default: provider == current_provider,
+                computer_use_supported: provider.supports_computer_use(),
             }
         }).collect()
     }
