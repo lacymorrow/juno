@@ -3,9 +3,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH, Instant};
 use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot};
+use tokio::time::{interval, timeout};
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{info, warn, error, debug};
 use tauri::{AppHandle, Manager, Emitter};
 use uuid::Uuid;
+use url::Url;
 use crate::cloud::types::*;
 use crate::cloud::config::CloudConfig;
 use crate::cloud::auth::DeviceAuth;
@@ -18,10 +21,6 @@ use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
     ConnectionState as CloudConnectionState, ResponseStatus, ResponseData,
 };
-use super::config::CloudConfig;
-use super::auth::DeviceAuth;
-use super::security::CloudSecurity;
-use super::commands::CloudCommandProcessor;
 use crate::constants::permission_types;
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
