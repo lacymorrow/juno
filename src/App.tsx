@@ -1,25 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/api/dialog";
-import { appDataDir } from "@tauri-apps/api/path";
-import { readTextFile } from "@tauri-apps/api/fs";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { MicrophonePermissionGuard } from "@/components/MicrophonePermissionGuard";
-import { VoiceControls } from "@/components/VoiceControls";
-import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
-import { Settings } from "@/components/Settings";
-import SettingsWindow from "@/components/SettingsWindow";
-import { PermissionsFlow } from "@/components/PermissionsFlow";
-import { FloatingBar } from "@/components/FloatingBar";
-import { DevTools } from "@/components/devtools/DevTools";
-import { StatusBar } from "@/components/StatusBar";
-import { MessageBubble } from "@/components/MessageBubble";
-import { MessageInput } from "@/components/MessageInput";
-import { ClickVisualizer } from "@/components/ClickVisualizer";
-import { toast, Toaster } from "sonner";
-import "./globals.css";
+import { AgentStatusIndicator } from "@/components/AgentStatusIndicator"; // Import the AgentStatusIndicator component
 import DevToolsPanel from "@/components/DevToolsPanel";
+import { PermissionsFlow } from "@/components/PermissionsFlow";
+import SettingsWindow from "@/components/SettingsWindow";
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
@@ -34,6 +16,8 @@ import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
 import { cn } from "@/lib/utils";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   ArrowLeft,
   Brain,
@@ -46,7 +30,12 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
+import { FloatingBar } from "./Bar";
+import ClickVisualizer from "./components/ClickVisualizer";
+import Settings from "./components/Settings";
+import "./globals.css";
 
 // Type for conversation messages
 type ChatMessage = {
@@ -991,18 +980,18 @@ function App() {
       setCurrentPath(window.location.pathname);
     };
 
-    window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
+    window.addEventListener("popstate", handleLocationChange);
+    return () => window.removeEventListener("popstate", handleLocationChange);
   }, []);
 
   // If this is the settings window, render only the settings
-  if (currentPath === '/settings') {
+  if (currentPath === "/settings") {
     return <SettingsWindow />;
   }
 
   // If this is the floating bar, render only the floating bar
-  if (currentPath === '/floating-bar') {
-    return <FloatingBar onNavigateToChat={handleNavigateToChat} />;
+  if (currentPath === "/floating-bar") {
+    return <FloatingBar />;
   }
 
   return (
@@ -1026,24 +1015,34 @@ function App() {
                     ? "Permissions"
                     : "Juno AI Assistant"}
                 </h1>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Server
-                    size={14}
-                    className={
-                      serverStatus === "connected"
-                        ? "text-green-500"
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <Server
+                      size={14}
+                      className={
+                        serverStatus === "connected"
+                          ? "text-green-500"
+                          : serverStatus === "error"
+                          ? "text-red-500"
+                          : "text-yellow-500"
+                      }
+                    />
+                    <span>
+                      {serverStatus === "connected"
+                        ? "Connected"
                         : serverStatus === "error"
-                        ? "text-red-500"
-                        : "text-yellow-500"
-                    }
-                  />
-                  <span>
-                    {serverStatus === "connected"
-                      ? "Connected"
-                      : serverStatus === "error"
-                      ? "Connection Error"
-                      : "Checking..."}
-                  </span>
+                        ? "Connection Error"
+                        : "Checking..."}
+                    </span>
+                  </div>
+                  {currentView === "chat" && serverStatus === "connected" && (
+                    <div className="border-l pl-4">
+                      <AgentStatusIndicator
+                        compact
+                        className="text-muted-foreground"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1287,7 +1286,16 @@ function App() {
                                       : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
                                   )}
                                 >
-                                  {msg.content}
+                                  {msg.role === "assistant" &&
+                                  (!msg.content ||
+                                    msg.content.trim() === "") ? (
+                                    <span className="text-muted-foreground italic flex items-center gap-2">
+                                      <span>✓</span>
+                                      <span>Task completed successfully</span>
+                                    </span>
+                                  ) : (
+                                    msg.content
+                                  )}
                                   {msg.screenshot_base64 && (
                                     <div
                                       className={cn(

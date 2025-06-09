@@ -3,6 +3,7 @@
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::state::AppState;
 use tauri::{State, Emitter, AppHandle, WebviewUrl, WebviewWindowBuilder, Manager};
+use tracing::warn;
 
 // Declare the submodules
 pub mod registry;
@@ -113,7 +114,7 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use tauri::TitleBarStyle;
-        
+
         // Set transparent title bar for native look
         if let Err(e) = settings_window.set_title_bar_style(TitleBarStyle::Transparent) {
             warn!("Failed to set title bar style: {}", e);

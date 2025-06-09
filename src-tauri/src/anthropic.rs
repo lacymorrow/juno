@@ -136,9 +136,17 @@ pub async fn submit_query(
 
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
     let memory_manager_arc = state.get_memory_manager().await;
-    let memory_manager = memory_manager_arc.lock().await;
-    let memory_manager_clone = memory_manager.clone();
-    drop(memory_manager); // Release the lock early
+    let memory_manager_clone = {
+        let mut memory_manager = memory_manager_arc.lock().await;
+
+        // Clean up any orphaned tool calls from previous cancelled executions
+        // This prevents LLM errors when tool calls don't have corresponding results
+        if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
+            warn!("Failed to clean orphaned tool calls: {}", e);
+        }
+
+        memory_manager.clone()
+    };
 
     // --- Setup Tool Provider for Specialized Agents ---
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
