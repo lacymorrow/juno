@@ -115,10 +115,13 @@ impl VoiceController {
             sample_format: _,
         } = reader.spec();
 
-        let samples_i16: Vec<i16> = reader
-            .samples::<i16>()
-            .map(|s| s.expect("invalid sample"))
-            .collect::<Vec<_>>();
+        let mut samples_i16 = Vec::new();
+        for sample_result in reader.samples::<i16>() {
+            match sample_result {
+                Ok(sample) => samples_i16.push(sample),
+                Err(e) => return Err(format!("Failed to read audio sample: {}", e)),
+            }
+        }
 
         let mut audio_f32: Vec<f32> = vec![0.0f32; samples_i16.len()];
         whisper_rs::convert_integer_to_float_audio(&samples_i16, &mut audio_f32)
@@ -162,7 +165,8 @@ impl VoiceController {
                 return Err("Resampling produced empty audio".to_string());
             }
 
-            processed_audio = waves_out.into_iter().next().unwrap();
+            processed_audio = waves_out.into_iter().next()
+                .ok_or_else(|| "Resampling failed to produce audio data".to_string())?;
         }
 
         state.full(params, &processed_audio[..])
@@ -234,10 +238,11 @@ impl VoiceController {
         let sample_format = supported_config.sample_format();
         let actual_rate = config.sample_rate.0;
 
-        // Store the actual sample rate
-        {
-            let mut rate_guard = self.actual_recording_sample_rate.lock().unwrap();
+        // Store the actual sample rate safely
+        if let Ok(mut rate_guard) = self.actual_recording_sample_rate.lock() {
             *rate_guard = Some(actual_rate);
+        } else {
+            tracing::error!("Failed to acquire lock for actual_recording_sample_rate - lock may be poisoned");
         }
 
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
@@ -301,35 +306,51 @@ impl VoiceController {
         };
 
         let stream = match sample_format {
-            SampleFormat::F32 => device.build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if let Err(e) = audio_data_tx.send(data.to_vec()) {
-                        tracing::error!("Failed to send audio data: {:?}", e);
-                    }
-                },
-                move |err| {
-                    tracing::error!("An error occurred on the input stream: {}", err);
-                },
-                None
-            ).expect("Failed to build f32 input stream"),
-            SampleFormat::I16 => device.build_input_stream(
-                &config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let mut audio_f32: Vec<f32> = vec![0.0f32; data.len()];
-                    if let Err(e) = whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32) {
-                        tracing::error!("Failed to convert i16 to f32: {:?}", e);
+            SampleFormat::F32 => {
+                match device.build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if let Err(e) = audio_data_tx.send(data.to_vec()) {
+                            tracing::error!("Failed to send audio data: {:?}", e);
+                        }
+                    },
+                    move |err| {
+                        tracing::error!("An error occurred on the input stream: {}", err);
+                    },
+                    None
+                ) {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        tracing::error!("Failed to build f32 input stream: {:?}", e);
                         return;
                     }
-                    if let Err(e) = audio_data_tx.send(audio_f32) {
-                        tracing::error!("Failed to send converted audio data: {:?}", e);
+                }
+            },
+            SampleFormat::I16 => {
+                match device.build_input_stream(
+                    &config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        let mut audio_f32: Vec<f32> = vec![0.0f32; data.len()];
+                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32) {
+                            tracing::error!("Failed to convert i16 to f32: {:?}", e);
+                            return;
+                        }
+                        if let Err(e) = audio_data_tx.send(audio_f32) {
+                            tracing::error!("Failed to send converted audio data: {:?}", e);
+                        }
+                    },
+                    move |err| {
+                        tracing::error!("An error occurred on the input stream: {}", err);
+                    },
+                    None
+                ) {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        tracing::error!("Failed to build i16 input stream: {:?}", e);
+                        return;
                     }
-                },
-                move |err| {
-                    tracing::error!("An error occurred on the input stream: {}", err);
-                },
-                None
-            ).expect("Failed to build i16 input stream"),
+                }
+            },
             _ => {
                 tracing::error!("Unsupported sample format {:?}", sample_format);
                 return;
