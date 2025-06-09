@@ -90,7 +90,7 @@ impl DesktopAgent {
                 let text = tool_call.input.get("text").and_then(|v| v.as_str()).ok_or_else(||
                     AgentError::InputError("Missing or invalid 'text' parameter".to_string()))?;
 
-                let result = commands::keyboard::dev_type_text(
+                let result = commands::dev::dev_type_text(
                     text.to_string(),
                     state
                 ).await;
@@ -108,7 +108,7 @@ impl DesktopAgent {
                     AgentError::InputError("Missing or invalid 'key' parameter".to_string()))?;
                 let modifier = tool_call.input.get("modifier").and_then(|v| v.as_str()).map(|s| s.to_string());
 
-                let result = commands::keyboard::dev_press_key(
+                let result = commands::dev::dev_press_key(
                     key.to_string(),
                     modifier,
                     state
