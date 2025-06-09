@@ -15,6 +15,7 @@ use super::config::CloudConfig;
 use super::auth::DeviceAuth;
 use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
+use crate::constants::permission_types;
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -465,11 +466,19 @@ impl ProductionCloudConnector {
         let mut permissions = Vec::new();
 
         if app_state.is_desktop_available() {
-            permissions.push("accessibility".to_string());
-            permissions.push("screen_recording".to_string());
+            permissions.push(permission_types::ACCESSIBILITY.to_string());
+            permissions.push(permission_types::SCREEN_RECORDING.to_string());
         }
 
-        permissions.push("microphone".to_string());
+        let voice_enabled = {
+            let always_listening = app_state.always_listening_active.lock().unwrap();
+            *always_listening
+        };
+
+        if voice_enabled {
+            permissions.push(permission_types::MICROPHONE.to_string());
+        }
+
         permissions
     }
 

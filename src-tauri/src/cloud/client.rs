@@ -17,6 +17,7 @@ use super::config::CloudConfig;
 use super::auth::DeviceAuth;
 use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
+use crate::constants::permission_types;
 
 // Type alias for WebSocket sender to simplify function signatures
 type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
@@ -387,12 +388,18 @@ impl CloudClient {
         let mut permissions = Vec::new();
 
         if app_state.is_desktop_available() {
-            permissions.push("accessibility".to_string());
-            permissions.push("screen_recording".to_string());
+            permissions.push(permission_types::ACCESSIBILITY.to_string());
+            permissions.push(permission_types::SCREEN_RECORDING.to_string());
         }
 
-        // TODO: Check microphone permission
-        permissions.push("microphone".to_string());
+        let voice_enabled = {
+            let always_listening = app_state.always_listening_active.lock().unwrap();
+            *always_listening
+        };
+
+        if voice_enabled {
+            permissions.push(permission_types::MICROPHONE.to_string());
+        }
 
         permissions
     }

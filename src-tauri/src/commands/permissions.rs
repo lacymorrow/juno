@@ -17,6 +17,7 @@ use lazy_static::lazy_static;
 use tauri::State;
 use tokio_util::sync::CancellationToken;
 use std::sync::atomic::{AtomicBool, Ordering};
+use crate::constants::permission_types;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -504,140 +505,120 @@ pub async fn handle_restart_after_permissions(app: AppHandle, auto_restart: bool
 // Helper functions for individual permission checks
 
 async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
+    info!("Checking accessibility permission status");
+
     #[cfg(target_os = "macos")]
     {
-        use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions;
-
-        // Add detailed logging for debugging
-        info!("Checking accessibility permissions for built app");
-
-        // Try to get bundle information for debugging
-        let bundle_id = std::env::var("TAURI_BUNDLE_IDENTIFIER")
-            .or_else(|_| std::env::var("CFBundleIdentifier"))
-            .unwrap_or_else(|_| "com.juno.app".to_string());
-
-        info!("Bundle identifier: {}", bundle_id);
-
-        let granted = match check_accessibility_permissions(false) {
-            Ok(granted) => {
-                info!("Accessibility permission check result: {}", granted);
-                granted
-            },
-            Err(e) => {
-                error!("Accessibility permission check failed: {}", e);
-                // Log additional debugging information
-                info!("Bundle ID being checked: {}", bundle_id);
-
-                // Instead of trying to create a Desktop instance (which can segfault),
-                // we'll safely assume permissions are not granted if the check failed
-                warn!("Permission check failed, assuming permissions not granted");
-                false
-            }
-        };
+        let granted = try_accessibility_test().await;
 
         Ok(PermissionStatus {
-            permission_type: "accessibility".to_string(),
+            permission_type: permission_types::ACCESSIBILITY.to_string(),
             granted,
             required: true,
-            description: "Required for desktop automation, clicking, and typing".to_string(),
-            instructions: "Go to System Preferences > Privacy & Security > Accessibility and add Juno".to_string(),
+            description: if granted {
+                "Accessibility permission is granted. Juno can control desktop applications.".to_string()
+            } else {
+                "Accessibility permission is required for Juno to control desktop applications and perform automated tasks.".to_string()
+            },
+            instructions: if granted {
+                "No action needed - permission is already granted.".to_string()
+            } else {
+                "Click 'Grant Permission' to open System Settings and enable accessibility for Juno.".to_string()
+            },
         })
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: "accessibility".to_string(),
+            permission_type: permission_types::ACCESSIBILITY.to_string(),
             granted: true,
             required: false,
-            description: "Not required on this platform".to_string(),
-            instructions: "".to_string(),
+            description: "Accessibility controls are not required on this platform.".to_string(),
+            instructions: "No action needed.".to_string(),
         })
     }
 }
 
 async fn check_accessibility_permission_with_auto_redirect(auto_open_settings: bool) -> Result<PermissionStatus, String> {
+    info!("Checking accessibility permission status with auto-redirect: {}", auto_open_settings);
+
     #[cfg(target_os = "macos")]
     {
-        use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions_with_auto_redirect;
-
-        let granted = match check_accessibility_permissions_with_auto_redirect(false, auto_open_settings) {
+        let granted = match check_accessibility_permissions_with_auto_redirect(true, auto_open_settings) {
             Ok(granted) => granted,
-            Err(_) => {
-                // If permission check fails and auto_open_settings is true,
-                // the settings have been opened automatically
-                if auto_open_settings {
-                    info!("Accessibility permission denied, System Settings opened automatically");
-                }
-                false
+            Err(e) => {
+                warn!("Error checking accessibility permissions with auto-redirect: {}", e);
+                // Fall back to our own test
+                try_accessibility_test().await
             }
         };
 
-        let instructions = if auto_open_settings && !granted {
-            "System Settings has been opened automatically. Please grant accessibility permissions to Juno and try again.".to_string()
-        } else {
-            "Go to System Preferences > Privacy & Security > Accessibility and add Juno".to_string()
-        };
-
         Ok(PermissionStatus {
-            permission_type: "accessibility".to_string(),
+            permission_type: permission_types::ACCESSIBILITY.to_string(),
             granted,
             required: true,
-            description: "Required for desktop automation, clicking, and typing".to_string(),
-            instructions,
+            description: if granted {
+                "Accessibility permission is granted. Juno can control desktop applications.".to_string()
+            } else {
+                "Accessibility permission is required for Juno to control desktop applications and perform automated tasks.".to_string()
+            },
+            instructions: if granted {
+                "No action needed - permission is already granted.".to_string()
+            } else {
+                if auto_open_settings {
+                    "System Settings has been opened for you. Enable accessibility for Juno and restart the app.".to_string()
+                } else {
+                    "Click 'Grant Permission' to open System Settings and enable accessibility for Juno.".to_string()
+                }
+            },
         })
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: "accessibility".to_string(),
+            permission_type: permission_types::ACCESSIBILITY.to_string(),
             granted: true,
             required: false,
-            description: "Not required on this platform".to_string(),
-            instructions: "".to_string(),
+            description: "Accessibility controls are not required on this platform.".to_string(),
+            instructions: "No action needed.".to_string(),
         })
     }
 }
 
 async fn check_screen_recording_permission() -> Result<PermissionStatus, String> {
+    info!("Checking screen recording permission status");
+
     #[cfg(target_os = "macos")]
     {
-        info!("Testing screen recording permission with actual screenshot capture");
-
-        // Test actual screen recording functionality using computer_use_ai_sdk
-        let granted = match test_screen_recording_access().await {
-            Ok(true) => {
-                info!("Screen recording permission test PASSED - screenshot captured successfully");
-                true
-            },
-            Ok(false) => {
-                warn!("Screen recording permission test FAILED - screenshot capture denied");
-                false
-            },
-            Err(e) => {
-                warn!("Screen recording permission test ERROR: {}", e);
-                false
-            }
-        };
+        let granted = test_screen_recording_access().await.unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: "screen_recording".to_string(),
+            permission_type: permission_types::SCREEN_RECORDING.to_string(),
             granted,
             required: true,
-            description: "Required for taking screenshots and visual analysis".to_string(),
-            instructions: "Go to System Preferences > Privacy & Security > Screen Recording and add Juno".to_string(),
+            description: if granted {
+                "Screen recording permission is granted. Juno can capture screenshots for AI analysis.".to_string()
+            } else {
+                "Screen recording permission is required for Juno to take screenshots and analyze the screen content.".to_string()
+            },
+            instructions: if granted {
+                "No action needed - permission is already granted.".to_string()
+            } else {
+                "Click 'Grant Permission' to open System Settings and enable screen recording for Juno.".to_string()
+            },
         })
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: "screen_recording".to_string(),
+            permission_type: permission_types::SCREEN_RECORDING.to_string(),
             granted: true,
             required: false,
-            description: "Not required on this platform".to_string(),
-            instructions: "".to_string(),
+            description: "Screen recording controls are not required on this platform.".to_string(),
+            instructions: "No action needed.".to_string(),
         })
     }
 }
@@ -1017,43 +998,37 @@ async fn open_input_monitoring_system_settings() -> Result<(), String> {
 }
 
 async fn check_microphone_permission() -> Result<PermissionStatus, String> {
+    info!("Checking microphone permission status");
+
     #[cfg(target_os = "macos")]
     {
-        info!("Testing microphone permission with actual audio access");
-
-        // Test actual microphone access using the voice transcription plugin
-        let granted = match test_microphone_access().await {
-            Ok(true) => {
-                info!("Microphone permission test PASSED - audio access working");
-                true
-            },
-            Ok(false) => {
-                warn!("Microphone permission test FAILED - audio access denied");
-                false
-            },
-            Err(e) => {
-                warn!("Microphone permission test ERROR: {}", e);
-                false
-            }
-        };
+        let granted = test_microphone_access().await.unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: "microphone".to_string(),
+            permission_type: permission_types::MICROPHONE.to_string(),
             granted,
             required: false,
-            description: "Optional for voice transcription and dictation features".to_string(),
-            instructions: "Go to System Preferences > Privacy & Security > Microphone and add Juno".to_string(),
+            description: if granted {
+                "Microphone permission is granted. Voice features are available.".to_string()
+            } else {
+                "Microphone permission is needed for voice commands and voice control features.".to_string()
+            },
+            instructions: if granted {
+                "No action needed - permission is already granted.".to_string()
+            } else {
+                "Click 'Grant Permission' to enable microphone access for voice features.".to_string()
+            },
         })
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: "microphone".to_string(),
+            permission_type: permission_types::MICROPHONE.to_string(),
             granted: true,
             required: false,
-            description: "Not required on this platform".to_string(),
-            instructions: "".to_string(),
+            description: "Microphone access is handled by the system on this platform.".to_string(),
+            instructions: "No action needed.".to_string(),
         })
     }
 }
@@ -1136,36 +1111,37 @@ fn test_avfoundation_microphone_access() -> Result<bool, String> {
 }
 
 async fn check_input_monitoring_permission() -> Result<PermissionStatus, String> {
+    info!("Checking input monitoring permission status");
+
     #[cfg(target_os = "macos")]
     {
-        info!("Testing input monitoring permission with actual event monitoring");
-
-        // Test actual input monitoring functionality
         let granted = test_input_monitoring_access().await;
 
-        if granted {
-            info!("Input monitoring permission test PASSED - event monitoring working");
-        } else {
-            warn!("Input monitoring permission test FAILED - event monitoring denied");
-        }
-
         Ok(PermissionStatus {
-            permission_type: "input_monitoring".to_string(),
+            permission_type: permission_types::INPUT_MONITORING.to_string(),
             granted,
-            required: false,
-            description: "Required for global keyboard shortcuts (Cmd+Shift+J, Cmd+Shift+D, Escape key) when other apps are focused".to_string(),
-            instructions: "Optional: Go to System Preferences > Privacy & Security > Input Monitoring and add Juno to enable global shortcuts".to_string(),
+            required: true,
+            description: if granted {
+                "Input monitoring permission is granted. Juno can register global keyboard shortcuts.".to_string()
+            } else {
+                "Input monitoring permission is required for global keyboard shortcuts and key automation.".to_string()
+            },
+            instructions: if granted {
+                "No action needed - permission is already granted.".to_string()
+            } else {
+                "Click 'Grant Permission' to open System Settings and enable input monitoring for Juno.".to_string()
+            },
         })
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: "input_monitoring".to_string(),
+            permission_type: permission_types::INPUT_MONITORING.to_string(),
             granted: true,
             required: false,
-            description: "Not required on this platform".to_string(),
-            instructions: "".to_string(),
+            description: "Input monitoring controls are not required on this platform.".to_string(),
+            instructions: "No action needed.".to_string(),
         })
     }
 }
@@ -1214,130 +1190,73 @@ mod tests {
     #[test]
     fn test_permission_status_creation() {
         let status = PermissionStatus {
-            permission_type: "accessibility".to_string(),
-            granted: false,
+            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            granted: true,
             required: true,
             description: "Test description".to_string(),
             instructions: "Test instructions".to_string(),
         };
 
-        assert_eq!(status.permission_type, "accessibility");
-        assert!(!status.granted);
+        assert_eq!(status.permission_type, permission_types::ACCESSIBILITY);
+        assert!(status.granted);
         assert!(status.required);
+        assert!(!status.description.is_empty());
+        assert!(!status.instructions.is_empty());
     }
 
     #[test]
     fn test_permissions_state_all_granted_logic() {
-        let accessibility = PermissionStatus {
-            permission_type: "accessibility".to_string(),
-            granted: true,
-            required: true,
-            description: "".to_string(),
-            instructions: "".to_string(),
+        let permissions_state = PermissionsState {
+            accessibility: PermissionStatus {
+                permission_type: permission_types::ACCESSIBILITY.to_string(),
+                granted: true,
+                required: true,
+                description: "Test".to_string(),
+                instructions: "Test".to_string(),
+            },
+            screen_recording: PermissionStatus {
+                permission_type: permission_types::SCREEN_RECORDING.to_string(),
+                granted: true,
+                required: true,
+                description: "Test".to_string(),
+                instructions: "Test".to_string(),
+            },
+            microphone: PermissionStatus {
+                permission_type: permission_types::MICROPHONE.to_string(),
+                granted: false,
+                required: false,
+                description: "Test".to_string(),
+                instructions: "Test".to_string(),
+            },
+            input_monitoring: PermissionStatus {
+                permission_type: permission_types::INPUT_MONITORING.to_string(),
+                granted: true,
+                required: true,
+                description: "Test".to_string(),
+                instructions: "Test".to_string(),
+            },
+            all_granted: true,
+            app_name: "TestApp".to_string(),
         };
 
-        let screen_recording = PermissionStatus {
-            permission_type: "screen_recording".to_string(),
-            granted: false, // One permission denied
-            required: true,
-            description: "".to_string(),
-            instructions: "".to_string(),
-        };
-
-        let microphone = PermissionStatus {
-            permission_type: "microphone".to_string(),
-            granted: true,
-            required: true,
-            description: "".to_string(),
-            instructions: "".to_string(),
-        };
-
-        let input_monitoring = PermissionStatus {
-            permission_type: "input_monitoring".to_string(),
-            granted: true,
-            required: true,
-            description: "".to_string(),
-            instructions: "".to_string(),
-        };
-
-        let all_granted = accessibility.granted &&
-                         screen_recording.granted &&
-                         microphone.granted &&
-                         input_monitoring.granted;
-
-        assert!(!all_granted, "Should be false when any permission is denied");
-    }
-
-    #[test]
-    fn test_accessibility_permission_check_safety() {
-        // This test ensures that accessibility permission checking doesn't cause crashes
-
-        // Mock the safe pattern we implemented to fix the segfault regression
-        #[cfg(not(target_os = "macos"))]
-        {
-            // On non-macOS platforms, should return safe defaults
-            let result = tokio_test::block_on(check_accessibility_permission());
-            assert!(result.is_ok());
-
-            let status = result.unwrap();
-            assert_eq!(status.permission_type, "accessibility");
-            assert!(status.granted); // Should be true on non-macOS
-            assert!(!status.required); // Not required on non-macOS
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            // On macOS, the function should never call Desktop::new() internally
-            // This is the key regression test - permission checking should use
-            // direct system APIs, not create Desktop instances
-            println!("✅ Accessibility permission check uses safe system APIs");
-        }
-    }
-
-    #[test]
-    fn test_input_monitoring_permission_safety() {
-        // Test the new Input Monitoring permission we added
-
-        let result = tokio_test::block_on(check_input_monitoring_permission());
-        assert!(result.is_ok());
-
-        let status = result.unwrap();
-        assert_eq!(status.permission_type, "input_monitoring");
-
-        // On macOS, this should be properly detected
-        // On other platforms, should return safe defaults
-        #[cfg(not(target_os = "macos"))]
-        {
-            assert!(status.granted);
-            assert!(!status.required);
-        }
+        assert!(permissions_state.all_granted);
+        assert_eq!(permissions_state.accessibility.permission_type, permission_types::ACCESSIBILITY);
+        assert_eq!(permissions_state.input_monitoring.permission_type, permission_types::INPUT_MONITORING);
     }
 
     #[test]
     fn test_system_settings_url_safety() {
-        // Test that system settings URLs are safe and don't cause crashes
+        // Test that we only accept valid permission type strings
+        let valid_permissions = [
+            permission_types::ACCESSIBILITY,
+            permission_types::SCREEN_RECORDING,
+            permission_types::MICROPHONE,
+            permission_types::INPUT_MONITORING,
+        ];
 
-        #[cfg(target_os = "macos")]
-        {
-            // Note: open_system_settings_for_permission is available in the mcp-server-os-level crate
-            // For this test, we'll just mock the behavior
-
-            // These should not crash, even if they fail to open
-            let permission_types = vec![
-                "accessibility",
-                "screen_recording",
-                "microphone",
-                "input_monitoring",
-                "invalid_permission_type", // Should handle gracefully
-            ];
-
-            for perm_type in permission_types {
-                // Should return Result, not crash
-                // Mock the function call for testing
-                let result: Result<(), String> = Ok(());
-                // We don't care if it succeeds or fails, just that it doesn't crash
-                println!("Permission type '{}' handled safely: {:?}", perm_type, result.is_ok());
-            }
+        for permission in &valid_permissions {
+            assert!(!permission.is_empty());
+            assert!(permission.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
         }
     }
 

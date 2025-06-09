@@ -13,7 +13,10 @@ use serde_json;
 
 use crate::error::{Error, Result};
 
+// Audio processing constants (matching main crate's constants)
 const WHISPER_SAMPLE_RATE: u32 = 16000;
+const SINC_LENGTH: usize = 256;
+const OVERSAMPLING_FACTOR: usize = 256;
 const INTENT_DETECTION_BUFFER_MS: u64 = 3000; // Buffer for intent detection (increased from 1500)
 const VOLUME_THRESHOLD: f32 = 0.01; // Increased from 0.003 to reduce false triggers
 const VOLUME_THRESHOLD_END: f32 = 0.005; // Increased from 0.002
@@ -449,18 +452,18 @@ impl AlwaysListeningController {
               sample_rate, WHISPER_SAMPLE_RATE, sample_rate != WHISPER_SAMPLE_RATE);
         let audio_to_process = if sample_rate != WHISPER_SAMPLE_RATE {
             // Create a custom resampler for this specific buffer size
-            let params = SincInterpolationParameters {
-                sinc_len: 256,
+            let config = SincInterpolationParameters {
+                sinc_len: SINC_LENGTH,
                 f_cutoff: 0.95,
                 interpolation: SincInterpolationType::Linear,
-                oversampling_factor: 256,
+                oversampling_factor: OVERSAMPLING_FACTOR,
                 window: WindowFunction::BlackmanHarris2,
             };
 
             match SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
                 2.0,
-                params,
+                config,
                 audio_buffer.len(), // Use exact buffer size as chunk size
                 1,
             ) {
@@ -587,18 +590,18 @@ impl AlwaysListeningController {
 
         let audio_to_transcribe = if sample_rate != WHISPER_SAMPLE_RATE {
             // Create a custom resampler for this specific buffer size
-            let params = SincInterpolationParameters {
-                sinc_len: 256,
+            let config = SincInterpolationParameters {
+                sinc_len: SINC_LENGTH,
                 f_cutoff: 0.95,
                 interpolation: SincInterpolationType::Linear,
-                oversampling_factor: 256,
+                oversampling_factor: OVERSAMPLING_FACTOR,
                 window: WindowFunction::BlackmanHarris2,
             };
 
             match SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / sample_rate as f64,
                 2.0,
-                params,
+                config,
                 audio_buffer.len(),
                 1,
             ) {
@@ -766,8 +769,8 @@ impl AlwaysListeningController {
             .map_err(|e| Error::Whisper(format!("Failed to create Whisper state: {:?}", e)))?;
 
         // Create test audio - a simple sine wave that should be detectable
-        let sample_rate = 16000;
-        let duration_samples = sample_rate; // 1 second
+        let sample_rate = WHISPER_SAMPLE_RATE;
+        let duration_samples = sample_rate as usize; // 1 second
         let frequency = 440.0; // A4 note
         let mut test_audio: Vec<f32> = Vec::with_capacity(duration_samples);
 
