@@ -266,14 +266,14 @@ function App() {
     email: "",
     priority: "medium"
   });
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  // Onboarding state
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  // Onboarding state  
+  const [_showOnboarding, setShowOnboarding] = useState(false);
+  const [_onboardingChecked, setOnboardingChecked] = useState(false);
 
   // Check permissions on startup
   useEffect(() => {
