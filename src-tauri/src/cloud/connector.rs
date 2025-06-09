@@ -133,31 +133,7 @@ impl HardwareMonitor {
             {
                 Ok(output) => {
                     let output_str = String::from_utf8_lossy(&output.stdout);
-                    for line in output_str.lines() {
-                        if line.contains("CPU usage:") {
-                            // Parse CPU usage from top command output
-                            // Example: "CPU usage: 15.38% user, 8.46% sys, 76.15% idle"
-                            if let Some(user_part) = line.split("CPU usage:").nth(1) {
-                                if let Some(user_str) = user_part.split('%').next() {
-                                    if let Ok(user_cpu) = user_str.trim().parse::<f32>() {
-                                        // Add system CPU if available
-                                        if let Some(sys_part) = user_part.split("sys,").next() {
-                                            if let Some(sys_str) = sys_part.split('%').next() {
-                                                if let Some(sys_only) = sys_str.split(',').nth(1) {
-                                                    if let Ok(sys_cpu) = sys_only.trim().parse::<f32>() {
-                                                        return Some(user_cpu + sys_cpu);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        return Some(user_cpu);
-                                    }
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    None
+                    Self::parse_cpu_usage(&output_str)
                 },
                 Err(e) => {
                     log::warn!("Failed to get CPU usage: {}", e);
@@ -172,6 +148,30 @@ impl HardwareMonitor {
             log::debug!("CPU monitoring not implemented for this platform");
             None
         }
+    }
+
+    /// Parse CPU usage from top command output
+    #[cfg(target_os = "macos")]
+    fn parse_cpu_usage(output: &str) -> Option<f32> {
+        use regex::Regex;
+
+        // Example: "CPU usage: 15.38% user, 8.46% sys, 76.15% idle"
+        let cpu_regex = Regex::new(r"CPU usage:\s*(\d+\.?\d*)%\s*user,\s*(\d+\.?\d*)%\s*sys").ok()?;
+
+        for line in output.lines() {
+            if let Some(captures) = cpu_regex.captures(line) {
+                let user_cpu = captures.get(1)?.as_str().parse::<f32>().ok()?;
+                let sys_cpu = captures.get(2)?.as_str().parse::<f32>().ok()?;
+
+                let total_cpu = user_cpu + sys_cpu;
+                log::debug!("Parsed CPU usage: {}% user + {}% sys = {}% total", user_cpu, sys_cpu, total_cpu);
+
+                return Some(total_cpu);
+            }
+        }
+
+        log::warn!("Could not parse CPU usage from top output");
+        None
     }
 
     /// Get current memory usage percentage
@@ -973,6 +973,56 @@ impl Clone for ProductionCloudConnector {
             command_statistics: self.command_statistics.clone(),
             last_heartbeat: self.last_heartbeat.clone(),
             reconnection_count: self.reconnection_count.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cpu_usage_parsing() {
+        let sample_output = r#"
+Processes: 123 total, 4 running, 119 sleeping, 456 threads
+2024/01/15 10:30:45
+Load Avg: 1.23, 1.45, 1.67
+CPU usage: 15.38% user, 8.46% sys, 76.15% idle
+SharedLibs: 123M resident, 456M data, 789M linkedit.
+MemRegions: 12345 total, 678M resident, 901M private, 234M shared.
+PhysMem: 8192M used (1234M wired), 567M unused.
+"#;
+
+        #[cfg(target_os = "macos")]
+        {
+            let result = HardwareMonitor::parse_cpu_usage(sample_output);
+            assert!(result.is_some());
+            let cpu_usage = result.unwrap();
+            assert_eq!(cpu_usage, 23.84); // 15.38 + 8.46
+        }
+    }
+
+    #[test]
+    fn test_cpu_usage_parsing_invalid_format() {
+        let invalid_output = "Some random output without CPU info";
+
+        #[cfg(target_os = "macos")]
+        {
+            let result = HardwareMonitor::parse_cpu_usage(invalid_output);
+            assert!(result.is_none());
+        }
+    }
+
+    #[test]
+    fn test_cpu_usage_parsing_different_format() {
+        let different_output = "CPU usage: 5.2% user, 12.8% sys, 82.0% idle";
+
+        #[cfg(target_os = "macos")]
+        {
+            let result = HardwareMonitor::parse_cpu_usage(different_output);
+            assert!(result.is_some());
+            let cpu_usage = result.unwrap();
+            assert_eq!(cpu_usage, 18.0); // 5.2 + 12.8
         }
     }
 }
