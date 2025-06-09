@@ -718,6 +718,9 @@ pub fn run() {
             test_environment_variables,
             // TTS Commands
             anthropic::handle_tts_completion,
+            // Settings Window Commands
+            commands::open_settings_window,
+            commands::close_settings_window,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
@@ -928,9 +931,12 @@ pub fn run() {
                     }
                     constants::app_menu_ids::SETTINGS => {
                         info!("[Menu] Settings menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::SETTINGS_REQUESTED, "/settings") {
-                            tracing::error!("[Menu] Failed to emit settings event: {}", e);
-                        }
+                        let app_handle_clone = app_handle_for_menu.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                                tracing::error!("[Menu] Failed to open settings window: {}", e);
+                            }
+                        });
                     }
 
                     // File Menu
@@ -1142,9 +1148,12 @@ pub fn run() {
                             }
                             constants::tray_menu_ids::SETTINGS => {
                                 info!("[Tray Menu] Settings menu item clicked");
-                                if let Err(e) = app_handle.emit(constants::events::SETTINGS_REQUESTED, "/settings") {
-                                    tracing::error!("[Tray Menu] Failed to emit settings-requested event: {}", e);
-                                }
+                                let app_handle_clone = app_handle.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                                        tracing::error!("[Tray Menu] Failed to open settings window: {}", e);
+                                    }
+                                });
                             }
                             _ => {
                                 println!("[Tray Menu] Unhandled tray menu event: {:?}", event.id());
