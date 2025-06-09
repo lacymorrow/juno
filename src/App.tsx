@@ -1,3 +1,4 @@
+import { AgentStatusIndicator } from "@/components/AgentStatusIndicator"; // Import the AgentStatusIndicator component
 import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
 import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
 import { PermissionsFlow } from "@/components/PermissionsFlow"; // Import the PermissionsFlow component
@@ -989,24 +990,34 @@ function App() {
                     ? "Permissions"
                     : "Juno AI Assistant"}
                 </h1>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Server
-                    size={14}
-                    className={
-                      serverStatus === "connected"
-                        ? "text-green-500"
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <Server
+                      size={14}
+                      className={
+                        serverStatus === "connected"
+                          ? "text-green-500"
+                          : serverStatus === "error"
+                          ? "text-red-500"
+                          : "text-yellow-500"
+                      }
+                    />
+                    <span>
+                      {serverStatus === "connected"
+                        ? "Connected"
                         : serverStatus === "error"
-                        ? "text-red-500"
-                        : "text-yellow-500"
-                    }
-                  />
-                  <span>
-                    {serverStatus === "connected"
-                      ? "Connected"
-                      : serverStatus === "error"
-                      ? "Connection Error"
-                      : "Checking..."}
-                  </span>
+                        ? "Connection Error"
+                        : "Checking..."}
+                    </span>
+                  </div>
+                  {currentView === "chat" && serverStatus === "connected" && (
+                    <div className="border-l pl-4">
+                      <AgentStatusIndicator
+                        compact
+                        className="text-muted-foreground"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
