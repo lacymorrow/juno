@@ -73,7 +73,17 @@ const settingsCategories: SettingsCategory[] = [
   },
 ];
 
-export default function SettingsWindow() {
+interface SettingsWindowProps {
+  onNavigateToDevTools?: () => void;
+  onNavigateToChat?: () => void;
+  onNavigateToPermissions?: () => void;
+}
+
+export default function SettingsWindow({
+  onNavigateToDevTools,
+  onNavigateToChat,
+  onNavigateToPermissions
+}: SettingsWindowProps = {}) {
   const [selectedCategory, setSelectedCategory] = useState("general");
   const settings = useSettings();
   const window = getCurrentWindow();
@@ -104,25 +114,32 @@ export default function SettingsWindow() {
   };
 
   const renderCategoryContent = () => {
+    const baseProps = { settings };
+    const navigationProps = {
+      onNavigateToDevTools,
+      onNavigateToChat,
+      onNavigateToPermissions,
+    };
+
     switch (selectedCategory) {
       case "general":
-        return <GeneralSettings settings={settings} />;
+        return <GeneralSettings {...baseProps} />;
       case "voice":
-        return <VoiceSettings settings={settings} />;
+        return <VoiceSettings {...baseProps} />;
       case "ai":
-        return <AIProviderSettings settings={settings} />;
+        return <AIProviderSettings {...baseProps} />;
       case "network":
-        return <NetworkSettings settings={settings} />;
+        return <NetworkSettings {...baseProps} />;
       case "security":
-        return <SecuritySettings settings={settings} />;
+        return <SecuritySettings {...baseProps} {...navigationProps} />;
       case "shortcuts":
-        return <ShortcutsSettings settings={settings} />;
+        return <ShortcutsSettings {...baseProps} />;
       case "tools":
-        return <ToolsSettings settings={settings} />;
+        return <ToolsSettings {...baseProps} />;
       case "advanced":
-        return <AdvancedSettings settings={settings} />;
+        return <AdvancedSettings {...baseProps} {...navigationProps} />;
       default:
-        return <GeneralSettings settings={settings} />;
+        return <GeneralSettings {...baseProps} />;
     }
   };
 

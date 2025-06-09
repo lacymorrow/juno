@@ -74,4 +74,7 @@ export interface MCPToolInfo {
 
 export interface SettingsSectionProps {
   settings: ReturnType<typeof useSettings>;
+  onNavigateToDevTools?: () => void;
+  onNavigateToChat?: () => void;
+  onNavigateToPermissions?: () => void;
 }
