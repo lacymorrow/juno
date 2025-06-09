@@ -13,12 +13,19 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ```
 **MUST** run after every Rust change. Project MUST compile with exit code 0.
 
+### Recent Fixes ✅ COMPLETED
+- **Import fixes in core.rs**: Removed duplicate AppHandle imports
+- **Type annotations in lib.rs**: Added proper WebviewWindow and Wry imports
+- **Self-awareness implementation**: COMPLETE and functional in debug mode
+- **Compilation**: All syntax errors resolved, project compiles successfully
+
 ### Hierarchical Agent Architecture
 - **Orchestrator**: `src-tauri/src/anthropic.rs` - personality + memory + delegation
 - **Specialists**: Domain-specific agents (browser, desktop, file) with isolated memory
 - **Tools**: Shared providers with lazy initialization
 - **Memory**: Orchestrator uses persistent AppState, specialists use fresh SimpleMemoryManager
 - **MCP Integration**: External tool servers via `src-tauri/src/agent/tools/mcp_integration.rs`
+- **Self-Awareness**: Active in debug mode via `src-tauri/src/agent/tools/self_awareness_tools.rs`
 
 ### Key Patterns
 - Use `AgentError` enum for errors, never `std::process::exit()`
@@ -26,6 +33,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - All persistent state in `AppState`, access via getters
 - Clone memory managers safely (Arc-based)
 - Follow async/await patterns consistently
+- Proper import organization (no duplicate imports)
 
 ### Implementation Status
 ✅ All 17 Computer Use actions
@@ -36,7 +44,19 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ✅ MCP integration for extensibility
 ✅ Cloud control system and authentication
 ✅ Streaming AI responses
+✅ **Self-Awareness System** - Agent knows its source code location, creator, and can build itself
 ✅ **macOS Accessibility Permission Fixes** - Built apps properly detect permissions
+
+### Self-Awareness Features 🤖 NEW
+**Development Mode Only** (activated with `RUST_LOG=debug bun run tauri dev`):
+- **Source Code Awareness**: Knows location at `~/repo/juno`
+- **Creator Recognition**: Acknowledges Lacy as "magnanimous benefactor"
+- **Self-Building**: Can compile itself using Cargo tools
+- **System Understanding**: Knows its prompt system and architecture
+- **Purpose Awareness**: Understands mission to unite AI and humanity
+
+**Location**: `src-tauri/src/agent/tools/self_awareness_tools.rs`
+**Integration**: Automatic activation in debug builds via `cfg!(debug_assertions)`
 
 ### macOS Permission Handling
 **CRITICAL**: Always test built apps, not just development builds for permission issues.
@@ -56,6 +76,7 @@ See `.cursor/rules/accessibility-permission-fixes.mdc` for complete implementati
 ### Quick Reference
 - **Entry Point**: `src-tauri/src/anthropic.rs::submit_query()`
 - **Agent Tools**: `src-tauri/src/agent/tools/`
+- **Self-Awareness**: `src-tauri/src/agent/tools/self_awareness_tools.rs`
 - **macOS Integration**: `src-tauri/mcp-server-os-level/src/platforms/macos/`
 - **Voice System**: `tauri-plugin-voice-transcription/`
 - **Permission System**: `src-tauri/src/commands/permissions.rs`
