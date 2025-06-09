@@ -18,6 +18,9 @@ use super::auth::DeviceAuth;
 use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
 
+// Type alias for WebSocket sender to simplify function signatures
+type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
+
 /// Cloud client for WebSocket communication
 #[derive(Debug)]
 pub struct CloudClient {
@@ -249,7 +252,7 @@ impl CloudClient {
     }
 
     /// Authenticate with the cloud server
-    async fn authenticate(&self, ws_sender: &mut futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>) -> Result<(), CloudError> {
+    async fn authenticate(&self, ws_sender: &mut WsSender) -> Result<(), CloudError> {
         info!("Authenticating with cloud server");
 
         let auth_data = self.auth.create_auth_message()?;
@@ -272,7 +275,7 @@ impl CloudClient {
     }
 
     /// Handle incoming WebSocket message
-    async fn handle_message(&self, text: String, ws_sender: Arc<TokioMutex<futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>>) -> Result<(), CloudError> {
+    async fn handle_message(&self, text: String, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
         debug!("Received message: {}", text);
 
         let message: WebSocketMessage = serde_json::from_str(&text)?;
@@ -316,7 +319,7 @@ impl CloudClient {
     }
 
     /// Handle incoming command from cloud
-    async fn handle_command(&self, command: CloudCommand, ws_sender: Arc<TokioMutex<futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>>) -> Result<(), CloudError> {
+    async fn handle_command(&self, command: CloudCommand, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
         info!("Processing command from cloud: {}", command.id);
 
         // Process the command
