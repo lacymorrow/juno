@@ -33,7 +33,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
-import Settings from "./components/Settings";
 import "./styles/globals.css";
 
 // Type for conversation messages
@@ -138,7 +137,7 @@ interface AgentEventTauri {
 // --- End Agent Event Types ---
 
 // Type for view state
-type AppView = "chat" | "settings" | "devtools" | "permissions";
+type AppView = "chat" | "devtools" | "permissions";
 
 // Simple debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
@@ -429,7 +428,10 @@ function App() {
   useEffect(() => {
     const unlisten = listen<string>("settings-requested", (event) => {
       console.log("Settings requested from menu:", event.payload);
-      setCurrentView("settings");
+      // Open settings window instead of navigating to settings view
+      invoke("open_settings_window").catch((error) => {
+        console.error("Failed to open settings window:", error);
+      });
     });
 
     return () => {
@@ -457,8 +459,10 @@ function App() {
       const helpType = event.payload;
 
       if (helpType === "shortcuts") {
-        // Show keyboard shortcuts - could navigate to settings or show modal
-        setCurrentView("settings");
+        // Show keyboard shortcuts - open settings window instead of view
+        invoke("open_settings_window").catch((error) => {
+          console.error("Failed to open settings window:", error);
+        });
       } else {
         // General help - could open documentation or show help modal
         console.log("General help requested");
@@ -1019,9 +1023,7 @@ function App() {
               <DogIcon size={32} className="text-blue-500" />
               <div>
                 <h1 className="text-xl font-bold">
-                  {currentView === "settings"
-                    ? "Settings"
-                    : currentView === "devtools"
+                  {currentView === "devtools"
                     ? "Developer Tools"
                     : currentView === "permissions"
                     ? "Permissions"
@@ -1071,9 +1073,8 @@ function App() {
             )}
 
             <div className="flex items-center gap-2">
-              {/* Back Button - show for settings and devtools views */}
-              {(currentView === "settings" ||
-                currentView === "devtools" ||
+              {/* Back Button - show for devtools and permissions views */}
+              {(currentView === "devtools" ||
                 currentView === "permissions") && (
                 <Button
                   variant="outline"
@@ -1103,17 +1104,7 @@ function App() {
           </header>
 
           {/* Main Content Area - Conditional based on current view */}
-          {currentView === "settings" ? (
-            <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full">
-                <Settings
-                  onNavigateToDevTools={() => setCurrentView("devtools")}
-                  onNavigateToChat={() => setCurrentView("chat")}
-                  onNavigateToPermissions={() => setCurrentView("permissions")}
-                />
-              </ScrollArea>
-            </div>
-          ) : currentView === "devtools" ? (
+          {currentView === "devtools" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
               <ScrollArea className="h-full w-full p-4">
                 <h2 className="text-lg font-semibold mb-3 border-b pb-2">

@@ -1,5 +1,5 @@
 import "../styles/globals.css"; // Make sure global styles are available
-import SettingsWindow from "./SettingsWindow";
+import { SettingsWindow } from "./settings";
 
 export default function SettingsRoute() {
   return (
