@@ -273,6 +273,10 @@ use crate::commands::mcp::{
     set_mcp_server_enabled,
     test_mcp_server_connection,
     initialize_mcp_servers,
+    get_mcp_diagnostics,
+    restart_mcp_server_with_diagnostics,
+    troubleshoot_mcp_issues,
+    apply_mcp_quick_fixes,
 };
 
 // Added for selector parsing
@@ -831,6 +835,10 @@ pub fn run() {
             set_mcp_server_enabled,
             test_mcp_server_connection,
             initialize_mcp_servers,
+            get_mcp_diagnostics,
+            restart_mcp_server_with_diagnostics,
+            troubleshoot_mcp_issues,
+            apply_mcp_quick_fixes,
             // Always Listening Commands
             start_always_listening_mode,
             stop_always_listening_mode,

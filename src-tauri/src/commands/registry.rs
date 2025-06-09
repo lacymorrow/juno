@@ -34,6 +34,12 @@ macro_rules! generate_invoke_handler {
             get_mcp_server_statuses,
             execute_mcp_task,
 
+            // MCP Diagnostics Commands
+            get_mcp_diagnostics,
+            restart_mcp_server_with_diagnostics,
+            troubleshoot_mcp_issues,
+            apply_mcp_quick_fixes,
+
             // Workflow Commands
             get_workflow_templates,
             execute_workflow_template,
@@ -230,7 +236,11 @@ pub mod categories {
         "update_mcp_server",
         "set_mcp_server_enabled",
         "test_mcp_server_connection",
-        "initialize_mcp_servers"
+        "initialize_mcp_servers",
+        "get_mcp_diagnostics",
+        "restart_mcp_server_with_diagnostics",
+        "troubleshoot_mcp_issues",
+        "apply_mcp_quick_fixes",
     ];
 
     /// Workflow orchestration commands (handled by commands/orchestrator.rs)
@@ -284,7 +294,7 @@ pub mod categories {
         "global_type_text"
     ];
 
-    /// Development keyboard commands  
+    /// Development keyboard commands
     pub const DEV_KEYBOARD: &[&str] = &[
         "dev_type_text",
         "dev_press_key",
