@@ -1,0 +1,40 @@
+name: juno - cloud - backend
+services:
+- name: api
+source_dir: /
+github:
+repo: your - username / your - repo
+branch: main
+run_command: npm start
+build_command: npm install
+environment_slug: node - js
+instance_count: 1
+instance_size_slug: basic - xxs
+http_port: 8080
+health_check:
+http_path: /health
+env:
+- key: NODE_ENV
+value: production
+    - key: PORT
+value: "8080"
+    - key: JWT_SECRET
+value: your - jwt - secret - here
+type: SECRET
+    - key: HMAC_SECRET
+value: your - hmac - secret - here
+type: SECRET
+    - key: DB_PATH
+value: /data/juno.db
+    - key: LOG_LEVEL
+value: info
+    - key: RATE_LIMIT_MAX_REQUESTS
+value: "100"
+    - key: ALLOWED_ORIGINS
+value: "*"
+databases:
+- engine: PG
+name: juno - db
+num_nodes: 1
+size: db - s - dev - database
+version: "14"

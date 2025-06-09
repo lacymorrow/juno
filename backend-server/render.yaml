@@ -1,0 +1,28 @@
+services:
+- type: web
+name: juno - cloud - backend
+env: node
+plan: starter
+buildCommand: npm install
+startCommand: npm start
+envVars:
+- key: NODE_ENV
+value: production
+    - key: PORT
+value: 8080
+    - key: JWT_SECRET
+generateValue: true
+    - key: HMAC_SECRET
+generateValue: true
+    - key: DB_PATH
+value: /opt/render / project / data / juno.db
+    - key: LOG_LEVEL
+value: info
+    - key: RATE_LIMIT_MAX_REQUESTS
+value: 100
+    - key: ALLOWED_ORIGINS
+value: "*"
+disk:
+name: data
+mountPath: /opt/render / project / data
+sizeGB: 1
