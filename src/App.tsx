@@ -6,6 +6,7 @@ import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { JsxMessageRenderer, isJsxContent } from "@/components/ui/jsx-message-renderer";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -46,6 +47,7 @@ type ChatMessage = {
     | "tool_call_request"
     | "tool_call_result";
   content: string;
+  isJsx?: boolean; // Flag to indicate if content should be rendered as JSX
   screenshot_base64?: string; // Optional base64 screenshot data
   tool_name?: string;
   tool_args?: any;
@@ -286,6 +288,7 @@ function App() {
           const assistantMessage: ChatMessage = {
             role: "assistant",
             content: response.text,
+            isJsx: isJsxContent(response.text), // Auto-detect JSX content
             screenshot_base64: response.screenshot_base64,
             timestamp: Date.now(),
           };
@@ -890,6 +893,7 @@ function App() {
               return {
                 ...msg,
                 content: complete_text,
+                isJsx: isJsxContent(complete_text), // Auto-detect JSX in completed stream
                 isStreaming: false,
               };
             }
@@ -1271,6 +1275,8 @@ function App() {
                                       <span>✓</span>
                                       <span>Task completed successfully</span>
                                     </span>
+                                  ) : msg.isJsx || (msg.role === "assistant" && isJsxContent(msg.content)) ? (
+                                    <JsxMessageRenderer jsx={msg.content} />
                                   ) : (
                                     msg.content
                                   )}
