@@ -1,3 +1,7 @@
+//! Tool configuration management for all agent tools.
+//! Handles categorization, enablement controls, persistence, and MCP server integration.
+//! Used by: Agent initialization and settings management for tool control.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::fs;
@@ -8,7 +12,8 @@ use tracing::info;
 // Re-export MCP types for convenience
 pub use super::mcp_integration::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
 
-/// Categories of tools for organization in the UI
+/// Tool category definitions for organizing tools by functionality.
+/// Used by: Settings UI and tool management for logical grouping.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ToolCategory {
     /// Official Anthropic Computer Use tools (screenshot, mouse, keyboard, etc.)
@@ -26,6 +31,8 @@ pub enum ToolCategory {
 }
 
 impl ToolCategory {
+    /// Returns the human-readable display name for the category.
+    /// Used by: Settings UI for category labels and display.
     pub fn display_name(&self) -> &'static str {
         match self {
             ToolCategory::AnthropicComputerUse => "Anthropic Computer Use",
@@ -37,6 +44,8 @@ impl ToolCategory {
         }
     }
 
+    /// Returns a description of what tools are in this category.
+    /// Used by: Settings UI for tooltips and help text.
     pub fn description(&self) -> &'static str {
         match self {
             ToolCategory::AnthropicComputerUse => "Official Anthropic Computer Use tools for screen interaction",
@@ -48,6 +57,8 @@ impl ToolCategory {
         }
     }
 
+    /// Returns all available tool categories.
+    /// Used by: Settings UI for iterating over all categories.
     pub fn all_categories() -> Vec<ToolCategory> {
         vec![
             ToolCategory::AnthropicComputerUse,
@@ -60,7 +71,9 @@ impl ToolCategory {
     }
 }
 
-/// Configuration for an individual tool
+/// Configuration for an individual tool.
+/// Contains settings for enablement state, category membership, and metadata.
+/// Used by: Tool configuration manager and settings UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolConfig {
     pub name: String,
@@ -72,6 +85,13 @@ pub struct ToolConfig {
 }
 
 impl ToolConfig {
+    /// Creates a new tool configuration with basic settings.
+    /// Used by: Default tool initialization and configuration builders.
+    /// 
+    /// # Arguments
+    /// * `name` - Unique tool name
+    /// * `category` - Tool category for organization
+    /// * `enabled` - Initial enablement state
     pub fn new(name: String, category: ToolCategory, enabled: bool) -> Self {
         Self {
             name,
@@ -83,6 +103,13 @@ impl ToolConfig {
         }
     }
 
+    /// Creates a new configuration specifically for MCP tools.
+    /// Used by: MCP integration when adding tools from external servers.
+    /// 
+    /// # Arguments
+    /// * `name` - Tool name (will be prefixed with server name)
+    /// * `server_id` - ID of the MCP server providing this tool
+    /// * `enabled` - Initial enablement state
     pub fn new_mcp_tool(name: String, server_id: String, enabled: bool) -> Self {
         Self {
             name,
@@ -94,11 +121,15 @@ impl ToolConfig {
         }
     }
 
+    /// Adds a description to the tool configuration.
+    /// Used by: Configuration builders for documentation purposes.
     pub fn with_description(mut self, description: String) -> Self {
         self.description = Some(description);
         self
     }
 
+    /// Marks the tool as required (cannot be disabled).
+    /// Used by: Core system tools that are essential for agent operation.
     pub fn as_required(mut self) -> Self {
         self.required = true;
         self.enabled = true; // Required tools are always enabled
@@ -106,7 +137,9 @@ impl ToolConfig {
     }
 }
 
-/// Manager for tool configurations
+/// Manager for tool configurations.
+/// Central management system for tool configurations, enablement, and persistence.
+/// Used by: Main agent system for tool availability and settings management.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolConfigManager {
     pub tools: HashMap<String, ToolConfig>,
@@ -115,6 +148,8 @@ pub struct ToolConfigManager {
 }
 
 impl Default for ToolConfigManager {
+    /// Creates a default tool configuration manager with all standard tools.
+    /// Used by: Application initialization when no saved configuration exists.
     fn default() -> Self {
         let mut tools = HashMap::new();
         let mut category_enabled = HashMap::new();
@@ -140,12 +175,18 @@ impl Default for ToolConfigManager {
 }
 
 impl ToolConfigManager {
-    /// Create a new tool configuration manager with defaults
+    /// Create a new tool configuration manager with defaults.
+    /// Used by: Application initialization and configuration reset.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Load configuration from file or create default
+    /// Load configuration from file or create default.
+    /// Attempts to load existing configuration, creates default if missing.
+    /// Used by: Application startup for configuration initialization.
+    /// 
+    /// # Arguments
+    /// * `config_path` - Path to the configuration JSON file
     pub fn load_from_file(config_path: &PathBuf) -> Result<Self, String> {
         if config_path.exists() {
             let content = fs::read_to_string(config_path)
@@ -167,7 +208,12 @@ impl ToolConfigManager {
         }
     }
 
-    /// Save configuration to file
+    /// Save configuration to file.
+    /// Serializes current configuration to JSON and saves to specified file.
+    /// Used by: Settings UI and application shutdown for persistence.
+    /// 
+    /// # Arguments
+    /// * `config_path` - Path where configuration should be saved
     pub fn save_to_file(&self, config_path: &PathBuf) -> Result<(), String> {
         // Ensure parent directory exists
         if let Some(parent) = config_path.parent() {
@@ -185,14 +231,24 @@ impl ToolConfigManager {
         Ok(())
     }
 
-    /// Get configuration path for the app
+    /// Get configuration path for the app.
+    /// Determines appropriate path for storing tool configuration.
+    /// Used by: Application initialization for finding config file location.
+    /// 
+    /// # Arguments
+    /// * `app_handle` - Tauri app handle for path resolution
     pub fn get_config_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
         let app_dir = app_handle.path().app_config_dir()
             .map_err(|e| format!("Failed to get app config directory: {}", e))?;
         Ok(app_dir.join("tool_config.json"))
     }
 
-    /// Check if a tool is enabled
+    /// Check if a tool is enabled.
+    /// Checks both individual tool setting and category enablement state.
+    /// Used by: Agent tool execution system for availability decisions.
+    /// 
+    /// # Arguments
+    /// * `tool_name` - Name of the tool to check
     pub fn is_tool_enabled(&self, tool_name: &str) -> bool {
         if let Some(tool_config) = self.tools.get(tool_name) {
             if tool_config.required {
@@ -207,7 +263,13 @@ impl ToolConfigManager {
         }
     }
 
-    /// Enable or disable a specific tool
+    /// Enable or disable a specific tool.
+    /// Changes enablement state with protection against disabling required tools.
+    /// Used by: Settings UI for individual tool management.
+    /// 
+    /// # Arguments
+    /// * `tool_name` - Name of the tool to modify
+    /// * `enabled` - New enablement state
     pub fn set_tool_enabled(&mut self, tool_name: &str, enabled: bool) {
         if let Some(tool_config) = self.tools.get_mut(tool_name) {
             if !(tool_config.required && !enabled) {
@@ -216,7 +278,13 @@ impl ToolConfigManager {
         }
     }
 
-    /// Enable or disable an entire category of tools
+    /// Enable or disable an entire category of tools.
+    /// Changes enablement state for all tools in a category.
+    /// Used by: Settings UI for category-level management.
+    /// 
+    /// # Arguments
+    /// * `category` - Category to modify
+    /// * `enabled` - New enablement state
     pub fn set_category_enabled(&mut self, category: &ToolCategory, enabled: bool) {
         // Don't disable categories with required tools
         if !enabled {
@@ -229,14 +297,21 @@ impl ToolConfigManager {
         self.category_enabled.insert(category.clone(), enabled);
     }
 
-    /// Get all tools in a category
+    /// Get all tools in a category.
+    /// Returns all tool configurations belonging to the specified category.
+    /// Used by: Settings UI for category-specific display.
+    /// 
+    /// # Arguments
+    /// * `category` - Category to filter by
     pub fn get_tools_by_category(&self, category: &ToolCategory) -> Vec<&ToolConfig> {
         self.tools.values()
             .filter(|config| config.category == *category)
             .collect()
     }
 
-    /// Get all enabled tools
+    /// Get all enabled tools.
+    /// Returns all tool configurations that are currently enabled.
+    /// Used by: Tool discovery and agent initialization.
     pub fn get_enabled_tools(&self) -> Vec<&ToolConfig> {
         self.tools.iter()
             .filter(|(name, _)| self.is_tool_enabled(name))
@@ -244,17 +319,27 @@ impl ToolConfigManager {
             .collect()
     }
 
-    /// Get tool configuration by name
+    /// Get tool configuration by name.
+    /// Used by: Settings UI and configuration queries.
+    /// 
+    /// # Arguments
+    /// * `tool_name` - Name of the tool to retrieve
     pub fn get_tool_config(&self, tool_name: &str) -> Option<ToolConfig> {
         self.tools.get(tool_name).cloned()
     }
 
-    /// Add or update a tool configuration
+    /// Add or update a tool configuration.
+    /// Used by: MCP integration and dynamic tool registration.
+    /// 
+    /// # Arguments
+    /// * `config` - Tool configuration to add or update
     pub fn add_tool_config(&mut self, config: ToolConfig) {
         self.tools.insert(config.name.clone(), config);
     }
 
-    /// Get enabled tool names
+    /// Get enabled tool names.
+    /// Returns a list of names for all currently enabled tools.
+    /// Used by: Agent system for building available tool lists.
     pub fn get_enabled_tool_names(&self) -> Vec<String> {
         self.tools.iter()
             .filter(|(name, _)| self.is_tool_enabled(name))
@@ -262,7 +347,9 @@ impl ToolConfigManager {
             .collect()
     }
 
-    /// Reset configuration to defaults
+    /// Reset configuration to defaults.
+    /// Resets all tool configurations to default values while preserving MCP servers.
+    /// Used by: Settings UI reset functionality.
     pub fn reset_to_defaults(&mut self) {
         let mut new_config = Self::default();
         
@@ -274,12 +361,21 @@ impl ToolConfigManager {
 
     // MCP Server Management Methods
 
-    /// Add an MCP server configuration
+    /// Add an MCP server configuration.
+    /// Used by: MCP integration and settings UI for server management.
+    /// 
+    /// # Arguments
+    /// * `config` - MCP server configuration to add
     pub fn add_mcp_server(&mut self, config: MCPServerConfig) {
         self.mcp_servers.insert(config.id.clone(), config);
     }
 
-    /// Remove an MCP server configuration
+    /// Remove an MCP server configuration.
+    /// Removes server configuration and all associated tools.
+    /// Used by: Settings UI for server removal.
+    /// 
+    /// # Arguments
+    /// * `server_id` - ID of the server to remove
     pub fn remove_mcp_server(&mut self, server_id: &str) {
         self.mcp_servers.remove(server_id);
         
@@ -289,22 +385,39 @@ impl ToolConfigManager {
         });
     }
 
-    /// Get all MCP server configurations
+    /// Get all MCP server configurations.
+    /// Used by: Settings UI for server list display.
     pub fn get_mcp_servers(&self) -> Vec<MCPServerConfig> {
         self.mcp_servers.values().cloned().collect()
     }
 
-    /// Get MCP server configuration by ID
+    /// Get MCP server configuration by ID.
+    /// Used by: MCP integration for server management.
+    /// 
+    /// # Arguments
+    /// * `server_id` - ID of the server to retrieve
     pub fn get_mcp_server(&self, server_id: &str) -> Option<MCPServerConfig> {
         self.mcp_servers.get(server_id).cloned()
     }
 
-    /// Update MCP server configuration
+    /// Update MCP server configuration.
+    /// Used by: Settings UI for server configuration changes.
+    /// 
+    /// # Arguments
+    /// * `config` - Updated server configuration
     pub fn update_mcp_server(&mut self, config: MCPServerConfig) {
         self.mcp_servers.insert(config.id.clone(), config);
     }
 
     /// Add tools from an MCP server
+    /// 
+    /// Creates tool configurations for all tools discovered from an MCP server.
+    /// 
+    /// Used by: MCP integration when server tools are discovered
+    /// 
+    /// # Arguments
+    /// * `server_id` - ID of the server providing the tools
+    /// * `tools` - List of discovered tools from the server
     pub fn add_mcp_tools(&mut self, server_id: &str, tools: Vec<MCPToolInfo>) {
         for tool_info in tools {
             let tool_config = ToolConfig::new_mcp_tool(
@@ -318,6 +431,11 @@ impl ToolConfigManager {
     }
 
     /// Get all MCP tools for a specific server
+    /// 
+    /// Used by: Settings UI for server-specific tool display
+    /// 
+    /// # Arguments
+    /// * `server_id` - ID of the server to filter by
     pub fn get_mcp_tools_for_server(&self, server_id: &str) -> Vec<&ToolConfig> {
         self.tools.values()
             .filter(|config| {
@@ -328,6 +446,11 @@ impl ToolConfigManager {
     }
 
     /// Check if an MCP server is enabled
+    /// 
+    /// Used by: MCP integration for server management decisions
+    /// 
+    /// # Arguments
+    /// * `server_id` - ID of the server to check
     pub fn is_mcp_server_enabled(&self, server_id: &str) -> bool {
         self.mcp_servers.get(server_id)
             .map(|config| config.enabled)
@@ -335,6 +458,12 @@ impl ToolConfigManager {
     }
 
     /// Enable or disable an MCP server
+    /// 
+    /// Used by: Settings UI for server enablement control
+    /// 
+    /// # Arguments
+    /// * `server_id` - ID of the server to modify
+    /// * `enabled` - New enablement state
     pub fn set_mcp_server_enabled(&mut self, server_id: &str, enabled: bool) {
         if let Some(server_config) = self.mcp_servers.get_mut(server_id) {
             server_config.enabled = enabled;
@@ -342,6 +471,10 @@ impl ToolConfigManager {
     }
 
     // Default tool initialization methods
+
+    /// Initializes default Anthropic Computer Use tools
+    /// 
+    /// Used by: Default configuration creation
     fn add_default_anthropic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let anthropic_tools = vec![
             ("screenshot", "Take a screenshot of the current screen"),
@@ -367,6 +500,9 @@ impl ToolConfigManager {
         }
     }
 
+    /// Initializes default desktop automation tools
+    /// 
+    /// Used by: Default configuration creation
     fn add_default_desktop_tools(tools: &mut HashMap<String, ToolConfig>) {
         let desktop_tools = vec![
             ("launch_application", "Launch applications by name"),
@@ -388,6 +524,9 @@ impl ToolConfigManager {
         }
     }
 
+    /// Initializes default browser automation tools
+    /// 
+    /// Used by: Default configuration creation
     fn add_default_browser_tools(tools: &mut HashMap<String, ToolConfig>) {
         let browser_tools = vec![
             ("browser_navigate", "Navigate to a URL"),
@@ -409,6 +548,9 @@ impl ToolConfigManager {
         }
     }
 
+    /// Initializes default timer and scheduling tools
+    /// 
+    /// Used by: Default configuration creation
     fn add_default_timer_tools(tools: &mut HashMap<String, ToolConfig>) {
         let timer_tools = vec![
             ("create_timer", "Create a scheduled timer"),
@@ -428,6 +570,9 @@ impl ToolConfigManager {
         }
     }
 
+    /// Initializes default basic file and text tools
+    /// 
+    /// Used by: Default configuration creation
     fn add_default_basic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let basic_tools = vec![
             ("read_file", "Read file contents"),
@@ -451,6 +596,11 @@ impl ToolConfigManager {
     }
 
     /// Ensure all default tools are present (for backwards compatibility)
+    /// 
+    /// Adds any missing default tools to existing configurations to handle
+    /// configuration file upgrades and new tool additions.
+    /// 
+    /// Used by: Configuration loading for backwards compatibility
     fn ensure_default_tools(tools: &mut HashMap<String, ToolConfig>) {
         let mut default_tools = HashMap::new();
         Self::add_default_anthropic_tools(&mut default_tools);

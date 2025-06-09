@@ -1,3 +1,7 @@
+//! Enhanced coding tools for development workflows and IDE integration.
+//! Provides project analysis, multi-file planning, code review, and smart file creation.
+//! Used by: Main agent orchestrator for coding tasks.
+
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -11,17 +15,23 @@ use crate::agent::traits::ToolProvider;
 use crate::agent::structs::AgentError;
 use crate::state::AppState;
 
-/// Enhanced coding tools for sophisticated development workflows
+/// Enhanced coding tools for sophisticated development workflows.
+/// Offers project analysis, multi-file refactoring, IDE integration, and code review.
+/// Used by: Main agent orchestrator for all coding-related tasks.
 pub struct EnhancedCodingToolProvider {
     app_state: AppState,
 }
 
 impl EnhancedCodingToolProvider {
+    /// Creates a new enhanced coding tool provider.
+    /// Used by: Tool registration system during agent initialization.
     pub fn new(app_state: AppState) -> Self {
         Self { app_state }
     }
 
-    /// Analyze codebase structure and provide project context
+    /// Analyzes codebase structure and provides project context.
+    /// Detects technologies, identifies key files, and provides development recommendations.
+    /// Used by: Main agent when starting work on a new project or when context is needed.
     async fn analyze_project_structure(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
         let project_path = tool_call.input.get("project_path")
             .and_then(|v| v.as_str())
@@ -67,7 +77,9 @@ impl EnhancedCodingToolProvider {
         })
     }
 
-    /// Plan multi-file changes for complex refactoring
+    /// Plans multi-file changes for complex refactoring operations.
+    /// Analyzes dependencies and creates execution order for coordinated changes.
+    /// Used by: Main agent when performing large refactoring operations or feature additions.
     async fn plan_multi_file_changes(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
         let description = tool_call.input.get("description")
             .and_then(|v| v.as_str())
@@ -121,7 +133,9 @@ impl EnhancedCodingToolProvider {
         })
     }
 
-    /// Communicate directly with Cursor IDE
+    /// Communicates directly with Cursor IDE for enhanced development experience.
+    /// Sends messages, opens files, and provides navigation commands to IDE.
+    /// Used by: All coding tools when IDE interaction is needed.
     async fn communicate_with_cursor(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
         let message_type = tool_call.input.get("type")
             .and_then(|v| v.as_str())
@@ -209,7 +223,9 @@ impl EnhancedCodingToolProvider {
         })
     }
 
-    /// Generate comprehensive code review
+    /// Generates comprehensive code review with quality metrics and recommendations.
+    /// Analyzes multiple files for code quality and provides actionable feedback.
+    /// Used by: Main agent when code quality assessment is requested.
     async fn generate_code_review(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
         let default_files = vec![];
         let file_paths = tool_call.input.get("files")
@@ -264,7 +280,9 @@ impl EnhancedCodingToolProvider {
         })
     }
 
-    /// Smart file creation with templates and best practices
+    /// Creates files with intelligent templates based on language and purpose.
+    /// Applies best practices and common patterns automatically.
+    /// Used by: Main agent when creating new files or scaffolding project structure.
     async fn smart_create_file(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
         let file_path = tool_call.input.get("file_path")
             .and_then(|v| v.as_str())
@@ -311,8 +329,8 @@ impl EnhancedCodingToolProvider {
         })
     }
 
-    // Helper methods
-
+    /// Scans directory structure and returns organized file/folder information.
+    /// Used by: analyze_project_structure for building project overview.
     async fn scan_directory_structure(&self, path: &str) -> Result<Value, AgentError> {
         let mut structure = HashMap::new();
 
@@ -336,6 +354,8 @@ impl EnhancedCodingToolProvider {
         Ok(json!(structure))
     }
 
+    /// Detects project type based on configuration files and structure.
+    /// Used by: analyze_project_structure for technology identification.
     async fn detect_project_type(&self, path: &str) -> Result<Value, AgentError> {
         let mut project_info = HashMap::new();
 
@@ -368,6 +388,8 @@ impl EnhancedCodingToolProvider {
         Ok(json!(project_info))
     }
 
+    /// Identifies important files commonly found in projects.
+    /// Used by: analyze_project_structure for highlighting key project files.
     async fn find_key_files(&self, path: &str) -> Result<Vec<String>, AgentError> {
         let mut key_files = Vec::new();
 
@@ -389,6 +411,8 @@ impl EnhancedCodingToolProvider {
         Ok(key_files)
     }
 
+    /// Analyzes file dependencies by parsing import/require statements.
+    /// Used by: plan_multi_file_changes for dependency analysis.
     async fn analyze_file_dependencies(&self, file_path: &str) -> Result<Vec<String>, AgentError> {
         let mut dependencies = Vec::new();
 
@@ -409,6 +433,8 @@ impl EnhancedCodingToolProvider {
         Ok(dependencies)
     }
 
+    /// Determines optimal order for making changes across multiple files.
+    /// Used by: plan_multi_file_changes for creating execution strategy.
     async fn determine_change_order(&self, files: &[Value]) -> Result<Vec<String>, AgentError> {
         // Simple ordering: dependencies first, then implementations
         let mut ordered = Vec::new();
@@ -429,6 +455,8 @@ impl EnhancedCodingToolProvider {
         Ok(ordered)
     }
 
+    /// Assigns priority to files based on type (headers first, tests last).
+    /// Used by: determine_change_order for sorting files by dependency priority.
     fn get_file_priority(&self, file_path: &str) -> u8 {
         if file_path.ends_with(".h") || file_path.ends_with(".hpp") || file_path.ends_with(".d.ts") {
             0 // Headers/type definitions first
@@ -441,6 +469,8 @@ impl EnhancedCodingToolProvider {
         }
     }
 
+    /// Opens a file in Cursor IDE using computer use capabilities.
+    /// Used by: communicate_with_cursor for file opening operations.
     async fn open_file_in_cursor(&self, file_path: &str, line_number: Option<u64>) -> Result<Value, AgentError> {
         // This would use the computer use capabilities to open file in Cursor
         // For now, return a structured command that could be executed
@@ -458,6 +488,8 @@ impl EnhancedCodingToolProvider {
         Ok(json!(command))
     }
 
+    /// Reviews a single file for code quality and issues.
+    /// Used by: generate_code_review for per-file analysis.
     async fn review_single_file(&self, file_path: &str, _focus_areas: &[Value]) -> Result<Value, AgentError> {
         let mut review = HashMap::new();
         review.insert("file", json!(file_path));
@@ -487,6 +519,8 @@ impl EnhancedCodingToolProvider {
         Ok(json!(review))
     }
 
+    /// Calculates overall quality score from individual file reviews.
+    /// Used by: generate_code_review for aggregating quality metrics.
     fn calculate_overall_score(&self, file_reviews: &[Value]) -> u8 {
         if file_reviews.is_empty() {
             return 0;
@@ -499,6 +533,8 @@ impl EnhancedCodingToolProvider {
         ((total_score / file_reviews.len() as u64) as u8).min(10)
     }
 
+    /// Generates actionable recommendations from review results.
+    /// Used by: generate_code_review for creating improvement suggestions.
     fn generate_recommendations(&self, file_reviews: &[Value], _focus_areas: &[Value]) -> Vec<String> {
         let mut recommendations = Vec::new();
 
@@ -516,6 +552,8 @@ impl EnhancedCodingToolProvider {
         recommendations
     }
 
+    /// Detects programming language from file extension.
+    /// Used by: smart_create_file for template selection.
     fn detect_language_from_path(&self, file_path: &str) -> String {
         let extension = Path::new(file_path)
             .extension()
@@ -543,6 +581,8 @@ impl EnhancedCodingToolProvider {
         }
     }
 
+    /// Generates appropriate file template based on language and content type.
+    /// Used by: smart_create_file for creating structured file content.
     async fn generate_file_template(&self, language: &str, content_type: &str, purpose: &str) -> Result<String, AgentError> {
         let template = match (language, content_type) {
             ("Rust", "module") => {
@@ -579,6 +619,8 @@ impl EnhancedCodingToolProvider {
         Ok(template)
     }
 
+    /// Creates file with specified content and returns creation metadata.
+    /// Used by: smart_create_file for actual file creation.
     async fn create_file_with_content(&self, file_path: &str, content: &str) -> Result<Value, AgentError> {
         match fs::write(file_path, content) {
             Ok(_) => {
@@ -598,6 +640,8 @@ impl EnhancedCodingToolProvider {
 
 #[async_trait]
 impl ToolProvider for EnhancedCodingToolProvider {
+    /// Executes the specified enhanced coding tool.
+    /// Used by: Agent tool execution system when coding tools are invoked.
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         match tool_call.name.as_str() {
             "analyze_project_structure" => self.analyze_project_structure(&tool_call).await,
@@ -609,6 +653,8 @@ impl ToolProvider for EnhancedCodingToolProvider {
         }
     }
 
+    /// Lists all available enhanced coding tools with their definitions.
+    /// Used by: Agent initialization and tool discovery systems.
     async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
         Ok(vec![
             ToolDefinition {
