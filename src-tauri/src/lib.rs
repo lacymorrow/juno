@@ -653,7 +653,7 @@ pub fn run() {
             global_type_text,
             hold_key,
             release_key,
-            // Development keyboard functions  
+            // Development keyboard functions
             commands::dev::dev_type_text,
             commands::dev::dev_press_key,
             commands::dev::dev_global_type_text,
@@ -2219,8 +2219,10 @@ mod tests {
 
         // Test that handle_non_desktop_cli_commands returns bool, not exits
         let cli = crate::cli::Cli {
-            tts_provider: None,
+            test_focused_element_ns: false,
             check_accessibility: false,
+            tts_provider: None,
+            tts_text: None,
         };
 
         let result = runner::handle_non_desktop_cli_commands(&cli);
