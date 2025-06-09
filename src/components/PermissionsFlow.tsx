@@ -4,15 +4,15 @@ import {
   AlertCircle,
   CheckCircle,
   ExternalLink,
+  Info,
+  Keyboard,
+  Lock,
+  Mic,
+  Monitor,
   RefreshCw,
   Settings,
-  Zap,
-  Lock,
   Shield,
-  Mic,
-  Keyboard,
-  Monitor,
-  Info,
+  Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription } from "./ui/alert";
@@ -325,14 +325,31 @@ export function PermissionsFlow({
   const getPermissionBadge = (permission: PermissionStatus) => {
     if (permission.granted) {
       return (
-        <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
+        <Badge
+          variant="outline"
+          className="text-green-600 border-green-200 bg-green-50"
+        >
           ✓ Granted
         </Badge>
       );
     } else if (permission.required) {
-      return <Badge variant="destructive" className="bg-red-100 text-red-700 border-red-300">⚠ Required</Badge>;
+      return (
+        <Badge
+          variant="destructive"
+          className="bg-red-100 text-red-700 border-red-300"
+        >
+          ⚠ Required
+        </Badge>
+      );
     } else {
-      return <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 border-yellow-300">💡 Optional</Badge>;
+      return (
+        <Badge
+          variant="secondary"
+          className="bg-yellow-100 text-yellow-700 border-yellow-300"
+        >
+          💡 Optional
+        </Badge>
+      );
     }
   };
 
@@ -357,11 +374,11 @@ export function PermissionsFlow({
     onRequestEnhanced?: () => void
   ) => {
     const isRequired = permission.required;
-    const cardClassName = permission.granted 
-      ? "transition-colors border-green-200 bg-green-50/30" 
-      : isRequired 
-        ? "transition-colors border-red-200 bg-red-50/30" 
-        : "transition-colors border-yellow-200 bg-yellow-50/30";
+    const cardClassName = permission.granted
+      ? "transition-colors border-green-200 bg-green-50/30"
+      : isRequired
+      ? "transition-colors border-red-200 bg-red-50/30"
+      : "transition-colors border-yellow-200 bg-yellow-50/30";
 
     return (
       <Card key={permission.permissionType} className={cardClassName}>
@@ -375,7 +392,10 @@ export function PermissionsFlow({
               <div className="flex-1">
                 <div className="flex items-center space-x-2 mb-1">
                   <CardTitle className="text-lg">
-                    {permission.permissionType.replace("_", " ").replace(/\b\w/g, l => l.toUpperCase())} Access
+                    {permission.permissionType
+                      .replace("_", " ")
+                      .replace(/\b\w/g, (l) => l.toUpperCase())}{" "}
+                    Access
                   </CardTitle>
                   {getPermissionBadge(permission)}
                 </div>
@@ -405,9 +425,22 @@ export function PermissionsFlow({
         <CardContent>
           {!permission.granted && (
             <div className="space-y-3">
-              <div className={`p-3 rounded-md border ${isRequired ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>
-                <p className={`text-sm ${isRequired ? 'text-red-800' : 'text-yellow-800'}`}>
-                  <strong>{isRequired ? 'Action Required:' : 'Optional Setup:'}</strong> {permission.instructions}
+              <div
+                className={`p-3 rounded-md border ${
+                  isRequired
+                    ? "bg-red-50 border-red-200"
+                    : "bg-yellow-50 border-yellow-200"
+                }`}
+              >
+                <p
+                  className={`text-sm ${
+                    isRequired ? "text-red-800" : "text-yellow-800"
+                  }`}
+                >
+                  <strong>
+                    {isRequired ? "Action Required:" : "Optional Setup:"}
+                  </strong>{" "}
+                  {permission.instructions}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -449,7 +482,9 @@ export function PermissionsFlow({
                       autoRedirectEnabled &&
                       permission.permissionType === "accessibility"
                         ? "outline"
-                        : isRequired ? "default" : "secondary"
+                        : isRequired
+                        ? "default"
+                        : "secondary"
                     }
                   >
                     {isRequestingPermission === permission.permissionType ? (
@@ -459,7 +494,9 @@ export function PermissionsFlow({
                       </>
                     ) : (
                       <>
-                        {isRequired ? "Grant Required Permission" : "Grant Optional Permission"}
+                        {isRequired
+                          ? "Grant Required Permission"
+                          : "Grant Optional Permission"}
                       </>
                     )}
                   </Button>
@@ -498,7 +535,9 @@ export function PermissionsFlow({
             <div className="flex items-center space-x-2 p-3 bg-green-50 rounded-md border border-green-200">
               <CheckCircle className="h-4 w-4 text-green-600" />
               <p className="text-sm text-green-800 font-medium">
-                Permission granted - {permission.permissionType.replace("_", " ")} access is working properly
+                Permission granted -{" "}
+                {permission.permissionType.replace("_", " ")} access is working
+                properly
               </p>
             </div>
           )}
@@ -611,61 +650,73 @@ export function PermissionsFlow({
       <div className="space-y-4">
         <div className="flex items-center space-x-2">
           <AlertCircle className="h-5 w-5 text-red-500" />
-          <h3 className="text-lg font-semibold text-red-800">Required Permissions</h3>
-          <Badge variant="destructive" className="bg-red-100 text-red-700">3 Required</Badge>
+          <h3 className="text-lg font-semibold text-red-800">
+            Required Permissions
+          </h3>
+          <Badge variant="destructive" className="bg-red-100 text-red-700">
+            2 Required
+          </Badge>
         </div>
         <p className="text-sm text-gray-600 mb-4">
-          These permissions are essential for Juno's core AI computer use functionality. Without them, Juno cannot automate tasks or interact with your desktop.
+          These permissions are essential for Juno's core AI computer use
+          functionality. Without them, Juno cannot automate tasks or interact
+          with your desktop.
         </p>
-        
+
         <div className="space-y-3">
           {/* Accessibility Permission */}
-          {permissions.accessibility.required && renderPermissionCard(
-            permissions.accessibility,
-            requestAccessibilityPermission,
-            autoRedirectEnabled
-              ? () => requestAccessibilityPermissionEnhanced(true)
-              : undefined
-          )}
+          {permissions.accessibility.required &&
+            renderPermissionCard(
+              permissions.accessibility,
+              requestAccessibilityPermission,
+              autoRedirectEnabled
+                ? () => requestAccessibilityPermissionEnhanced(true)
+                : undefined
+            )}
 
           {/* Screen Recording Permission */}
-          {permissions.screenRecording.required && renderPermissionCard(
-            permissions.screenRecording,
-            requestScreenRecordingPermission
-          )}
-
-          {/* Microphone Permission */}
-          {permissions.microphone.required && renderPermissionCard(
-            permissions.microphone,
-            requestMicrophonePermission
-          )}
+          {permissions.screenRecording.required &&
+            renderPermissionCard(
+              permissions.screenRecording,
+              requestScreenRecordingPermission
+            )}
         </div>
       </div>
 
       {/* Optional Permissions Section */}
-      {(!permissions.inputMonitoring.required || permissions.inputMonitoring) && (
-        <>
-          <Separator />
-          <div className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <Info className="h-5 w-5 text-yellow-600" />
-              <h3 className="text-lg font-semibold text-yellow-800">Optional Permissions</h3>
-              <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">Enhances Experience</Badge>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">
-              These permissions enhance Juno's functionality but are not required for basic operation. You can grant them now or skip and enable them later.
-            </p>
-            
-            <div className="space-y-3">
-              {/* Input Monitoring Permission */}
-              {!permissions.inputMonitoring.required && renderPermissionCard(
-                permissions.inputMonitoring,
-                requestInputMonitoringPermission
-              )}
-            </div>
-          </div>
-        </>
-      )}
+      <Separator />
+      <div className="space-y-4">
+        <div className="flex items-center space-x-2">
+          <Info className="h-5 w-5 text-yellow-600" />
+          <h3 className="text-lg font-semibold text-yellow-800">
+            Optional Permissions
+          </h3>
+          <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
+            Enhances Experience
+          </Badge>
+        </div>
+        <p className="text-sm text-gray-600 mb-4">
+          These permissions enhance Juno's functionality but are not required
+          for basic operation. You can grant them now or skip and enable them
+          later.
+        </p>
+
+        <div className="space-y-3">
+          {/* Microphone Permission */}
+          {!permissions.microphone.required &&
+            renderPermissionCard(
+              permissions.microphone,
+              requestMicrophonePermission
+            )}
+
+          {/* Input Monitoring Permission */}
+          {!permissions.inputMonitoring.required &&
+            renderPermissionCard(
+              permissions.inputMonitoring,
+              requestInputMonitoringPermission
+            )}
+        </div>
+      </div>
 
       {/* Success Footer */}
       {permissions.allGranted && (
@@ -679,7 +730,8 @@ export function PermissionsFlow({
                     🎉 Setup Complete!
                   </span>
                   <p className="text-green-700 text-sm mt-1">
-                    All permissions configured. Juno is ready for AI computer use.
+                    All permissions configured. Juno is ready for AI computer
+                    use.
                   </p>
                 </div>
               </div>
