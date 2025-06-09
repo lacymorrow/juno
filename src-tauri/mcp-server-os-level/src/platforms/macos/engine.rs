@@ -415,6 +415,7 @@ fn parse_modifiers(modifier_str: Option<&str>) -> CGEventFlags {
 }
 
 // Helper function to post keyboard events
+#[allow(dead_code)] // Used through computer_use_ai_sdk interface
 fn post_keyboard_event(
     key_code: u16,
     flags: CGEventFlags,
