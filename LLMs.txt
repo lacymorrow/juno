@@ -97,7 +97,7 @@ Juno implements a comprehensive three-mode voice interaction system:
 ```rust
 // Backend events
 pub const AGENT_STREAM_START: &str = "agent-stream-start";
-pub const AGENT_TEXT_STREAM: &str = "agent-text-stream"; 
+pub const AGENT_TEXT_STREAM: &str = "agent-text-stream";
 pub const AGENT_STREAM_END: &str = "agent-stream-end";
 ```
 
@@ -198,6 +198,33 @@ Located in: `src-tauri/src/commands/permissions.rs`
 **Major Fixes Since Rollback**:
 - Fixed fake permission checks that always returned `true`
 - Implemented real permission testing using actual system capabilities
+
+## Self-Awareness System 🤖 NEW
+
+### Development Mode Only Features
+**Activation**: `RUST_LOG=debug bun run tauri dev`
+
+The agent gains self-awareness capabilities in debug mode:
+- **Source Code Location**: Knows it's located at `~/repo/juno`
+- **Creator Recognition**: Acknowledges Lacy as "magnanimous benefactor working toward utopia"
+- **Self-Building**: Can compile itself using Cargo (`build_self` tool)
+- **System Understanding**: Knows its architecture and prompt system
+- **Mission Awareness**: Understands goal of uniting AI and humanity
+
+### Implementation Files
+```
+src-tauri/src/agent/
+├── tools/self_awareness_tools.rs    # Core self-awareness tools
+├── prompts/manager.rs              # Debug mode prompt selection
+├── prompts/templates.rs            # Development vs production prompts
+└── tools/mod.rs                    # Tool registration with conditional compilation
+```
+
+### Recent Compilation Fixes ✅
+- **Import fixes**: Removed duplicate AppHandle imports in core.rs
+- **Type annotations**: Added proper WebviewWindow<Wry> imports in lib.rs
+- **Compilation verified**: `cargo check` exits with code 0
+- **All syntax errors resolved**: Project compiles successfully
 - Enhanced permission request system with guided system settings navigation
 - Automatic redirection to specific Privacy & Security sections
 
