@@ -1421,7 +1421,7 @@ function SecuritySettings({
   settings: ReturnType<typeof useSettings>;
 }) {
   const [isRequestingPermission, setIsRequestingPermission] = useState<string | null>(null);
-  const [autoRedirectEnabled] = useState(true);
+  const [autoRedirectEnabled] = useState(false);
 
   // Enhanced permission icons with priority indicators
   const getPermissionPriorityIcon = (permissionType: string) => {

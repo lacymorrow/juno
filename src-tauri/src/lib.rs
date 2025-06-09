@@ -457,10 +457,10 @@ pub fn run() {
     let cli = cli::Cli::parse();
 
     // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
-    let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, true);
+    let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, false);
     let desktop_instance = match desktop_instance_result {
         Ok(instance) => {
-            tracing::info!("Desktop Automation Engine initialized successfully with auto-redirect");
+            tracing::info!("Desktop Automation Engine initialized successfully with auto-redirect disabled");
             Some(instance)
         },
         Err(e) => {
