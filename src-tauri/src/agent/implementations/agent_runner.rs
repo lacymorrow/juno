@@ -8,7 +8,10 @@ use crate::agent::structs::{
     AgentAction, AgentError, AgentState, Message, Role, // Removed ToolCall, ToolResult
 };
 use crate::agent::traits::{
-    AgentBrain, AgentRunnable, MemoryManager, ToolProvider, StreamingAgentBrain
+    AgentBrain,
+    AgentRunnable,
+    MemoryManager,
+    ToolProvider,
 };
 use crate::agent::tool_logger; // Added for logging
 use tauri::AppHandle; // Added for AppHandle

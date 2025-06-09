@@ -1,12 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH, Instant};
-use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot, watch};
-use tokio::time::{sleep, timeout};
-use tokio_tungstenite::{connect_async, tungstenite::Message, WebSocketStream, MaybeTlsStream};
-use futures_util::{SinkExt, StreamExt, stream::{SplitSink, SplitStream}};
-use url::Url;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot};
 use tracing::{info, warn, error, debug};
 use tauri::{AppHandle, Manager, Emitter};
 use uuid::Uuid;

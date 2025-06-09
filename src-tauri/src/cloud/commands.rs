@@ -2,22 +2,19 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use tauri::{AppHandle, Manager, Emitter};
+use tauri::{AppHandle, Manager};
 use tracing::{info, warn, error, debug};
 use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
+use serde_json;
 
 use super::types::{
     CloudError, CloudCommand, CloudCommandType, DeviceResponse, ResponseStatus, ResponseData,
-    AgentMode,
+    DeviceStatus,
+    HardwareInfo,
 };
 use super::security::CloudSecurity;
 use crate::state::AppState;
-use crate::cloud::types::{
-    CloudCommandPayload,
-    WebSocketMessage, MessageType,
-    SystemInfo,
-};
 
 /// Remote command that can be executed on the device
 #[derive(Debug, Clone, Serialize, Deserialize)]

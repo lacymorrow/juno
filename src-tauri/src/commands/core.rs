@@ -1,7 +1,9 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
 use crate::state::AppState;
-use tracing::{info};
+use std::env;
+use tauri::{AppHandle, State};
+use tracing::info;
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 
@@ -11,7 +13,6 @@ use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
 use tauri::AppHandle; // AppHandle needed for macos capture_screenshot_command
 #[cfg(not(target_os = "macos"))]
 use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consistency
-use tauri::State; // State is needed for several commands
 
 
 #[cfg(target_os = "macos")]
