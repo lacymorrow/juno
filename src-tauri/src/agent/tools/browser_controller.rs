@@ -1,3 +1,49 @@
+//! Browser Controller for Juno AI Computer Use Agent
+//!
+//! This module provides comprehensive browser automation capabilities using Playwright,
+//! enabling the agent to interact with web content, navigate pages, extract data, and
+//! perform complex web-based tasks.
+//!
+//! ## Core Features
+//!
+//! - **Multi-Strategy Connection**: CDP, persistent profiles, and fresh instances
+//! - **Cross-Platform Support**: macOS, Windows, and Linux browser detection
+//! - **Content Extraction**: Text, HTML, and structured data extraction
+//! - **Interactive Automation**: Clicking, typing, scrolling, and form interaction
+//! - **Screenshot Capture**: Full page and element-specific screenshots
+//! - **Navigation Control**: URL navigation with timeout and wait conditions
+//!
+//! ## Connection Strategies
+//!
+//! 1. **CDP Connection** - Fastest (~1-2 seconds) - Connects to existing browser via Chrome DevTools Protocol
+//! 2. **Persistent Profile** - Fast (~10-15 seconds) - Launches with user profile data
+//! 3. **Fresh Instance** - Fallback (~90+ seconds) - Clean browser launch
+//!
+//! ## Browser Support
+//!
+//! - Google Chrome
+//! - Microsoft Edge
+//! - Brave Browser
+//! - Chromium
+//!
+//! ## Tools Integration
+//!
+//! This controller powers the browser tools in `browser_tools.rs` and provides
+//! the underlying automation capabilities for web-based agent interactions.
+//!
+//! ## Used By
+//!
+//! - `browser_tools.rs` for high-level browser tool implementations
+//! - Main agent for web navigation and data extraction tasks
+//! - Enhanced coding tools for web development workflows
+//! - Research and information gathering workflows
+//!
+//! ## Security
+//!
+//! - Isolated browser contexts for security
+//! - Configurable download handling
+//! - User profile isolation options
+
 use playwright::Playwright;
 use playwright::api::{Browser, BrowserContext, Page};
 use serde_json::Value;
@@ -15,6 +61,12 @@ type ControllerResult<T> = Result<T, AgentError>;
 // Timeout defaults
 const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
 
+/// Browser automation controller using Playwright
+/// 
+/// Provides comprehensive browser automation capabilities with multiple connection
+/// strategies for optimal performance and reliability across different environments.
+/// 
+/// Used by: Browser tools and main agent for web automation tasks
 #[derive(Clone)]
 pub struct BrowserController {
     // Store Playwright components
@@ -28,6 +80,20 @@ pub struct BrowserController {
 }
 
 impl BrowserController {
+    /// Creates a new browser controller with optimized connection strategies
+    /// 
+    /// Attempts three connection methods in order of performance:
+    /// 1. CDP connection to existing browser (fastest)
+    /// 2. Launch with persistent user profile (fast)
+    /// 3. Fresh instance launch (fallback)
+    /// 
+    /// Used by: Browser tools initialization and agent startup
+    /// 
+    /// # Arguments
+    /// * `playwright` - Playwright instance for browser automation
+    /// 
+    /// # Returns
+    /// * Browser controller with established connection
     pub async fn new(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("BrowserController::new called - attempting optimized browser connection...");
 
@@ -51,6 +117,17 @@ impl BrowserController {
     }
 
     /// Strategy 1: Try to connect to an existing browser instance via CDP
+    /// 
+    /// Attempts to connect to running browser instances using Chrome DevTools Protocol
+    /// on common ports. This is the fastest connection method (~1-2 seconds).
+    /// 
+    /// Used by: new() as primary connection strategy
+    /// 
+    /// # Arguments
+    /// * `playwright` - Playwright instance for CDP connection
+    /// 
+    /// # Returns
+    /// * Browser controller connected via CDP or error if no existing browser found
     async fn try_connect_to_existing_browser(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("Attempting to connect to existing browser via CDP...");
 
@@ -119,6 +196,17 @@ impl BrowserController {
     }
 
     /// Strategy 2: Launch browser with persistent user profile
+    /// 
+    /// Launches browser using existing user profile data for faster startup
+    /// and access to bookmarks, extensions, and user preferences (~10-15 seconds).
+    /// 
+    /// Used by: new() as secondary connection strategy
+    /// 
+    /// # Arguments
+    /// * `playwright` - Playwright instance for browser launch
+    /// 
+    /// # Returns
+    /// * Browser controller with persistent profile or error if launch fails
     async fn try_launch_with_user_profile(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("Attempting to launch browser with user profile...");
 
@@ -195,6 +283,17 @@ impl BrowserController {
     }
 
     /// Strategy 3: Launch fresh browser instance (current behavior)
+    /// 
+    /// Creates a completely new browser instance with clean state.
+    /// Fallback method when other strategies fail (~90+ seconds).
+    /// 
+    /// Used by: new() as fallback connection strategy
+    /// 
+    /// # Arguments
+    /// * `playwright` - Playwright instance for fresh browser launch
+    /// 
+    /// # Returns
+    /// * Browser controller with fresh instance
     async fn launch_fresh_instance(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("Launching fresh browser instance (fallback method)...");
 
@@ -371,6 +470,14 @@ impl BrowserController {
     }
 
     /// Detect user profile directory based on OS and available browsers
+    /// 
+    /// Searches for browser profile directories in standard locations
+    /// across different operating systems and browser types.
+    /// 
+    /// Used by: try_launch_with_user_profile for profile detection
+    /// 
+    /// # Returns
+    /// * Path to user profile directory or error if none found
     fn detect_user_profile_directory() -> ControllerResult<String> {
         #[cfg(target_os = "macos")]
         {
@@ -433,6 +540,14 @@ impl BrowserController {
     }
 
     /// Detect browser executable and return (channel, path)
+    /// 
+    /// Searches for installed browsers in standard locations and returns
+    /// the first available browser with its channel name and executable path.
+    /// 
+    /// Used by: try_launch_with_user_profile for browser detection
+    /// 
+    /// # Returns
+    /// * Tuple of (channel_name, executable_path) or error if no browser found
     fn detect_browser_executable() -> ControllerResult<(String, PathBuf)> {
         #[cfg(target_os = "macos")]
         {
@@ -492,11 +607,27 @@ impl BrowserController {
     }
 
     /// Get connection method for debugging
+    /// 
+    /// Returns the method used to establish the browser connection,
+    /// useful for debugging and performance analysis.
+    /// 
+    /// Used by: Debugging and logging systems
+    /// 
+    /// # Returns
+    /// * String describing the connection method used
     pub fn get_connection_method(&self) -> &str {
         &self.connection_method
     }
 
-    // Helper to get or create a page, with enhanced error handling and recovery
+    /// Helper to get or create a page, with enhanced error handling and recovery
+    /// 
+    /// Ensures a valid page exists for browser operations, creating one if needed
+    /// and handling various error conditions with retry logic.
+    /// 
+    /// Used by: All browser operation methods for page access
+    /// 
+    /// # Returns
+    /// * Success if page is available, error if page creation fails
     async fn ensure_page_exists(&self) -> ControllerResult<()> {
         let mut retry_context = false;
 
@@ -583,8 +714,18 @@ impl BrowserController {
         Err(AgentError::ToolError("Failed to create new page after multiple attempts. The browser may need to be restarted.".to_string()))
     }
 
-    // --- Tool Implementation Methods ---
-
+    /// Navigate to a URL with configurable timeout and wait conditions
+    /// 
+    /// Navigates the browser to the specified URL with comprehensive error handling,
+    /// timeout configuration, and wait conditions for page load completion.
+    /// 
+    /// Used by: Browser tools for URL navigation tasks
+    /// 
+    /// # Arguments
+    /// * `args` - JSON object containing url and optional timeout parameters
+    /// 
+    /// # Returns
+    /// * Tool result with navigation success status and final URL
     pub async fn navigate(&self, args: &Value) -> ControllerResult<ToolResult> {
         let url = args["url"].as_str().ok_or_else(|| AgentError::ToolError("Missing 'url' argument".to_string()))?;
         let timeout_ms = args["timeout"].as_u64().unwrap_or(DEFAULT_NAVIGATION_TIMEOUT_MS);
@@ -625,6 +766,18 @@ impl BrowserController {
         }
     }
 
+    /// Get the current URL of the active page
+    /// 
+    /// Retrieves the current URL from the active browser page,
+    /// useful for navigation state tracking and debugging.
+    /// 
+    /// Used by: Browser tools for URL state queries
+    /// 
+    /// # Arguments
+    /// * `_args` - Unused parameters (for consistency with other methods)
+    /// 
+    /// # Returns
+    /// * Tool result containing the current page URL
     pub async fn get_current_url(&self, _args: &Value) -> ControllerResult<ToolResult> {
         // No need to ensure page exists if we just check Option
         let page_guard = self.page.lock().await;
@@ -652,7 +805,18 @@ impl BrowserController {
         }
     }
 
-    // Implementation for extract_content
+    /// Extract content from the current page
+    /// 
+    /// Extracts various types of content from the web page including text,
+    /// HTML, links, and structured data based on specified selectors.
+    /// 
+    /// Used by: Browser tools for content extraction and data gathering
+    /// 
+    /// # Arguments
+    /// * `args` - JSON object with extraction type and optional selectors
+    /// 
+    /// # Returns
+    /// * Tool result with extracted content in requested format
     pub async fn extract_content(&self, args: &Value) -> ControllerResult<ToolResult> {
         let selector = args["selector"].as_str().ok_or_else(|| AgentError::ToolError("Missing 'selector' argument for browser_extract_content".to_string()))?;
         let attribute = args["attribute"].as_str(); // Optional
@@ -731,7 +895,18 @@ impl BrowserController {
         }
     }
 
-    // Implementation for interact
+    /// Interact with page elements (click, type, scroll, etc.)
+    /// 
+    /// Performs various interactions with web page elements including clicking,
+    /// typing text, scrolling, and form manipulation with element selection.
+    /// 
+    /// Used by: Browser tools for page interaction and automation
+    /// 
+    /// # Arguments
+    /// * `args` - JSON object with interaction type, selectors, and parameters
+    /// 
+    /// # Returns
+    /// * Tool result with interaction success status and details
     pub async fn interact(&self, args: &Value) -> ControllerResult<ToolResult> {
         let action = args["action"].as_str().ok_or_else(||
             AgentError::ToolError("Missing 'action' argument for browser_interact".to_string()))?;
@@ -909,7 +1084,18 @@ impl BrowserController {
         }
     }
 
-    // Implementation for screenshot
+    /// Take a screenshot of the current page or specific elements
+    /// 
+    /// Captures screenshots of the entire page or specific elements with
+    /// configurable quality, format, and clipping options.
+    /// 
+    /// Used by: Browser tools for visual documentation and debugging
+    /// 
+    /// # Arguments
+    /// * `args` - JSON object with screenshot parameters and options
+    /// 
+    /// # Returns
+    /// * Tool result with base64-encoded screenshot data
     pub async fn screenshot(&self, args: &Value) -> ControllerResult<ToolResult> {
         let selector = args["selector"].as_str(); // Optional
         let full_page = args["full_page"].as_bool().unwrap_or(false);
@@ -1013,7 +1199,15 @@ impl BrowserController {
         }
     }
 
-    // Ensure browser is closed gracefully
+    /// Clean up browser resources and close connections
+    /// 
+    /// Gracefully shuts down the browser instance, closes all pages and contexts,
+    /// and cleans up associated resources to prevent memory leaks.
+    /// 
+    /// Used by: Application shutdown and resource cleanup
+    /// 
+    /// # Returns
+    /// * Success if cleanup completed, error if cleanup fails
     pub async fn cleanup(&self) -> Result<(), AgentError> {
         log::info!("Cleaning up browser controller resources...");
 
@@ -1047,8 +1241,13 @@ impl BrowserController {
     }
 }
 
-// Implement Drop to ensure cleanup happens if controller goes out of scope unexpectedly
 impl Drop for BrowserController {
+    /// Cleanup when BrowserController is dropped
+    /// 
+    /// Ensures proper resource cleanup when the controller goes out of scope,
+    /// preventing browser processes from remaining open.
+    /// 
+    /// Used by: Rust runtime during object destruction
     fn drop(&mut self) {
         // No automatic cleanup in Drop.
         // We'll only clean up explicitly when the app exits.

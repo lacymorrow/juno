@@ -1,3 +1,24 @@
+//! # Agent Tools Module
+//! 
+//! This module contains all the tool implementations for the Juno AI Computer Use Agent.
+//! 
+//! ## Module Structure:
+//! - `desktop_tools`: Cross-platform desktop automation tools (screenshot, mouse, keyboard, UI elements)
+//! - `browser_tools`: Web browser automation and interaction tools
+//! - `browser_controller`: Low-level browser control and management 
+//! - `basic_tools`: Core system tools (file operations, terminal commands)
+//! - `anthropic_computer_use`: Full Anthropic Computer Use API implementation with 17 actions
+//! - `timer_tools`: Scheduling and monitoring tools for delayed agent execution
+//! - `tool_config`: Tool configuration and category management system
+//! - `enhanced_coding_tools`: Advanced development and coding assistance tools
+//! - `cursor_integration`: Integration with Cursor IDE for development workflows
+//! - `mcp_integration`: Model Context Protocol (MCP) server integration for extensibility
+//! - `self_awareness_tools`: Self-building and introspection capabilities (debug mode only)
+//! 
+//! ## Usage
+//! Tools are registered with the `LocalToolProvider` and made available to AI agents.
+//! Each module exports registration functions and relevant types.
+
 pub mod desktop_tools;
 pub mod browser_tools;
 pub mod browser_controller;

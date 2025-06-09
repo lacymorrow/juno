@@ -1,3 +1,44 @@
+//! MCP (Model Context Protocol) Integration for Juno AI Computer Use Agent
+//!
+//! This module provides comprehensive integration with external MCP servers, enabling
+//! the agent to discover, connect to, and execute tools from external tool providers.
+//!
+//! ## Core Features
+//!
+//! - **Server Management**: Dynamic discovery and connection to MCP servers
+//! - **Tool Discovery**: Automatic detection of available tools from connected servers
+//! - **Protocol Handling**: Full JSON-RPC 2.0 implementation for MCP communication
+//! - **Connection Lifecycle**: Start, stop, restart, and health monitoring of servers
+//! - **Security**: Isolated execution environments for external tools
+//!
+//! ## Key Components
+//!
+//! - `MCPServerConfig` - Configuration for external MCP servers
+//! - `MCPServerConnection` - Active connection to an MCP server
+//! - `MCPManager` - Central manager for all MCP server connections
+//! - `MCPToolInfo` - Information about discovered tools
+//!
+//! ## Protocol Support
+//!
+//! - MCP Protocol Version: 2025-03-26
+//! - JSON-RPC 2.0 messaging
+//! - Bidirectional communication
+//! - Tool execution and result handling
+//!
+//! ## Used By
+//!
+//! - Main agent orchestrator for external tool access
+//! - Tool configuration system for managing external tools
+//! - Settings UI for server configuration
+//! - Desktop tools when MCP capabilities are needed
+//!
+//! ## Integration
+//!
+//! This module integrates with:
+//! - `tool_config.rs` for server configuration persistence
+//! - `desktop_tools.rs` for process management
+//! - Main agent system for tool execution
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -15,6 +56,11 @@ use uuid::Uuid;
 use crate::agent::structs::{AgentError, ToolDefinition, ToolResult};
 
 /// Configuration for an external MCP server
+/// 
+/// Defines all settings needed to connect to and manage an external MCP server,
+/// including execution parameters, environment setup, and connection options.
+/// 
+/// Used by: MCPManager for server initialization and tool_config for persistence
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPServerConfig {
     pub id: String,
@@ -31,6 +77,14 @@ pub struct MCPServerConfig {
 }
 
 impl MCPServerConfig {
+    /// Creates a new MCP server configuration with default settings
+    /// 
+    /// Used by: Settings UI and configuration management when adding new servers
+    /// 
+    /// # Arguments
+    /// * `name` - Human-readable name for the server
+    /// * `command` - Executable command to start the server
+    /// * `args` - Command line arguments for the server
     pub fn new(name: String, command: String, args: Vec<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -47,16 +101,25 @@ impl MCPServerConfig {
         }
     }
 
+    /// Adds a description to the server configuration
+    /// 
+    /// Used by: Configuration builders for documentation purposes
     pub fn with_description(mut self, description: String) -> Self {
         self.description = Some(description);
         self
     }
 
+    /// Sets the working directory for the server process
+    /// 
+    /// Used by: Configuration when server needs specific working directory
     pub fn with_working_directory(mut self, working_directory: PathBuf) -> Self {
         self.working_directory = Some(working_directory);
         self
     }
 
+    /// Adds an environment variable to the server configuration
+    /// 
+    /// Used by: Configuration when server requires specific environment setup
     pub fn with_environment_variable(mut self, key: String, value: String) -> Self {
         self.environment_variables.insert(key, value);
         self
@@ -64,6 +127,11 @@ impl MCPServerConfig {
 }
 
 /// Status of an MCP server connection
+/// 
+/// Represents the current state of connection to an external MCP server,
+/// used for monitoring and debugging connection health.
+/// 
+/// Used by: MCPManager and UI for displaying connection status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MCPServerStatus {
     Disconnected,
@@ -74,6 +142,11 @@ pub enum MCPServerStatus {
 }
 
 /// Information about a discovered MCP tool
+/// 
+/// Contains metadata about tools discovered from external MCP servers,
+/// including server origin and enablement status.
+/// 
+/// Used by: Tool discovery system and configuration management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPToolInfo {
     pub server_id: String,
@@ -83,6 +156,11 @@ pub struct MCPToolInfo {
 }
 
 /// An active MCP server connection
+/// 
+/// Manages the lifecycle of a connection to an external MCP server,
+/// including process management, communication, and tool discovery.
+/// 
+/// Used by: MCPManager for handling individual server connections
 pub struct MCPServerConnection {
     config: MCPServerConfig,
     process: Option<Child>,
@@ -94,6 +172,12 @@ pub struct MCPServerConnection {
 }
 
 impl MCPServerConnection {
+    /// Creates a new MCP server connection instance
+    /// 
+    /// Used by: MCPManager when adding new server configurations
+    /// 
+    /// # Arguments
+    /// * `config` - Server configuration containing connection details
     pub fn new(config: MCPServerConfig) -> Self {
         Self {
             config,
@@ -107,6 +191,14 @@ impl MCPServerConnection {
     }
 
     /// Start the MCP server process and establish connection
+    /// 
+    /// Launches the external server process, establishes JSON-RPC communication,
+    /// performs MCP protocol handshake, and discovers available tools.
+    /// 
+    /// Used by: MCPManager when starting servers manually or automatically
+    /// 
+    /// # Returns
+    /// * Success if connection established, error with details if failed
     pub async fn connect(&mut self) -> Result<(), String> {
         if matches!(self.status, MCPServerStatus::Connected) {
             return Ok(());
@@ -169,6 +261,11 @@ impl MCPServerConnection {
     }
 
     /// Send the MCP initialize request
+    /// 
+    /// Performs the MCP protocol initialization handshake with the server,
+    /// declaring client capabilities and protocol version.
+    /// 
+    /// Used by: connect() during connection establishment
     async fn initialize(&mut self) -> Result<(), String> {
         let request = json!({
             "jsonrpc": "2.0",
@@ -199,6 +296,11 @@ impl MCPServerConnection {
     }
 
     /// Send initialized notification
+    /// 
+    /// Sends the required initialized notification to complete the MCP handshake
+    /// after receiving the initialize response from the server.
+    /// 
+    /// Used by: connect() after successful initialization
     async fn send_initialized_notification(&mut self) -> Result<(), String> {
         let notification = json!({
             "jsonrpc": "2.0",
@@ -225,6 +327,11 @@ impl MCPServerConnection {
     }
 
     /// Discover available tools from the MCP server
+    /// 
+    /// Requests the list of available tools from the server and parses
+    /// them into internal tool definitions for later execution.
+    /// 
+    /// Used by: connect() after connection establishment
     async fn discover_tools(&mut self) -> Result<(), String> {
         let request = json!({
             "jsonrpc": "2.0",
@@ -263,6 +370,11 @@ impl MCPServerConnection {
     }
 
     /// Parse a tool definition from MCP server response
+    /// 
+    /// Converts MCP tool definition format to internal ToolDefinition format,
+    /// adding server prefixes to avoid naming conflicts.
+    /// 
+    /// Used by: discover_tools() for processing server tool lists
     fn parse_tool_definition(&self, tool_json: &Value) -> Result<ToolDefinition, String> {
         let name = tool_json.get("name")
             .and_then(|n| n.as_str())
@@ -289,6 +401,16 @@ impl MCPServerConnection {
     }
 
     /// Execute a tool on the MCP server
+    /// 
+    /// Sends a tool execution request to the external server and handles
+    /// the response, returning results in the internal format.
+    /// 
+    /// Used by: MCPManager when executing external tools
+    /// 
+    /// # Arguments
+    /// * `tool_name` - Name of the tool to execute (with server prefix)
+    /// * `input` - Input parameters for the tool
+    /// * `call_id` - Unique identifier for the tool call
     pub async fn execute_tool(&mut self, tool_name: &str, input: Value, call_id: String) -> Result<ToolResult, String> {
         // Remove the server prefix from the tool name
         let original_tool_name = tool_name.strip_prefix(&format!("{}_", self.config.name))
@@ -321,6 +443,11 @@ impl MCPServerConnection {
     }
 
     /// Send a JSON-RPC request and wait for response
+    /// 
+    /// Handles the low-level JSON-RPC communication with timeout support,
+    /// managing request serialization and response parsing.
+    /// 
+    /// Used by: All server communication methods (initialize, discover_tools, execute_tool)
     async fn send_request(&mut self, request: Value) -> Result<Value, String> {
         let request_str = serde_json::to_string(&request)
             .map_err(|e| format!("Failed to serialize request: {}", e))?;
@@ -360,6 +487,11 @@ impl MCPServerConnection {
     }
 
     /// Disconnect from the MCP server
+    /// 
+    /// Gracefully shuts down the connection by terminating the server process
+    /// and cleaning up communication channels.
+    /// 
+    /// Used by: MCPManager when stopping servers and during cleanup
     pub async fn disconnect(&mut self) {
         if let Some(mut process) = self.process.take() {
             let _ = process.kill().await;
@@ -370,31 +502,51 @@ impl MCPServerConnection {
         info!("Disconnected from MCP server: {}", self.config.name);
     }
 
+    /// Generate the next request ID for JSON-RPC
+    /// 
+    /// Used by: send_request() for maintaining unique request identifiers
     fn next_request_id(&mut self) -> u64 {
         self.request_id_counter += 1;
         self.request_id_counter
     }
 
+    /// Get the current connection status
+    /// 
+    /// Used by: MCPManager and UI for status monitoring
     pub fn get_status(&self) -> &MCPServerStatus {
         &self.status
     }
 
+    /// Get the list of discovered tools
+    /// 
+    /// Used by: MCPManager for tool aggregation and discovery
     pub fn get_tools(&self) -> &[ToolDefinition] {
         &self.tools
     }
 
+    /// Get the server configuration
+    /// 
+    /// Used by: MCPManager for accessing server settings
     pub fn get_config(&self) -> &MCPServerConfig {
         &self.config
     }
 }
 
 /// Manager for all MCP server connections
+/// 
+/// Central coordination point for managing multiple external MCP servers,
+/// handling their lifecycles, aggregating tools, and routing execution requests.
+/// 
+/// Used by: Main agent system for accessing external tool capabilities
 pub struct MCPManager {
     servers: Arc<RwLock<HashMap<String, MCPServerConnection>>>,
     configs: Arc<RwLock<HashMap<String, MCPServerConfig>>>,
 }
 
 impl MCPManager {
+    /// Creates a new MCP manager instance
+    /// 
+    /// Used by: Application initialization for setting up external tool system
     pub fn new() -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
@@ -403,6 +555,14 @@ impl MCPManager {
     }
 
     /// Add a new MCP server configuration
+    /// 
+    /// Registers a new external server configuration and optionally starts
+    /// the connection if auto-start is enabled.
+    /// 
+    /// Used by: Settings UI and configuration system when adding servers
+    /// 
+    /// # Arguments
+    /// * `config` - Complete server configuration
     pub async fn add_server(&self, config: MCPServerConfig) -> Result<(), String> {
         let server_id = config.id.clone();
 
@@ -428,6 +588,14 @@ impl MCPManager {
     }
 
     /// Start a specific MCP server
+    /// 
+    /// Initiates connection to a specific server by ID, performing full
+    /// connection handshake and tool discovery.
+    /// 
+    /// Used by: Settings UI for manual server startup and auto-start system
+    /// 
+    /// # Arguments
+    /// * `server_id` - Unique identifier of the server to start
     pub async fn start_server(&self, server_id: &str) -> Result<(), String> {
         let mut servers = self.servers.write().await;
         if let Some(connection) = servers.get_mut(server_id) {
@@ -438,6 +606,14 @@ impl MCPManager {
     }
 
     /// Stop a specific MCP server
+    /// 
+    /// Gracefully disconnects from a server by ID, cleaning up processes
+    /// and communication channels.
+    /// 
+    /// Used by: Settings UI for manual server shutdown and error recovery
+    /// 
+    /// # Arguments
+    /// * `server_id` - Unique identifier of the server to stop
     pub async fn stop_server(&self, server_id: &str) -> Result<(), String> {
         let mut servers = self.servers.write().await;
         if let Some(connection) = servers.get_mut(server_id) {
@@ -449,6 +625,14 @@ impl MCPManager {
     }
 
     /// Get all available tools from all connected servers
+    /// 
+    /// Aggregates tools from all currently connected servers into a single
+    /// list with server attribution and enablement status.
+    /// 
+    /// Used by: Tool discovery system and main agent for tool availability
+    /// 
+    /// # Returns
+    /// * Vector of all available tools with server information
     pub async fn get_all_tools(&self) -> Vec<MCPToolInfo> {
         let servers = self.servers.read().await;
         let mut all_tools = Vec::new();
@@ -470,6 +654,16 @@ impl MCPManager {
     }
 
     /// Execute a tool on the appropriate MCP server
+    /// 
+    /// Routes tool execution requests to the correct server based on tool name
+    /// prefixes and handles the execution response.
+    /// 
+    /// Used by: Main agent tool execution system for external tools
+    /// 
+    /// # Arguments
+    /// * `tool_name` - Name of the tool to execute (with server prefix)
+    /// * `input` - Input parameters for the tool
+    /// * `call_id` - Unique identifier for the tool call
     pub async fn execute_tool(&self, tool_name: &str, input: Value, call_id: String) -> Result<ToolResult, AgentError> {
         let mut servers = self.servers.write().await;
 
@@ -487,6 +681,14 @@ impl MCPManager {
     }
 
     /// Get status of all servers
+    /// 
+    /// Returns the current connection status for all registered servers,
+    /// useful for monitoring and debugging.
+    /// 
+    /// Used by: Settings UI and system health monitoring
+    /// 
+    /// # Returns
+    /// * Map of server IDs to their current status
     pub async fn get_server_statuses(&self) -> HashMap<String, MCPServerStatus> {
         let servers = self.servers.read().await;
         let mut statuses = HashMap::new();
@@ -498,7 +700,9 @@ impl MCPManager {
         statuses
     }
 
-    /// Remove an MCP server
+    /// Remove a server configuration and disconnect if running
+    /// 
+    /// Used by: Settings UI when removing server configurations
     pub async fn remove_server(&self, server_id: &str) -> Result<(), String> {
         // Stop the server first
         self.stop_server(server_id).await?;
@@ -517,7 +721,9 @@ impl MCPManager {
         Ok(())
     }
 
-    /// Start all enabled servers
+    /// Start all enabled servers that have auto_start configured
+    /// 
+    /// Used by: Application startup for automatic server initialization
     pub async fn start_all_enabled_servers(&self) -> Result<(), String> {
         let configs = self.configs.read().await;
         let server_ids: Vec<String> = configs
@@ -538,6 +744,8 @@ impl MCPManager {
     }
 
     /// Get all server configurations
+    /// 
+    /// Used by: Settings UI for displaying server list
     pub async fn get_server_configs(&self) -> Vec<MCPServerConfig> {
         let configs = self.configs.read().await;
         configs.values().cloned().collect()
@@ -545,6 +753,9 @@ impl MCPManager {
 }
 
 impl Default for MCPManager {
+    /// Creates a default MCP manager instance
+    /// 
+    /// Used by: Application initialization when no custom configuration needed
     fn default() -> Self {
         Self::new()
     }
