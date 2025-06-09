@@ -406,21 +406,50 @@ impl MCPServerConnection {
             return Err("No stdin writer available".to_string());
         }
 
-        // Read response with timeout
+        // Read response with timeout and retry logic
         let response_future = async {
             if let Some(ref mut reader) = self.stdout_reader {
-                let mut line = String::new();
-                reader.read_line(&mut line).await
-                    .map_err(|e| format!("Failed to read response: {}", e))?;
+                // Try to read multiple lines until we get a valid JSON response
+                let mut attempts = 0;
+                const MAX_ATTEMPTS: usize = 3;
 
-                debug!("Received MCP response from '{}': {}", self.config.name, line.trim());
+                while attempts < MAX_ATTEMPTS {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => {
+                            return Err(format!("MCP server '{}' closed stdout (EOF)", self.config.name));
+                        }
+                        Ok(_) => {
+                            let trimmed = line.trim();
+                            if trimmed.is_empty() {
+                                attempts += 1;
+                                continue;
+                            }
 
-                if line.trim().is_empty() {
-                    return Err(format!("Received empty response from MCP server '{}'", self.config.name));
+                            debug!("Received MCP response from '{}': {}", self.config.name, trimmed);
+
+                            match serde_json::from_str::<Value>(trimmed) {
+                                Ok(json) => return Ok(json),
+                                Err(e) => {
+                                    warn!("Failed to parse JSON from MCP server '{}' (attempt {}): {} - Response: '{}'",
+                                          self.config.name, attempts + 1, e, trimmed);
+                                    attempts += 1;
+                                    if attempts >= MAX_ATTEMPTS {
+                                        return Err(format!("Failed to parse response JSON from '{}' after {} attempts: {} (last response: '{}')",
+                                                         self.config.name, MAX_ATTEMPTS, e, trimmed));
+                                    }
+                                    // Small delay before retry
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(format!("Failed to read response from '{}': {}", self.config.name, e));
+                        }
+                    }
                 }
 
-                serde_json::from_str::<Value>(&line)
-                    .map_err(|e| format!("Failed to parse response JSON from '{}': {} (response was: '{}')", self.config.name, e, line.trim()))
+                Err(format!("No valid response received from MCP server '{}' after {} attempts", self.config.name, MAX_ATTEMPTS))
             } else {
                 Err("No stdout reader available".to_string())
             }
