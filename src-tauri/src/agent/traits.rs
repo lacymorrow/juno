@@ -18,6 +18,13 @@ pub trait MemoryManager: Send + Sync {
     /// Clears the agent's memory.
     async fn clear_memory(&mut self) -> Result<(), AgentError>;
 
+    /// Removes orphaned tool calls that don't have corresponding tool results.
+    /// This should be implemented by memory managers that track tool call state.
+    /// Default implementation does nothing (for backward compatibility).
+    async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
+        Ok(()) // Default no-op implementation
+    }
+
     // Potential future additions:
     // async fn summarize_memory(&self) -> Result<String, AgentError>;
     // async fn prune_memory(&mut self, max_tokens: usize) -> Result<(), AgentError>;
