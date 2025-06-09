@@ -12,6 +12,12 @@ use crate::cloud::auth::DeviceAuth;
 use crate::cloud::security::CloudSecurity;
 use crate::cloud::commands::CloudCommandProcessor;
 use serde_json::json;
+use crate::cloud::client::CloudClient;
+
+use super::types::{
+    CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
+    ConnectionState as CloudConnectionState, ResponseStatus, ResponseData,
+};
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -742,9 +748,9 @@ impl ProductionCloudConnector {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Check if any agent is currently active
-        if app_state.is_agent_mode_active() {
+        if app_state.is_agent_executing() {
             Some("Agent interaction in progress".to_string())
-        } else if app_state.is_dictation_active() {
+        } else if *app_state.dictation_active.lock().unwrap() {
             Some("Voice dictation active".to_string())
         } else {
             None

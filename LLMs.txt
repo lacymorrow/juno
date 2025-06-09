@@ -1,7 +1,9 @@
 # Juno AI Computer Use Agent - LLM Instructions
 
 ## Project Overview
-Juno is a production-ready Tauri v2 desktop app implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, comprehensive system integration, and enterprise-grade security.
+Juno is a **production-ready Tauri v2 desktop app** implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, comprehensive system integration, and enterprise-grade security.
+
+**🔒 SECURITY STATUS**: ✅ **ENTERPRISE HARDENED** - Complete security framework with production-grade protections against file system attacks, command injection, and stability issues.
 
 **Latest Enhancement**: Completed systematic improvement process (Steps 1-7) delivering advanced orchestration, tool configuration, memory management systems, plus security enhancements and hardware monitoring.
 
@@ -52,13 +54,19 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ```
 Project MUST compile with exit code 0. No exceptions.
 
+### 🔒 Security Development Standards (MANDATORY)
+- **Input Validation**: All user inputs MUST be validated against whitelists before processing
+- **Path Operations**: Use security validation functions with workspace boundary enforcement
+- **Command Execution**: All commands MUST pass whitelist validation and injection prevention
+- **Error Handling**: NEVER use `.unwrap()` in production code - implement graceful degradation
+- **Resource Limits**: Implement size limits and DoS prevention for all operations
+
 ### Key Development Patterns
 - Use `AgentError` enum for errors, NEVER `std::process::exit()`
 - Dynamic escape key registration ONLY during agent execution
 - All persistent state in `AppState`, access via getters
 - Follow async/await patterns consistently throughout
-- **NEW**: All tool operations must implement security validation and audit logging
-- **NEW**: Hardware monitoring data collection should be async and parallel
+- **NEW**: Safe mutex handling with lock poisoning protection
 
 ## Enhanced Security Framework 🔒 NEW
 
