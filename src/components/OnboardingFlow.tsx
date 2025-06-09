@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +39,7 @@ import {
 interface OnboardingFlowProps {
   onComplete: () => void;
   onSkip?: () => void;
+  permissionsAlreadyGranted?: boolean;
 }
 
 type OnboardingStep = 
@@ -57,12 +58,16 @@ interface FeatureCard {
   color: string;
 }
 
-export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
+export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted = false }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("welcome");
   const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const steps: OnboardingStep[] = ["welcome", "features", "permissions", "voice-setup", "examples", "completion"];
+  // Dynamically determine steps based on permissions state
+  const steps: OnboardingStep[] = permissionsAlreadyGranted 
+    ? ["welcome", "features", "voice-setup", "examples", "completion"] // Skip permissions step
+    : ["welcome", "features", "permissions", "voice-setup", "examples", "completion"]; // Include permissions step
+    
   const currentStepIndex = steps.indexOf(currentStep);
   const progress = ((currentStepIndex + 1) / steps.length) * 100;
 
@@ -87,8 +92,19 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
   };
 
   const skipToStep = (step: OnboardingStep) => {
+    // Prevent navigation to permissions step if already granted
+    if (step === "permissions" && permissionsAlreadyGranted) {
+      return;
+    }
     setCurrentStep(step);
   };
+
+  // Auto-mark permissions as completed if already granted
+  useEffect(() => {
+    if (permissionsAlreadyGranted) {
+      setCompletedSteps(prev => new Set([...prev, "permissions"]));
+    }
+  }, [permissionsAlreadyGranted]);
 
   // Handle example prompt selection
   const handleExamplePromptSelect = async (prompt: string) => {
@@ -223,6 +239,16 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
           Explore the powerful capabilities that make Juno your ultimate AI assistant
         </p>
       </div>
+
+      {/* Permissions already granted notice */}
+      {permissionsAlreadyGranted && (
+        <Alert className="border-green-200 bg-green-50/50">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription>
+            <strong>Great news!</strong> Permissions are already configured. We'll skip the permissions setup and go straight to voice features.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {featureCards.map((feature, index) => (
@@ -518,13 +544,18 @@ export function OnboardingFlow({ onComplete, onSkip }: OnboardingFlowProps) {
               className={`w-3 h-3 rounded-full transition-all ${
                 index === currentStepIndex
                   ? "bg-primary ring-2 ring-primary/20"
-                  : completedSteps.has(step)
+                  : completedSteps.has(step) || (step === "permissions" && permissionsAlreadyGranted)
                   ? "bg-green-500"
                   : index < currentStepIndex
                   ? "bg-muted-foreground/30 hover:bg-muted-foreground/50 cursor-pointer"
                   : "bg-muted-foreground/20"
               }`}
               disabled={index > currentStepIndex}
+              title={
+                step === "permissions" && permissionsAlreadyGranted
+                  ? "Permissions (already granted - skipped)"
+                  : step.charAt(0).toUpperCase() + step.slice(1).replace("-", " ")
+              }
             />
           ))}
         </div>
