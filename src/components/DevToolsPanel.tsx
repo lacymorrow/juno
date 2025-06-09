@@ -7,6 +7,7 @@ import type { LoadingStates } from "@/types/devtools";
 import { ExternalLink, Timer } from "lucide-react";
 import React, { useState } from "react";
 import { toast } from "sonner";
+import { AgentStatusIndicator } from "@/components/AgentStatusIndicator";
 import { CloudTestPanel } from "./devtools/CloudTestPanel";
 import FileOperations from "./devtools/FileOperations";
 import KeyboardOperations from "./devtools/KeyboardOperations";
@@ -100,6 +101,12 @@ const DevToolsPanel: React.FC = () => {
   return (
     <ScrollArea className="h-full w-full rounded-md border p-4">
       <div className="space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold">Agent System Status</h2>
+          <Separator className="my-2" />
+          <AgentStatusIndicator className="text-sm" />
+        </div>
+
         <div>
           <h2 className="text-lg font-semibold">Cloud & WebSocket Testing</h2>
           <Separator className="my-2" />
