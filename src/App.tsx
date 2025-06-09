@@ -35,7 +35,7 @@ import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
-import "./globals.css";
+import "./styles/globals.css";
 
 // Type for conversation messages
 type ChatMessage = {
