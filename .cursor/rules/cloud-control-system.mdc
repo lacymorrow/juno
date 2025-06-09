@@ -3,154 +3,349 @@ description:
 globs:
 alwaysApply: false
 ---
-# Cloud Control System Integration ✅
+# Cloud Control System - Production Implementation ✅ COMPLETE
 
-## Overview
+## System Overview
 
-The cloud control system provides secure WebSocket-based remote connectivity and command execution for the Juno AI agent. This system was successfully merged with the main branch, combining production-ready cloud infrastructure with enhanced agent capabilities.
+The Juno AI Cloud Control System is now a **complete production-ready implementation** consisting of a secure Node.js WebSocket backend server and sophisticated Tauri client integration. This system provides enterprise-grade remote connectivity, device authentication, and command execution capabilities.
 
-## Architecture Components
+## 🏗️ Architecture - Full Stack Implementation
 
-### Core Cloud Modules
+### Backend Server (NEW - Production Ready)
+**Location**: `backend-server/`
+
+#### Core Server Components
+- **Main Server**: [src/server.js](mdc:backend-server/src/server.js) - Express + WebSocket server with integrated auth
+- **Authentication Service**: [src/auth/AuthService.js](mdc:backend-server/src/auth/AuthService.js) - HMAC device auth, JWT sessions
+- **Database Layer**: [src/database/Database.js](mdc:backend-server/src/database/Database.js) - SQLite with complete schema
+- **WebSocket Manager**: [src/websocket/WebSocketManager.js](mdc:backend-server/src/websocket/WebSocketManager.js) - Connection handling, message routing
+- **Command Processor**: [src/services/CommandProcessor.js](mdc:backend-server/src/services/CommandProcessor.js) - Anthropic Computer Use command handling
+- **Security Middleware**: [src/middleware/rateLimiter.js](mdc:backend-server/src/middleware/rateLimiter.js) - Rate limiting, validation
+- **Health Monitoring**: [src/services/HealthCheck.js](mdc:backend-server/src/services/HealthCheck.js) - System health checks, metrics
+
+#### Database Schema
+Complete SQLite database with:
+- `users` - User accounts and profiles
+- `devices` - Registered devices with API keys
+- `sessions` - Active JWT sessions
+- `commands` - Command execution history
+- `audit_log` - Security audit trail
+- `subscriptions` - Premium feature tracking
+- `rate_limits` - Request rate limiting
+
+#### Server Features
+- **WebSocket Server**: Real-time bidirectional communication on port 8080
+- **Device Authentication**: HMAC-signed API key authentication with JWT sessions
+- **Command Processing**: Full support for Anthropic Computer Use commands
+- **Health Monitoring**: Comprehensive system health checks and metrics API
+- **Security**: Rate limiting, CORS, input validation, audit logging
+- **Production Ready**: Docker deployment, Unraid guide, comprehensive logging
+
+### Client Integration (Enhanced)
+**Location**: `src-tauri/src/cloud/`
+
+#### Core Cloud Modules
 - **Cloud Config**: [src-tauri/src/cloud/config.rs](mdc:src-tauri/src/cloud/config.rs) - Configuration management and validation
 - **Cloud Client**: [src-tauri/src/cloud/client.rs](mdc:src-tauri/src/cloud/client.rs) - WebSocket client implementation
-- **Cloud Connector**: [src-tauri/src/cloud/connector.rs](mdc:src-tauri/src/cloud/connector.rs) - Production-ready connection management
+- **Cloud Connector**: [src-tauri/src/cloud/connector.rs](mdc:src-tauri/src/cloud/connector.rs) - Production-ready connection management with hardware monitoring
 - **Cloud Commands**: [src-tauri/src/cloud/commands.rs](mdc:src-tauri/src/cloud/commands.rs) - Command processing and execution
 - **Cloud Types**: [src-tauri/src/cloud/types.rs](mdc:src-tauri/src/cloud/types.rs) - Shared type definitions
 
-### Authentication & Security
+#### Authentication & Security
 - **Device Authentication**: [src-tauri/src/cloud/auth.rs](mdc:src-tauri/src/cloud/auth.rs) - Device registration and credentials
 - **Cloud Security**: [src-tauri/src/cloud/security.rs](mdc:src-tauri/src/cloud/security.rs) - Encryption and security protocols
 
-### Command Interface
+#### Command Interface
 - **Cloud Commands**: [src-tauri/src/commands/cloud.rs](mdc:src-tauri/src/commands/cloud.rs) - Tauri command handlers for frontend
 
-## State Management Integration
+## 🔐 Authentication & Security Architecture
 
-### AppState Cloud Fields
-The cloud system integrates seamlessly with the main AppState in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs):
+### Device Registration Flow
+1. **Client Registration**: POST `/api/register` with device info
+2. **Credential Generation**: Server generates API key and HMAC secret
+3. **Database Storage**: Device record created with credentials
+4. **Client Storage**: Credentials stored securely in client
 
+### Authentication Flow
+1. **HMAC Signature**: Client generates HMAC signature using `METHOD:PATH:BODY:TIMESTAMP`
+2. **Authentication Request**: POST `/api/auth` with API key, timestamp, signature
+3. **Server Validation**: HMAC signature validated, timestamp checked (5-minute window)
+4. **JWT Token**: Server returns JWT token with 24-hour expiration
+5. **WebSocket Auth**: Client authenticates WebSocket connection with JWT
+
+### Security Features
+- **HMAC Signature Validation**: All API requests require HMAC-SHA256 signatures
+- **JWT Session Management**: Secure token-based sessions with expiration
+- **Rate Limiting**: 100 requests per 15 minutes per IP (configurable)
+- **Input Validation**: All inputs validated against whitelists and schemas
+- **Audit Logging**: Comprehensive logging of all authentication and command activity
+- **CORS Protection**: Configurable CORS origins for secure cross-origin requests
+
+## 📡 Communication Protocol
+
+### WebSocket Connection
+**Endpoint**: `ws://localhost:8080/ws`
+
+#### Connection Flow
+1. **Connect** to WebSocket endpoint
+2. **Receive** welcome message with client ID and server capabilities
+3. **Send** authentication message with JWT token
+4. **Receive** authentication confirmation
+5. **Exchange** command messages with heartbeat system
+
+#### Message Format
+All WebSocket messages follow this structure:
+```json
+{
+  "type": "message_type",
+  "data": { /* message payload */ },
+  "timestamp": 1749496859
+}
+```
+
+#### Message Types
+
+**Client → Server**:
+- `authenticate` - Authenticate with JWT token
+- `voice_query` - Process voice input with AI
+- `text_query` - Process text input with AI
+- `system_command` - Execute system automation
+- `screenshot` - Request screenshot capture
+- `status_request` - Get system status
+- `config_update` - Update configuration
+- `heartbeat` - Respond to server ping
+
+**Server → Client**:
+- `status` - Welcome message with server capabilities
+- `authenticated` - Authentication successful confirmation
+- `heartbeat` - Keep-alive ping (every 30 seconds)
+- `command_response` - Response to executed commands
+- `error` - Error messages and status updates
+
+### API Endpoints
+
+#### Device Registration
+```bash
+POST /api/register
+Content-Type: application/json
+
+{
+  "device_name": "MacBook Pro",
+  "device_type": "desktop",
+  "platform": "macos"
+}
+```
+
+#### Device Authentication
+```bash
+POST /api/auth
+Content-Type: application/json
+
+{
+  "api_key": "hex_string",
+  "timestamp": 1749496859,
+  "signature": "hmac_signature",
+  "method": "POST",
+  "path": "/api/auth"
+}
+```
+
+#### Health & Monitoring
+- `GET /health` - System health check with comprehensive metrics
+- `GET /metrics` - Performance metrics and system statistics
+
+## 🎯 Command Processing
+
+### Supported Commands
+- **Voice Processing**: `voice_query` - Voice-to-text processing with AI responses
+- **Text Processing**: `text_query` - Direct text-based AI queries
+- **System Control**: `system_command` - System automation and control
+- **Screen Capture**: `screenshot` - Screen capture with base64 encoding
+- **Status Monitoring**: `status_request` - System status and capabilities
+- **Configuration**: `config_update` - Dynamic configuration updates
+
+### Command Execution Flow
+1. **Receive**: WebSocket message containing command
+2. **Authenticate**: Validate JWT token and permissions
+3. **Validate**: Check command format and parameters
+4. **Execute**: Process command through appropriate handler
+5. **Audit**: Log command execution for security
+6. **Respond**: Return result with success/error status
+
+### Security Validation
+- Command authorization based on device permissions
+- Input validation for all command parameters
+- Rate limiting per device and command type
+- Comprehensive audit logging
+- Safe error handling without information leakage
+
+## 🚀 Deployment & Infrastructure
+
+### Production Backend Deployment
+
+#### Docker Deployment
+```bash
+# Using Docker Compose
+docker-compose up -d
+
+# Manual Docker
+docker build -t juno-cloud-backend .
+docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
+```
+
+#### Unraid VPS Deployment
+Complete deployment guide available in [UNRAID_DEPLOYMENT.md](mdc:backend-server/UNRAID_DEPLOYMENT.md):
+- Container configuration with proper networking
+- Volume mapping for persistent data and logs
+- Environment variable configuration
+- SSL/reverse proxy setup for production
+- Monitoring and health check configuration
+
+#### Environment Configuration
+Key production settings in `.env`:
+```bash
+NODE_ENV=production
+PORT=8080
+HOST=0.0.0.0
+JWT_SECRET=your-super-secure-jwt-secret
+HMAC_SECRET=your-hmac-secret-for-device-auth
+DB_PATH=./data/juno.db
+LOG_LEVEL=info
+RATE_LIMIT_MAX_REQUESTS=100
+```
+
+### Client Integration
+
+#### AppState Integration
+The cloud system integrates with main AppState in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs):
 ```rust
-// Cloud connectivity components
+// Enhanced cloud connectivity components
 pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>,
 pub cloud_config: Arc<TokioMutex<Option<CloudConfig>>>,
 pub cloud_enabled: Arc<Mutex<bool>>,
 pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>,
 ```
 
-### Connection States
-- **Disconnected**: No active connection
-- **Connecting**: Attempting WebSocket connection
-- **Connected**: WebSocket established, authenticating
-- **Authenticated**: Device verified, ready for commands
-- **Error**: Connection failed or authentication error
+#### Hardware Monitoring Integration
+The client now includes comprehensive hardware monitoring in [src-tauri/src/cloud/connector.rs](mdc:src-tauri/src/cloud/connector.rs):
+- CPU usage monitoring via macOS `top` command
+- Memory usage calculation via `vm_stat`
+- Disk usage monitoring via `df` command
+- Screen resolution detection via `system_profiler`
+- Performance analytics with command execution timing
 
-## Command Processing
+## 📊 Monitoring & Health Checks
 
-### Supported Command Types
-- **Screenshot**: Capture screen with base64 encoding
-- **Mouse Actions**: Click, move, drag operations
-- **Keyboard Input**: Text typing and key combinations
-- **System Info**: Device status and capabilities
-- **Application Control**: Launch and manage applications
+### Server Health Monitoring
+The backend provides comprehensive health monitoring:
 
-### Command Flow
-1. **Receive**: WebSocket message containing CloudCommand
-2. **Validate**: Authenticate and authorize command
-3. **Execute**: Process command through appropriate handler
-4. **Respond**: Return CommandResult with success/error status
-5. **Audit**: Log command execution for security
+#### Health Check Data
+- **Database**: Connection status, query performance, error rates
+- **WebSocket**: Active connections, message throughput
+- **Memory**: Heap usage, RSS memory, performance metrics
+- **Disk**: Available space, I/O performance
+- **Uptime**: Server runtime, restart history
 
-## Security Implementation
+#### Metrics API
+- Real-time system metrics via `/metrics` endpoint
+- Performance analytics and trend data
+- Connection statistics and usage patterns
+- Error rates and response time monitoring
 
-### Device Registration
-- Unique device ID generation
-- Secure credential storage
-- Authentication token management
-- Device capability reporting
+### Client Monitoring
+- Hardware statistics collection and reporting
+- Connection health monitoring with automatic reconnection
+- Command execution performance tracking
+- Error rate monitoring and alerting
 
-### Command Authorization
-- Per-command permission validation
-- Rate limiting and throttling
-- Audit logging for all operations
-- Secure credential handling
-
-## Integration with Main Features
-
-### Tauri Command Registration
-The cloud commands are registered in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
-
-```rust
-.invoke_handler(tauri::generate_handler![
-    // ... existing handlers ...
-    commands::cloud::toggle_cloud_connection,
-    commands::cloud::get_cloud_status,
-    commands::cloud::connect_to_cloud,
-    commands::cloud::disconnect_from_cloud
-])
-```
-
-### Plugin Integration
-Cloud functionality works alongside existing plugins:
-- **Voice Transcription**: Maintains existing voice modes
-- **Keyboard Shortcuts**: Cloud commands don't interfere with hotkeys
-- **Agent System**: Cloud commands can trigger agent workflows
-
-## Production Readiness Features
-
-### Robust Connection Management
-- Automatic reconnection with exponential backoff
-- Heartbeat monitoring and connection health checks
-- Graceful degradation when cloud is unavailable
-- Connection state persistence across app restarts
-
-### Error Handling
-- Comprehensive error types in CloudError enum
-- Graceful fallback when cloud services are unavailable
-- User-friendly error messages and recovery suggestions
-- Debug logging for troubleshooting
-
-### Performance Optimization
-- Efficient WebSocket message handling
-- Base64 encoding for image data transmission
-- Async command processing to prevent UI blocking
-- Memory-efficient state management
-
-## Usage Patterns
-
-### Enabling Cloud Control
-```rust
-// Toggle cloud connection through Tauri command
-let is_connected = app_state.is_cloud_connected().await;
-if !is_connected {
-    app_state.enable_cloud().await;
-}
-```
-
-### Command Execution
-Commands are processed asynchronously through the CloudCommandProcessor, maintaining separation between cloud operations and local agent functionality.
-
-### Status Monitoring
-The system provides real-time connection status updates through Tauri events, allowing the frontend to display current cloud connectivity state.
-
-## Development Guidelines
+## 🔧 Development Patterns
 
 ### Adding New Commands
+
+#### Backend (Server)
+1. Define command type in [CommandProcessor.js](mdc:backend-server/src/services/CommandProcessor.js)
+2. Implement command handler with validation
+3. Add security checks and audit logging
+4. Test command execution and error handling
+
+#### Frontend (Client)
 1. Define command structure in [cloud/types.rs](mdc:src-tauri/src/cloud/types.rs)
 2. Implement execution logic in [cloud/commands.rs](mdc:src-tauri/src/cloud/commands.rs)
-3. Add security validation and audit logging
-4. Test command execution in isolation and integration
+3. Add security validation and error handling
+4. Test integration with backend server
 
-### Security Considerations
-- Always validate incoming commands against device capabilities
-- Implement proper rate limiting for resource-intensive operations
-- Maintain audit logs for security monitoring
-- Use secure credential storage and transmission
+### Security Best Practices
+- **Always validate inputs** against whitelists and schemas
+- **Implement rate limiting** for resource-intensive operations
+- **Maintain audit logs** for all command executions
+- **Use secure credential storage** and transmission
+- **Test security measures** regularly with penetration testing
 
-### Testing Cloud Functionality
-- Test connection establishment and authentication
-- Verify command execution and response handling
-- Test reconnection scenarios and error recovery
-- Validate security measures and audit logging
+### Testing Guidelines
 
-The cloud control system represents a production-ready remote access solution that maintains security while providing comprehensive device control capabilities.
+#### Backend Testing
+```bash
+# Health check
+curl http://localhost:8080/health | jq .
+
+# Authentication flow
+node test_auth.js
+
+# WebSocket connectivity
+wscat -c ws://localhost:8080/ws
+```
+
+#### Integration Testing
+- Device registration and authentication flow
+- Command execution across all supported types
+- Error handling and recovery scenarios
+- Performance under load testing
+- Security validation testing
+
+## 🎯 Production Readiness Status
+
+### ✅ **Backend Server Complete**
+- Full WebSocket server with Express integration
+- Complete authentication system with HMAC + JWT
+- SQLite database with comprehensive schema
+- Production Docker deployment with Unraid guide
+- Health monitoring and metrics API
+- Security hardening with rate limiting and validation
+
+### ✅ **Client Integration Enhanced**
+- Hardware monitoring and performance analytics
+- Robust connection management with reconnection
+- Comprehensive error handling and recovery
+- Security integration with HMAC authentication
+- Production-ready state management
+
+### ✅ **Security Implementation**
+- Enterprise-grade authentication with HMAC signatures
+- JWT session management with proper expiration
+- Comprehensive audit logging and monitoring
+- Rate limiting and DoS protection
+- Input validation and sanitization
+
+### ✅ **Deployment Ready**
+- Complete Docker containerization
+- Unraid VPS deployment guide
+- Environment configuration management
+- Logging and monitoring integration
+- Production security configurations
+
+## 🔄 Future Enhancements
+
+### Planned Improvements
+- **Redis Integration**: Distributed rate limiting for horizontal scaling
+- **Stripe Integration**: Premium feature subscriptions and billing
+- **Advanced Analytics**: Command usage patterns and performance optimization
+- **Multi-Platform Support**: Windows and Linux client implementations
+- **Enhanced Security**: Certificate-based authentication and encrypted commands
+
+### Scalability Considerations
+- **Horizontal Scaling**: Redis-backed rate limiting and session storage
+- **Load Balancing**: Multiple backend instances with shared state
+- **Database Optimization**: PostgreSQL migration for high-volume deployments
+- **CDN Integration**: Global edge deployment for reduced latency
+
+The cloud control system now represents a complete, production-ready enterprise solution for secure remote device management and AI agent control, ready for immediate deployment and scaling.
