@@ -1,3 +1,18 @@
+//! # Timer Tools Module
+//! 
+//! Advanced scheduling and monitoring tools for delayed agent execution and system monitoring.
+//! Enables agents to set timers, monitor screen changes, file system events, and application states.
+//! 
+//! ## Core Capabilities:
+//! - Simple time-based delays with context restoration
+//! - Screen region monitoring for visual changes  
+//! - File system monitoring (creation, modification, deletion)
+//! - Application state monitoring (launch, focus, termination)
+//! 
+//! ## Usage
+//! Used by: Game automation, long-running tasks, system monitoring, waiting for external events
+//! Registration: Called via `register_timer_tools()` during agent setup
+
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
 use serde_json::{json, Value};
@@ -16,66 +31,125 @@ use tracing::{info, error, debug};
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
 
 // Timer state management
+
+/// Represents a scheduled timer task with associated context and configuration.
+/// 
+/// Used by: Timer management system, monitoring tools, agent scheduling
+/// Contains all information needed to restore agent state when timer expires.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TimerTask {
+    /// Unique identifier for this timer task
     pub id: String,
-    pub trigger_time: u64, // Unix timestamp in seconds
-    pub context: Value,    // JSON context to restore when timer triggers
+    /// Unix timestamp in seconds when timer should trigger
+    pub trigger_time: u64, 
+    /// JSON context to restore when timer triggers (game state, conversation history, etc.)
+    pub context: Value,    
+    /// Human-readable description of what this timer is for
     pub description: String,
+    /// Unix timestamp when timer was created
     pub created_at: u64,
-    pub timer_type: TimerType, // New field to specify timer type
+    /// Type and configuration of the timer (simple, screen monitor, etc.)
+    pub timer_type: TimerType, 
 }
 
+/// Defines the different types of timers and their specific configurations.
+/// 
+/// Used by: Timer task creation, monitoring system dispatch, timer execution logic
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TimerType {
+    /// Simple time-based delay timer
     Simple,
+    /// Screen monitoring with change detection
     ScreenMonitor {
+        /// Optional screen region to monitor (full screen if None)
         region: Option<ScreenRegion>,
-        threshold: f32, // Percentage change to trigger (0.0-1.0)
+        /// Percentage change threshold to trigger (0.0-1.0)
+        threshold: f32, 
+        /// How often to check for changes in seconds
         check_interval_seconds: u64,
     },
+    /// File system monitoring for various file events
     FileMonitor {
+        /// Path to the file to monitor
         file_path: String,
+        /// Type of file event to watch for
         monitor_type: FileMonitorType,
     },
+    /// Application state monitoring
     ApplicationMonitor {
+        /// Name of the application to monitor
         app_name: String,
+        /// State change to watch for
         monitor_state: AppMonitorState,
     },
 }
 
+/// Defines a rectangular screen region for monitoring.
+/// 
+/// Used by: Screen monitoring timers, visual change detection
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScreenRegion {
+    /// X coordinate of top-left corner
     pub x: f64,
+    /// Y coordinate of top-left corner  
     pub y: f64,
+    /// Width of the region
     pub width: f64,
+    /// Height of the region
     pub height: f64,
 }
 
+/// Types of file system events that can be monitored.
+/// 
+/// Used by: File monitoring timers, filesystem change detection
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum FileMonitorType {
+    /// File was created
     Created,
+    /// File content was modified
     Modified,
+    /// File was deleted
     Deleted,
+    /// File size changed
     SizeChanged,
 }
 
+/// Application state changes that can be monitored.
+/// 
+/// Used by: Application monitoring timers, app state tracking
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AppMonitorState {
+    /// Application was launched
     Launched,
+    /// Application was terminated
     Terminated,
+    /// Application gained focus
     BecameFocused,
+    /// Application lost focus
     LostFocus,
 }
 
-// Enhanced timer manager with monitoring capabilities
+/// Enhanced timer manager with monitoring capabilities.
+/// 
+/// Manages active timers and their associated monitoring tasks.
+/// Provides thread-safe access to timer state and cancellation.
+/// 
+/// Used by: Agent system for timer lifecycle management, monitoring coordination
 #[derive(Debug, Default, Clone)]
 pub struct TimerManager {
+    /// Map of active timer tasks by ID
     pub active_timers: Arc<Mutex<HashMap<String, TimerTask>>>,
+    /// Map of monitoring task handles by timer ID
     pub monitoring_tasks: Arc<Mutex<HashMap<String, tokio::task::JoinHandle<()>>>>,
 }
 
 impl TimerManager {
+    /// Creates a new empty timer manager.
+    /// 
+    /// Used by: Agent initialization, app state setup
+    /// 
+    /// # Returns
+    /// New `TimerManager` instance with empty timer collections
     pub fn new() -> Self {
         Self {
             active_timers: Arc::new(Mutex::new(HashMap::new())),
@@ -83,11 +157,27 @@ impl TimerManager {
         }
     }
 
+    /// Adds a timer to the active timers collection.
+    /// 
+    /// Used by: Timer creation functions, scheduler setup
+    /// 
+    /// # Arguments
+    /// * `timer` - The TimerTask to add to active collection
     pub async fn add_timer(&self, timer: TimerTask) {
         let mut timers = self.active_timers.lock().await;
         timers.insert(timer.id.clone(), timer);
     }
 
+    /// Removes and returns a timer from the active collection.
+    /// 
+    /// Also cancels any associated monitoring task.
+    /// Used by: Timer expiration, timer cancellation, cleanup
+    /// 
+    /// # Arguments
+    /// * `timer_id` - ID of the timer to remove
+    /// 
+    /// # Returns
+    /// The removed `TimerTask` if it existed, None otherwise
     pub async fn remove_timer(&self, timer_id: &str) -> Option<TimerTask> {
         let mut timers = self.active_timers.lock().await;
         let timer = timers.remove(timer_id);
@@ -102,21 +192,50 @@ impl TimerManager {
         timer
     }
 
+    /// Adds a monitoring task handle for cleanup management.
+    /// 
+    /// Used by: Monitoring timer creation, background task tracking
+    /// 
+    /// # Arguments
+    /// * `timer_id` - ID of the timer this task belongs to
+    /// * `task_handle` - Handle to the background monitoring task
     pub async fn add_monitoring_task(&self, timer_id: String, task_handle: tokio::task::JoinHandle<()>) {
         let mut monitoring_tasks = self.monitoring_tasks.lock().await;
         monitoring_tasks.insert(timer_id, task_handle);
     }
 
+    /// Retrieves a timer by ID without removing it.
+    /// 
+    /// Used by: Timer status checking, monitoring loops
+    /// 
+    /// # Arguments
+    /// * `timer_id` - ID of the timer to retrieve
+    /// 
+    /// # Returns
+    /// Cloned `TimerTask` if found, None otherwise  
     pub async fn get_timer(&self, timer_id: &str) -> Option<TimerTask> {
         let timers = self.active_timers.lock().await;
         timers.get(timer_id).cloned()
     }
 
+    /// Returns a list of all currently active timers.
+    /// 
+    /// Used by: Timer listing tool, status reporting, debugging
+    /// 
+    /// # Returns
+    /// Vector of all active `TimerTask` instances
     pub async fn list_active_timers(&self) -> Vec<TimerTask> {
         let timers = self.active_timers.lock().await;
         timers.values().cloned().collect()
     }
 
+    /// Returns timers that have reached their trigger time.
+    /// 
+    /// Only applies to simple time-based timers, not monitoring timers.
+    /// Used by: Timer expiration checking, cleanup processes
+    /// 
+    /// # Returns
+    /// Vector of expired `TimerTask` instances
     pub async fn get_expired_timers(&self) -> Vec<TimerTask> {
         let timers = self.active_timers.lock().await;
         let now = SystemTime::now()
@@ -142,6 +261,13 @@ mod timer_tools_impl {
     use super::*;
     use crate::agent::structs::ToolDefinition;
 
+    /// Creates the tool definition for the `set_timer` tool.
+    /// 
+    /// Used by: Tool registration system, agent tool discovery
+    /// Creates schema for simple time-based delay timers.
+    /// 
+    /// # Returns
+    /// `ToolDefinition` for setting simple delay timers with context
     pub fn set_timer_definition() -> ToolDefinition {
         ToolDefinition {
             name: "set_timer".to_string(),
@@ -169,6 +295,19 @@ mod timer_tools_impl {
         }
     }
 
+    /// Executes the `set_timer` tool operation.
+    /// 
+    /// Creates a simple delay timer that will emit a timer-expired event
+    /// to restart the agent with saved context after the delay.
+    /// 
+    /// Used by: Game automation, long-running processes, scheduled tasks
+    /// 
+    /// # Arguments  
+    /// * `input` - JSON with delay_seconds, context, and description
+    /// * `app_handle` - Tauri app handle for event emission
+    /// 
+    /// # Returns
+    /// Success response with timer details or error message
     pub async fn set_timer_exec(
         input: Value,
         app_handle: AppHandle,
@@ -240,6 +379,13 @@ mod timer_tools_impl {
         }))
     }
 
+    /// Creates the tool definition for the `set_screen_monitor` tool.
+    /// 
+    /// Used by: Tool registration system for screen monitoring capabilities
+    /// Enables monitoring of screen regions for visual changes.
+    /// 
+    /// # Returns
+    /// `ToolDefinition` for screen change monitoring with region and threshold options
     pub fn set_screen_monitor_definition() -> ToolDefinition {
         ToolDefinition {
             name: "set_screen_monitor".to_string(),
@@ -288,6 +434,19 @@ mod timer_tools_impl {
         }
     }
 
+    /// Executes the `set_screen_monitor` tool operation (macOS only).
+    /// 
+    /// Sets up continuous screen monitoring that compares screenshots
+    /// to detect visual changes and trigger agent restart.
+    /// 
+    /// Used by: Game automation, UI state monitoring, visual change detection
+    /// 
+    /// # Arguments
+    /// * `input` - JSON with monitoring configuration
+    /// * `app_handle` - Tauri app handle for event emission
+    /// 
+    /// # Returns
+    /// Success response with monitor details or error message
     #[cfg(target_os = "macos")]
     pub async fn set_screen_monitor_exec(
         input: Value,
@@ -418,6 +577,16 @@ mod timer_tools_impl {
         }))
     }
 
+    /// Executes the `set_screen_monitor` tool operation (non-macOS platforms).
+    /// 
+    /// Returns an error indicating screen monitoring is only supported on macOS.
+    /// 
+    /// # Arguments
+    /// * `_input` - Unused input (screen monitoring not supported)
+    /// * `_app_handle` - Unused app handle
+    /// 
+    /// # Returns
+    /// Error message indicating platform limitation
     #[cfg(not(target_os = "macos"))]
     pub async fn set_screen_monitor_exec(
         _input: Value,
@@ -426,6 +595,13 @@ mod timer_tools_impl {
         Err("Screen monitoring is only supported on macOS currently".to_string())
     }
 
+    /// Creates the tool definition for the `set_file_monitor` tool.
+    /// 
+    /// Used by: Tool registration system for file system monitoring
+    /// Enables monitoring of file creation, modification, deletion, and size changes.
+    /// 
+    /// # Returns
+    /// `ToolDefinition` for file system event monitoring
     pub fn set_file_monitor_definition() -> ToolDefinition {
         ToolDefinition {
             name: "set_file_monitor".to_string(),
@@ -467,6 +643,19 @@ mod timer_tools_impl {
         }
     }
 
+    /// Executes the `set_file_monitor` tool operation.
+    /// 
+    /// Sets up continuous monitoring of a file for specified events
+    /// (creation, modification, deletion, size changes).
+    /// 
+    /// Used by: Download monitoring, log file watching, build process tracking
+    /// 
+    /// # Arguments
+    /// * `input` - JSON with file path, monitor type, and configuration
+    /// * `app_handle` - Tauri app handle for event emission  
+    /// 
+    /// # Returns
+    /// Success response with monitor details or error message
     pub async fn set_file_monitor_exec(
         input: Value,
         app_handle: AppHandle,
@@ -632,6 +821,13 @@ mod timer_tools_impl {
         }))
     }
 
+    /// Creates the tool definition for the `cancel_timer` tool.
+    /// 
+    /// Used by: Tool registration system for timer cancellation capabilities
+    /// Allows agents to cancel previously set timers when conditions change.
+    /// 
+    /// # Returns
+    /// `ToolDefinition` for cancelling active timers by ID
     pub fn cancel_timer_definition() -> ToolDefinition {
         ToolDefinition {
             name: "cancel_timer".to_string(),
@@ -649,6 +845,19 @@ mod timer_tools_impl {
         }
     }
 
+    /// Executes the `cancel_timer` tool operation.
+    /// 
+    /// Cancels an active timer by removing it from the manager and stopping
+    /// any associated monitoring tasks.
+    /// 
+    /// Used by: Cleanup processes, condition changes, manual timer cancellation
+    /// 
+    /// # Arguments
+    /// * `input` - JSON with timer_id to cancel
+    /// * `app_handle` - Tauri app handle for state access
+    /// 
+    /// # Returns
+    /// Success/failure response with cancellation details
     pub async fn cancel_timer_exec(
         input: Value,
         app_handle: AppHandle,
@@ -680,6 +889,13 @@ mod timer_tools_impl {
         }
     }
 
+    /// Creates the tool definition for the `list_timers` tool.
+    /// 
+    /// Used by: Tool registration system for timer status inspection
+    /// Enables agents to view all currently active timers and their details.
+    /// 
+    /// # Returns
+    /// `ToolDefinition` for listing all active timers
     pub fn list_timers_definition() -> ToolDefinition {
         ToolDefinition {
             name: "list_timers".to_string(),
@@ -692,6 +908,19 @@ mod timer_tools_impl {
         }
     }
 
+    /// Executes the `list_timers` tool operation.
+    /// 
+    /// Returns a comprehensive list of all active timers with their configurations,
+    /// remaining time, and current status.
+    /// 
+    /// Used by: Status reporting, debugging, timer management interfaces
+    /// 
+    /// # Arguments
+    /// * `_input` - Unused (no parameters required)
+    /// * `app_handle` - Tauri app handle for state access
+    /// 
+    /// # Returns
+    /// JSON array of all active timers with details and time remaining
     pub async fn list_timers_exec(
         _input: Value,
         app_handle: AppHandle,
@@ -735,6 +964,14 @@ mod timer_tools_impl {
         }))
     }
 
+    /// Creates the tool definition for the `check_expired_timers` tool.
+    /// 
+    /// Used by: Tool registration system for expired timer checking
+    /// Critical for agent startup to detect if previous timers have expired
+    /// and need context restoration.
+    /// 
+    /// # Returns
+    /// `ToolDefinition` for checking and retrieving expired timer contexts
     pub fn check_expired_timers_definition() -> ToolDefinition {
         ToolDefinition {
             name: "check_expired_timers".to_string(),
@@ -747,6 +984,19 @@ mod timer_tools_impl {
         }
     }
 
+    /// Executes the `check_expired_timers` tool operation.
+    /// 
+    /// Scans for expired timers and returns their contexts for agent resumption.
+    /// Automatically removes expired timers from the active collection.
+    /// 
+    /// Used by: Agent startup, context restoration, expired timer cleanup
+    /// 
+    /// # Arguments
+    /// * `_input` - Unused (no parameters required)
+    /// * `app_handle` - Tauri app handle for state access
+    /// 
+    /// # Returns
+    /// JSON with expired timer details and contexts for restoration
     pub async fn check_expired_timers_exec(
         _input: Value,
         app_handle: AppHandle,
@@ -789,7 +1039,24 @@ mod timer_tools_impl {
     }
 }
 
-/// Registers timer tools with the provider for agent task scheduling and resumption.
+/// Registers all timer tools with the provider for agent task scheduling and resumption.
+/// 
+/// This is the main registration function that makes all timer capabilities available
+/// to agents. Includes simple timers, monitoring timers, and timer management tools.
+/// 
+/// Used by: Agent initialization in `anthropic.rs`, tool provider setup
+/// 
+/// # Arguments
+/// * `provider` - Mutable reference to LocalToolProvider for tool registration
+/// * `app_handle` - Tauri app handle for state access and event emission
+/// 
+/// # Tools Registered
+/// - `set_timer`: Simple delay timers with context restoration
+/// - `set_screen_monitor`: Screen change monitoring (macOS only)
+/// - `set_file_monitor`: File system event monitoring  
+/// - `cancel_timer`: Timer cancellation by ID
+/// - `list_timers`: List all active timers with status
+/// - `check_expired_timers`: Check for expired timers needing context restoration
 pub async fn register_timer_tools(
     provider: &mut LocalToolProvider,
     app_handle: AppHandle,
