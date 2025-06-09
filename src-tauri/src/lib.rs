@@ -817,6 +817,8 @@ pub fn run() {
             get_always_listening_status,
             set_always_listening_sensitivity,
             get_always_listening_sensitivity,
+            // Agent Execution Progress Commands
+            get_agent_execution_progress,
             set_always_listening_wake_words,
             get_always_listening_wake_words,
             debug_always_listening_status,
