@@ -12,6 +12,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<App />} />
+          <Route path="/settings" element={<App />} />
           <Route path="/floating-bar" element={<EnhancedFloatingBar />} />
         </Routes>
       </BrowserRouter>

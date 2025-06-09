@@ -1,24 +1,23 @@
 import { AgentStatusIndicator } from "@/components/AgentStatusIndicator"; // Import the AgentStatusIndicator component
-import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
-import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
-import { PermissionsFlow } from "@/components/PermissionsFlow"; // Import the PermissionsFlow component
-import Settings from "@/components/Settings"; // Import the Settings component
-import { ThinkingMessage } from "@/components/ThinkingMessage"; // Import the ThinkingMessage component
-import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage"; // Import the ToolCall components
-import { Button } from "@/components/ui/button"; // Shadcn Button
-import { Input } from "@/components/ui/input"; // Shadcn Input
+import DevToolsPanel from "@/components/DevToolsPanel";
+import { PermissionsFlow } from "@/components/PermissionsFlow";
+import SettingsWindow from "@/components/SettingsWindow";
+import { ThinkingMessage } from "@/components/ThinkingMessage";
+import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable"; // Import Resizable components
-import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
-import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator"; // Import the VoiceStatusIndicator component
-import { useSound, useVoiceSounds } from "@/hooks/useSound"; // Import sound hooks
-import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService"; // Import TTS service
-import { cn } from "@/lib/utils"; // Shadcn utility
-import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
-import { listen } from "@tauri-apps/api/event"; // Import listen
+} from "@/components/ui/resizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
+import { useSound, useVoiceSounds } from "@/hooks/useSound";
+import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
+import { cn } from "@/lib/utils";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   ArrowLeft,
   Brain,
@@ -30,9 +29,13 @@ import {
   Server,
   Trash2,
   Type,
-} from "lucide-react"; // Icons
-import { useCallback, useEffect, useRef, useState } from "react";
-import { toggleDictation } from "tauri-plugin-voice-transcription-api"; // Import toggleDictation from plugin API
+} from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { toggleDictation } from "tauri-plugin-voice-transcription-api";
+import { FloatingBar } from "./Bar";
+import ClickVisualizer from "./components/ClickVisualizer";
+import Settings from "./components/Settings";
+import "./styles/globals.css";
 
 // Type for conversation messages
 type ChatMessage = {
@@ -969,6 +972,28 @@ function App() {
     conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversation]);
 
+  // Router logic based on URL path
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setCurrentPath(window.location.pathname);
+    };
+
+    window.addEventListener("popstate", handleLocationChange);
+    return () => window.removeEventListener("popstate", handleLocationChange);
+  }, []);
+
+  // If this is the settings window, render only the settings
+  if (currentPath === "/settings") {
+    return <SettingsWindow />;
+  }
+
+  // If this is the floating bar, render only the floating bar
+  if (currentPath === "/floating-bar") {
+    return <FloatingBar />;
+  }
+
   return (
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
@@ -1261,7 +1286,9 @@ function App() {
                                       : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
                                   )}
                                 >
-                                  {msg.role === "assistant" && (!msg.content || msg.content.trim() === "") ? (
+                                  {msg.role === "assistant" &&
+                                  (!msg.content ||
+                                    msg.content.trim() === "") ? (
                                     <span className="text-muted-foreground italic flex items-center gap-2">
                                       <span>✓</span>
                                       <span>Task completed successfully</span>
