@@ -2,9 +2,18 @@
 
 A production-ready Node.js WebSocket backend for the Juno AI Computer Use Agent, providing authentication, cloud control, and premium features.
 
+## ✅ Production Status
+
+**DEPLOYED**: <https://juno-cloud-backend.fly.dev> (Fly.io)
+
+- Status: ✅ Healthy and operational
+- Region: Atlanta (atl)
+- Last deployed: June 9, 2025
+
 ## 🌟 Features
 
 ### Core Functionality
+
 - **WebSocket Server**: Real-time bidirectional communication with Tauri clients
 - **Device Authentication**: HMAC-signed API key authentication with JWT sessions
 - **Command Processing**: Full support for Anthropic Computer Use commands
@@ -12,6 +21,7 @@ A production-ready Node.js WebSocket backend for the Juno AI Computer Use Agent,
 - **Security**: Rate limiting, CORS, validation, and audit logging
 
 ### Supported Commands
+
 - `voice_query` - Voice-to-text processing and AI responses
 - `text_query` - Direct text-based AI queries
 - `system_command` - System automation commands
@@ -20,6 +30,7 @@ A production-ready Node.js WebSocket backend for the Juno AI Computer Use Agent,
 - `config_update` - Configuration changes
 
 ### Security Features
+
 - HMAC signature validation for all requests
 - JWT token-based session management
 - Rate limiting with configurable thresholds
@@ -58,33 +69,39 @@ backend-server/
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Node.js 20 or higher
 - npm or yarn package manager
 
 ### Installation
 
 1. **Install dependencies:**
+
    ```bash
    npm install
    ```
 
 2. **Configure environment:**
+
    ```bash
    cp env.example .env
    # Edit .env with your configuration
    ```
 
 3. **Create required directories:**
+
    ```bash
    mkdir -p data logs
    ```
 
 4. **Start the server:**
+
    ```bash
    npm start
    ```
 
 The server will be available at:
+
 - **HTTP/WebSocket**: `http://localhost:8080`
 - **WebSocket Endpoint**: `ws://localhost:8080/ws`
 - **Health Check**: `http://localhost:8080/health`
@@ -121,6 +138,7 @@ LOG_FILE=./logs/server.log
 ## 📡 API Endpoints
 
 ### Device Registration
+
 ```bash
 POST /api/register
 Content-Type: application/json
@@ -133,6 +151,7 @@ Content-Type: application/json
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -144,6 +163,7 @@ Content-Type: application/json
 ```
 
 ### Device Authentication
+
 ```bash
 POST /api/auth
 Content-Type: application/json
@@ -158,6 +178,7 @@ Content-Type: application/json
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -173,9 +194,11 @@ Content-Type: application/json
 ## 🔌 WebSocket Protocol
 
 ### Connection
+
 Connect to `ws://localhost:8080/ws`
 
 ### Authentication Flow
+
 1. **Connect** to WebSocket endpoint
 2. **Receive** welcome message with client ID
 3. **Send** authentication message with JWT token
@@ -183,7 +206,9 @@ Connect to `ws://localhost:8080/ws`
 5. **Exchange** command messages
 
 ### Message Format
+
 All WebSocket messages follow this structure:
+
 ```json
 {
   "type": "message_type",
@@ -195,6 +220,7 @@ All WebSocket messages follow this structure:
 ### Message Types
 
 #### Client → Server
+
 - `authenticate` - Authenticate with JWT token
 - `voice_query` - Process voice input
 - `text_query` - Process text input
@@ -205,6 +231,7 @@ All WebSocket messages follow this structure:
 - `heartbeat` - Respond to server ping
 
 #### Server → Client
+
 - `status` - Welcome message with capabilities
 - `authenticated` - Authentication successful
 - `heartbeat` - Keep-alive ping (every 30s)
@@ -214,11 +241,13 @@ All WebSocket messages follow this structure:
 ## 🐳 Docker Deployment
 
 ### Using Docker Compose
+
 ```bash
 docker-compose up -d
 ```
 
 ### Manual Docker Build
+
 ```bash
 docker build -t juno-cloud-backend .
 docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
@@ -227,16 +256,19 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 ## 📊 Monitoring
 
 ### Health Check
+
 ```bash
 curl http://localhost:8080/health | jq .
 ```
 
 ### Metrics
+
 ```bash
 curl http://localhost:8080/metrics | jq .
 ```
 
 ### Logs
+
 ```bash
 tail -f logs/server.log
 ```
@@ -244,6 +276,7 @@ tail -f logs/server.log
 ## 🔒 Security
 
 ### HMAC Authentication
+
 All API requests must include HMAC signatures:
 
 1. **Create payload**: `METHOD:PATH:BODY:TIMESTAMP`
@@ -251,12 +284,15 @@ All API requests must include HMAC signatures:
 3. **Include in request**: `{"api_key": "...", "timestamp": 123, "signature": "..."}`
 
 ### Rate Limiting
+
 - **Default**: 100 requests per 15 minutes per IP
 - **Configurable**: Via `RATE_LIMIT_*` environment variables
 - **Backend**: Memory-based (Redis optional for scaling)
 
 ### Audit Logging
+
 All authentication attempts and command executions are logged to the database with:
+
 - Device ID and user information
 - Timestamp and IP address
 - Action details and success/failure status
@@ -264,9 +300,15 @@ All authentication attempts and command executions are logged to the database wi
 
 ## 🚀 Deployment to Unraid
 
-See [UNRAID_DEPLOYMENT.md](UNRAID_DEPLOYMENT.md) for detailed deployment instructions including:
-- Container configuration
-- Volume mapping
+### Deployment Documentation
+
+- **[FLY_DEPLOYMENT_RULES.md](FLY_DEPLOYMENT_RULES.md)** - Complete Fly.io deployment rules and guidelines
+- **[QUICK_DEPLOY.md](QUICK_DEPLOY.md)** - Fast deployment guide for multiple platforms
+- **[CLOUD_DEPLOYMENT.md](CLOUD_DEPLOYMENT.md)** - Comprehensive cloud deployment options
+- **[UNRAID_DEPLOYMENT.md](UNRAID_DEPLOYMENT.md)** - Unraid container deployment instructions
+
+For production deployments, see [FLY_DEPLOYMENT_RULES.md](FLY_DEPLOYMENT_RULES.md) for complete rules and guidelines.
+
 - Environment setup
 - Port forwarding
 - SSL/reverse proxy setup
@@ -274,12 +316,14 @@ See [UNRAID_DEPLOYMENT.md](UNRAID_DEPLOYMENT.md) for detailed deployment instruc
 ## 🛠️ Development
 
 ### Running in Development Mode
+
 ```bash
 # Set NODE_ENV=development in .env
 npm run dev
 ```
 
 ### Testing Authentication
+
 ```javascript
 // Generate HMAC signature
 const crypto = require('crypto');
@@ -288,7 +332,9 @@ const signature = crypto.createHmac('sha256', hmacSecret).update(payload).digest
 ```
 
 ### Database Schema
+
 The server automatically creates SQLite tables for:
+
 - `users` - User accounts
 - `devices` - Registered devices
 - `sessions` - Active JWT sessions
@@ -309,4 +355,4 @@ This backend server is designed to work seamlessly with the Juno AI Computer Use
 3. **Command Processing**: Handles all Anthropic Computer Use action types
 4. **Cloud Features**: Premium functionality gating and user management
 
-For the complete Juno AI system, see the main repository documentation. 
+For the complete Juno AI system, see the main repository documentation.

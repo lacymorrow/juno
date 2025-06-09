@@ -9,7 +9,9 @@ Juno AI has a **comprehensive cloud control and authentication system already im
 ### 🔧 Backend Architecture (Rust/Tauri)
 
 #### **1. Cloud Module Structure**
+
 Located in `src-tauri/src/cloud/`:
+
 - **`auth.rs`** - Device authentication and credential management
 - **`connector.rs`** - Production WebSocket connector with reconnection logic
 - **`commands.rs`** - Remote command processing and execution
@@ -19,6 +21,7 @@ Located in `src-tauri/src/cloud/`:
 - **`client.rs`** - Cloud client implementation
 
 #### **2. Authentication System (`auth.rs`)**
+
 - ✅ **Device Registration**: Automatic device ID generation and registration
 - ✅ **API Key Management**: Secure API key storage and rotation
 - ✅ **Credential Storage**: Encrypted credential management with expiration
@@ -35,6 +38,7 @@ pub struct CloudCredentials {
 ```
 
 #### **3. Production Cloud Connector (`connector.rs`)**
+
 - ✅ **Official Tauri WebSocket Plugin**: Production-grade WebSocket implementation
 - ✅ **Intelligent Reconnection**: Exponential backoff with retry limits
 - ✅ **Health Monitoring**: Heartbeat system with latency tracking
@@ -42,8 +46,9 @@ pub struct CloudCredentials {
 - ✅ **Event-Driven Architecture**: Real-time status updates and error handling
 
 #### **4. Command Processing (`commands.rs`)**
+
 - ✅ **Full Computer Use Integration**: All Anthropic Computer Use actions supported
-- ✅ **Command Types**: 
+- ✅ **Command Types**:
   - Text queries
   - Voice queries (with audio transcription)
   - System commands (click, type, key press, shell commands)
@@ -54,6 +59,7 @@ pub struct CloudCredentials {
 - ✅ **Audit Logging**: Complete command execution tracking
 
 #### **5. Security Layer (`security.rs`)**
+
 - ✅ **Multi-Level Security**: Low/Medium/High security configurations
 - ✅ **Command Validation**: Whitelist/blacklist system
 - ✅ **Rate Limiting**: Prevents abuse and ensures fair usage
@@ -63,6 +69,7 @@ pub struct CloudCredentials {
 ### 🌐 Frontend Integration (TypeScript)
 
 #### **Cloud Connector (`src/lib/cloud-connector.ts`)**
+
 - ✅ **TypeScript API**: Clean interface for cloud operations
 - ✅ **Event System**: Real-time status monitoring and message handling
 - ✅ **Auto-initialization**: Automatic setup when enabled
@@ -80,6 +87,7 @@ export class ProductionCloudConnector {
 ### 🎛️ Tauri Commands Integration
 
 #### **Cloud Commands (`src-tauri/src/commands/cloud.rs`)**
+
 - ✅ **Configuration Management**: Get/update cloud settings
 - ✅ **Connection Control**: Enable/disable cloud connectivity
 - ✅ **Status Monitoring**: Real-time connection and health status
@@ -87,6 +95,7 @@ export class ProductionCloudConnector {
 - ✅ **Diagnostics**: Connection troubleshooting and metrics
 
 **Available Tauri Commands:**
+
 ```rust
 // Configuration
 get_cloud_config, update_cloud_config, enable_cloud, disable_cloud
@@ -105,6 +114,7 @@ handle_cloud_message, execute_remote_command
 ### 📊 Data Structures & Types
 
 #### **Command Protocol**
+
 ```rust
 pub struct CloudCommand {
     pub id: String,
@@ -124,6 +134,7 @@ pub struct DeviceResponse {
 ```
 
 #### **Device Management**
+
 ```rust
 pub struct DeviceStatus {
     pub device_id: String,
@@ -137,10 +148,11 @@ pub struct DeviceStatus {
 ### 🔧 Configuration System
 
 #### **Cloud Config (`cloud-config.toml`)**
+
 ```toml
 [cloud]
 enabled = true
-server_url = "wss://juno-cloud.shipkit.io/ws"
+server_url = "wss://juno-cloud-backend.fly.dev/ws"
 device_id = "juno-device-12345"
 device_name = "Juno-MacBook-Pro"
 api_key = "your-secure-api-key"
@@ -152,6 +164,7 @@ reconnect_interval = 30
 ### 🛡️ Security Features
 
 #### **Multi-Layer Protection**
+
 1. **Transport Security**: TLS/WSS encryption
 2. **Device Authentication**: API key + device registration
 3. **Command Signing**: HMAC verification
@@ -160,6 +173,7 @@ reconnect_interval = 30
 6. **Audit Logging**: Complete operation tracking
 
 #### **Security Levels**
+
 - **Low**: Basic validation and logging
 - **Medium**: Enhanced validation with rate limiting  
 - **High**: Strict validation, comprehensive auditing, and advanced rate limiting
@@ -167,9 +181,11 @@ reconnect_interval = 30
 ## What's Missing for Production Backend 🚧
 
 ### 1. **Cloud Server Infrastructure**
+
 While the **client-side implementation is complete**, you need:
 
 #### **WebSocket Server** (Recommended: Node.js/Next.js)
+
 ```typescript
 // Example using Socket.io
 io.on('connection', (socket) => {
@@ -180,6 +196,7 @@ io.on('connection', (socket) => {
 ```
 
 #### **Authentication/Registration API**
+
 ```typescript
 // API endpoints needed:
 POST /api/auth/register-device
@@ -190,6 +207,7 @@ GET  /api/devices/{id}/status
 ```
 
 #### **Database Schema**
+
 ```sql
 -- Users table
 CREATE TABLE users (
@@ -225,6 +243,7 @@ CREATE TABLE commands (
 ```
 
 ### 2. **Web Dashboard** (Next.js/React)
+
 ```tsx
 // Device control interface
 const DeviceControl = () => {
@@ -249,6 +268,7 @@ const DeviceControl = () => {
 ```
 
 ### 3. **Premium Features Architecture**
+
 ```typescript
 // Subscription management
 interface Subscription {
@@ -267,6 +287,7 @@ const checkFeatureAccess = (user: User, feature: string) => {
 ## Recommended Implementation Plan 🚀
 
 ### Phase 1: Cloud Server (2-3 weeks)
+
 1. **Setup Next.js project** with WebSocket support (Socket.io)
 2. **Implement authentication API** (NextAuth.js + Prisma)
 3. **Create device management** endpoints
@@ -274,6 +295,7 @@ const checkFeatureAccess = (user: User, feature: string) => {
 5. **Deploy to Shipkit.io** or similar platform
 
 ### Phase 2: Web Dashboard (2-3 weeks)  
+
 1. **Build device grid** and selection interface
 2. **Create command interface** (text/voice input)
 3. **Implement live monitoring** (screenshots, status)
@@ -281,6 +303,7 @@ const checkFeatureAccess = (user: User, feature: string) => {
 5. **Mobile-responsive design** for tablet/phone control
 
 ### Phase 3: Premium Features (1-2 weeks)
+
 1. **Subscription management** (Stripe integration)
 2. **Feature gating** based on subscription tiers
 3. **Usage analytics** and reporting
@@ -288,7 +311,8 @@ const checkFeatureAccess = (user: User, feature: string) => {
 5. **Advanced security** options
 
 ### Phase 4: Advanced Features (2-3 weeks)
-1. **Multi-device orchestration** 
+
+1. **Multi-device orchestration**
 2. **Workflow automation**
 3. **Voice command streaming**
 4. **Session recording** and playback
@@ -297,6 +321,7 @@ const checkFeatureAccess = (user: User, feature: string) => {
 ## Technology Stack Recommendations 📚
 
 ### **Backend (Cloud Server)**
+
 - **Framework**: Next.js 14 with App Router
 - **Database**: PostgreSQL (Supabase or Neon)
 - **Real-time**: Socket.io for WebSocket communication
@@ -305,6 +330,7 @@ const checkFeatureAccess = (user: User, feature: string) => {
 - **Hosting**: Vercel, Railway, or Shipkit.io
 
 ### **Frontend (Web Dashboard)**
+
 - **Framework**: Next.js 14 with TypeScript
 - **Styling**: Tailwind CSS + shadcn/ui components
 - **State Management**: Zustand or Redux Toolkit
@@ -312,25 +338,29 @@ const checkFeatureAccess = (user: User, feature: string) => {
 - **Charts**: Recharts or Chart.js for analytics
 
 ### **Mobile Apps** (Future)
-- **React Native** or **Flutter** 
+
+- **React Native** or **Flutter**
 - **Same WebSocket protocol** as web dashboard
 - **Platform-specific optimizations** for touch controls
 
 ## Key Benefits of Current Implementation ✨
 
 ### **For Development**
+
 - ✅ **Complete backend** - No need to rebuild core functionality
 - ✅ **Production-ready** - Official Tauri WebSocket plugin usage
 - ✅ **Secure by default** - Multi-layer security implementation
 - ✅ **Extensible** - Clean architecture for adding features
 
 ### **For Users**  
+
 - ✅ **Remote control** - Full computer automation from anywhere
 - ✅ **Voice commands** - Audio upload and transcription
 - ✅ **Live monitoring** - Real-time screenshots and status
 - ✅ **Multi-platform** - Works on macOS, Windows, Linux
 
 ### **For Business**
+
 - ✅ **Premium ready** - Easy to add subscription tiers
 - ✅ **Scalable** - WebSocket architecture supports many devices
 - ✅ **Auditable** - Complete command and response logging
