@@ -1,7 +1,7 @@
 # Juno AI Computer Use Agent - LLM Instructions
 
 ## Project Overview
-Juno is a **production-ready Tauri v2 desktop app** implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, and comprehensive system integration.
+Juno is a **production-ready Tauri v2 desktop app** implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, comprehensive system integration, and enterprise-grade security.
 
 **🔒 SECURITY STATUS**: ✅ **ENTERPRISE HARDENED** - Complete security framework with production-grade protections against file system attacks, command injection, and stability issues.
 
@@ -13,14 +13,16 @@ Juno is a **production-ready Tauri v2 desktop app** implementing Anthropic's Com
 - **AI Integration**: Anthropic Claude with Computer Use API
 - **Voice System**: Custom Whisper-based transcription plugin
 - **Automation**: macOS accessibility APIs with Computer Use SDK
+- **Security Framework**: Production-grade validation and monitoring system
+- **Hardware Monitoring**: Real-time system metrics and performance analytics
 
 ### Agent Architecture (Hierarchical)
 ```
 Orchestrator (src-tauri/src/anthropic.rs)
 ├── Desktop Agent (screen interaction, accessibility)
 ├── Browser Agent (web automation)
-├── File Agent (filesystem operations)
-├── Tools (shared providers with lazy initialization)
+├── File Agent (filesystem operations with security controls)
+├── Tools (shared providers with enhanced security validation)
 └── Prompts (centralized prompt management system)
 ```
 
@@ -28,6 +30,11 @@ Orchestrator (src-tauri/src/anthropic.rs)
 - Orchestrator: Persistent AppState with Arc-based cloning
 - Specialists: Fresh SimpleMemoryManager instances (isolated)
 - All agents use safe Arc-based memory manager cloning
+
+**Security Integration**:
+- All tools implement comprehensive security validation
+- Production vs development mode security controls
+- Comprehensive audit logging and performance tracking
 
 **Prompt Management**:
 - Centralized system in `src-tauri/src/agent/prompts/`
@@ -59,6 +66,206 @@ Project MUST compile with exit code 0. No exceptions.
 - Follow async/await patterns consistently throughout
 - **NEW**: Safe mutex handling with lock poisoning protection
 
+## Enhanced Security Framework 🔒 NEW
+
+### Production-Grade Security System
+**Location**: `src-tauri/src/agent/tools/basic_tools.rs`
+
+**Security Modes**:
+- **Development Mode** (`cfg!(debug_assertions)`): Relaxed security for development workflow
+- **Production Mode**: Strict security controls with comprehensive validation
+
+### File Access Security
+**Path Validation and Sandboxing**:
+- Path traversal prevention (`../`, `~/` attacks blocked)
+- Directory access control (workspace-only access)
+- File extension validation (safe text files only)
+- File size limits (10MB production, 50MB development)
+- Canonical path validation and normalization
+
+**Allowed File Extensions** (Production):
+```rust
+txt, md, rs, js, ts, tsx, jsx, json, yaml, yml, toml, css, html, xml, py, log
+```
+
+**Allowed Directories** (Production):
+```rust
+src, src-tauri, public, scripts, docs, examples, tests, tasks
+```
+
+### Command Execution Security
+**Command Whitelisting and Monitoring**:
+- Command whitelist enforcement (safe development tools only)
+- Dangerous pattern detection and blocking
+- Execution timeouts (30s production, 120s development)
+- Resource usage monitoring and limits
+- Comprehensive audit logging
+
+**Allowed Commands** (Production):
+```rust
+cargo, npm, bun, git, ls, cat, grep, find, wc, head, tail, echo, pwd, which
+```
+
+**Dangerous Patterns Blocked**:
+```rust
+rm -rf, sudo, su, chmod 777, wget, curl, nc, netcat, telnet, /dev/, mkfifo, nohup
+```
+
+### Security Configuration
+```rust
+// Production configuration
+SecurityConfig::default() {
+    max_file_size: 10 * 1024 * 1024, // 10MB
+    command_timeout: Duration::from_secs(30),
+    debug_mode: false,
+    // ... whitelists and validation rules
+}
+
+// Development configuration
+SecurityConfig::development_mode() {
+    max_file_size: 50 * 1024 * 1024, // 50MB
+    command_timeout: Duration::from_secs(120),
+    debug_mode: true,
+    // ... expanded permissions for development
+}
+```
+
+**Security Audit Logging**:
+- All file access attempts logged with validation results
+- Command execution tracked with performance metrics
+- Security violations logged with detailed context
+- Production vs development mode operations distinguished
+
+## Real-Time Hardware Monitoring 📊 NEW
+
+### Comprehensive System Monitoring
+**Location**: `src-tauri/src/cloud/connector.rs`
+
+**Hardware Metrics Collection**:
+- **CPU Usage**: Real-time percentage via macOS `top` command
+- **Memory Usage**: Memory percentage calculation via `vm_stat`
+- **Disk Usage**: Root filesystem usage via `df` command
+- **Screen Resolution**: Display information via `system_profiler`
+
+**Implementation**:
+```rust
+struct HardwareMonitor;
+
+impl HardwareMonitor {
+    async fn get_comprehensive_hardware_info() -> HardwareInfo {
+        let (cpu_usage, memory_usage, disk_usage, screen_resolution) = tokio::join!(
+            Self::get_cpu_usage(),
+            Self::get_memory_usage(), 
+            Self::get_disk_usage(),
+            Self::get_screen_resolution()
+        );
+        // ... parallel async collection
+    }
+}
+```
+
+### Performance Analytics
+**Connection and Command Tracking**:
+- Command execution timing and success rates
+- Connection statistics with latency measurement
+- System health reporting in heartbeats
+- Hardware data collection optimization
+
+**Enhanced Cloud Connector Features**:
+- Real-time connection statistics tracking
+- Command performance analytics
+- Hardware metrics integration in status updates
+- Optimized parallel hardware data collection
+
+**Monitoring Integration**:
+```rust
+// Enhanced heartbeat with system health
+let heartbeat = WebSocketMessage {
+    message_type: MessageType::Heartbeat,
+    data: json!({
+        "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        "device_id": self.auth.get_credentials().map(|c| c.device_id.clone()).unwrap_or_default(),
+        "connection_stats": self.get_connection_stats().await,
+        "system_health": {
+            "uptime": self.connection_start_time.lock().await
+                .as_ref()
+                .map(|start| start.elapsed().as_secs())
+                .unwrap_or(0),
+            "performance": "optimal"
+        }
+    }),
+    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+};
+```
+
+## Complete Frontend Functionality 🎨 NEW
+
+### Enhanced Modal System
+**Location**: `src/App.tsx`
+
+**Complete User Interface Features**:
+- **Help Modal**: Comprehensive documentation and user guides
+- **Feedback System**: GitHub issue integration with priority levels  
+- **Chat Import/Export**: JSON-based conversation backup and restore
+- **Window Management**: Full window control (minimize, maximize, fullscreen)
+- **Update System**: Application update checking and installation
+
+### Modal Implementations
+
+#### Help Modal
+```typescript
+// Comprehensive documentation modal
+case "help":
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto">
+      {/* Voice Controls, Chat Features, Tools & Automation, Settings & Permissions */}
+    </div>
+  );
+```
+
+#### Feedback System
+```typescript
+// GitHub integration with priority levels
+interface FeedbackData {
+  type: "issue" | "feature" | "general";
+  title: string;
+  description: string;
+  email?: string;
+  priority: "low" | "medium" | "high";
+}
+```
+
+#### Chat Import/Export
+```typescript
+// JSON-based conversation management
+interface ChatExport {
+  version: string;
+  exported_at: string;
+  conversation: ChatMessage[];
+  metadata: {
+    total_messages: number;
+    export_type: "full" | "filtered";
+  };
+}
+```
+
+### User Experience Enhancements
+**Accessibility and Error Handling**:
+- Accessible modal design with keyboard navigation
+- Comprehensive error handling and user feedback
+- Loading states and progress indicators
+- Data validation and format checking
+- Backend integration via secure Tauri commands
+
+**Window Management**:
+```typescript
+// Complete window control implementation
+const window = getCurrentWindow();
+await window.minimize();
+await window.maximize();
+await window.setFullscreen(!isFullscreen);
+```
+
 ## Voice System - Three-Mode Architecture 🎙️
 
 ### Complete Voice Mode System
@@ -70,7 +277,7 @@ Juno implements a comprehensive three-mode voice interaction system:
 | **Agent Mode** | Option+D toggle | AI conversations | Blue mic + chat | Orchestrator integration |
 | **Always Listening** | Background continuous | Intent detection | Background active | Wake word detection |
 
-### Always Listening Mode ✨ NEW
+### Always Listening Mode ✨
 **Location**: `tauri-plugin-voice-transcription/src/always_listening.rs`
 
 **Features**:
@@ -92,7 +299,7 @@ Juno implements a comprehensive three-mode voice interaction system:
 - Configure sensitivity and wake words
 - Debug status and audio level monitoring
 
-## JSX Visual Response System 🎨 NEW
+## JSX Visual Response System 🎨
 
 ### Rich Visual Agent Responses
 **Location**: `src/components/ui/jsx-message-renderer.tsx`, UI integration in `src/App.tsx`
@@ -147,33 +354,7 @@ Extensive Lucide React icon set: `CheckCircle`, `XCircle`, `AlertCircle`, `Alert
 **Component Safety**: Type-safe component library with proper TypeScript integration
 **Error Handling**: Graceful fallback to text rendering if JSX parsing fails
 
-**Integration Pattern**:
-```typescript
-// Automatic JSX detection in streaming responses
-if (isJsxContent(message.content) || message.isJsx) {
-  return <JsxMessageRenderer jsx={message.content} />
-} else {
-  return <div className="message-content">{message.content}</div>
-}
-```
-
-### Usage Examples
-**Before (Raw Code Problem)**:
-```
-Agent types: <!DOCTYPE svg><svg><circle cx="50" cy="50" r="40"/></svg>
-```
-
-**After (Visual Solution)**:
-```jsx
-<Card>
-  <CardHeader><CardTitle>Here's your circle!</CardTitle></CardHeader>
-  <CardContent>
-    <Circle size={100} color="blue" borderColor="black" borderWidth={2} />
-  </CardContent>
-</Card>
-```
-
-## AI Response Streaming 🌊 NEW
+## AI Response Streaming 🌊
 
 ### Real-Time Streaming Implementation
 **Location**: Backend in `src-tauri/src/agent/providers/anthropic.rs`, Frontend in `src/App.tsx`
@@ -198,7 +379,7 @@ pub const AGENT_STREAM_END: &str = "agent-stream-end";
 - Integration with TTS system
 - Visual typing indicator with auto-scroll
 
-## MCP Integration System 🔌 NEW
+## MCP Integration System 🔌
 
 ### External Tool Server Support
 **Location**: `src-tauri/src/agent/tools/mcp_integration.rs`
@@ -228,23 +409,26 @@ struct MCPServerConfig {
 - Tool namespacing to prevent conflicts
 - Configuration UI in settings panel
 
-## Production Cloud Connector ☁️ NEW
+## Production Cloud Connector ☁️
 
 ### Enterprise Remote Control
 **Location**: `src-tauri/src/cloud/connector.rs`
 
-**Features**:
+**Enhanced Features**:
 - Official Tauri WebSocket plugin integration
 - HMAC-signed authentication with device-specific API keys
 - Command validation with configurable security levels
 - Rate limiting and audit logging
 - Exponential backoff reconnection with health monitoring
+- **NEW**: Real-time hardware monitoring integration
+- **NEW**: Enhanced connection statistics and performance analytics
 
 **Supported Remote Commands**:
 - Text and voice queries to AI agent
 - Screenshot capture and retrieval
 - System status and configuration updates
 - Real-time connection monitoring
+- **NEW**: Hardware metrics reporting
 
 **Security**:
 - TLS/WebSocket Secure (WSS) encryption
@@ -290,7 +474,7 @@ Located in: `src-tauri/src/commands/permissions.rs`
 - Fixed fake permission checks that always returned `true`
 - Implemented real permission testing using actual system capabilities
 
-## Self-Awareness System 🤖 NEW
+## Self-Awareness System 🤖
 
 ### Development Mode Only Features
 **Activation**: `RUST_LOG=debug bun run tauri dev`
@@ -311,28 +495,17 @@ src-tauri/src/agent/
 └── tools/mod.rs                    # Tool registration with conditional compilation
 ```
 
-### Recent Compilation Fixes ✅
-- **Import fixes**: Removed duplicate AppHandle imports in core.rs
-- **Type annotations**: Added proper WebviewWindow<Wry> imports in lib.rs
-- **Compilation verified**: `cargo check` exits with code 0
-- **All syntax errors resolved**: Project compiles successfully
-- Enhanced permission request system with guided system settings navigation
-- Automatic redirection to specific Privacy & Security sections
-
-**Multi-layered Detection**:
-1. Primary: `computer_use_ai_sdk` permission checks
-2. Fallback: Real functionality tests (screenshot, microphone, etc.)
-3. Bundle identifier detection from `TAURI_BUNDLE_IDENTIFIER` env var
-4. Detailed logging for debugging permission issues
-
 ## Implementation Status ✅
 
-### Recently Completed Features (Since Rollback)
+### Recently Completed Major Improvements
+- ✅ **Enhanced Security Framework** - Production-grade file and command security with comprehensive validation
+- ✅ **Real-Time Hardware Monitoring** - CPU, memory, disk, connection metrics with performance analytics
+- ✅ **Complete Frontend Functionality** - All TODO items implemented including help, feedback, import/export, window management, updates
 - ✅ **Always Listening Mode** with wake word detection
 - ✅ **Streaming AI Responses** with real-time text updates
 - ✅ **JSX Visual Response System** with rich React component rendering
 - ✅ **MCP Integration** for external tool servers
-- ✅ **Production Cloud Connector** with enterprise security
+- ✅ **Production Cloud Connector** with enterprise security and hardware monitoring
 - ✅ **Accessibility Permission Fixes** with real permission testing
 - ✅ **Tech Debt Cleanup** (37% warning reduction, compilation fixes)
 - ✅ **Enhanced Voice Transcription** with improved state management
@@ -375,6 +548,9 @@ src-tauri/src/agent/
 
 ### Key Entry Points
 - **Main Agent**: `src-tauri/src/anthropic.rs::submit_query()`
+- **Security Framework**: `src-tauri/src/agent/tools/basic_tools.rs`
+- **Hardware Monitoring**: `src-tauri/src/cloud/connector.rs`
+- **Frontend Features**: `src/App.tsx`
 - **Permission System**: `src-tauri/src/commands/permissions.rs`
 - **Agent Tools**: `src-tauri/src/agent/tools/`
 - **Prompt System**: `src-tauri/src/agent/prompts/`
@@ -386,7 +562,7 @@ src-tauri/src/agent/
 
 ### State Management
 - **AppState**: `src-tauri/src/state.rs` - Central application state
-- **Enhanced Fields**: Always listening state, cloud configuration, MCP manager
+- **Enhanced Fields**: Always listening state, cloud configuration, MCP manager, hardware monitoring
 - **Agent Memory**: Arc-based managers for safe cloning
 - **Configuration**: Tauri store for persistent settings
 
@@ -396,13 +572,21 @@ src-tauri/src/agent/
 - **Agent Communication**: Event-based system with `bar-state-update` events
 - **Streaming Integration**: Real-time text updates in `src/App.tsx`
 - **Window Management**: Multiple windows (main, floating-bar, settings)
+- **Modal System**: Complete UI functionality with help, feedback, import/export
 
 ## Build & Testing
 
 ### Development
 ```bash
 bun run dev          # Frontend development
-cargo check         # Verify Rust compilation
+cargo check         # Verify Rust compilation (MANDATORY after changes)
+```
+
+### Security Testing
+```bash
+# Test both security modes
+RUST_LOG=debug bun run tauri dev  # Development mode (relaxed security)
+bun tauri build                   # Production mode (strict security)
 ```
 
 ### Testing Infrastructure
@@ -440,6 +624,7 @@ cargo test --manifest-path src-tauri/Cargo.toml    # All Rust tests
 - **State Management**: AppState, configuration, thread safety
 - **Data Structures**: Serialization, validation, error propagation
 - **Platform Integration**: macOS APIs, permissions, accessibility
+- **Security Framework**: Path validation, command filtering, audit logging
 
 **Testing Patterns:**
 - `#[tokio::test]` for async operations
@@ -491,6 +676,12 @@ bun tauri build     # Creates app bundle with entitlements
 3. **Test error scenarios** comprehensively
 4. **Validate async operations** with proper timeout handling
 
+#### Security Testing Requirements
+1. **Test both security modes** (development and production)
+2. **Validate path restrictions** and command filtering
+3. **Test file size limits** and extension validation
+4. **Verify audit logging** functionality
+
 #### Testing Anti-patterns to Avoid
 - Don't mock internal module functions (test behavior, not implementation)
 - Don't write tests that depend on external services
@@ -508,72 +699,6 @@ bun tauri build     # Creates app bundle with entitlements
 - [ ] All frontend tests pass (`npm test`)
 - [ ] All Rust tests pass (`cargo test`)
 - [ ] No new compilation warnings
-- [ ] Test coverage meets requirements
-- [ ] Built app contains Info.plist with usage descriptions
-- [ ] Permission checking returns accurate results in built app
-- [ ] Always listening mode activates with wake words
-- [ ] Streaming responses work with real-time updates
-- [ ] MCP servers connect and provide tools
-- [ ] Cloud connector establishes secure WebSocket connection
-- [ ] App launches and initializes all systems (voice, agents, shortcuts)
-
-## Error Handling
-
-### Agent Errors
-Use `AgentError` enum defined in agent traits:
-- `ToolExecutionError`
-- `MemoryError`
-- `ConfigurationError`
-- Never use `std::process::exit()` - always return proper errors
-
-### Permission Errors
-Robust fallback mechanisms in place:
-- Multiple detection methods prevent false negatives
-- Real functionality testing prevents false positives
-- Detailed logging helps debug permission issues
-- Graceful degradation when permissions unavailable
-
-## LLM-Specific Instructions
-
-### Code Modification Guidelines
-1. **Always run `cargo check`** after Rust changes
-2. **Test built apps** for permission-related changes
-3. **Use existing patterns** (AgentError, async/await, Arc cloning)
-4. **Maintain memory isolation** between agent types
-5. **Follow hierarchical architecture** (orchestrator → specialists → tools)
-6. **Respect voice mode separation** (Always Listening ≠ Dictation ≠ Agent)
-
-### Debugging Approach
-- Check compilation first (`cargo check`)
-- Use tracing logs for runtime debugging
-- Test both dev and built apps for permission issues
-- Verify entitlements and Info.plist inclusion in bundles
-- Monitor streaming events for AI response issues
-- Check MCP server connectivity and tool discovery
-- Verify cloud connector WebSocket connection status
-
-### Extension Guidelines
-- New tools go in `src-tauri/src/agent/tools/`
-- New prompts use `PromptManager::load()` and centralized templates
-- MCP servers for external integrations via `MCPManager`
-- Always listening features use `AlwaysListeningController`
-- Streaming capabilities leverage existing SSE infrastructure
-- Cloud features extend `ProductionCloudConnector`
-- Follow existing async patterns and error handling
-- Maintain state management through AppState getters
-
-### Recent Architecture Additions
-- **Always Listening**: Background voice monitoring with wake word detection
-- **Streaming**: Progressive AI response updates with real-time UI
-- **MCP Integration**: External tool server management and execution
-- **Cloud Connector**: Enterprise remote control with WebSocket security
-- **Permission System**: Real permission testing with guided setup flows
-
-### Prompt System Guidelines
-- **No hardcoded prompts**: All prompts must use `PromptManager`
-- **Template structure**: Use `DefaultPrompts` for new prompt types
-- **Variable substitution**: Support `{{var}}` syntax for dynamic content
-- **Integration pattern**: Load prompt manager with `PromptManager::load().unwrap_or_default()`
-- **Customization**: Allow user overrides while maintaining defaults
-
-This documentation provides comprehensive guidance for LLMs working with the Juno codebase, emphasizing recent major additions since rollback-2025-06-06, critical patterns, and proper development practices.
+- [ ] Security validation working in both modes
+- [ ] Hardware monitoring operational
+- [ ] Frontend modals and features functional
