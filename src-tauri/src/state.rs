@@ -129,6 +129,8 @@ pub struct AppState {
     // Agent iteration tracking
     pub agent_current_step: Arc<Mutex<Option<u32>>>, // Track the current iteration/step number
     pub agent_max_steps: Arc<Mutex<Option<u32>>>, // Track the maximum iterations/steps allowed
+    // First onboarding prompt storage
+    pub first_onboarding_prompt: Arc<Mutex<Option<String>>>, // Store the first prompt selected during onboarding
 }
 
 impl AppState {
@@ -178,6 +180,8 @@ impl AppState {
             // Initialize agent iteration tracking
             agent_current_step: Arc::new(Mutex::new(None)),
             agent_max_steps: Arc::new(Mutex::new(None)),
+            // Initialize first onboarding prompt storage
+            first_onboarding_prompt: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -686,13 +690,35 @@ impl AppState {
 
         Ok(())
     }
+
+    // Method to set the first onboarding prompt
+    pub fn set_first_onboarding_prompt(&self, prompt: String) {
+        let mut prompt_guard = self.first_onboarding_prompt.lock().unwrap();
+        *prompt_guard = Some(prompt);
+    }
+
+    // Method to get the first onboarding prompt
+    pub fn get_first_onboarding_prompt(&self) -> Option<String> {
+        let prompt_guard = self.first_onboarding_prompt.lock().unwrap();
+        prompt_guard.clone()
+    }
 }
 
 // Helper function to update undo state
 #[allow(dead_code)] // Keep allowing dead code as it might be conditionally used
 pub(crate) fn update_undo_state(state: &AppState, file_path: PathBuf, previous_content: Option<String>) {
-    *state.last_edited_file.lock().unwrap() = Some(file_path);
-    *state.previous_content.lock().unwrap() = Some(previous_content);
+    // Safely handle potential lock poisoning
+    if let Ok(mut last_edited) = state.last_edited_file.lock() {
+        *last_edited = Some(file_path);
+    } else {
+        log::error!("Failed to acquire lock for last_edited_file - lock may be poisoned");
+    }
+    
+    if let Ok(mut previous) = state.previous_content.lock() {
+        *previous = Some(previous_content);
+    } else {
+        log::error!("Failed to acquire lock for previous_content - lock may be poisoned");
+    }
 }
 
 // DesktopWrapper implementation moved to desktop_wrapper.rs

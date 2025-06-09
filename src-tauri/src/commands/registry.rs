@@ -65,7 +65,14 @@ macro_rules! generate_invoke_handler {
             qa_test_select_text,
             qa_test_scroll,
 
-            // Keyboard Commands
+            // Production Keyboard Commands
+            type_text,
+            press_key,
+            hold_key,
+            release_key,
+            global_type_text,
+
+            // Dev Keyboard Commands (for devtools)
             dev_type_text,
             dev_press_key,
             dev_hold_key,
@@ -268,8 +275,17 @@ pub mod categories {
         "qa_test_scroll"
     ];
 
-    /// Keyboard interaction commands
+    /// Production keyboard commands
     pub const KEYBOARD: &[&str] = &[
+        "type_text",
+        "press_key",
+        "hold_key",
+        "release_key",
+        "global_type_text"
+    ];
+
+    /// Development keyboard commands  
+    pub const DEV_KEYBOARD: &[&str] = &[
         "dev_type_text",
         "dev_press_key",
         "dev_hold_key",
@@ -297,6 +313,7 @@ pub mod categories {
         ("Mouse", MOUSE),
         ("QA Test", QA_TEST),
         ("Keyboard", KEYBOARD),
+        ("Dev Keyboard", DEV_KEYBOARD),
         ("Window", WINDOW),
     ];
 }
