@@ -263,3 +263,26 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
         progress_percentage,
     })
 }
+
+/// Store the first prompt selected during onboarding
+#[tauri::command]
+pub async fn store_first_prompt(prompt: String, state: State<'_, AppState>) -> Result<(), String> {
+    info!("Storing first prompt from onboarding: {}", prompt);
+    
+    // Store the prompt in AppState for potential use after onboarding
+    state.set_first_onboarding_prompt(prompt.clone());
+    
+    // Optionally, you could also persist this to a file or database
+    // For now, we'll just store it in memory for the session
+    
+    Ok(())
+}
+
+/// Get the first prompt selected during onboarding
+#[tauri::command]
+pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    info!("Retrieving first prompt from onboarding");
+    
+    let prompt = state.get_first_onboarding_prompt();
+    Ok(prompt)
+}

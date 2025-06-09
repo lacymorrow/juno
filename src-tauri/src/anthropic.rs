@@ -510,7 +510,10 @@ async fn register_orchestrator_delegation_tools(
         let provider = browser_provider.clone();
         let handle = browser_app_handle.clone();
         async move {
-            execute_specialized_agent_task(provider, "browser", input, handle).await
+            // Get the current cancellation receiver from app state to pass to specialist
+            let app_state = handle.state::<crate::state::AppState>();
+            let cancel_rx = app_state.cancel_rx.clone();
+            execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx).await
         }
     };
     orchestrator_provider.register_async_tool(browser_delegation_def, browser_executor).await;
@@ -541,7 +544,10 @@ async fn register_orchestrator_delegation_tools(
         let provider = desktop_provider.clone();
         let handle = desktop_app_handle.clone();
         async move {
-            execute_specialized_agent_task(provider, "desktop", input, handle).await
+            // Get the current cancellation receiver from app state to pass to specialist
+            let app_state = handle.state::<crate::state::AppState>();
+            let cancel_rx = app_state.cancel_rx.clone();
+            execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx).await
         }
     };
     orchestrator_provider.register_async_tool(desktop_delegation_def, desktop_executor).await;
@@ -572,7 +578,10 @@ async fn register_orchestrator_delegation_tools(
         let provider = file_provider.clone();
         let handle = file_app_handle.clone();
         async move {
-            execute_specialized_agent_task(provider, "file", input, handle).await
+            // Get the current cancellation receiver from app state to pass to specialist
+            let app_state = handle.state::<crate::state::AppState>();
+            let cancel_rx = app_state.cancel_rx.clone();
+            execute_specialized_agent_task(provider, "file", input, handle, cancel_rx).await
         }
     };
     orchestrator_provider.register_async_tool(file_delegation_def, file_executor).await;
@@ -586,6 +595,7 @@ async fn execute_specialized_agent_task(
     agent_type: &str,
     input: serde_json::Value,
     app_handle: tauri::AppHandle,
+    cancel_rx: crate::state::CancelReceiver,
 ) -> Result<serde_json::Value, String> {
     let task = input["task"].as_str()
         .ok_or_else(|| "Missing required 'task' parameter".to_string())?;
@@ -619,8 +629,8 @@ async fn execute_specialized_agent_task(
         format!("{}\n\nAdditional context: {}", task, context)
     };
 
-    // Execute the specialist agent
-    match specialist_runner.run(specialist_query, tokio::sync::watch::channel(false).1).await {
+    // Execute the specialist agent with proper cancellation signal
+    match specialist_runner.run(specialist_query, cancel_rx).await {
         Ok(result) => {
             info!("Specialist {} agent completed successfully", agent_type);
 

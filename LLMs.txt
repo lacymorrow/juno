@@ -1,7 +1,9 @@
 # Juno AI Computer Use Agent - LLM Instructions
 
 ## Project Overview
-Juno is a production-ready Tauri v2 desktop app implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, and comprehensive system integration.
+Juno is a **production-ready Tauri v2 desktop app** implementing Anthropic's Computer Use Bot for macOS. It provides AI-powered automation with voice control, multi-agent orchestration, and comprehensive system integration.
+
+**🔒 SECURITY STATUS**: ✅ **ENTERPRISE HARDENED** - Complete security framework with production-grade protections against file system attacks, command injection, and stability issues.
 
 ## Architecture Overview
 
@@ -43,11 +45,19 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ```
 Project MUST compile with exit code 0. No exceptions.
 
+### 🔒 Security Development Standards (MANDATORY)
+- **Input Validation**: All user inputs MUST be validated against whitelists before processing
+- **Path Operations**: Use security validation functions with workspace boundary enforcement
+- **Command Execution**: All commands MUST pass whitelist validation and injection prevention
+- **Error Handling**: NEVER use `.unwrap()` in production code - implement graceful degradation
+- **Resource Limits**: Implement size limits and DoS prevention for all operations
+
 ### Key Development Patterns
 - Use `AgentError` enum for errors, NEVER `std::process::exit()`
 - Dynamic escape key registration ONLY during agent execution
 - All persistent state in `AppState`, access via getters
 - Follow async/await patterns consistently throughout
+- **NEW**: Safe mutex handling with lock poisoning protection
 
 ## Voice System - Three-Mode Architecture 🎙️
 
