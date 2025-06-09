@@ -223,3 +223,52 @@ pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
     tracing::info!("Set AI provider to: {}", provider_id);
     Ok(())
 }
+
+/// Agent execution progress information
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentExecutionProgress {
+    pub is_executing: bool,
+    pub execution_id: Option<String>,
+    pub current_step: Option<u32>,
+    pub max_steps: Option<u32>,
+    pub remaining_steps: Option<u32>,
+    pub progress_percentage: Option<f32>,
+}
+
+/// Get current agent execution progress
+#[tauri::command]
+pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<AgentExecutionProgress, String> {
+    let is_executing = state.is_agent_executing();
+    let execution_id = state.get_current_agent_execution_id();
+
+    // For now, we'll use hardcoded max_steps values based on the agent mode
+    // In a full implementation, this would come from the actual agent runner
+    let max_steps = if is_executing {
+        Some(15u32) // MAX_ITERATIONS from anthropic.rs
+    } else {
+        None
+    };
+
+    // Since we don't currently track current_step in AppState, we'll return None for now
+    // This is where we'd get the actual current step from the running agent
+    let current_step = None;
+
+    let remaining_steps = match (current_step, max_steps) {
+        (Some(current), Some(max)) => Some(max.saturating_sub(current)),
+        _ => None,
+    };
+
+    let progress_percentage = match (current_step, max_steps) {
+        (Some(current), Some(max)) if max > 0 => Some((current as f32 / max as f32) * 100.0),
+        _ => None,
+    };
+
+    Ok(AgentExecutionProgress {
+        is_executing,
+        execution_id,
+        current_step,
+        max_steps,
+        remaining_steps,
+        progress_percentage,
+    })
+}

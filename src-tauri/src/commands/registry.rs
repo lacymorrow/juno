@@ -169,6 +169,7 @@ macro_rules! generate_invoke_handler {
             // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
             list_ai_providers,
             set_ai_provider,
+            get_agent_execution_progress,
         ]
     };
 }
