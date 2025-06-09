@@ -9,6 +9,15 @@ interface ProviderInfo {
   description: string;
   models: string[];
   default_model: string;
+  model_info: {
+    id: string;
+    name: string;
+    supports_computer_use: boolean;
+    is_recommended: boolean;
+  }[];
+  is_available: boolean;
+  is_default: boolean;
+  computer_use_supported: boolean;
 }
 
 interface ProviderSettings {
