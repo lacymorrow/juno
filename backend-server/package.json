@@ -1,0 +1,52 @@
+{
+  "name": "juno-cloud-backend",
+  "version": "1.0.0",
+  "description": "Production WebSocket server for Juno AI cloud control and authentication",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "jest",
+    "db:migrate": "node src/database/migrate.js",
+    "db:seed": "node src/database/seed.js",
+    "docker:build": "docker build -t juno-backend .",
+    "docker:run": "docker run -p 8080:8080 --env-file .env juno-backend",
+    "docker:compose": "docker-compose up -d"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "uuid": "^10.0.0",
+    "sqlite3": "^5.1.7",
+    "redis": "^4.7.0",
+    "rate-limiter-flexible": "^5.0.3",
+    "joi": "^17.13.3",
+    "dotenv": "^16.4.7",
+    "winston": "^3.15.0",
+    "crypto": "^1.0.1",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0",
+    "@types/node": "^22.14.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "websocket",
+    "authentication",
+    "cloud-control",
+    "ai-agent",
+    "real-time"
+  ],
+  "author": "Juno AI",
+  "license": "MIT"
+}
