@@ -1,3 +1,4 @@
+import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator"; // Import the AgentExecutionProgressIndicator component
 import { AgentStatusIndicator } from "@/components/AgentStatusIndicator"; // Import the AgentStatusIndicator component
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
@@ -1048,8 +1049,12 @@ function App() {
                     </span>
                   </div>
                   {currentView === "chat" && serverStatus === "connected" && (
-                    <div className="border-l pl-4">
+                    <div className="border-l pl-4 space-y-1">
                       <AgentStatusIndicator
+                        compact
+                        className="text-muted-foreground"
+                      />
+                      <AgentExecutionProgressIndicator
                         compact
                         className="text-muted-foreground"
                       />
