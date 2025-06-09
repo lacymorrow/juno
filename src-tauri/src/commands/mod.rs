@@ -2,7 +2,7 @@
 
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::state::AppState;
-use tauri::{State, Emitter};
+use tauri::{State, Emitter, AppHandle, WebviewUrl, WebviewWindowBuilder, Manager};
 
 // Declare the submodules
 pub mod registry;
@@ -81,4 +81,57 @@ pub async fn test_system_context(state: State<'_, AppState>) -> Result<String, S
         }
         Err(e) => Err(format!("Failed to gather system context: {}", e))
     }
+}
+
+/// Open the native settings window
+#[tauri::command]
+pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
+    // Check if settings window already exists
+    if let Some(settings_window) = app.get_webview_window("settings") {
+        // If it exists, just show and focus it
+        settings_window.show().map_err(|e| e.to_string())?;
+        settings_window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Create new settings window if it doesn't exist
+    let settings_window = WebviewWindowBuilder::new(
+        &app,
+        "settings",
+        WebviewUrl::App("/settings".into()),
+    )
+    .title("Juno Settings")
+    .inner_size(800.0, 600.0)
+    .min_inner_size(700.0, 500.0)
+    .resizable(true)
+    .center()
+    .visible(false) // Start hidden, show after setup
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    // Apply macOS-specific styling
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::TitleBarStyle;
+        
+        // Set transparent title bar for native look
+        if let Err(e) = settings_window.set_title_bar_style(TitleBarStyle::Transparent) {
+            warn!("Failed to set title bar style: {}", e);
+        }
+    }
+
+    // Show the window
+    settings_window.show().map_err(|e| e.to_string())?;
+    settings_window.set_focus().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Close the native settings window
+#[tauri::command]
+pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
+    if let Some(settings_window) = app.get_webview_window("settings") {
+        settings_window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

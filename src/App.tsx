@@ -1,23 +1,39 @@
-import ClickVisualizer from "@/components/ClickVisualizer"; // Import the ClickVisualizer
-import DevToolsPanel from "@/components/DevToolsPanel"; // Import the new panel
-import { PermissionsFlow } from "@/components/PermissionsFlow"; // Import the PermissionsFlow component
-import Settings from "@/components/Settings"; // Import the Settings component
-import { ThinkingMessage } from "@/components/ThinkingMessage"; // Import the ThinkingMessage component
-import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage"; // Import the ToolCall components
-import { Button } from "@/components/ui/button"; // Shadcn Button
-import { Input } from "@/components/ui/input"; // Shadcn Input
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/api/dialog";
+import { appDataDir } from "@tauri-apps/api/path";
+import { readTextFile } from "@tauri-apps/api/fs";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { MicrophonePermissionGuard } from "@/components/MicrophonePermissionGuard";
+import { VoiceControls } from "@/components/VoiceControls";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { Settings } from "@/components/Settings";
+import SettingsWindow from "@/components/SettingsWindow";
+import { PermissionsFlow } from "@/components/PermissionsFlow";
+import { FloatingBar } from "@/components/FloatingBar";
+import { DevTools } from "@/components/devtools/DevTools";
+import { StatusBar } from "@/components/StatusBar";
+import { MessageBubble } from "@/components/MessageBubble";
+import { MessageInput } from "@/components/MessageInput";
+import { ClickVisualizer } from "@/components/ClickVisualizer";
+import { toast, Toaster } from "sonner";
+import "./globals.css";
+import DevToolsPanel from "@/components/DevToolsPanel";
+import { ThinkingMessage } from "@/components/ThinkingMessage";
+import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
-} from "@/components/ui/resizable"; // Import Resizable components
-import { ScrollArea } from "@/components/ui/scroll-area"; // Import Shadcn ScrollArea
-import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator"; // Import the VoiceStatusIndicator component
-import { useSound, useVoiceSounds } from "@/hooks/useSound"; // Import sound hooks
-import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService"; // Import TTS service
-import { cn } from "@/lib/utils"; // Shadcn utility
-import { invoke } from "@tauri-apps/api/core"; // Use Tauri's invoke
-import { listen } from "@tauri-apps/api/event"; // Import listen
+} from "@/components/ui/resizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
+import { useSound, useVoiceSounds } from "@/hooks/useSound";
+import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
+import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   Brain,
@@ -29,9 +45,8 @@ import {
   Server,
   Trash2,
   Type,
-} from "lucide-react"; // Icons
-import { useCallback, useEffect, useRef, useState } from "react";
-import { toggleDictation } from "tauri-plugin-voice-transcription-api"; // Import toggleDictation from plugin API
+} from "lucide-react";
+import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 
 // Type for conversation messages
 type ChatMessage = {
@@ -967,6 +982,28 @@ function App() {
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversation]);
+
+  // Router logic based on URL path
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setCurrentPath(window.location.pathname);
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  // If this is the settings window, render only the settings
+  if (currentPath === '/settings') {
+    return <SettingsWindow />;
+  }
+
+  // If this is the floating bar, render only the floating bar
+  if (currentPath === '/floating-bar') {
+    return <FloatingBar onNavigateToChat={handleNavigateToChat} />;
+  }
 
   return (
     <main className="h-screen flex flex-col">
