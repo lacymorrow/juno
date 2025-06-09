@@ -165,8 +165,8 @@ pub async fn run_cli_command(app_handle: AppHandle, matches: &clap::ArgMatches) 
 /// Handle test command variations with TTS test
 async fn run_test_command(app_handle: AppHandle, test_matches: &clap::ArgMatches) -> Result<(), String> {
     if test_matches.get_flag("tts") || test_matches.subcommand_matches("tts").is_some() {
-        let text = "Testing TTS functionality";
-        let provider = "system";
+        let _text = "Testing TTS functionality";
+        let _provider = "system";
 
         // Create a runtime for blocking on async function
         let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
@@ -190,7 +190,7 @@ async fn run_test_command(app_handle: AppHandle, test_matches: &clap::ArgMatches
 
 /// Handle config command variations
 async fn run_config_command(config_matches: &clap::ArgMatches) -> Result<(), String> {
-    if let Some(show_matches) = config_matches.subcommand_matches("show") {
+    if let Some(_show_matches) = config_matches.subcommand_matches("show") {
         match show_config_file() {
             Ok(()) => {
                 info!("✅ Config file displayed successfully");

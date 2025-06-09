@@ -92,7 +92,7 @@ pub struct MultiAgentOrchestrator {
 
 impl MultiAgentOrchestrator {
     pub async fn new(
-        memory: Arc<dyn MemoryManager + Send + Sync>,
+        _memory: Arc<dyn MemoryManager + Send + Sync>,
         tool_provider: Arc<dyn ToolProvider + Send + Sync>,
     ) -> Result<Self, AgentError> {
         // Load prompt manager

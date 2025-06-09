@@ -293,7 +293,9 @@ fn is_text_input_element(attrs: &computer_use_ai_sdk::UIElementAttributes) -> bo
 /// Try to get application name from element using NSWorkspace
 #[cfg(target_os = "macos")]
 fn get_application_name_from_element(element: &computer_use_ai_sdk::UIElement) -> Option<String> {
-    use objc::{class, msg_send, sel, sel_impl};
+    #[cfg(target_os = "macos")]
+    {
+        use objc::{class, msg_send, sel, sel_impl};
 
     // Try to get application name by checking if element has app-related properties
     let attrs = element.attributes();
@@ -335,31 +337,37 @@ fn get_application_name_from_element(element: &computer_use_ai_sdk::UIElement) -
         }
     }
 
-    // Fallback: try to use NSWorkspace to get the frontmost application
-    unsafe {
-        let workspace_class = class!(NSWorkspace);
-        let shared_workspace: *mut objc::runtime::Object =
-            msg_send![workspace_class, sharedWorkspace];
-        let frontmost_app: *mut objc::runtime::Object =
-            msg_send![shared_workspace, frontmostApplication];
+        // Fallback: try to use NSWorkspace to get the frontmost application
+        unsafe {
+            let workspace_class = class!(NSWorkspace);
+            let shared_workspace: *mut objc::runtime::Object =
+                msg_send![workspace_class, sharedWorkspace];
+            let frontmost_app: *mut objc::runtime::Object =
+                msg_send![shared_workspace, frontmostApplication];
 
-        if !frontmost_app.is_null() {
-            let app_name_obj: *mut objc::runtime::Object = msg_send![frontmost_app, localizedName];
-            if !app_name_obj.is_null() {
-                let app_name_str: &str = {
-                    let nsstring = app_name_obj as *const objc::runtime::Object;
-                    let bytes: *const std::os::raw::c_char =
-                        msg_send![nsstring, UTF8String];
-                    let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
-                    let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
-                    std::str::from_utf8_unchecked(bytes_slice)
-                };
-                return Some(app_name_str.to_string());
+            if !frontmost_app.is_null() {
+                let app_name_obj: *mut objc::runtime::Object = msg_send![frontmost_app, localizedName];
+                if !app_name_obj.is_null() {
+                    let app_name_str: &str = {
+                        let nsstring = app_name_obj as *const objc::runtime::Object;
+                        let bytes: *const std::os::raw::c_char =
+                            msg_send![nsstring, UTF8String];
+                        let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
+                        let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
+                        std::str::from_utf8_unchecked(bytes_slice)
+                    };
+                    return Some(app_name_str.to_string());
+                }
             }
         }
+
+        None
     }
 
-    None
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 /// Get screen resolution using macOS display APIs
@@ -460,7 +468,7 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
                 };
 
                 // Skip system background processes unless they're user-relevant
-                if let Some(ref bundle_id_str) = bundle_id {
+                if let Some(bundle_id_str) = &bundle_id {
                     if bundle_id_str.contains(".worker") ||
                        bundle_id_str.contains("com.apple.WebKit") ||
                        bundle_id_str.contains("com.apple.CoreServices") ||

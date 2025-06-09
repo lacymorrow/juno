@@ -233,7 +233,7 @@ impl CloudCommandProcessor {
         info!("Executing voice query");
 
         // Decode audio and process
-        let audio_data = general_purpose::STANDARD.decode(audio_base64)
+        let _audio_data = general_purpose::STANDARD.decode(audio_base64)
             .map_err(|e| CloudError::ValidationFailed(format!("Invalid audio data: {}", e)))?;
 
         // TODO: Implement voice transcription and processing

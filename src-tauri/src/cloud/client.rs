@@ -136,7 +136,7 @@ impl CloudClient {
 
     /// Handle WebSocket communication
     async fn handle_websocket(&self, ws_stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>) -> Result<(), CloudError> {
-        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+        let (ws_sender, mut ws_receiver) = ws_stream.split();
         let ws_sender = Arc::new(TokioMutex::new(ws_sender));
 
         // Authenticate first

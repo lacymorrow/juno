@@ -23,7 +23,7 @@ pub async fn add_mcp_server(
 
     // Add to tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.add_mcp_server(config);
     }
@@ -55,7 +55,7 @@ pub async fn remove_mcp_server(
 
     // Remove from tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.remove_mcp_server(&server_id);
     }
@@ -141,7 +141,7 @@ pub async fn update_mcp_server(
 
     // Update in tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.update_mcp_server(config.clone());
     }
@@ -167,7 +167,7 @@ pub async fn set_mcp_server_enabled(
 
     // Update in tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.set_mcp_server_enabled(&server_id, enabled);
     }
