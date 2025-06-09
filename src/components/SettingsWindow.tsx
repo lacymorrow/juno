@@ -1,37 +1,48 @@
-import React, { useState, useEffect } from "react";
+import { useSettings } from "@/hooks/useSettings";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  Settings,
-  Mic,
-  Brain,
-  Network,
-  Shield,
-  Keyboard,
-  MonitorSpeaker,
-  Server,
-  Terminal,
-  Palette,
-  Save,
-  RefreshCw,
-  CheckCircle,
   AlertCircle,
-  Square,
+  Brain,
+  CheckCircle,
   ExternalLink,
+  Keyboard,
+  Mic,
+  MonitorSpeaker,
+  Network,
+  RefreshCw,
   RotateCcw,
+  Save,
+  Server,
+  Settings,
+  Shield,
+  Square,
+  Terminal,
 } from "lucide-react";
+import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { useSettings } from "@/hooks/useSettings";
 
 // Import UI components
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 
 interface SettingsCategory {
   id: string;
@@ -128,7 +139,7 @@ export default function SettingsWindow() {
         <div className="p-6 border-b border-gray-200">
           <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto p-4">
           <div className="space-y-1">
             {settingsCategories.map((category) => (
@@ -141,9 +152,13 @@ export default function SettingsWindow() {
                     : "text-gray-700 hover:bg-gray-100"
                 }`}
               >
-                <div className={`${
-                  selectedCategory === category.id ? "text-blue-600" : "text-gray-500"
-                }`}>
+                <div
+                  className={`${
+                    selectedCategory === category.id
+                      ? "text-blue-600"
+                      : "text-gray-500"
+                  }`}
+                >
                   {category.icon}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -174,10 +189,10 @@ export default function SettingsWindow() {
         <div className="h-12 flex items-center justify-between px-6 bg-transparent">
           <div className="flex items-center gap-3">
             <div className="text-gray-500">
-              {settingsCategories.find(c => c.id === selectedCategory)?.icon}
+              {settingsCategories.find((c) => c.id === selectedCategory)?.icon}
             </div>
             <h2 className="text-lg font-semibold text-gray-900">
-              {settingsCategories.find(c => c.id === selectedCategory)?.name}
+              {settingsCategories.find((c) => c.id === selectedCategory)?.name}
             </h2>
           </div>
         </div>
@@ -191,7 +206,13 @@ export default function SettingsWindow() {
   );
 }
 
-function SettingsContent({ category, settings }: { category: string; settings: ReturnType<typeof useSettings> }) {
+function SettingsContent({
+  category,
+  settings,
+}: {
+  category: string;
+  settings: ReturnType<typeof useSettings>;
+}) {
   const renderCategoryContent = () => {
     switch (category) {
       case "general":
@@ -215,19 +236,21 @@ function SettingsContent({ category, settings }: { category: string; settings: R
     }
   };
 
-  return (
-    <div className="max-w-2xl">
-      {renderCategoryContent()}
-    </div>
-  );
+  return <div className="max-w-2xl">{renderCategoryContent()}</div>;
 }
 
-function GeneralSettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
+function GeneralSettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">General Settings</h3>
-        
+        <h3 className="text-lg font-medium text-gray-900 mb-4">
+          General Settings
+        </h3>
+
         <Card>
           <CardHeader>
             <CardTitle>Sound Effects</CardTitle>
@@ -238,8 +261,12 @@ function GeneralSettings({ settings }: { settings: ReturnType<typeof useSettings
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <Label htmlFor="sound-enabled" className="text-sm font-medium">Enable Sound Effects</Label>
-                <p className="text-xs text-gray-500">Play sounds for notifications and feedback</p>
+                <Label htmlFor="sound-enabled" className="text-sm font-medium">
+                  Enable Sound Effects
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Play sounds for notifications and feedback
+                </p>
               </div>
               <Switch
                 id="sound-enabled"
@@ -260,17 +287,23 @@ function GeneralSettings({ settings }: { settings: ReturnType<typeof useSettings
           <CardContent>
             <div className="space-y-2">
               <Label htmlFor="agent-mode">Agent Mode</Label>
-              <Select value={settings.agentMode} onValueChange={settings.handleAgentModeChange}>
+              <Select
+                value={settings.agentMode}
+                onValueChange={settings.handleAgentModeChange}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select agent mode" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="multi">Multi-Agent (Recommended)</SelectItem>
+                  <SelectItem value="multi">
+                    Multi-Agent (Recommended)
+                  </SelectItem>
                   <SelectItem value="single">Single Agent</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-gray-500">
-                Multi-agent mode uses specialized agents for different tasks, while single agent mode uses one agent for everything.
+                Multi-agent mode uses specialized agents for different tasks,
+                while single agent mode uses one agent for everything.
               </p>
             </div>
           </CardContent>
@@ -280,23 +313,30 @@ function GeneralSettings({ settings }: { settings: ReturnType<typeof useSettings
   );
 }
 
-function VoiceSettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
+function VoiceSettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Voice & Audio</h3>
-        
+        <h3 className="text-lg font-medium text-gray-900 mb-4">
+          Voice & Audio
+        </h3>
+
         <Card>
           <CardHeader>
             <CardTitle>Text-to-Speech</CardTitle>
-            <CardDescription>
-              Configure voice output settings
-            </CardDescription>
+            <CardDescription>Configure voice output settings</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
               <Label htmlFor="tts-provider">TTS Provider</Label>
-              <Select value={settings.ttsProvider} onValueChange={settings.handleTtsProviderChange}>
+              <Select
+                value={settings.ttsProvider}
+                onValueChange={settings.handleTtsProviderChange}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select TTS provider" />
                 </SelectTrigger>
@@ -320,8 +360,12 @@ function VoiceSettings({ settings }: { settings: ReturnType<typeof useSettings> 
           <CardContent>
             <div className="flex items-center justify-between">
               <div>
-                <Label htmlFor="dictation-clipboard">Enable Clipboard Integration</Label>
-                <p className="text-xs text-gray-500">Automatically copy dictated text to clipboard</p>
+                <Label htmlFor="dictation-clipboard">
+                  Enable Clipboard Integration
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Automatically copy dictated text to clipboard
+                </p>
               </div>
               <Switch
                 id="dictation-clipboard"
@@ -342,8 +386,12 @@ function VoiceSettings({ settings }: { settings: ReturnType<typeof useSettings> 
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <Label htmlFor="always-listening">Enable Always Listening</Label>
-                <p className="text-xs text-gray-500">Listen for wake words to activate Juno</p>
+                <Label htmlFor="always-listening">
+                  Enable Always Listening
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Listen for wake words to activate Juno
+                </p>
               </div>
               <Switch
                 id="always-listening"
@@ -351,11 +399,14 @@ function VoiceSettings({ settings }: { settings: ReturnType<typeof useSettings> 
                 onCheckedChange={settings.handleAlwaysListeningToggle}
               />
             </div>
-            
+
             {settings.alwaysListeningActive && (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="sensitivity">Sensitivity: {(settings.alwaysListeningSensitivity * 100).toFixed(0)}%</Label>
+                  <Label htmlFor="sensitivity">
+                    Sensitivity:{" "}
+                    {(settings.alwaysListeningSensitivity * 100).toFixed(0)}%
+                  </Label>
                   <input
                     type="range"
                     id="sensitivity"
@@ -363,18 +414,24 @@ function VoiceSettings({ settings }: { settings: ReturnType<typeof useSettings> 
                     max="1"
                     step="0.1"
                     value={settings.alwaysListeningSensitivity}
-                    onChange={(e) => settings.handleSensitivityChange(parseFloat(e.target.value))}
+                    onChange={(e) =>
+                      settings.handleSensitivityChange(
+                        parseFloat(e.target.value)
+                      )
+                    }
                     className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="wake-words">Wake Words</Label>
                   <div className="flex gap-2">
                     <Input
                       id="wake-words"
                       value={settings.wakeWordsInput}
-                      onChange={(e) => settings.setWakeWordsInput(e.target.value)}
+                      onChange={(e) =>
+                        settings.setWakeWordsInput(e.target.value)
+                      }
                       placeholder="hey juno, computer"
                       className="flex-1"
                     />
@@ -395,23 +452,28 @@ function VoiceSettings({ settings }: { settings: ReturnType<typeof useSettings> 
   );
 }
 
-function AIProviderSettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
+function AIProviderSettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">AI Provider</h3>
-        
+
         <Card>
           <CardHeader>
             <CardTitle>Provider Selection</CardTitle>
-            <CardDescription>
-              Choose your AI provider and model
-            </CardDescription>
+            <CardDescription>Choose your AI provider and model</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="ai-provider">Active Provider</Label>
-              <Select value={settings.activeProvider} onValueChange={settings.handleActiveProviderChange}>
+              <Select
+                value={settings.activeProvider}
+                onValueChange={settings.handleActiveProviderChange}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select AI provider" />
                 </SelectTrigger>
@@ -442,23 +504,30 @@ function AIProviderSettings({ settings }: { settings: ReturnType<typeof useSetti
                   id="api-key"
                   type="password"
                   value={settings.formData.apiKey}
-                  onChange={(e) => settings.setFormData(prev => ({ ...prev, apiKey: e.target.value }))}
+                  onChange={(e) =>
+                    settings.setFormData((prev) => ({
+                      ...prev,
+                      apiKey: e.target.value,
+                    }))
+                  }
                   placeholder="Enter your API key"
                 />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="model">Model</Label>
-                <Select 
-                  value={settings.formData.model} 
-                  onValueChange={(value) => settings.setFormData(prev => ({ ...prev, model: value }))}
+                <Select
+                  value={settings.formData.model}
+                  onValueChange={(value) =>
+                    settings.setFormData((prev) => ({ ...prev, model: value }))
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
                     {settings.providers
-                      .find(p => p.id === settings.activeProvider)
+                      .find((p) => p.id === settings.activeProvider)
                       ?.models.map((model) => (
                         <SelectItem key={model} value={model}>
                           {model}
@@ -475,7 +544,12 @@ function AIProviderSettings({ settings }: { settings: ReturnType<typeof useSetti
                     id="max-tokens"
                     type="number"
                     value={settings.formData.maxTokens}
-                    onChange={(e) => settings.setFormData(prev => ({ ...prev, maxTokens: e.target.value }))}
+                    onChange={(e) =>
+                      settings.setFormData((prev) => ({
+                        ...prev,
+                        maxTokens: e.target.value,
+                      }))
+                    }
                     placeholder="e.g., 4000"
                   />
                 </div>
@@ -489,7 +563,12 @@ function AIProviderSettings({ settings }: { settings: ReturnType<typeof useSetti
                     min="0"
                     max="2"
                     value={settings.formData.temperature}
-                    onChange={(e) => settings.setFormData(prev => ({ ...prev, temperature: e.target.value }))}
+                    onChange={(e) =>
+                      settings.setFormData((prev) => ({
+                        ...prev,
+                        temperature: e.target.value,
+                      }))
+                    }
                     placeholder="e.g., 0.7"
                   />
                 </div>
@@ -500,13 +579,21 @@ function AIProviderSettings({ settings }: { settings: ReturnType<typeof useSetti
                 <Textarea
                   id="system-prompt"
                   value={settings.formData.systemPrompt}
-                  onChange={(e) => settings.setFormData(prev => ({ ...prev, systemPrompt: e.target.value }))}
+                  onChange={(e) =>
+                    settings.setFormData((prev) => ({
+                      ...prev,
+                      systemPrompt: e.target.value,
+                    }))
+                  }
                   placeholder="Enter custom system prompt (optional)"
                   rows={4}
                 />
               </div>
 
-              <Button onClick={settings.handleSaveProviderSettings} className="w-full">
+              <Button
+                onClick={settings.handleSaveProviderSettings}
+                className="w-full"
+              >
                 <Save className="w-4 h-4 mr-2" />
                 Save Provider Settings
               </Button>
@@ -518,12 +605,20 @@ function AIProviderSettings({ settings }: { settings: ReturnType<typeof useSetti
   );
 }
 
-function NetworkSettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
+function NetworkSettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
   const [newServerJson, setNewServerJson] = useState("");
 
   const getMcpServerStatusBadge = (status: any) => {
     if (status.Connected !== undefined) {
-      return <Badge variant="default" className="bg-green-500">Connected</Badge>;
+      return (
+        <Badge variant="default" className="bg-green-500">
+          Connected
+        </Badge>
+      );
     } else if (status.Connecting !== undefined) {
       return <Badge variant="secondary">Connecting</Badge>;
     } else if (status.Error !== undefined) {
@@ -582,12 +677,13 @@ function NetworkSettings({ settings }: { settings: ReturnType<typeof useSettings
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Network</h3>
-        
+
         <Card>
           <CardHeader>
             <CardTitle>MCP Servers</CardTitle>
             <CardDescription>
-              Manage Model Context Protocol (MCP) servers for external tool integration
+              Manage Model Context Protocol (MCP) servers for external tool
+              integration
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -599,21 +695,33 @@ function NetworkSettings({ settings }: { settings: ReturnType<typeof useSettings
             ) : (
               <div className="space-y-3">
                 {settings.mcpServers.map((server) => (
-                  <div key={server.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div
+                    key={server.id}
+                    className="flex items-center justify-between p-3 border rounded-lg"
+                  >
                     <div className="flex items-center gap-3">
-                      {getMcpServerStatusIcon(settings.mcpServerStatuses[server.id])}
+                      {getMcpServerStatusIcon(
+                        settings.mcpServerStatuses[server.id]
+                      )}
                       <div>
                         <div className="font-medium">{server.name}</div>
-                        <div className="text-sm text-gray-500">{server.description || server.command}</div>
+                        <div className="text-sm text-gray-500">
+                          {server.description || server.command}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {getMcpServerStatusBadge(settings.mcpServerStatuses[server.id])}
+                      {getMcpServerStatusBadge(
+                        settings.mcpServerStatuses[server.id]
+                      )}
                       <Switch
                         checked={server.enabled}
                         onCheckedChange={async (enabled) => {
                           try {
-                            await invoke("toggle_mcp_server", { serverId: server.id, enabled });
+                            await invoke("toggle_mcp_server", {
+                              serverId: server.id,
+                              enabled,
+                            });
                             await settings.loadMcpServers();
                           } catch (error) {
                             toast.error("Failed to toggle server");
@@ -623,7 +731,7 @@ function NetworkSettings({ settings }: { settings: ReturnType<typeof useSettings
                     </div>
                   </div>
                 ))}
-                
+
                 {settings.mcpServers.length === 0 && (
                   <div className="text-center py-8 text-gray-500">
                     No MCP servers configured
@@ -648,22 +756,29 @@ function NetworkSettings({ settings }: { settings: ReturnType<typeof useSettings
                 id="server-config"
                 value={newServerJson}
                 onChange={(e) => setNewServerJson(e.target.value)}
-                placeholder={JSON.stringify({
-                  name: "Example Server",
-                  description: "Description of the server",
-                  command: "python",
-                  args: ["-m", "example_server"],
-                  working_directory: "/path/to/server",
-                  environment_variables: {},
-                  auto_start: true,
-                  timeout_seconds: 30,
-                  max_retries: 3
-                }, null, 2)}
+                placeholder={JSON.stringify(
+                  {
+                    name: "Example Server",
+                    description: "Description of the server",
+                    command: "python",
+                    args: ["-m", "example_server"],
+                    working_directory: "/path/to/server",
+                    environment_variables: {},
+                    auto_start: true,
+                    timeout_seconds: 30,
+                    max_retries: 3,
+                  },
+                  null,
+                  2
+                )}
                 rows={8}
                 className="font-mono text-sm"
               />
             </div>
-            <Button onClick={handleAddMcpServer} disabled={!newServerJson.trim()}>
+            <Button
+              onClick={handleAddMcpServer}
+              disabled={!newServerJson.trim()}
+            >
               <Server className="w-4 h-4 mr-2" />
               Add Server
             </Button>
@@ -681,20 +796,29 @@ function NetworkSettings({ settings }: { settings: ReturnType<typeof useSettings
             <CardContent>
               <div className="space-y-2">
                 {settings.mcpTools.map((tool) => (
-                  <div key={`${tool.server_id}-${tool.tool_definition.name}`} className="flex items-center justify-between p-2 border rounded">
+                  <div
+                    key={`${tool.server_id}-${tool.tool_definition.name}`}
+                    className="flex items-center justify-between p-2 border rounded"
+                  >
                     <div>
-                      <div className="font-medium">{tool.tool_definition.name}</div>
-                      <div className="text-sm text-gray-500">from {tool.server_name}</div>
-                      <div className="text-xs text-gray-400">{tool.tool_definition.description}</div>
+                      <div className="font-medium">
+                        {tool.tool_definition.name}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        from {tool.server_name}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {tool.tool_definition.description}
+                      </div>
                     </div>
                     <Switch
                       checked={tool.enabled}
                       onCheckedChange={async (enabled) => {
                         try {
-                          await invoke("toggle_mcp_tool", { 
-                            serverId: tool.server_id, 
-                            toolName: tool.tool_definition.name, 
-                            enabled 
+                          await invoke("toggle_mcp_tool", {
+                            serverId: tool.server_id,
+                            toolName: tool.tool_definition.name,
+                            enabled,
                           });
                           await settings.loadMcpServers();
                         } catch (error) {
@@ -713,7 +837,11 @@ function NetworkSettings({ settings }: { settings: ReturnType<typeof useSettings
   );
 }
 
-function SecuritySettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
+function SecuritySettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
   const getPermissionIcon = (granted: boolean, required: boolean) => {
     if (granted) {
       return <CheckCircle className="h-5 w-5 text-green-500" />;
@@ -726,7 +854,11 @@ function SecuritySettings({ settings }: { settings: ReturnType<typeof useSetting
 
   const getPermissionBadge = (granted: boolean, required: boolean) => {
     if (granted) {
-      return <Badge variant="default" className="bg-green-500">Granted</Badge>;
+      return (
+        <Badge variant="default" className="bg-green-500">
+          Granted
+        </Badge>
+      );
     } else if (required) {
       return <Badge variant="destructive">Required</Badge>;
     } else {
@@ -737,8 +869,10 @@ function SecuritySettings({ settings }: { settings: ReturnType<typeof useSetting
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Security & Privacy</h3>
-        
+        <h3 className="text-lg font-medium text-gray-900 mb-4">
+          Security & Privacy
+        </h3>
+
         <Card>
           <CardHeader>
             <CardTitle>System Permissions</CardTitle>
@@ -762,7 +896,9 @@ function SecuritySettings({ settings }: { settings: ReturnType<typeof useSetting
                     )}
                     <div>
                       <div className="font-medium">Accessibility</div>
-                      <div className="text-sm text-gray-500">Required for computer use and automation</div>
+                      <div className="text-sm text-gray-500">
+                        Required for computer use and automation
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -797,7 +933,9 @@ function SecuritySettings({ settings }: { settings: ReturnType<typeof useSetting
                     )}
                     <div>
                       <div className="font-medium">Screen Recording</div>
-                      <div className="text-sm text-gray-500">Required for screen capture and analysis</div>
+                      <div className="text-sm text-gray-500">
+                        Required for screen capture and analysis
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -832,7 +970,9 @@ function SecuritySettings({ settings }: { settings: ReturnType<typeof useSetting
                     )}
                     <div>
                       <div className="font-medium">Microphone</div>
-                      <div className="text-sm text-gray-500">Required for voice input and dictation</div>
+                      <div className="text-sm text-gray-500">
+                        Required for voice input and dictation
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -864,14 +1004,18 @@ function SecuritySettings({ settings }: { settings: ReturnType<typeof useSetting
                 Failed to load permissions status
               </div>
             )}
-            
+
             <div className="pt-4 border-t">
               <Button
                 onClick={settings.loadPermissionsStatus}
                 disabled={settings.permissionsLoading}
                 className="w-full"
               >
-                <RefreshCw className={`w-4 h-4 mr-2 ${settings.permissionsLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw
+                  className={`w-4 h-4 mr-2 ${
+                    settings.permissionsLoading ? "animate-spin" : ""
+                  }`}
+                />
                 Refresh Permissions Status
               </Button>
             </div>
@@ -882,7 +1026,11 @@ function SecuritySettings({ settings }: { settings: ReturnType<typeof useSetting
   );
 }
 
-function ShortcutsSettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
+function ShortcutsSettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
   const getShortcutDisplayName = (shortcutName: string): string => {
     const names: { [key: string]: string } = {
       agent_mode_toggle: "Toggle Agent Mode",
@@ -928,8 +1076,10 @@ function ShortcutsSettings({ settings }: { settings: ReturnType<typeof useSettin
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Keyboard Shortcuts</h3>
-        
+        <h3 className="text-lg font-medium text-gray-900 mb-4">
+          Keyboard Shortcuts
+        </h3>
+
         <Card>
           <CardHeader>
             <CardTitle>Global Shortcuts</CardTitle>
@@ -945,46 +1095,59 @@ function ShortcutsSettings({ settings }: { settings: ReturnType<typeof useSettin
               </div>
             ) : (
               <div className="space-y-3">
-                {Object.entries(settings.keyboardShortcuts).map(([shortcutName, shortcutValue]) => (
-                  <div key={shortcutName} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div>
-                      <div className="font-medium">{getShortcutDisplayName(shortcutName)}</div>
-                      <div className="text-sm text-gray-500">{getShortcutDescription(shortcutName)}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {settings.editingShortcut === shortcutName ? (
-                        <Input
-                          value={shortcutValue}
-                          onChange={(e) => handleShortcutChange(shortcutName, e.target.value)}
-                          onBlur={() => settings.setEditingShortcut(null)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              settings.setEditingShortcut(null);
-                            } else if (e.key === 'Escape') {
-                              settings.setEditingShortcut(null);
-                              settings.loadKeyboardShortcuts();
+                {Object.entries(settings.keyboardShortcuts).map(
+                  ([shortcutName, shortcutValue]) => (
+                    <div
+                      key={shortcutName}
+                      className="flex items-center justify-between p-3 border rounded-lg"
+                    >
+                      <div>
+                        <div className="font-medium">
+                          {getShortcutDisplayName(shortcutName)}
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          {getShortcutDescription(shortcutName)}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {settings.editingShortcut === shortcutName ? (
+                          <Input
+                            value={shortcutValue}
+                            onChange={(e) =>
+                              handleShortcutChange(shortcutName, e.target.value)
                             }
-                          }}
-                          placeholder="e.g., Cmd+Shift+J"
-                          className="w-40 text-sm"
-                          autoFocus
-                        />
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => settings.setEditingShortcut(shortcutName)}
-                          className="w-40 justify-start font-mono text-sm"
-                        >
-                          {shortcutValue || "Not set"}
-                        </Button>
-                      )}
+                            onBlur={() => settings.setEditingShortcut(null)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                settings.setEditingShortcut(null);
+                              } else if (e.key === "Escape") {
+                                settings.setEditingShortcut(null);
+                                settings.loadKeyboardShortcuts();
+                              }
+                            }}
+                            placeholder="e.g., Cmd+Shift+J"
+                            className="w-40 text-sm"
+                            autoFocus
+                          />
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              settings.setEditingShortcut(shortcutName)
+                            }
+                            className="w-40 justify-start font-mono text-sm"
+                          >
+                            {shortcutValue || "Not set"}
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                )}
               </div>
             )}
-            
+
             <div className="pt-4 border-t">
               <Button
                 onClick={handleResetShortcuts}
@@ -1003,12 +1166,21 @@ function ShortcutsSettings({ settings }: { settings: ReturnType<typeof useSettin
   );
 }
 
-function ToolsSettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
-  const handleToggleCategory = async (categoryName: string, enabled: boolean) => {
+function ToolsSettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
+  const handleToggleCategory = async (
+    categoryName: string,
+    enabled: boolean
+  ) => {
     try {
       await invoke("set_tool_category_enabled", { categoryName, enabled });
       await settings.loadToolConfigurations();
-      toast.success(`${categoryName} tools ${enabled ? "enabled" : "disabled"}`);
+      toast.success(
+        `${categoryName} tools ${enabled ? "enabled" : "disabled"}`
+      );
     } catch (error) {
       console.error("Failed to toggle tool category:", error);
       toast.error("Failed to toggle tool category");
@@ -1041,7 +1213,7 @@ function ToolsSettings({ settings }: { settings: ReturnType<typeof useSettings> 
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Tools</h3>
-        
+
         <Card>
           <CardHeader>
             <CardTitle>Tool Categories</CardTitle>
@@ -1057,44 +1229,64 @@ function ToolsSettings({ settings }: { settings: ReturnType<typeof useSettings> 
               </div>
             ) : (
               <div className="space-y-4">
-                {Object.entries(settings.toolConfigurations).map(([categoryName, category]) => (
-                  <div key={categoryName} className="border rounded-lg">
-                    <div className="flex items-center justify-between p-4 border-b">
-                      <div>
-                        <div className="font-medium">{category.name}</div>
-                        <div className="text-sm text-gray-500">{category.description}</div>
-                      </div>
-                      <Switch
-                        checked={category.enabled}
-                        onCheckedChange={(enabled) => handleToggleCategory(categoryName, enabled)}
-                      />
-                    </div>
-                    
-                    {category.enabled && (
-                      <div className="p-4 space-y-2">
-                        {category.tools.map((tool) => (
-                          <div key={tool.name} className="flex items-center justify-between p-2 rounded bg-gray-50">
-                            <div>
-                              <div className="text-sm font-medium">{tool.name}</div>
-                              {tool.description && (
-                                <div className="text-xs text-gray-500">{tool.description}</div>
-                              )}
-                              {tool.required && (
-                                <Badge variant="secondary" className="mt-1 text-xs">Required</Badge>
-                              )}
-                            </div>
-                            <Switch
-                              checked={tool.enabled}
-                              disabled={tool.required}
-                              onCheckedChange={(enabled) => handleToggleTool(tool.name, enabled)}
-                            />
+                {Object.entries(settings.toolConfigurations).map(
+                  ([categoryName, category]) => (
+                    <div key={categoryName} className="border rounded-lg">
+                      <div className="flex items-center justify-between p-4 border-b">
+                        <div>
+                          <div className="font-medium">{category.name}</div>
+                          <div className="text-sm text-gray-500">
+                            {category.description}
                           </div>
-                        ))}
+                        </div>
+                        <Switch
+                          checked={category.enabled}
+                          onCheckedChange={(enabled) =>
+                            handleToggleCategory(categoryName, enabled)
+                          }
+                        />
                       </div>
-                    )}
-                  </div>
-                ))}
-                
+
+                      {category.enabled && (
+                        <div className="p-4 space-y-2">
+                          {category.tools.map((tool) => (
+                            <div
+                              key={tool.name}
+                              className="flex items-center justify-between p-2 rounded bg-gray-50"
+                            >
+                              <div>
+                                <div className="text-sm font-medium">
+                                  {tool.name}
+                                </div>
+                                {tool.description && (
+                                  <div className="text-xs text-gray-500">
+                                    {tool.description}
+                                  </div>
+                                )}
+                                {tool.required && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="mt-1 text-xs"
+                                  >
+                                    Required
+                                  </Badge>
+                                )}
+                              </div>
+                              <Switch
+                                checked={tool.enabled}
+                                disabled={tool.required}
+                                onCheckedChange={(enabled) =>
+                                  handleToggleTool(tool.name, enabled)
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                )}
+
                 {Object.keys(settings.toolConfigurations).length === 0 && (
                   <div className="text-center py-8 text-gray-500">
                     No tool configurations available
@@ -1102,7 +1294,7 @@ function ToolsSettings({ settings }: { settings: ReturnType<typeof useSettings> 
                 )}
               </div>
             )}
-            
+
             <div className="pt-4 border-t">
               <Button
                 onClick={handleResetToolConfiguration}
@@ -1121,12 +1313,16 @@ function ToolsSettings({ settings }: { settings: ReturnType<typeof useSettings> 
   );
 }
 
-function AdvancedSettings({ settings }: { settings: ReturnType<typeof useSettings> }) {
+function AdvancedSettings({
+  settings,
+}: {
+  settings: ReturnType<typeof useSettings>;
+}) {
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Advanced</h3>
-        
+
         <Card>
           <CardHeader>
             <CardTitle>Developer Options</CardTitle>
@@ -1138,30 +1334,40 @@ function AdvancedSettings({ settings }: { settings: ReturnType<typeof useSetting
             <div className="flex items-center justify-between p-3 border rounded-lg">
               <div>
                 <div className="font-medium">Debug Mode</div>
-                <div className="text-sm text-gray-500">Enable verbose logging and debug features</div>
+                <div className="text-sm text-gray-500">
+                  Enable verbose logging and debug features
+                </div>
               </div>
               <Switch
                 onCheckedChange={async (enabled) => {
                   try {
                     await invoke("set_debug_mode", { enabled });
-                    toast.success(`Debug mode ${enabled ? "enabled" : "disabled"}`);
+                    toast.success(
+                      `Debug mode ${enabled ? "enabled" : "disabled"}`
+                    );
                   } catch (error) {
                     toast.error("Failed to toggle debug mode");
                   }
                 }}
               />
             </div>
-            
+
             <div className="flex items-center justify-between p-3 border rounded-lg">
               <div>
                 <div className="font-medium">Performance Monitoring</div>
-                <div className="text-sm text-gray-500">Monitor system resource usage</div>
+                <div className="text-sm text-gray-500">
+                  Monitor system resource usage
+                </div>
               </div>
               <Switch
                 onCheckedChange={async (enabled) => {
                   try {
                     await invoke("set_performance_monitoring", { enabled });
-                    toast.success(`Performance monitoring ${enabled ? "enabled" : "disabled"}`);
+                    toast.success(
+                      `Performance monitoring ${
+                        enabled ? "enabled" : "disabled"
+                      }`
+                    );
                   } catch (error) {
                     toast.error("Failed to toggle performance monitoring");
                   }
@@ -1182,7 +1388,11 @@ function AdvancedSettings({ settings }: { settings: ReturnType<typeof useSetting
             <Button
               variant="destructive"
               onClick={async () => {
-                if (confirm("Are you sure you want to reset all settings? This action cannot be undone.")) {
+                if (
+                  confirm(
+                    "Are you sure you want to reset all settings? This action cannot be undone."
+                  )
+                ) {
                   try {
                     await invoke("reset_all_settings");
                     await settings.loadAllSettings();
