@@ -131,6 +131,242 @@ pub fn format_elapsed_time(start_ms: u64, end_ms: u64) -> String {
     }
 }
 
+/// Permission validation utilities for graceful error handling
+pub mod permission_validator {
+    use crate::agent::core::AgentError;
+    use crate::state::AppState;
+    use crate::commands::permissions::check_permissions_status;
+    use tauri::AppHandle;
+    use tracing::{warn, info, debug};
+
+    /// Required permissions for different tool categories
+    #[derive(Debug, Clone)]
+    pub enum RequiredPermission {
+        Accessibility,
+        ScreenRecording,
+        Microphone,
+        InputMonitoring,
+        AccessibilityAndScreenRecording,
+    }
+
+    impl RequiredPermission {
+        /// Get user-friendly description of the permission
+        pub fn description(&self) -> &'static str {
+            match self {
+                RequiredPermission::Accessibility => "accessibility permissions for desktop automation",
+                RequiredPermission::ScreenRecording => "screen recording permissions for screenshots",
+                RequiredPermission::Microphone => "microphone access for voice features",
+                RequiredPermission::InputMonitoring => "input monitoring for global shortcuts",
+                RequiredPermission::AccessibilityAndScreenRecording => "accessibility and screen recording permissions",
+            }
+        }
+
+        /// Get specific instructions for granting the permission
+        pub fn instructions(&self) -> &'static str {
+            match self {
+                RequiredPermission::Accessibility => "Please grant accessibility permissions in System Settings > Privacy & Security > Accessibility and restart the app",
+                RequiredPermission::ScreenRecording => "Please grant screen recording permissions in System Settings > Privacy & Security > Screen Recording",
+                RequiredPermission::Microphone => "Please grant microphone permissions in System Settings > Privacy & Security > Microphone",
+                RequiredPermission::InputMonitoring => "Please grant input monitoring permissions in System Settings > Privacy & Security > Input Monitoring",
+                RequiredPermission::AccessibilityAndScreenRecording => "Please grant accessibility and screen recording permissions in System Settings > Privacy & Security and restart the app",
+            }
+        }
+    }
+
+    /// Validate that required permissions are granted before tool execution
+    pub async fn validate_permission(
+        app_handle: &AppHandle,
+        required: RequiredPermission,
+        tool_name: &str,
+    ) -> Result<(), AgentError> {
+        // First check if desktop is available (basic accessibility check)
+        let app_state = app_handle.state::<AppState>();
+        
+        debug!("Validating {} for tool '{}'", required.description(), tool_name);
+
+        // Check the specific permissions based on requirement
+        match required {
+            RequiredPermission::Accessibility => {
+                if !app_state.is_desktop_available() {
+                    warn!("Tool '{}' requires accessibility permissions but desktop is not available", tool_name);
+                    return Err(AgentError::PermissionDenied(format!(
+                        "Tool '{}' requires {} but they are not granted. {}",
+                        tool_name,
+                        required.description(),
+                        required.instructions()
+                    )));
+                }
+            }
+            RequiredPermission::ScreenRecording => {
+                // Check screen recording permissions using our permission system
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => {
+                        if !permissions.screen_recording.granted {
+                            warn!("Tool '{}' requires screen recording permissions but they are not granted", tool_name);
+                            return Err(AgentError::PermissionDenied(format!(
+                                "Tool '{}' requires {} but they are not granted. {}",
+                                tool_name,
+                                required.description(),
+                                required.instructions()
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to check screen recording permissions for tool '{}': {}", tool_name, e);
+                        return Err(AgentError::PermissionDenied(format!(
+                            "Tool '{}' requires {} but permission status could not be verified. {}",
+                            tool_name,
+                            required.description(),
+                            required.instructions()
+                        )));
+                    }
+                }
+            }
+            RequiredPermission::Microphone => {
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => {
+                        if !permissions.microphone.granted {
+                            info!("Tool '{}' requires microphone permissions but they are not granted - this may be optional for some tools", tool_name);
+                            // Note: Microphone is often optional, so we might just warn instead of error
+                            // For now, let's still error to be consistent, but tools can handle this gracefully
+                            return Err(AgentError::PermissionDenied(format!(
+                                "Tool '{}' requires {} but they are not granted. {}",
+                                tool_name,
+                                required.description(),
+                                required.instructions()
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to check microphone permissions for tool '{}': {}", tool_name, e);
+                        // Microphone permission check failures are often not critical
+                        info!("Proceeding with tool '{}' despite microphone permission check failure", tool_name);
+                    }
+                }
+            }
+            RequiredPermission::InputMonitoring => {
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => {
+                        if !permissions.input_monitoring.granted {
+                            info!("Tool '{}' requires input monitoring permissions but they are not granted - this is often optional", tool_name);
+                            // Input monitoring is typically optional for global shortcuts
+                            // We'll warn but not block execution
+                        }
+                    }
+                    Err(_) => {
+                        // Input monitoring check failures are usually not critical
+                        debug!("Input monitoring permission check failed for tool '{}' - continuing", tool_name);
+                    }
+                }
+            }
+            RequiredPermission::AccessibilityAndScreenRecording => {
+                // Check both permissions
+                if !app_state.is_desktop_available() {
+                    warn!("Tool '{}' requires accessibility permissions but desktop is not available", tool_name);
+                    return Err(AgentError::PermissionDenied(format!(
+                        "Tool '{}' requires {} but accessibility permissions are not granted. {}",
+                        tool_name,
+                        required.description(),
+                        required.instructions()
+                    )));
+                }
+
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => {
+                        if !permissions.screen_recording.granted {
+                            warn!("Tool '{}' requires screen recording permissions but they are not granted", tool_name);
+                            return Err(AgentError::PermissionDenied(format!(
+                                "Tool '{}' requires {} but screen recording permissions are not granted. {}",
+                                tool_name,
+                                required.description(),
+                                required.instructions()
+                            )));
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to check screen recording permissions for tool '{}': {}", tool_name, e);
+                        return Err(AgentError::PermissionDenied(format!(
+                            "Tool '{}' requires {} but permission status could not be verified. {}",
+                            tool_name,
+                            required.description(),
+                            required.instructions()
+                        )));
+                    }
+                }
+            }
+        }
+
+        info!("Permission validation passed for tool '{}' - {} are available", tool_name, required.description());
+        Ok(())
+    }
+
+    /// Check if a specific permission type is granted without failing
+    pub async fn is_permission_granted(
+        app_handle: &AppHandle,
+        permission: RequiredPermission,
+    ) -> bool {
+        match permission {
+            RequiredPermission::Accessibility => {
+                let app_state = app_handle.state::<AppState>();
+                app_state.is_desktop_available()
+            }
+            RequiredPermission::ScreenRecording => {
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => permissions.screen_recording.granted,
+                    Err(_) => false,
+                }
+            }
+            RequiredPermission::Microphone => {
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => permissions.microphone.granted,
+                    Err(_) => false,
+                }
+            }
+            RequiredPermission::InputMonitoring => {
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => permissions.input_monitoring.granted,
+                    Err(_) => false,
+                }
+            }
+            RequiredPermission::AccessibilityAndScreenRecording => {
+                let app_state = app_handle.state::<AppState>();
+                if !app_state.is_desktop_available() {
+                    return false;
+                }
+                match check_permissions_status(app_handle.clone()).await {
+                    Ok(permissions) => permissions.screen_recording.granted,
+                    Err(_) => false,
+                }
+            }
+        }
+    }
+
+    /// Get tools that require specific permissions (for documentation/error messages)
+    pub fn get_tools_requiring_permission(permission: &RequiredPermission) -> Vec<&'static str> {
+        match permission {
+            RequiredPermission::Accessibility => vec![
+                "desktop_click", "left_click", "right_click", "double_click", "triple_click",
+                "type_text", "press_key", "key", "hold_key", "mouse_move", "left_click_drag",
+                "scroll", "get_focused_element_info", "open_application", "focus_application",
+                "get_running_applications", "list_windows", "focus_window", "element_interaction"
+            ],
+            RequiredPermission::ScreenRecording => vec![
+                "capture_screenshot", "screenshot", "capture_element_screenshot",
+                "browser_screenshot", "computer"
+            ],
+            RequiredPermission::Microphone => vec![
+                "voice_transcription", "microphone_input", "always_listening"
+            ],
+            RequiredPermission::InputMonitoring => vec![
+                "global_shortcuts", "hotkey_registration"
+            ],
+            RequiredPermission::AccessibilityAndScreenRecording => vec![
+                "computer", "desktop_automation_with_visual_feedback"
+            ],
+        }
+    }
+}
+
 /// System context information to pass to agents
 #[derive(Debug, serde::Serialize)]
 pub struct SystemContext {
