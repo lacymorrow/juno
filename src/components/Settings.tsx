@@ -43,7 +43,6 @@ import {
 import React, { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { listen } from "@tauri-apps/api/event";
 
 interface ProviderInfo {
   id: string;
@@ -666,7 +665,6 @@ const Settings: React.FC<SettingsProps> = ({
     }
   );
   const [shortcutsLoading, setShortcutsLoading] = useState<boolean>(false);
-  const [editingShortcut, setEditingShortcut] = useState<string | null>(null);
 
   // Load initial settings
   useEffect(() => {
@@ -1189,7 +1187,6 @@ const Settings: React.FC<SettingsProps> = ({
       toast.error(`Failed to update shortcut: ${error}`);
     } finally {
       setShortcutsLoading(false);
-      setEditingShortcut(null);
     }
   };
 
