@@ -1,10 +1,19 @@
-use async_trait::async_trait;
-use std::sync::Arc;
-use std::collections::HashSet;
-use tokio::sync::RwLock;
-
-use crate::agent::structs::{AgentError, Message, Role};
+use crate::agent::structs::{
+    ToolCall,
+    AgentAction,
+    AgentError,
+    Message,
+    Role,
+};
 use crate::agent::traits::MemoryManager;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+use tokio::sync::RwLock;
+use std::sync::Arc;
+use chrono::{DateTime, Utc};
+use tracing::{info, warn, debug};
 
 /// A simple in-memory implementation of the MemoryManager trait.
 #[derive(Debug, Clone)]
