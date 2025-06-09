@@ -1,5 +1,4 @@
 import { useSettings } from "@/hooks/useSettings";
-import { KeyboardShortcuts } from "@/types/keyboard";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -24,35 +23,6 @@ import {
   Info,
   AlertTriangle,
   Edit3,
-  Plus,
-  X,
-  Upload,
-  Download,
-  FileText,
-  Eye,
-  Monitor,
-  Search,
-  Building2,
-  Gamepad2,
-  HardDrive,
-  Clock,
-  Users,
-  MessageSquare,
-  Podcast,
-  Layers,
-  Layout,
-  Mail,
-  Calendar,
-  Camera,
-  Music,
-  Video,
-  Database,
-  Globe,
-  Code,
-  Palette,
-  PaintBucket,
-  TreePine,
-  Lightbulb,
 } from "lucide-react";
 import React, { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
@@ -226,7 +196,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     }
 
     const modifiers: string[] = [];
-    
+
     // Detect modifiers with platform-aware naming
     if (e.ctrlKey || e.metaKey) {
       if (e.metaKey) {
@@ -242,7 +212,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     if (e.shiftKey) modifiers.push("Shift");
 
     let key = "";
-    
+
     // Enhanced key detection with better special key handling
     switch (e.code) {
       case "Space":
@@ -336,10 +306,10 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     if (key) {
       const allKeys = [...modifiers, key];
       setPressedKeys(allKeys);
-      
+
       const shortcutString = allKeys.join("+");
       setCurrentValue(shortcutString);
-      
+
       // Auto-finish capture with longer delay for complex combinations
       const delay = modifiers.length >= 2 ? 800 : 500;
       const newTimeout = setTimeout(() => {
@@ -357,7 +327,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     setCurrentValue("");
     setValidationMessage("Press the key combination you want to use...");
     setValidationError("");
-    
+
     // Auto-cancel capture after 10 seconds to prevent UI getting stuck
     const cancelTimeout = setTimeout(() => {
       setIsCapturing(false);
@@ -464,11 +434,11 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                   </div>
                 )}
               </div>
-              <div 
+              <div
                 className={cn(
                   "min-h-[50px] p-3 border-2 border-dashed rounded-lg flex items-center gap-2 cursor-pointer transition-all duration-200",
-                  isCapturing 
-                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 shadow-sm" 
+                  isCapturing
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 shadow-sm"
                     : "border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50"
                 )}
                 onClick={!isCapturing ? handleStartCapture : undefined}
@@ -498,8 +468,8 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Keyboard className="h-4 w-4" />
                     <span className="text-sm">
-                      {isCapturing 
-                        ? "Press the keys you want to use..." 
+                      {isCapturing
+                        ? "Press the keys you want to use..."
                         : `Click here to capture shortcut (e.g., ${getExampleShortcut()})`
                       }
                     </span>
@@ -527,8 +497,8 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             {(validationMessage || validationError) && (
               <div className={cn(
                 "flex items-start gap-2 text-sm p-3 rounded-md border",
-                validationError 
-                  ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800 dark:text-red-400" 
+                validationError
+                  ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800 dark:text-red-400"
                   : "text-green-700 bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800 dark:text-green-400"
               )}>
                 <div className="flex-shrink-0 mt-0.5">
@@ -1059,7 +1029,7 @@ function AIProviderSettings({
                   <SelectContent>
                     {(() => {
                       const currentProvider = settings.providers.find(p => p.id === settings.activeProvider);
-                      
+
                       if (currentProvider?.model_info) {
                         return (
                           <>
@@ -1086,7 +1056,7 @@ function AIProviderSettings({
                                   ))}
                               </>
                             )}
-                            
+
                             {/* General Chat Models */}
                             {currentProvider.model_info.filter(model => !model.supports_computer_use).length > 0 && (
                               <>
@@ -1793,7 +1763,7 @@ function SecuritySettings({
                 </Badge>
               </div>
               <p className="text-sm text-gray-600 mb-4">
-                These permissions are essential for Juno's core AI computer use functionality. 
+                These permissions are essential for Juno's core AI computer use functionality.
                 Without them, Juno cannot automate tasks or interact with your desktop.
               </p>
 
@@ -1830,7 +1800,7 @@ function SecuritySettings({
                     </Badge>
                   </div>
                   <p className="text-sm text-gray-600 mb-4">
-                    These permissions enhance Juno's functionality but are not required for basic operation. 
+                    These permissions enhance Juno's functionality but are not required for basic operation.
                     You can grant them now or enable them later.
                   </p>
 
