@@ -418,6 +418,9 @@ impl BrainFactory {
         // Register timer tools for agent task scheduling and resumption
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
+        // Register self-awareness and introspection tools (development mode only)
+        crate::agent::tools::register_self_awareness_tools(provider).await;
+
         // Initialize MCP servers and sync tools
         if let Err(e) = state_manager.initialize_mcp_servers().await {
             warn!("Failed to initialize MCP servers: {}", e);
