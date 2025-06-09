@@ -841,6 +841,9 @@ pub fn run() {
             // Settings Window Commands
             commands::open_settings_window,
             commands::close_settings_window,
+            // Onboarding Commands
+            commands::core::store_first_prompt,
+            commands::core::get_first_onboarding_prompt,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
