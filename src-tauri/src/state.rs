@@ -697,8 +697,18 @@ impl AppState {
 // Helper function to update undo state
 #[allow(dead_code)] // Keep allowing dead code as it might be conditionally used
 pub(crate) fn update_undo_state(state: &AppState, file_path: PathBuf, previous_content: Option<String>) {
-    *state.last_edited_file.lock().unwrap() = Some(file_path);
-    *state.previous_content.lock().unwrap() = Some(previous_content);
+    // Safely handle potential lock poisoning
+    if let Ok(mut last_edited) = state.last_edited_file.lock() {
+        *last_edited = Some(file_path);
+    } else {
+        log::error!("Failed to acquire lock for last_edited_file - lock may be poisoned");
+    }
+    
+    if let Ok(mut previous) = state.previous_content.lock() {
+        *previous = Some(previous_content);
+    } else {
+        log::error!("Failed to acquire lock for previous_content - lock may be poisoned");
+    }
 }
 
 // DesktopWrapper implementation moved to desktop_wrapper.rs
