@@ -41,6 +41,9 @@ import Settings from "./components/Settings";
 import "./styles/globals.css";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
+// Add version constant at the top after imports
+const APP_VERSION = "0.1.0";
+
 // Type for conversation messages
 type ChatMessage = {
   role:
@@ -2119,6 +2122,11 @@ function App() {
           Checking for updates...
         </div>
       )}
+
+      {/* Version display in bottom left corner */}
+      <div className="fixed bottom-2 left-2 text-xs text-muted-foreground/50 pointer-events-none select-none">
+        v{APP_VERSION}
+      </div>
     </main>
   );
 }
