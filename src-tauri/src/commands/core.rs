@@ -241,17 +241,8 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
     let is_executing = state.is_agent_executing();
     let execution_id = state.get_current_agent_execution_id();
 
-    // For now, we'll use hardcoded max_steps values based on the agent mode
-    // In a full implementation, this would come from the actual agent runner
-    let max_steps = if is_executing {
-        Some(15u32) // MAX_ITERATIONS from anthropic.rs
-    } else {
-        None
-    };
-
-    // Since we don't currently track current_step in AppState, we'll return None for now
-    // This is where we'd get the actual current step from the running agent
-    let current_step = None;
+    // Get real current step and max steps from AppState
+    let (current_step, max_steps) = state.get_agent_step_progress();
 
     let remaining_steps = match (current_step, max_steps) {
         (Some(current), Some(max)) => Some(max.saturating_sub(current)),

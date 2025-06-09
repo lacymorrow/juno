@@ -14,7 +14,7 @@ use crate::agent::traits::{
     ToolProvider,
 };
 use crate::agent::tool_logger; // Added for logging
-use tauri::AppHandle; // Added for AppHandle
+use tauri::{AppHandle, Manager}; // Added Manager trait for accessing app state
 
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
@@ -148,6 +148,10 @@ where
 
             log::info!("Agent step {} of {}", self.current_step + 1, self.max_steps);
 
+            // Update AppState with current step progress
+            let app_state = self.app_handle.state::<crate::state::AppState>();
+            app_state.update_agent_current_step(self.current_step);
+
             // Execute one step of the agent loop, passing the cloned receiver
             let action = self.step(step_cancel_rx.clone()).await?;
 
@@ -193,12 +197,6 @@ where
 
             self.current_step += 1;
         }
-
-        // The loop should only exit via return statements within its body
-        // (e.g., Finish, Error, Cancelled, MaxStepsReached).
-        // Code here is unreachable.
-        // log::warn(\"Agent loop completed without reaching a Finish state.\");
-        // Err(AgentError::Terminated)
     }
 
     // Modify step to accept the CancelReceiver

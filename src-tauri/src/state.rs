@@ -126,6 +126,9 @@ pub struct AppState {
     // Agent execution status tracking
     pub agent_execution_active: Arc<Mutex<bool>>, // Track if an agent is currently executing
     pub agent_execution_id: Arc<Mutex<Option<String>>>, // Track the current agent execution ID
+    // Agent iteration tracking
+    pub agent_current_step: Arc<Mutex<Option<u32>>>, // Track the current iteration/step number
+    pub agent_max_steps: Arc<Mutex<Option<u32>>>, // Track the maximum iterations/steps allowed
 }
 
 impl AppState {
@@ -172,6 +175,9 @@ impl AppState {
             // Initialize agent execution status tracking
             agent_execution_active: Arc::new(Mutex::new(false)),
             agent_execution_id: Arc::new(Mutex::new(None)),
+            // Initialize agent iteration tracking
+            agent_current_step: Arc::new(Mutex::new(None)),
+            agent_max_steps: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -209,6 +215,27 @@ impl AppState {
         log::info!("[AppState] Agent execution started with ID: {}", execution_id);
     }
 
+    // Method to mark agent execution as started with iteration info
+    pub fn mark_agent_execution_started_with_steps(&self, execution_id: String, max_steps: u32) {
+        {
+            let mut active_guard = self.agent_execution_active.lock().unwrap();
+            *active_guard = true;
+        }
+        {
+            let mut id_guard = self.agent_execution_id.lock().unwrap();
+            *id_guard = Some(execution_id.clone());
+        }
+        {
+            let mut max_steps_guard = self.agent_max_steps.lock().unwrap();
+            *max_steps_guard = Some(max_steps);
+        }
+        {
+            let mut current_step_guard = self.agent_current_step.lock().unwrap();
+            *current_step_guard = Some(0); // Start at step 0
+        }
+        log::info!("[AppState] Agent execution started with ID: {} (max steps: {})", execution_id, max_steps);
+    }
+
     // Method to mark agent execution as finished
     pub fn mark_agent_execution_finished(&self) {
         {
@@ -219,6 +246,14 @@ impl AppState {
             let mut id_guard = self.agent_execution_id.lock().unwrap();
             let execution_id = id_guard.take();
             log::info!("[AppState] Agent execution finished for ID: {:?}", execution_id);
+        }
+        {
+            let mut current_step_guard = self.agent_current_step.lock().unwrap();
+            *current_step_guard = None;
+        }
+        {
+            let mut max_steps_guard = self.agent_max_steps.lock().unwrap();
+            *max_steps_guard = None;
         }
     }
 
@@ -232,6 +267,32 @@ impl AppState {
     pub fn get_current_agent_execution_id(&self) -> Option<String> {
         let id_guard = self.agent_execution_id.lock().unwrap();
         id_guard.clone()
+    }
+
+    // Method to update the current agent step
+    pub fn update_agent_current_step(&self, step: u32) {
+        let mut current_step_guard = self.agent_current_step.lock().unwrap();
+        *current_step_guard = Some(step);
+        log::debug!("[AppState] Agent current step updated to: {}", step);
+    }
+
+    // Method to get the current agent step
+    pub fn get_agent_current_step(&self) -> Option<u32> {
+        let current_step_guard = self.agent_current_step.lock().unwrap();
+        *current_step_guard
+    }
+
+    // Method to get the agent max steps
+    pub fn get_agent_max_steps(&self) -> Option<u32> {
+        let max_steps_guard = self.agent_max_steps.lock().unwrap();
+        *max_steps_guard
+    }
+
+    // Method to get agent step progress info
+    pub fn get_agent_step_progress(&self) -> (Option<u32>, Option<u32>) {
+        let current_step = self.get_agent_current_step();
+        let max_steps = self.get_agent_max_steps();
+        (current_step, max_steps)
     }
 
     // Method to get or initialize the Playwright driver
