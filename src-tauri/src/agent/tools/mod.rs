@@ -8,6 +8,7 @@ pub mod tool_config; // Add tool configuration management
 pub mod enhanced_coding_tools;
 pub mod cursor_integration;
 pub mod mcp_integration;
+pub mod self_awareness_tools; // Self-building and introspection capabilities
 
 pub use browser_tools::get_browser_tool_definitions;
 pub use browser_controller::BrowserController;
@@ -15,3 +16,4 @@ pub use basic_tools::*; // Export functions from basic_tools
 pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
 pub use tool_config::{ToolConfig, ToolConfigManager, ToolCategory}; // Export tool configuration types
 pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolInfo};
+pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration

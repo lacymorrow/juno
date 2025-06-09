@@ -6,6 +6,8 @@ use std::collections::HashMap;
 pub enum PromptType {
     /// Main system prompt for single agent mode
     SystemDefault,
+    /// Development-only self-aware system prompt
+    SystemDefaultDevelopment,
     /// Orchestrator personality prompt for multi-agent mode
     OrchestratorPersonality,
     /// Expert agent prompts
@@ -28,6 +30,7 @@ impl PromptType {
     pub fn as_str(&self) -> &'static str {
         match self {
             PromptType::SystemDefault => "system_default",
+            PromptType::SystemDefaultDevelopment => "system_default_development",
             PromptType::OrchestratorPersonality => "orchestrator_personality",
             PromptType::BrowserExpert => "browser_expert",
             PromptType::CodingExpert => "coding_expert",
@@ -46,6 +49,7 @@ impl PromptType {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "system_default" => Some(PromptType::SystemDefault),
+            "system_default_development" => Some(PromptType::SystemDefaultDevelopment),
             "orchestrator_personality" => Some(PromptType::OrchestratorPersonality),
             "browser_expert" => Some(PromptType::BrowserExpert),
             "coding_expert" => Some(PromptType::CodingExpert),
