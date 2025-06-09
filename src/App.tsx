@@ -1,6 +1,7 @@
 import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator"; // Import the AgentExecutionProgressIndicator component
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
+import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
@@ -139,7 +140,7 @@ interface AgentEventTauri {
 // --- End Agent Event Types ---
 
 // Type for view state
-type AppView = "chat" | "settings" | "devtools" | "permissions";
+type AppView = "chat" | "settings" | "devtools" | "permissions" | "onboarding";
 
 // Simple debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
@@ -221,6 +222,10 @@ function App() {
   const [, setShowPermissionsFlow] = useState(false);
   const [, setPermissionsChecked] = useState(false);
 
+  // Onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+
   // Check permissions on startup
   useEffect(() => {
     const checkInitialPermissions = async () => {
@@ -249,6 +254,27 @@ function App() {
     };
 
     checkInitialPermissions();
+  }, []);
+
+  // Check if this is a first-time user and show onboarding
+  useEffect(() => {
+    const checkFirstTimeUser = async () => {
+      try {
+        // Check if user has completed onboarding before
+        const hasCompletedOnboarding = localStorage.getItem('juno-onboarding-completed');
+        
+        if (!hasCompletedOnboarding) {
+          setShowOnboarding(true);
+          setCurrentView("onboarding");
+        }
+        setOnboardingChecked(true);
+      } catch (error) {
+        console.error("Error checking onboarding status:", error);
+        setOnboardingChecked(true);
+      }
+    };
+
+    checkFirstTimeUser();
   }, []);
 
   // Play boot sound on app startup
@@ -426,6 +452,41 @@ function App() {
     setConversation([]);
     setIsProcessing(false);
   }, [setConversation, setIsProcessing]);
+
+  // Handle onboarding completion
+  const handleOnboardingComplete = useCallback(async () => {
+    try {
+      // Mark onboarding as completed
+      localStorage.setItem('juno-onboarding-completed', 'true');
+      setShowOnboarding(false);
+      
+      // Get the stored first prompt if any
+      try {
+        const firstPrompt = await invoke<string>("get_first_onboarding_prompt");
+        if (firstPrompt && firstPrompt.trim()) {
+          // Submit the first prompt automatically
+          await submitQuery(firstPrompt);
+        }
+      } catch (error) {
+        console.log("No first prompt stored or error retrieving it:", error);
+      }
+      
+      // Return to chat view
+      setCurrentView("chat");
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
+      // Still proceed to chat view
+      setCurrentView("chat");
+    }
+  }, [submitQuery]);
+
+  // Handle onboarding skip
+  const handleOnboardingSkip = useCallback(() => {
+    // Mark onboarding as completed even if skipped
+    localStorage.setItem('juno-onboarding-completed', 'true');
+    setShowOnboarding(false);
+    setCurrentView("chat");
+  }, []);
 
   // Listen for settings menu requests from native menu
   useEffect(() => {
@@ -1040,6 +1101,8 @@ function App() {
                     ? "Developer Tools"
                     : currentView === "permissions"
                     ? "Permissions"
+                    : currentView === "onboarding"
+                    ? "Onboarding"
                     : "Juno AI Assistant"}
                 </h1>
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -1089,7 +1152,8 @@ function App() {
               {/* Back Button - show for settings and devtools views */}
               {(currentView === "settings" ||
                 currentView === "devtools" ||
-                currentView === "permissions") && (
+                currentView === "permissions" ||
+                currentView === "onboarding") && (
                 <Button
                   variant="outline"
                   size="icon"
@@ -1151,6 +1215,15 @@ function App() {
                   }}
                   showSkipOption={true}
                   className="max-w-4xl mx-auto"
+                />
+              </ScrollArea>
+            </div>
+          ) : currentView === "onboarding" ? (
+            <div className="flex-grow rounded-lg border overflow-hidden">
+              <ScrollArea className="h-full w-full p-4">
+                <OnboardingFlow
+                  onComplete={handleOnboardingComplete}
+                  onSkip={handleOnboardingSkip}
                 />
               </ScrollArea>
             </div>
