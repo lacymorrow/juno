@@ -647,16 +647,23 @@ pub fn run() {
             dev_get_focused_element_info,
             capture_element_screenshot_command,
             dev_click_focused_element,
-            dev_type_text,
-            dev_press_key,
+            // Production keyboard functions
+            type_text,
+            press_key,
+            global_type_text,
+            hold_key,
+            release_key,
+            // Development keyboard functions  
+            commands::dev::dev_type_text,
+            commands::dev::dev_press_key,
+            commands::dev::dev_global_type_text,
+            commands::dev::dev_hold_key,
+            commands::dev::dev_release_key,
             dev_open_application,
             dev_open_url,
             dev_scroll_window,
-            dev_global_type_text,
             dev_get_clipboard,
             dev_set_clipboard,
-            dev_hold_key,
-            dev_release_key,
             dev_wait,
             dev_find_element_by_selector,
             dev_click_element_by_selector,
@@ -1997,7 +2004,7 @@ pub fn run() {
                                             }
 
                                             // Then type the transcribed text immediately using the computer use tools
-                                            match crate::commands::keyboard::dev_global_type_text(
+                                            match crate::commands::keyboard::global_type_text(
                                                 trimmed_text.to_string(),
                                                 app_state.clone()
                                             ).await {
