@@ -149,7 +149,7 @@ pub async fn invoke_tts_with_fallback(
     // Define the provider fallback order based on the primary provider
     let fallback_providers = match primary_provider.to_lowercase().as_str() {
         "replicate" => vec!["replicate", "elevenlabs", "system"],
-        "elevenlabs" => vec!["elevenlabs", "replicate", "system"],
+        "elevenlabs" => vec!["elevenlabs", "system"],
         "system" => vec!["system", "elevenlabs", "replicate"],
         "off" => {
             return Ok("TTS_DISABLED_BY_SETTING".to_string());
