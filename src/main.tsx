@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import App from "./App";
 import { EnhancedFloatingBar } from "./components/EnhancedFloatingBar";
+import SettingsRoute from "./components/SettingsRoute";
 import { Toaster } from "./components/ui/sonner";
 import "./styles/globals.css";
 
@@ -12,7 +13,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<App />} />
-          <Route path="/settings" element={<App />} />
+          <Route path="/settings" element={<SettingsRoute />} />
           <Route path="/floating-bar" element={<EnhancedFloatingBar />} />
         </Routes>
       </BrowserRouter>

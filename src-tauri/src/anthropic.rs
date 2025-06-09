@@ -3,7 +3,7 @@ use uuid;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{State, Manager};
+use tauri::{State, Manager, Emitter};
 
 use crate::agent::implementations::{
     agent_runner::DefaultAgentRunner,
@@ -366,8 +366,19 @@ pub async fn submit_query(
     let tts_enabled = match crate::tts::invoke_tts(final_response.text.clone(), state.clone()).await {
         Ok(audio_result) => {
             if audio_result != "TTS_DISABLED_BY_SETTING" {
-                final_response.audio_base64 = Some(audio_result);
+                final_response.audio_base64 = Some(audio_result.clone());
                 info!("TTS audio generated successfully for response");
+
+                // Emit TTS audio event for frontend to play, regardless of streaming status
+                let tts_app_handle = app_handle.clone();
+                let tts_audio_data = audio_result.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = tts_app_handle.emit("tts-audio-ready", serde_json::json!({
+                        "audio_base64": tts_audio_data
+                    })) {
+                        warn!("Failed to emit TTS audio event: {}", e);
+                    }
+                });
 
                 // Update floating bar manager for TTS start
                 let app_handle_for_tts = app_handle.clone();

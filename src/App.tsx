@@ -1,7 +1,6 @@
 import { AgentStatusIndicator } from "@/components/AgentStatusIndicator"; // Import the AgentStatusIndicator component
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
-import SettingsWindow from "@/components/SettingsWindow";
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
@@ -751,6 +750,24 @@ function App() {
     };
   }, []);
 
+  // Listen for TTS audio ready events
+  useEffect(() => {
+    const unlisten = listen<{ audio_base64: string }>(
+      "tts-audio-ready",
+      (event) => {
+        console.log("TTS audio ready event received");
+        const { audio_base64 } = event.payload;
+        if (audio_base64) {
+          playAudioFromBase64(audio_base64);
+        }
+      }
+    );
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
     const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
@@ -983,11 +1000,6 @@ function App() {
     window.addEventListener("popstate", handleLocationChange);
     return () => window.removeEventListener("popstate", handleLocationChange);
   }, []);
-
-  // If this is the settings window, render only the settings
-  if (currentPath === "/settings") {
-    return <SettingsWindow />;
-  }
 
   // If this is the floating bar, render only the floating bar
   if (currentPath === "/floating-bar") {
