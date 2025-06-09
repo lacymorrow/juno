@@ -1191,6 +1191,11 @@ function NetworkSettings({
   const [newServerJson, setNewServerJson] = useState("");
 
   const getMcpServerStatusBadge = (status: any) => {
+    // Handle undefined/null status
+    if (!status) {
+      return <Badge variant="outline">Disconnected</Badge>;
+    }
+    
     if (status.Connected !== undefined) {
       return (
         <Badge variant="default" className="bg-green-500">
@@ -1209,6 +1214,11 @@ function NetworkSettings({
   };
 
   const getMcpServerStatusIcon = (status: any) => {
+    // Handle undefined/null status
+    if (!status) {
+      return <Square className="h-4 w-4 text-gray-400" />;
+    }
+    
     if (status.Connected !== undefined) {
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     } else if (status.Connecting !== undefined) {
