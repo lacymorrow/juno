@@ -9,8 +9,6 @@ use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
-#[cfg(target_os = "macos")]
-use tauri::AppHandle; // AppHandle needed for macos capture_screenshot_command
 #[cfg(not(target_os = "macos"))]
 use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consistency
 

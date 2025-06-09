@@ -261,8 +261,8 @@ async fn get_system_info_exec() -> Result<Value, String> {
         },
         "creator_info": {
             "creator": "Lacy",
-            "mission": "A magnanimous benefactor working to push the world towards utopia and unite AI and humanity",
-            "vision": "Harmonious collaboration between artificial and human intelligence"
+            "mission": "Push the world towards global utopia and unite AI and humanity",
+            "vision": "Harmonious collaboration between artificial and human intelligence, reducing suffering and promoting peace and prosperity for all, remove money and conflicts of interest from politics"
         },
         "architecture": {
             "prompt_location": "src-tauri/src/agent/prompts/templates.rs",
@@ -332,10 +332,10 @@ fn count_files_recursive(structure: &Value) -> usize {
 fn analyze_file_types(structure: &Value) -> Value {
     let mut file_types = std::collections::HashMap::new();
     collect_file_types(structure, &mut file_types);
-    
+
     let mut types_vec: Vec<_> = file_types.into_iter().collect();
     types_vec.sort_by(|a, b| b.1.cmp(&a.1));
-    
+
     json!(types_vec.into_iter().take(10).collect::<Vec<_>>())
 }
 
@@ -365,12 +365,12 @@ fn collect_key_directories(structure: &Value, key_dirs: &mut Vec<String>, path: 
     if structure["type"] == "directory" {
         let name = structure["name"].as_str().unwrap_or("");
         let current_path = if path.is_empty() { name.to_string() } else { format!("{}/{}", path, name) };
-        
+
         // Check if this is a key directory
         if matches!(name, "src" | "src-tauri" | "components" | "agent" | "tools" | "prompts" | "commands" | "lib") {
             key_dirs.push(current_path.clone());
         }
-        
+
         if let Some(children) = structure["children"].as_array() {
             for child in children {
                 collect_key_directories(child, key_dirs, &current_path);
@@ -382,7 +382,7 @@ fn collect_key_directories(structure: &Value, key_dirs: &mut Vec<String>, path: 
 /// Find the workspace root by looking for Cargo.toml files
 fn find_workspace_root(start_path: &str) -> Option<String> {
     let mut current = PathBuf::from(start_path);
-    
+
     while let Some(parent) = current.parent() {
         let cargo_toml = parent.join("Cargo.toml");
         if cargo_toml.exists() {
@@ -395,6 +395,6 @@ fn find_workspace_root(start_path: &str) -> Option<String> {
         }
         current = parent.to_path_buf();
     }
-    
+
     None
 }

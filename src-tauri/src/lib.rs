@@ -103,7 +103,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "x" => Code::KeyX,
         "y" => Code::KeyY,
         "z" => Code::KeyZ,
-        
+
         // Numbers with multiple aliases
         "0" | "digit0" | "zero" => Code::Digit0,
         "1" | "digit1" | "one" => Code::Digit1,
@@ -115,7 +115,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "7" | "digit7" | "seven" => Code::Digit7,
         "8" | "digit8" | "eight" => Code::Digit8,
         "9" | "digit9" | "nine" => Code::Digit9,
-        
+
         // Function keys with expanded range
         "f1" => Code::F1,
         "f2" => Code::F2,
@@ -141,13 +141,13 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "f22" => Code::F22,
         "f23" => Code::F23,
         "f24" => Code::F24,
-        
+
         // Arrow keys with aliases
         "arrowup" | "up" | "uparrow" => Code::ArrowUp,
         "arrowdown" | "down" | "downarrow" => Code::ArrowDown,
         "arrowleft" | "left" | "leftarrow" => Code::ArrowLeft,
         "arrowright" | "right" | "rightarrow" => Code::ArrowRight,
-        
+
         // Special keys with comprehensive aliases
         "space" | "spacebar" | " " => Code::Space,
         "escape" | "esc" => Code::Escape,
@@ -160,14 +160,14 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "pageup" | "pgup" | "pageupward" => Code::PageUp,
         "pagedown" | "pgdn" | "pagedownward" => Code::PageDown,
         "insert" | "ins" => Code::Insert,
-        
+
         // System and media keys
         "printscreen" | "prtsc" | "print" => Code::PrintScreen,
         "scrolllock" | "scrlk" => Code::ScrollLock,
         "pause" | "pausebreak" => Code::Pause,
         "capslock" | "caps" => Code::CapsLock,
         "numlock" | "numlk" => Code::NumLock,
-        
+
         // Punctuation with better coverage
         "," | "comma" => Code::Comma,
         "." | "period" | "dot" => Code::Period,
@@ -180,7 +180,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "`" | "backquote" | "backtick" | "grave" => Code::Backquote,
         "-" | "minus" | "hyphen" | "dash" => Code::Minus,
         "=" | "equal" | "equals" => Code::Equal,
-        
+
         // Numpad keys
         "numpad0" | "kp0" => Code::Numpad0,
         "numpad1" | "kp1" => Code::Numpad1,
@@ -198,7 +198,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "numpaddivide" | "kpdivide" | "numpad/" => Code::NumpadDivide,
         "numpadenter" | "kpenter" => Code::NumpadEnter,
         "numpaddecimal" | "kpdecimal" | "numpad." => Code::NumpadDecimal,
-        
+
         // Additional punctuation and symbols
         "\"" | "doublequote" | "quotation" => Code::Quote, // Map to same as single quote for compatibility
         ":" | "colon" => Code::Semicolon, // Often on same key as semicolon
@@ -211,7 +211,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "~" | "tilde" => Code::Backquote, // Often on same key as `
         "_" | "underscore" => Code::Minus, // Often on same key as -
         "+" | "plus" => Code::Equal, // Often on same key as =
-        
+
         _ => {
             warn!("Unknown key: {}", key_part);
             return None;
@@ -2445,7 +2445,7 @@ mod macos_tracking {
          }
     }
 
-    pub fn setup_tracking_area(window: &WebviewWindow<Wry>, app_handle: AppHandle) {
+    pub fn setup_tracking_area(window: &tauri::WebviewWindow<tauri::Wry>, app_handle: AppHandle) {
         info!("Setting up macOS tracking area for floating-bar...");
         // Store the AppHandle statically
         *APP_HANDLE.lock().unwrap() = Some(app_handle.clone());
