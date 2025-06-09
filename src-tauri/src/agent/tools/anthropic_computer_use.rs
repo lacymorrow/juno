@@ -3,7 +3,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
 use serde_json::{json, Value};
 use tauri::Manager;
-use tracing::{info, warn};
+use tracing::{info, warn, error, debug};
 
 // Computer Use Tool for Anthropic Claude
 // Based on official specification: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
@@ -119,12 +119,11 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
     }
 }
 
-/// Register the official Anthropic Computer Use tools with exact API specification
-pub async fn register_anthropic_computer_use_tools(
-    provider: &mut LocalToolProvider,
-    app_handle: tauri::AppHandle,
-) -> Result<(), String> {
-    info!("Registering Anthropic Computer Use tools...");
+/// 🔐 SECURE: Register Anthropic Computer Use tools with security integration
+pub async fn register_anthropic_computer_use_tools_secure(provider: &mut LocalToolProvider, app_handle: tauri::AppHandle) -> Result<(), String> {
+    info!("🔐 Registering SECURE Anthropic Computer Use tools...");
+
+    let app_state = app_handle.state::<AppState>();
 
     // Computer Tool (computer_20250124) - Enhanced version for Claude 4 & Sonnet 3.7
     let computer_tool_def = ToolDefinition {
@@ -890,10 +889,160 @@ pub async fn register_anthropic_computer_use_tools(
     provider.register_async_tool(text_editor_tool_def, text_editor_exec).await;
     info!("Registered tool: str_replace_based_edit_tool (Anthropic Text Editor)");
 
-    // Bash Tool (bash_20250124) - Enhanced bash tool
-    let bash_tool_def = ToolDefinition {
+    // Secure bash command execution
+    let bash_def = ToolDefinition {
         name: "bash".to_string(),
-        description: "Run commands in a bash shell".to_string(),
+        description: "🔐 SECURED: Run bash commands with comprehensive security validation. All commands are validated against security policies before execution.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "The bash command to run. Will be validated for security before execution."
+                },
+                "restart": {
+                    "type": "boolean",
+                    "description": "Specifying true will restart this tool. Otherwise, leave this unspecified."
+                }
+            }
+        }),
+    };
+
+    let app_state_clone = app_state.inner().clone();
+    let bash_exec = move |input: Value| {
+        let app_state = app_state_clone.clone();
+        async move {
+            bash_exec_secure(input, &app_state).await
+        }
+    };
+    provider.register_async_tool(bash_def, bash_exec).await;
+
+    info!("🔐 SECURE Anthropic Computer Use tools registered successfully");
+
+    Ok(())
+}
+
+/// 🔐 SECURE: Execute bash command with comprehensive security validation
+async fn bash_exec_secure(input: Value, app_state: &AppState) -> Result<Value, String> {
+    // Handle restart functionality
+    if let Some(restart) = input["restart"].as_bool() {
+        if restart {
+            info!("🔄 Bash environment restart requested");
+            return Ok(json!({"status": "restarted", "message": "Bash environment restarted"}));
+        }
+    }
+
+    let command = input["command"]
+        .as_str()
+        .ok_or_else(|| "Missing or invalid 'command' parameter".to_string())?;
+
+    info!("🔐 Executing SECURED bash command: {}", command);
+
+    // 🔐 SECURITY: MANDATORY validation with SecurityManager
+    if let Some(security_manager) = app_state.get_security_manager().await {
+        // 1. Validate command with security manager
+        match security_manager.validate_command(
+            command,
+            "bash",
+            "Anthropic Computer Use bash execution"
+        ).await {
+            Ok(_) => {
+                info!("✅ Security validation passed for bash command: {}", command);
+            },
+            Err(e) => {
+                warn!("🚫 Security validation failed for bash command '{}': {}", command, e);
+                return Err(format!("🔐 Bash command blocked by security policy: {}", e));
+            }
+        }
+
+        // 2. Start execution monitoring
+        let monitor_id = security_manager.start_execution_monitoring(
+            command,
+            "bash"
+        ).await;
+
+        // 3. Execute the command with timing
+        let start_time = std::time::Instant::now();
+        let result = execute_bash_command_impl(command).await;
+        let execution_time = start_time.elapsed();
+
+        // 4. End monitoring
+        if let Err(e) = security_manager.end_execution_monitoring(&monitor_id).await {
+            warn!("🔐 Failed to end bash monitoring: {}", e);
+        }
+
+        // 5. Add security metadata to result
+        match result {
+            Ok(mut value) => {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("security_validated".to_string(), json!(true));
+                    obj.insert("execution_time_ms".to_string(), json!(execution_time.as_millis()));
+                    obj.insert("monitor_id".to_string(), json!(monitor_id));
+                    obj.insert("tool_name".to_string(), json!("bash_secure"));
+                }
+                info!("✅ Secured bash command completed in {}ms: {}", execution_time.as_millis(), command);
+                Ok(value)
+            },
+            Err(e) => {
+                error!("❌ Secured bash command failed: {} - {}", command, e);
+                Err(e)
+            }
+        }
+    } else {
+        error!("🚨 CRITICAL: Security manager not available! Bash execution blocked.");
+        Err("🔐 Security manager not available - bash execution blocked for safety".to_string())
+    }
+}
+
+/// Implementation of bash command execution
+async fn execute_bash_command_impl(command: &str) -> Result<Value, String> {
+    info!("Executing bash command: {}", command);
+
+    let output = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(command)
+        .output()
+        .map_err(|e| format!("Failed to execute command: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code();
+
+    debug!("Command '{}' completed with exit code: {:?}", command, exit_code);
+
+    let result = if stdout.is_empty() && stderr.is_empty() {
+        "[No output]".to_string()
+    } else if !stdout.is_empty() && stderr.is_empty() {
+        stdout
+    } else if stdout.is_empty() && !stderr.is_empty() {
+        format!("STDERR:\n{}", stderr)
+    } else {
+        format!("STDOUT:\n{}\nSTDERR:\n{}", stdout, stderr)
+    };
+
+    Ok(json!({
+        "output": result,
+        "exit_code": exit_code,
+        "success": output.status.success(),
+        "command": command,
+        "stdout": stdout,
+        "stderr": stderr
+    }))
+}
+
+/// ⚠️ LEGACY: Register Anthropic Computer Use tools WITHOUT security (DEPRECATED)
+pub async fn register_anthropic_computer_use_tools(provider: &mut LocalToolProvider, app_handle: tauri::AppHandle) -> Result<(), String> {
+    warn!("🚨 SECURITY WARNING: Registering Anthropic Computer Use tools WITHOUT security validation");
+    warn!("🚨 This should only be used for testing or backward compatibility");
+
+    // Call the secure version for all tools except bash
+    // Only the bash tool needs special legacy handling
+    register_anthropic_computer_use_tools_secure(provider, app_handle.clone()).await?;
+
+    // Override with legacy bash tool (UNSECURED)
+    let bash_def = ToolDefinition {
+        name: "bash".to_string(),
+        description: "⚠️ UNSECURED: Run bash commands in the terminal. CAUTION: No security validation!".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -911,48 +1060,29 @@ pub async fn register_anthropic_computer_use_tools(
 
     let bash_exec = move |input: Value| {
         async move {
-            if let Some(restart) = input["restart"].as_bool() {
-                if restart {
-                    return Ok(json!({"status": "restarted", "message": "Bash environment restarted"}));
-                }
-            }
-
-            let command = input["command"]
-                .as_str()
-                .ok_or_else(|| "Missing or invalid 'command' parameter".to_string())?;
-
-            info!("Executing bash command: {}", command);
-
-            let output = std::process::Command::new("bash")
-                .arg("-c")
-                .arg(command)
-                .output()
-                .map_err(|e| format!("Failed to execute command: {}", e))?;
-
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let exit_code = output.status.code();
-
-            let result = if stdout.is_empty() && stderr.is_empty() {
-                "[No output]".to_string()
-            } else if !stdout.is_empty() && stderr.is_empty() {
-                stdout
-            } else if stdout.is_empty() && !stderr.is_empty() {
-                format!("STDERR:\n{}", stderr)
-            } else {
-                format!("STDOUT:\n{}\nSTDERR:\n{}", stdout, stderr)
-            };
-
-            Ok(json!({
-                "output": result,
-                "exit_code": exit_code,
-                "success": output.status.success()
-            }))
+            bash_exec_legacy(input).await
         }
     };
+    provider.register_async_tool(bash_def, bash_exec).await;
 
-    provider.register_async_tool(bash_tool_def, bash_exec).await;
-    info!("Registered tool: bash (Anthropic Bash Tool)");
-
+    warn!("⚠️ Registered UNSECURED bash tool (other tools remain secure)");
     Ok(())
+}
+
+/// ⚠️ LEGACY: Execute bash command without security validation (DEPRECATED)
+async fn bash_exec_legacy(input: Value) -> Result<Value, String> {
+    if let Some(restart) = input["restart"].as_bool() {
+        if restart {
+            return Ok(json!({"status": "restarted", "message": "Bash environment restarted"}));
+        }
+    }
+
+    let command = input["command"]
+        .as_str()
+        .ok_or_else(|| "Missing or invalid 'command' parameter".to_string())?;
+
+    error!("🚨 SECURITY WARNING: Using unsecured bash execution for: {}", command);
+    error!("🚨 This should only happen during development or fallback scenarios");
+    
+    execute_bash_command_impl(command).await
 }

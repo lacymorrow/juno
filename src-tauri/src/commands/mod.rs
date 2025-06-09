@@ -29,6 +29,7 @@ pub mod cloud;
 pub mod mcp;
 pub mod always_listening;
 pub mod security_demo; // Security system demonstration commands
+pub mod security_config; // Security configuration management
 
 // Re-export commands for easy access in lib.rs
 pub use self::core::*;

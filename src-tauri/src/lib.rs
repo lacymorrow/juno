@@ -292,6 +292,14 @@ use crate::commands::security_demo::{
     test_dangerous_commands, test_safe_commands
 };
 
+// Import security configuration commands
+use crate::commands::security_config::{
+    get_security_config, update_security_config, reset_security_config,
+    get_security_stats, test_command_security, get_security_system_info,
+    toggle_security_system, get_security_audit_log, export_security_config,
+    import_security_config
+};
+
 /// Enhanced environment variable loading for both development and production builds
 fn load_environment_variables() {
     // Try to load from current directory first (development)
@@ -852,7 +860,18 @@ pub fn run() {
             get_security_status,
             get_command_history,
             test_dangerous_commands,
-            test_safe_commands
+            test_safe_commands,
+            // Security Configuration Commands
+            get_security_config,
+            update_security_config,
+            reset_security_config,
+            get_security_stats,
+            test_command_security,
+            get_security_system_info,
+            toggle_security_system,
+            get_security_audit_log,
+            export_security_config,
+            import_security_config
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
