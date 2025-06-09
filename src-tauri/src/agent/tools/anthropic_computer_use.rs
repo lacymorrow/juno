@@ -1,3 +1,63 @@
+//! Official Anthropic Computer Use Tools for Juno AI Computer Use Agent
+//!
+//! This module implements the official Anthropic Computer Use API specification,
+//! providing the core computer interaction capabilities that enable Claude to
+//! control desktop environments through screen interaction.
+//!
+//! ## Core Tools
+//!
+//! - **Computer Tool** (`computer`) - Complete screen interaction with mouse, keyboard, and screenshots
+//! - **Text Editor Tool** (`str_replace_based_edit_tool`) - File viewing, creation, and editing
+//! - **Bash Tool** (`bash`) - Command line execution and shell interaction
+//!
+//! ## Computer Use Actions
+//!
+//! The computer tool supports all 17 official Anthropic Computer Use actions:
+//! 1. `screenshot` - Capture screen or window screenshots
+//! 2. `cursor_position` - Get current mouse cursor position
+//! 3. `mouse_move` - Move mouse to coordinates
+//! 4. `left_mouse_down/up` - Mouse button control
+//! 5. `left_click` - Single click with optional modifiers
+//! 6. `right_click` - Context menu click
+//! 7. `middle_click` - Middle mouse button click
+//! 8. `double_click` - Double-click for selection
+//! 9. `triple_click` - Triple-click for line selection
+//! 10. `left_click_drag` - Drag operations between coordinates
+//! 11. `scroll` - Scroll in specified direction and amount
+//! 12. `type` - Type text into focused input
+//! 13. `key` - Press keyboard keys and combinations
+//! 14. `hold_key` - Hold keys for specified duration
+//! 15. `wait` - Pause execution for timing control
+//!
+//! ## Enhanced Features
+//!
+//! - **Input Verification**: Automatic verification of text input focus and readiness
+//! - **Window Targeting**: Support for focused window and specific window ID targeting
+//! - **Coordinate Systems**: Global and window-relative coordinate support
+//! - **Error Recovery**: Comprehensive error handling with detailed feedback
+//! - **Action Logging**: Detailed logging for debugging and monitoring
+//!
+//! ## Protocol Compliance
+//!
+//! Implements Anthropic Computer Use specification:
+//! - computer_20250124 (Enhanced version for Claude 4 & Sonnet 3.7)
+//! - text_editor_20250429 (Claude 4 version without undo_edit)
+//! - bash_20250124 (Enhanced bash tool)
+//!
+//! ## Used By
+//!
+//! - Main agent orchestrator for all computer interaction tasks
+//! - Desktop tools for system-level operations
+//! - Browser tools for web automation coordination
+//! - Enhanced coding tools for development workflows
+//!
+//! ## Security
+//!
+//! - Sandboxed execution environment
+//! - Input validation and sanitization
+//! - File system access controls
+//! - Command execution monitoring
+
 use crate::agent::structs::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
@@ -9,6 +69,20 @@ use tracing::{info, warn};
 // Based on official specification: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
 
 /// Helper function to verify that an input element is focused after clicking
+/// 
+/// Performs verification that clicking on screen coordinates resulted in proper
+/// focus of a text input element, with timeout and retry logic.
+/// 
+/// Used by: Computer tool click actions for input verification
+/// 
+/// # Arguments
+/// * `x` - X coordinate of the click
+/// * `y` - Y coordinate of the click  
+/// * `state_manager` - Application state for desktop access
+/// * `timeout_ms` - Maximum time to wait for focus verification
+/// 
+/// # Returns
+/// * True if input is properly focused, false if verification fails
 async fn verify_input_focus_after_click(
     x: f64,
     y: f64,
@@ -66,6 +140,17 @@ async fn verify_input_focus_after_click(
 }
 
 /// Helper function to verify that the currently focused element is ready for text input
+/// 
+/// Checks that the currently focused element is a text input that is enabled
+/// and ready to receive typed text input.
+/// 
+/// Used by: Computer tool type action for input readiness verification
+/// 
+/// # Arguments
+/// * `state_manager` - Application state for desktop access
+/// 
+/// # Returns
+/// * True if ready for text input, false if not ready or not a text input
 fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String> {
     match state_manager.desktop.focused_element() {
         Ok(focused_element) => {
@@ -120,6 +205,20 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
 }
 
 /// Register the official Anthropic Computer Use tools with exact API specification
+/// 
+/// Registers all three official Anthropic Computer Use tools with the local tool provider:
+/// - Computer tool for screen interaction
+/// - Text editor tool for file operations  
+/// - Bash tool for command execution
+/// 
+/// Used by: Agent initialization system during tool registration
+/// 
+/// # Arguments
+/// * `provider` - Local tool provider for tool registration
+/// * `app_handle` - Tauri app handle for system access
+/// 
+/// # Returns
+/// * Success if all tools registered, error if registration fails
 pub async fn register_anthropic_computer_use_tools(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
