@@ -1,3 +1,15 @@
+//! # Basic Tools Module
+//! 
+//! Core system tools providing fundamental file operations and terminal command execution.
+//! These tools form the foundation for agent interactions with the host system.
+//! 
+//! ## Tools Provided:
+//! - `read_file`: Read file contents from the workspace
+//! - `run_terminal_command`: Execute shell commands with output capture
+//! 
+//! ## Usage
+//! Used by: Orchestrator agent, coding specialists, general agent workflows
+//! Registration: Called via `register_basic_tools()` during agent initialization
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 
@@ -8,6 +20,13 @@ mod basic_tools_impl {
     use std::path::PathBuf;
     use crate::agent::structs::ToolDefinition;
 
+    /// Creates the tool definition for the `read_file` tool.
+    /// 
+    /// This tool allows agents to read the contents of text files relative to the workspace root.
+    /// Used by: Coding agents, file analysis workflows, documentation tools
+    /// 
+    /// # Returns
+    /// `ToolDefinition` with schema requiring a `path` parameter
     pub fn read_file_definition() -> ToolDefinition {
         ToolDefinition {
             name: "read_file".to_string(),
@@ -25,6 +44,19 @@ mod basic_tools_impl {
         }
     }
 
+    /// Executes the `read_file` tool operation.
+    /// 
+    /// Reads the contents of a file specified by the relative path from workspace root.
+    /// Used by: All agent types for accessing file contents during analysis and development
+    /// 
+    /// # Arguments
+    /// * `input` - JSON value containing the file path
+    /// 
+    /// # Returns
+    /// `Result<Value, String>` - File content as JSON on success, error message on failure
+    /// 
+    /// # Security Note
+    /// TODO: SECURITY: Implement proper path validation and sandboxing!
     pub fn read_file_exec(input: Value) -> Result<Value, String> {
         let path_str = input["path"]
             .as_str()
@@ -45,6 +77,16 @@ mod basic_tools_impl {
         }
     }
 
+    /// Creates the tool definition for the `run_terminal_command` tool.
+    /// 
+    /// Allows agents to execute shell commands and capture their output.
+    /// Used by: Development tools, system administration, build processes
+    /// 
+    /// # Returns
+    /// `ToolDefinition` with schema requiring a `command` parameter
+    /// 
+    /// # Security Note
+    /// CAUTION: This executes commands directly on the system without sandboxing
     pub fn run_terminal_command_definition() -> ToolDefinition {
         ToolDefinition {
             name: "run_terminal_command".to_string(),
@@ -62,6 +104,19 @@ mod basic_tools_impl {
         }
     }
 
+    /// Executes the `run_terminal_command` tool operation.
+    /// 
+    /// Runs a shell command and captures stdout, stderr, and exit code.
+    /// Used by: Build tools, git operations, system utilities, development workflows
+    /// 
+    /// # Arguments
+    /// * `input` - JSON value containing the command string
+    /// 
+    /// # Returns
+    /// `Result<Value, String>` - Command output and status as JSON on success, error on spawn failure
+    /// 
+    /// # Security Note
+    /// TODO: SECURITY: This is extremely dangerous without sandboxing!
     pub fn run_terminal_command_exec(input: Value) -> Result<Value, String> {
         let command_str = input["command"]
             .as_str()
@@ -99,7 +154,20 @@ mod basic_tools_impl {
     }
 }
 
-/// Registers basic file and command execution tools with the provider.
+/// Registers basic file and command execution tools with the tool provider.
+/// 
+/// This function is called during agent initialization to make core system tools
+/// available to all agent types. These tools provide fundamental capabilities
+/// for file access and command execution.
+/// 
+/// Used by: Agent initialization system in `anthropic.rs` and other agent entry points
+/// 
+/// # Arguments
+/// * `provider` - Mutable reference to the LocalToolProvider for tool registration
+/// 
+/// # Tools Registered
+/// - `read_file`: File content reading
+/// - `run_terminal_command`: Shell command execution
 pub async fn register_basic_tools(provider: &mut LocalToolProvider) {
     // Now use the functions from the module defined above
 
