@@ -50,6 +50,13 @@ interface ProviderInfo {
   description: string;
   models: string[];
   default_model: string;
+  computer_use_supported: boolean;
+  model_info?: {
+    id: string;
+    name: string;
+    supports_computer_use: boolean;
+    is_recommended: boolean;
+  }[];
 }
 
 interface ProviderSettings {
@@ -1488,15 +1495,30 @@ const Settings: React.FC<SettingsProps> = ({
               <SelectContent>
                 {providers.map((provider) => (
                   <SelectItem key={provider.id} value={provider.id}>
-                    {provider.name}
+                    <div className="flex items-center gap-2">
+                      <span>{provider.name}</span>
+                      {provider.computer_use_supported && (
+                        <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                          Computer Use
+                        </Badge>
+                      )}
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             {currentProvider && (
-              <p className="text-sm text-muted-foreground">
-                {currentProvider.description}
-              </p>
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  {currentProvider.description}
+                </p>
+                {currentProvider.computer_use_supported && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <span className="text-green-700">Computer use capabilities available</span>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -1522,7 +1544,14 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="model">Model</Label>
+                  <Label htmlFor="model">
+                    Model
+                    {currentProvider?.computer_use_supported && (
+                      <span className="text-xs text-muted-foreground ml-2">
+                        (🖥️ = Computer Use)
+                      </span>
+                    )}
+                  </Label>
                   <Select
                     value={formData.model}
                     onValueChange={(value) =>
@@ -1533,17 +1562,82 @@ const Settings: React.FC<SettingsProps> = ({
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {currentProvider?.models?.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      )) || (
-                        <SelectItem value="" disabled>
-                          No models available
-                        </SelectItem>
+                      {currentProvider?.model_info ? (
+                        <>
+                          {/* Computer Use Models */}
+                          {currentProvider.model_info.filter(model => model.supports_computer_use).length > 0 && (
+                            <>
+                              <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-blue-50 border-b">
+                                Computer Use Models
+                              </div>
+                              {currentProvider.model_info
+                                .filter(model => model.supports_computer_use)
+                                .map((model) => (
+                                  <SelectItem key={model.id} value={model.id}>
+                                    <div className="flex items-center gap-2">
+                                      <span>🖥️</span>
+                                      <span>{model.name}</span>
+                                      {model.is_recommended && (
+                                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                          Recommended
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                            </>
+                          )}
+                          
+                          {/* General Chat Models */}
+                          {currentProvider.model_info.filter(model => !model.supports_computer_use).length > 0 && (
+                            <>
+                              <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-gray-50 border-b">
+                                General Chat Models
+                              </div>
+                              {currentProvider.model_info
+                                .filter(model => !model.supports_computer_use)
+                                .map((model) => (
+                                  <SelectItem key={model.id} value={model.id}>
+                                    <div className="flex items-center gap-2">
+                                      <span>💬</span>
+                                      <span>{model.name}</span>
+                                      {model.is_recommended && (
+                                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                          Recommended
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        // Fallback to old model list format
+                        currentProvider?.models?.map((model) => (
+                          <SelectItem key={model} value={model}>
+                            {model}
+                          </SelectItem>
+                        )) || (
+                          <SelectItem value="" disabled>
+                            No models available
+                          </SelectItem>
+                        )
                       )}
                     </SelectContent>
                   </Select>
+                  {formData.model && currentProvider?.model_info && (
+                    <div className="text-xs text-muted-foreground">
+                      {(() => {
+                        const selectedModel = currentProvider.model_info.find(m => m.id === formData.model);
+                        if (selectedModel?.supports_computer_use) {
+                          return "✅ This model supports computer use automation";
+                        } else {
+                          return "⚠️ This model is for general chat only";
+                        }
+                      })()}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
