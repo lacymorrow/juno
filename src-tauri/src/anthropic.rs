@@ -117,8 +117,11 @@ pub async fn submit_query(
 
     // Generate a unique execution ID for this agent run
     let execution_id = uuid::Uuid::new_v4().to_string();
-    state.mark_agent_execution_started(execution_id.clone());
-    info!("Starting new agent execution with ID: {}", execution_id);
+    
+    // Mark agent execution as started with max iterations (both modes use 15)
+    const MAX_ITERATIONS: u32 = 15;
+    state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
+    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
 
     // --- Gather System Context ---
     let system_context = match gather_system_context(Some(&*state)).await {
@@ -231,8 +234,6 @@ pub async fn submit_query(
             };
             info!("Single agent brain initialized.");
 
-            const MAX_ITERATIONS: u32 = 15;
-
             // Create single agent runner with all tools
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
                 memory_manager_clone,
@@ -280,8 +281,6 @@ pub async fn submit_query(
             // Register delegation tools for the orchestrator
             register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, agent_tool_provider, app_handle.clone()).await;
             info!("Registered delegation tools for orchestrator.");
-
-            const MAX_ITERATIONS: u32 = 15;
 
             // Create the orchestrator agent runner with personality-focused system prompt
             let mut orchestrator_runner = DefaultAgentRunner::with_boxed_brain(
