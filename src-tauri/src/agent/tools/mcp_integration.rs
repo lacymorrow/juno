@@ -91,6 +91,7 @@ pub struct MCPServerConnection {
     request_id_counter: u64,
     stdin_writer: Option<BufWriter<tokio::process::ChildStdin>>,
     stdout_reader: Option<BufReader<tokio::process::ChildStdout>>,
+    stderr_reader: Option<BufReader<tokio::process::ChildStderr>>,
 }
 
 impl MCPServerConnection {
@@ -103,6 +104,7 @@ impl MCPServerConnection {
             request_id_counter: 0,
             stdin_writer: None,
             stdout_reader: None,
+            stderr_reader: None,
         }
     }
 
@@ -113,7 +115,7 @@ impl MCPServerConnection {
         }
 
         self.status = MCPServerStatus::Connecting;
-        info!("Starting MCP server: {}", self.config.name);
+        info!("Starting MCP server: {} (command: {} {:?})", self.config.name, self.config.command, self.config.args);
 
         // Start the server process
         let mut command = Command::new(&self.config.command);
@@ -124,6 +126,7 @@ impl MCPServerConnection {
 
         if let Some(working_dir) = &self.config.working_directory {
             command.current_dir(working_dir);
+            info!("MCP server '{}' working directory: {:?}", self.config.name, working_dir);
         }
 
         for (key, value) in &self.config.environment_variables {
@@ -132,7 +135,8 @@ impl MCPServerConnection {
 
         let mut child = command.spawn()
             .map_err(|e| {
-                let err = format!("Failed to start MCP server '{}': {}", self.config.name, e);
+                let err = format!("Failed to start MCP server '{}' (command: {}): {}", self.config.name, self.config.command, e);
+                error!("{}", err);
                 self.status = MCPServerStatus::Error(err.clone());
                 err
             })?;
@@ -150,9 +154,44 @@ impl MCPServerConnection {
             err
         })?;
 
+        let stderr = child.stderr.take().ok_or_else(|| {
+            let err = "Failed to get stderr for MCP server".to_string();
+            self.status = MCPServerStatus::Error(err.clone());
+            err
+        })?;
+
         self.stdin_writer = Some(BufWriter::new(stdin));
         self.stdout_reader = Some(BufReader::new(stdout));
+        self.stderr_reader = Some(BufReader::new(stderr));
         self.process = Some(child);
+
+        // Start stderr monitoring task
+        self.start_stderr_monitoring().await;
+
+        // Give the server a moment to start up
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Check if process is still running
+        if let Some(ref mut process) = self.process {
+            match process.try_wait() {
+                Ok(Some(exit_status)) => {
+                    let err = format!("MCP server '{}' exited immediately with status: {}", self.config.name, exit_status);
+                    error!("{}", err);
+                    self.status = MCPServerStatus::Error(err.clone());
+                    return Err(err);
+                }
+                Ok(None) => {
+                    // Process is still running, continue
+                    info!("MCP server '{}' process started successfully", self.config.name);
+                }
+                Err(e) => {
+                    let err = format!("Failed to check MCP server '{}' process status: {}", self.config.name, e);
+                    error!("{}", err);
+                    self.status = MCPServerStatus::Error(err.clone());
+                    return Err(err);
+                }
+            }
+        }
 
         // Initialize the MCP connection
         self.initialize().await?;
@@ -166,6 +205,34 @@ impl MCPServerConnection {
         self.status = MCPServerStatus::Connected;
         info!("Successfully connected to MCP server: {}", self.config.name);
         Ok(())
+    }
+
+    /// Start monitoring stderr for error messages
+    async fn start_stderr_monitoring(&mut self) {
+        if let Some(stderr_reader) = self.stderr_reader.take() {
+            let server_name = self.config.name.clone();
+            tokio::spawn(async move {
+                let mut reader = stderr_reader;
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => break, // EOF
+                        Ok(_) => {
+                            let trimmed = line.trim();
+                            if !trimmed.is_empty() {
+                                warn!("MCP server '{}' stderr: {}", server_name, trimmed);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading stderr from MCP server '{}': {}", server_name, e);
+                            break;
+                        }
+                    }
+                }
+                debug!("Stderr monitoring ended for MCP server '{}'", server_name);
+            });
+        }
     }
 
     /// Send the MCP initialize request
@@ -325,6 +392,8 @@ impl MCPServerConnection {
         let request_str = serde_json::to_string(&request)
             .map_err(|e| format!("Failed to serialize request: {}", e))?;
 
+        debug!("Sending MCP request to '{}': {}", self.config.name, request_str);
+
         // Send request
         if let Some(ref mut writer) = self.stdin_writer {
             writer.write_all(request_str.as_bytes()).await
@@ -344,8 +413,14 @@ impl MCPServerConnection {
                 reader.read_line(&mut line).await
                     .map_err(|e| format!("Failed to read response: {}", e))?;
 
+                debug!("Received MCP response from '{}': {}", self.config.name, line.trim());
+
+                if line.trim().is_empty() {
+                    return Err(format!("Received empty response from MCP server '{}'", self.config.name));
+                }
+
                 serde_json::from_str::<Value>(&line)
-                    .map_err(|e| format!("Failed to parse response JSON: {}", e))
+                    .map_err(|e| format!("Failed to parse response JSON from '{}': {} (response was: '{}')", self.config.name, e, line.trim()))
             } else {
                 Err("No stdout reader available".to_string())
             }
@@ -355,7 +430,7 @@ impl MCPServerConnection {
             .await
             .map_err(|_| {
                 self.status = MCPServerStatus::Timeout;
-                "Request timeout".to_string()
+                format!("Request timeout for MCP server '{}' ({}s)", self.config.name, self.config.timeout_seconds)
             })?
     }
 
@@ -366,6 +441,7 @@ impl MCPServerConnection {
         }
         self.stdin_writer = None;
         self.stdout_reader = None;
+        self.stderr_reader = None;
         self.status = MCPServerStatus::Disconnected;
         info!("Disconnected from MCP server: {}", self.config.name);
     }
