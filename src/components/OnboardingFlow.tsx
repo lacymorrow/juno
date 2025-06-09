@@ -178,6 +178,27 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
     }
   ];
 
+  // Helper function to get explicit color classes to prevent layout shifts
+  const getFeatureCardClasses = (color: string) => {
+    const colorClasses = {
+      blue: "border-blue-200 hover:border-blue-300",
+      green: "border-green-200 hover:border-green-300", 
+      purple: "border-purple-200 hover:border-purple-300",
+      orange: "border-orange-200 hover:border-orange-300"
+    };
+    return colorClasses[color as keyof typeof colorClasses] || "border-gray-200 hover:border-gray-300";
+  };
+
+  const getIconClasses = (color: string) => {
+    const iconClasses = {
+      blue: "bg-blue-100 text-blue-600",
+      green: "bg-green-100 text-green-600",
+      purple: "bg-purple-100 text-purple-600", 
+      orange: "bg-orange-100 text-orange-600"
+    };
+    return iconClasses[color as keyof typeof iconClasses] || "bg-gray-100 text-gray-600";
+  };
+
   // Render individual steps
   const renderWelcomeStep = () => (
     <div className="max-w-2xl mx-auto text-center space-y-8">
@@ -252,11 +273,11 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
 
       <div className="grid md:grid-cols-2 gap-6">
         {featureCards.map((feature, index) => (
-          <Card key={index} className={`border-2 transition-all duration-300 hover:shadow-lg border-${feature.color}-200`}>
+          <Card key={index} className={`border-2 transition-colors duration-200 hover:shadow-lg ${getFeatureCardClasses(feature.color)}`}>
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-lg bg-${feature.color}-100`}>
-                  <feature.icon className={`w-6 h-6 text-${feature.color}-600`} />
+                <div className={`p-3 rounded-lg ${getIconClasses(feature.color)}`}>
+                  <feature.icon className="w-6 h-6" />
                 </div>
                 <CardTitle className="text-lg">{feature.title}</CardTitle>
               </div>
@@ -481,7 +502,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             <div className="text-left space-y-2">
               <div className="flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">Type your request in the chat box below</span>
+                <span className="text-sm text-green-800">Start chatting once setup is complete</span>
               </div>
               <div className="flex items-center gap-2">
                 <Mic className="w-4 h-4 text-green-600" />
@@ -541,7 +562,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             <button
               key={step}
               onClick={() => index <= currentStepIndex ? skipToStep(step) : undefined}
-              className={`w-3 h-3 rounded-full transition-all ${
+              className={`w-3 h-3 rounded-full transition-colors duration-200 ${
                 index === currentStepIndex
                   ? "bg-primary ring-2 ring-primary/20"
                   : completedSteps.has(step) || (step === "permissions" && permissionsAlreadyGranted)
