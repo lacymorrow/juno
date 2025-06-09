@@ -24,6 +24,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::structs::ToolDefinition;
 use crate::state::AppState;
 use crate::commands;
+use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use tauri::{State, Manager};
 use serde_json::{Value, json};
 use tracing::info;
@@ -432,6 +433,11 @@ pub async fn register_desktop_tools(
     let get_focused_exec = move |_input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before accessing UI elements
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "get_focused_element_info").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
@@ -463,6 +469,11 @@ pub async fn register_desktop_tools(
     let capture_screenshot_exec = move |_input: Value| {
         let app_handle = app_handle_clone.clone(); // Clone for this specific async move block
          async move {
+            // Validate screen recording permission before taking screenshot
+            if let Err(e) = validate_permission(&app_handle, RequiredPermission::ScreenRecording, "capture_screenshot").await {
+                return Err(e.to_string());
+            }
+
             let block_result: Result<String, String> = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
@@ -497,6 +508,11 @@ pub async fn register_desktop_tools(
     let capture_element_screenshot_exec = move |_input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before capturing element screenshot
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "capture_element_screenshot").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
@@ -535,18 +551,22 @@ pub async fn register_desktop_tools(
     let type_text_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before typing text
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "type_text").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<TypeTextArgs>(input)
                 .map_err(|e| format!("Failed to parse type_text input: {}", e))?;
 
-            let inner_result = tokio::task::block_in_place(|| {
+            let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::keyboard::type_text(args.text, state_manager)
-                        .await
+                    commands::key::dev_type_text(app.clone(), state_manager, args.text, args.delay).await
                 })
             });
-            inner_result.map_err(|e| format!("Error typing text: {}", e))?;
+            result.map_err(|e| format!("Error typing text: {}", e))?;
             Ok(json!({"success": true}))
         }
     };
@@ -655,18 +675,22 @@ pub async fn register_desktop_tools(
     let desktop_click_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before mouse clicks
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "desktop_click").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<DesktopClickArgs>(input)
-                .map_err(|e| format!("Failed to parse desktop click input: {}", e))?;
+                .map_err(|e| format!("Failed to parse desktop_click input: {}", e))?;
 
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, args.modifier)
-                        .await
+                    commands::mouse::dev_desktop_click(app.clone(), state_manager, args.x, args.y, args.click_type, args.modifier).await
                 })
             });
-            inner_result.map_err(|e| format!("Error clicking on desktop: {}", e))?;
+            inner_result.map_err(|e| format!("Error clicking: {}", e))?;
             Ok(json!({"success": true}))
         }
     };
@@ -722,6 +746,11 @@ pub async fn register_desktop_tools(
     let mouse_move_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before mouse movement
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "mouse_move").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
@@ -761,6 +790,11 @@ pub async fn register_desktop_tools(
     let left_click_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before left clicking
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "left_click").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
@@ -800,6 +834,11 @@ pub async fn register_desktop_tools(
     let right_click_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before right clicking
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "right_click").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
@@ -839,6 +878,11 @@ pub async fn register_desktop_tools(
     let middle_click_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before middle clicking
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "middle_click").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
@@ -878,6 +922,11 @@ pub async fn register_desktop_tools(
     let double_click_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before double clicking
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "double_click").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<MousePositionInput>(input)
                 .map_err(|e| format!("Failed to parse mouse position input: {}", e))?;
@@ -919,6 +968,11 @@ pub async fn register_desktop_tools(
     let left_click_drag_exec = move |input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before drag operations
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "left_click_drag").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<DragInput>(input)
                 .map_err(|e| format!("Failed to parse drag input: {}", e))?;
@@ -963,6 +1017,11 @@ pub async fn register_desktop_tools(
     let cursor_position_exec = move |_input: Value| {
         let app = app_handle_clone.clone();
         async move {
+            // Validate accessibility permission before getting cursor position
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "cursor_position").await {
+                return Err(e.to_string());
+            }
+
             let state_manager = app.state::<AppState>();
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();

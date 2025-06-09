@@ -7,7 +7,7 @@ use tracing::{warn, info, debug, error};
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
 
 /// Common error patterns found in agent execution
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ErrorPattern {
     ElementNotFound,
     UnexpectedDialog,
@@ -23,6 +23,8 @@ pub enum ErrorPattern {
     InvalidInput,
     ResourceBusy,
     ServiceUnavailable,
+    MaxStepsReached,
+    Cancelled,
     Unknown(String),
 }
 
@@ -139,8 +141,8 @@ impl ErrorRecoveryManager {
         self.strategy_mappings.insert(
             ErrorPattern::PermissionDenied,
             vec![
-                RecoveryStrategy::AlternativeMethod,
                 RecoveryStrategy::EscalateToUser,
+                RecoveryStrategy::AlternativeMethod,
                 RecoveryStrategy::SkipStep,
             ]
         );
@@ -184,19 +186,42 @@ impl ErrorRecoveryManager {
             ]
         );
 
-        // Service unavailable - wait and use fallback
+        // Service unavailable - wait and fallback
         self.strategy_mappings.insert(
             ErrorPattern::ServiceUnavailable,
             vec![
-                RecoveryStrategy::WaitAndRetry(Duration::from_secs(5)),
+                RecoveryStrategy::WaitAndRetry(Duration::from_secs(10)),
                 RecoveryStrategy::FallbackTool,
-                RecoveryStrategy::SkipStep,
+            ]
+        );
+
+        // Max steps reached - terminate gracefully
+        self.strategy_mappings.insert(
+            ErrorPattern::MaxStepsReached,
+            vec![
+                RecoveryStrategy::EscalateToUser,
+            ]
+        );
+
+        // User cancelled - terminate immediately
+        self.strategy_mappings.insert(
+            ErrorPattern::Cancelled,
+            vec![
+                RecoveryStrategy::EscalateToUser,
             ]
         );
     }
 
     /// Determine error pattern from an AgentError
     pub fn determine_error_pattern(&self, error: &AgentError) -> ErrorPattern {
+        // First check for specific AgentError types
+        match error {
+            AgentError::PermissionDenied(_) => return ErrorPattern::PermissionDenied,
+            AgentError::MaxStepsReached => return ErrorPattern::MaxStepsReached,
+            AgentError::Terminated => return ErrorPattern::Cancelled,
+            _ => {}
+        }
+
         let error_message = error.to_string().to_lowercase();
 
         // Check for specific patterns in error messages
@@ -216,7 +241,12 @@ impl ErrorRecoveryManager {
             return ErrorPattern::FileSystemError;
         }
 
-        if error_message.contains("permission denied") || error_message.contains("access denied") {
+        if error_message.contains("permission denied") || 
+           error_message.contains("access denied") ||
+           error_message.contains("accessibility permissions") ||
+           error_message.contains("screen recording permission") ||
+           error_message.contains("microphone permission") ||
+           error_message.contains("desktop automation is not available") {
             return ErrorPattern::PermissionDenied;
         }
 
@@ -246,8 +276,6 @@ impl ErrorRecoveryManager {
             AgentError::ToolError(_) => ErrorPattern::ElementNotFound,
             AgentError::InputError(_) => ErrorPattern::InvalidInput,
             AgentError::ConfigurationError(_) => ErrorPattern::InvalidInput,
-            AgentError::MaxStepsReached => ErrorPattern::Timeout,
-            AgentError::Terminated => return ErrorPattern::Unknown("User cancelled".to_string()),
             _ => ErrorPattern::Unknown(error_message),
         }
     }
