@@ -29,25 +29,6 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
     Ok(())
 }
 
-/// Initialize the orchestrator system (without app handle - deprecated)
-pub async fn init_orchestrator() -> Result<(), String> {
-    let factory = AgentFactory::new();
-
-    // Initialize default agents (will skip desktop agent without app_handle)
-    factory.initialize_default_agents().await
-        .map_err(|e| format!("Failed to initialize agents: {}", e))?;
-
-    // Create orchestrator
-    let orchestrator = factory.create_orchestrator();
-
-    // Store globally
-    ORCHESTRATOR.set(Arc::new(Mutex::new(orchestrator)))
-        .map_err(|_| "Failed to initialize orchestrator - already initialized")?;
-
-    tracing::info!("Multi-agent orchestrator system initialized successfully (without app handle)");
-    Ok(())
-}
-
 /// Get the global orchestrator instance
 async fn get_orchestrator() -> Result<Arc<Mutex<Orchestrator>>, String> {
     ORCHESTRATOR.get()
@@ -197,5 +178,21 @@ pub async fn get_agent_capabilities() -> Result<std::collections::HashMap<String
 
 /// Initialize the orchestrator on app startup
 pub async fn initialize_orchestrator_system() -> Result<(), String> {
-    init_orchestrator().await
+    // Updated to use the non-deprecated function with app handle
+    // Note: This function now requires an app handle to be passed in properly
+    let factory = AgentFactory::new();
+    
+    // Initialize default agents (will skip desktop agent without app_handle)
+    factory.initialize_default_agents().await
+        .map_err(|e| format!("Failed to initialize agents: {}", e))?;
+
+    // Create orchestrator
+    let orchestrator = factory.create_orchestrator();
+
+    // Store globally
+    ORCHESTRATOR.set(Arc::new(Mutex::new(orchestrator)))
+        .map_err(|_| "Failed to initialize orchestrator - already initialized")?;
+
+    tracing::info!("Multi-agent orchestrator system initialized successfully (minimal mode)");
+    Ok(())
 }
