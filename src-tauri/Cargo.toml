@@ -78,6 +78,10 @@ tauri-plugin-store = "2.0.1"
 # rabDab = { path = "../rabDab" }   # Commented out due to path issue and no current usages
 open = "5.3"
 
+# Security framework dependencies
+notify = "6.0"              # File system monitoring for security
+regex = "1.0"               # Pattern matching for command validation
+
 # Cloud connectivity dependencies
 tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
 ring = "0.17"

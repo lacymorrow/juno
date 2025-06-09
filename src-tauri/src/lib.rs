@@ -286,6 +286,12 @@ use commands::cloud::{
     execute_remote_command, get_cloud_connection_diagnostics,
 };
 
+// Import security demo commands
+use crate::commands::security_demo::{
+    test_security_demo, get_security_status, get_command_history,
+    test_dangerous_commands, test_safe_commands
+};
+
 /// Enhanced environment variable loading for both development and production builds
 fn load_environment_variables() {
     // Try to load from current directory first (development)
@@ -521,6 +527,15 @@ pub fn run() {
 
     // Initialize shell state
     commands::shell::init_shell_state(&app_state);
+
+    // Initialize security manager with default configuration
+    let security_config = agent::security::SecurityConfig::default();
+    if let Err(e) = tauri::async_runtime::block_on(app_state.init_security_manager(security_config)) {
+        warn!("Failed to initialize security manager: {}", e);
+        warn!("Security features will be disabled");
+    } else {
+        info!("Security manager initialized successfully");
+    }
 
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
@@ -832,6 +847,12 @@ pub fn run() {
             // Settings Window Commands
             commands::open_settings_window,
             commands::close_settings_window,
+            // Security Demo Commands
+            test_security_demo,
+            get_security_status,
+            get_command_history,
+            test_dangerous_commands,
+            test_safe_commands
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

@@ -27,6 +27,8 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::MCPManager;
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
+// Import SecurityManager for command security
+use crate::agent::security::{SecurityManager, SecurityConfig};
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +128,8 @@ pub struct AppState {
     // Agent execution status tracking
     pub agent_execution_active: Arc<Mutex<bool>>, // Track if an agent is currently executing
     pub agent_execution_id: Arc<Mutex<Option<String>>>, // Track the current agent execution ID
+    // Security manager for command validation and monitoring
+    pub security_manager: Arc<TokioMutex<Option<SecurityManager>>>, // Manage command security and monitoring
 }
 
 impl AppState {
@@ -172,6 +176,8 @@ impl AppState {
             // Initialize agent execution status tracking
             agent_execution_active: Arc::new(Mutex::new(false)),
             agent_execution_id: Arc::new(Mutex::new(None)),
+            // Initialize security manager
+            security_manager: Arc::new(TokioMutex::new(None)),
         }
     }
 
@@ -614,6 +620,32 @@ impl AppState {
         }
 
         Ok(())
+    }
+
+    // Security manager methods
+
+    /// Initialize security manager with configuration
+    pub async fn init_security_manager(&self, config: SecurityConfig) -> Result<(), String> {
+        let security_manager = SecurityManager::new(config)
+            .map_err(|e| format!("Failed to create security manager: {}", e))?;
+
+        let mut manager_guard = self.security_manager.lock().await;
+        *manager_guard = Some(security_manager);
+
+        log::info!("Security manager initialized successfully");
+        Ok(())
+    }
+
+    /// Get security manager
+    pub async fn get_security_manager(&self) -> Option<SecurityManager> {
+        let manager_guard = self.security_manager.lock().await;
+        manager_guard.clone()
+    }
+
+    /// Check if security manager is available
+    pub async fn has_security_manager(&self) -> bool {
+        let manager_guard = self.security_manager.lock().await;
+        manager_guard.is_some()
     }
 }
 
