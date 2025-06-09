@@ -54,8 +54,8 @@ async fn main() -> anyhow::Result<()> {
     check_os_permissions();
 
     // Create app state using the type from the server module
-    // Initialize the Desktop engine here with auto-redirect for better UX
-    let desktop_engine = Desktop::new_with_auto_redirect(false, true, true)
+    // Initialize the Desktop engine here with auto-redirect disabled for user control
+    let desktop_engine = Desktop::new_with_auto_redirect(false, true, false)
         .map_err(|e| anyhow::anyhow!("Failed to initialize desktop engine: {}", e))?;
 
     let app_state = Arc::new(AppState {
@@ -200,13 +200,13 @@ fn check_os_permissions() {
     // Only check on macOS
     #[cfg(target_os = "macos")]
     {
-        // Use enhanced permission checking with auto-redirect
+        // Use enhanced permission checking with auto-redirect disabled
         use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions_with_auto_redirect;
 
-        match check_accessibility_permissions_with_auto_redirect(true, true) {
+        match check_accessibility_permissions_with_auto_redirect(true, false) {
             Ok(granted) => {
                 if !granted {
-                    info!("accessibility permissions: prompt shown to user with auto-redirect to System Settings");
+                    info!("accessibility permissions: prompt shown to user (auto-redirect disabled)");
                     // Sleep to give user time to respond to the prompt and open settings
                     std::thread::sleep(std::time::Duration::from_secs(3));
 
@@ -218,18 +218,18 @@ fn check_os_permissions() {
                             } else {
                                 info!("**************************************************************");
                                 info!("* ACCESSIBILITY PERMISSIONS STILL REQUIRED                   *");
-                                info!("* System Settings has been opened for you automatically.     *");
-                                info!("* Please grant accessibility permissions to this app.        *");
+                                info!("* Please open System Settings manually to grant permissions.  *");
+                                info!("* Go to: System Settings > Privacy & Security > Accessibility*");
                                 info!("* Without this permission, UI automation will not function.   *");
                                 info!("**************************************************************");
                             }
                         },
                         Err(e) => {
-                            error!("accessibility permissions check failed after auto-redirect: {}", e);
+                            error!("accessibility permissions check failed: {}", e);
                             info!("**************************************************************");
                             info!("* ACCESSIBILITY PERMISSIONS REQUIRED                          *");
-                            info!("* System Settings should have opened automatically.           *");
-                            info!("* Please grant accessibility permissions to this app.        *");
+                            info!("* Please open System Settings manually to grant permissions.  *");
+                            info!("* Go to: System Settings > Privacy & Security > Accessibility*");
                             info!("* Without this permission, UI automation will not function.   *");
                             info!("**************************************************************");
                         }
@@ -242,10 +242,8 @@ fn check_os_permissions() {
                 error!("accessibility permissions check failed: {}", e);
                 info!("**************************************************************");
                 info!("* ACCESSIBILITY PERMISSIONS REQUIRED                          *");
-                info!("* System Settings should have opened automatically.           *");
-                info!("* Please grant accessibility permissions to this app.        *");
-                info!("* If System Settings didn't open, go to:                     *");
-                info!("* System Settings > Privacy & Security > Accessibility       *");
+                info!("* Please open System Settings manually to grant permissions.  *");
+                info!("* Go to: System Settings > Privacy & Security > Accessibility*");
                 info!("* Without this permission, UI automation will not function.   *");
                 info!("**************************************************************");
             }
