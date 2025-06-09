@@ -224,7 +224,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 }
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, always_listening::*};
+use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*};
 
 // Import specific sound commands from sound.rs
 use crate::commands::sound::{
@@ -635,9 +635,23 @@ pub fn run() {
             submit_orchestrated_query,
             get_orchestrator_status,
             configure_orchestrator,
+            create_orchestrator_task,
             get_task_history,
             get_active_tasks,
             get_agent_capabilities,
+            cancel_task,
+
+                                    // Workflow Orchestration Commands
+            execute_mcp_task,
+            get_workflow_templates,
+            execute_workflow_template,
+
+            // Memory Management Commands
+            get_memory_status,
+            clear_conversation_memory,
+            clean_orphaned_tool_calls,
+            get_conversation_messages,
+            get_last_n_messages,
             anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection

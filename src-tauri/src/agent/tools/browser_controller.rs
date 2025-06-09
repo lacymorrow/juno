@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::env;
 
 use crate::agent::structs::{AgentError, ToolResult};
+use crate::constants::chrome_debug_urls;
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
@@ -54,12 +55,8 @@ impl BrowserController {
     async fn try_connect_to_existing_browser(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("Attempting to connect to existing browser via CDP...");
 
-        // Common CDP endpoints to try
-        let cdp_endpoints = [
-            "http://localhost:9222",  // Chrome default
-            "http://localhost:9223",  // Alternative port
-            "http://localhost:9224",  // Alternative port
-        ];
+        // Common CDP endpoints to try (using constants)
+        let cdp_endpoints = chrome_debug_urls::get_all_urls();
 
         for endpoint in &cdp_endpoints {
             log::debug!("Trying CDP endpoint: {}", endpoint);
