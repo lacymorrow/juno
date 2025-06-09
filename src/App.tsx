@@ -1,12 +1,16 @@
 import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator"; // Import the AgentExecutionProgressIndicator component
 import DevToolsPanel from "@/components/DevToolsPanel";
-import { PermissionsFlow } from "@/components/PermissionsFlow";
+import { ExamplePrompts } from "@/components/ExamplePrompts";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { PermissionsFlow } from "@/components/PermissionsFlow";
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { JsxMessageRenderer, isJsxContent } from "@/components/ui/jsx-message-renderer";
+import {
+  JsxMessageRenderer,
+  isJsxContent,
+} from "@/components/ui/jsx-message-renderer";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -34,7 +38,6 @@ import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
-import { ExamplePrompts } from "@/components/ExamplePrompts";
 import "./styles/globals.css";
 
 // Type for conversation messages
@@ -260,9 +263,22 @@ function App() {
   useEffect(() => {
     const checkFirstTimeUser = async () => {
       try {
+        // In dev mode, always show onboarding for QA purposes
+        const isDevMode = import.meta.env.DEV;
+
+        if (isDevMode) {
+          console.log("Dev mode detected - showing onboarding for QA");
+          setShowOnboarding(true);
+          setCurrentView("onboarding");
+          setOnboardingChecked(true);
+          return;
+        }
+
         // Check if user has completed onboarding before
-        const hasCompletedOnboarding = localStorage.getItem('juno-onboarding-completed');
-        
+        const hasCompletedOnboarding = localStorage.getItem(
+          "juno-onboarding-completed"
+        );
+
         if (!hasCompletedOnboarding) {
           setShowOnboarding(true);
           setCurrentView("onboarding");
@@ -457,9 +473,9 @@ function App() {
   const handleOnboardingComplete = useCallback(async () => {
     try {
       // Mark onboarding as completed
-      localStorage.setItem('juno-onboarding-completed', 'true');
+      localStorage.setItem("juno-onboarding-completed", "true");
       setShowOnboarding(false);
-      
+
       // Get the stored first prompt if any
       try {
         const firstPrompt = await invoke<string>("get_first_onboarding_prompt");
@@ -470,7 +486,7 @@ function App() {
       } catch (error) {
         console.log("No first prompt stored or error retrieving it:", error);
       }
-      
+
       // Return to chat view
       setCurrentView("chat");
     } catch (error) {
@@ -483,7 +499,7 @@ function App() {
   // Handle onboarding skip
   const handleOnboardingSkip = useCallback(() => {
     // Mark onboarding as completed even if skipped
-    localStorage.setItem('juno-onboarding-completed', 'true');
+    localStorage.setItem("juno-onboarding-completed", "true");
     setShowOnboarding(false);
     setCurrentView("chat");
   }, []);
@@ -1071,16 +1087,19 @@ function App() {
   }
 
   // Function to handle example prompt selection
-  const handleExamplePromptSelect = useCallback((prompt: string) => {
-    setQuery(prompt);
-    // Auto-submit the selected prompt
-    setTimeout(() => {
-      const syntheticEvent = {
-        preventDefault: () => {},
-      } as React.FormEvent<HTMLFormElement>;
-      handleSubmit(syntheticEvent);
-    }, 100); // Small delay to ensure state is updated
-  }, [handleSubmit]);
+  const handleExamplePromptSelect = useCallback(
+    (prompt: string) => {
+      setQuery(prompt);
+      // Auto-submit the selected prompt
+      setTimeout(() => {
+        const syntheticEvent = {
+          preventDefault: () => {},
+        } as React.FormEvent<HTMLFormElement>;
+        handleSubmit(syntheticEvent);
+      }, 100); // Small delay to ensure state is updated
+    },
+    [handleSubmit]
+  );
 
   return (
     <main className="h-screen flex flex-col">
@@ -1258,9 +1277,11 @@ function App() {
                             </p>
                           </div>
                         </div>
-                        
+
                         {/* Example Prompts */}
-                        <ExamplePrompts onPromptSelect={handleExamplePromptSelect} />
+                        <ExamplePrompts
+                          onPromptSelect={handleExamplePromptSelect}
+                        />
                       </div>
                     ) : (
                       conversation.map((msg, index) => {
@@ -1343,7 +1364,9 @@ function App() {
                                       <span>✓</span>
                                       <span>Task completed successfully</span>
                                     </span>
-                                  ) : msg.isJsx || (msg.role === "assistant" && isJsxContent(msg.content)) ? (
+                                  ) : msg.isJsx ||
+                                    (msg.role === "assistant" &&
+                                      isJsxContent(msg.content)) ? (
                                     <JsxMessageRenderer jsx={msg.content} />
                                   ) : (
                                     msg.content
