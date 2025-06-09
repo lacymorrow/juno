@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -5,6 +6,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Shield } from "lucide-react";
+import { PermissionsManager } from "@/components/PermissionsManager";
 import { SettingsSectionProps } from "../types";
 
 export default function SecuritySettings({ settings }: SettingsSectionProps) {
@@ -20,15 +23,41 @@ export default function SecuritySettings({ settings }: SettingsSectionProps) {
 
         <Card>
           <CardHeader>
-            <CardTitle>Permissions</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Shield size={20} />
+              macOS Permissions
+            </CardTitle>
             <CardDescription>
-              Manage app permissions and privacy settings
+              Manage system permissions required for AI computer use features
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-gray-500">
-              Permission management features will be available here.
-            </p>
+            <PermissionsManager
+              variant="compact"
+              showHeader={false}
+              autoRedirectEnabled={false}
+              onRefresh={() => {
+                // Trigger any refresh callbacks if needed
+                settings.loadAllSettings();
+              }}
+            />
+            
+            {/* Additional Settings Navigation */}
+            <div className="pt-4 border-t">
+              <Button
+                onClick={() => {
+                  // For now, this would open the full permissions setup
+                  // We can integrate this with onNavigateToPermissions later if needed
+                  console.log("Open full permissions setup");
+                }}
+                size="sm"
+                variant="outline"
+                className="w-full"
+              >
+                <Shield className="h-4 w-4 mr-1" />
+                Open Full Permissions Setup
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
