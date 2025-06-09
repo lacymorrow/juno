@@ -256,6 +256,7 @@ function App() {
   // Permissions state
   const [, setShowPermissionsFlow] = useState(false);
   const [, setPermissionsChecked] = useState(false);
+  const [permissionsGranted, setPermissionsGranted] = useState(false);
 
   // Enhanced modal and feature state
   const [activeModal, setActiveModal] = useState<ModalType>(null);
@@ -275,11 +276,12 @@ function App() {
   const [_showOnboarding, setShowOnboarding] = useState(false);
   const [_onboardingChecked, setOnboardingChecked] = useState(false);
 
-  // Check permissions on startup
+  // Consolidated startup flow - check both permissions and onboarding status
   useEffect(() => {
-    const checkInitialPermissions = async () => {
+    const initializeApp = async () => {
       try {
-        const result = await invoke<{
+        // First check permissions
+        const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
           screenRecording: { granted: boolean; required: boolean };
           microphone: { granted: boolean; required: boolean };
@@ -287,56 +289,49 @@ function App() {
         }>("check_permissions_status");
 
         setPermissionsChecked(true);
+        
+        // Store permissions result for OnboardingFlow
+        setPermissionsGranted(permissionsResult.allGranted);
 
-        // Show permissions flow if any required permissions are missing
-        if (!result.allGranted) {
+        // Then check onboarding status
+        const isDevMode = import.meta.env.DEV;
+        const hasCompletedOnboarding = localStorage.getItem("juno-onboarding-completed");
+
+        // Decision logic for which flow to show
+        if (isDevMode) {
+          // Dev mode: Always show onboarding for QA, but skip permissions if already granted
+          console.log("Dev mode detected - showing onboarding for QA");
+          setShowOnboarding(true);
+          setCurrentView("onboarding");
+        } else if (!hasCompletedOnboarding) {
+          // First-time user: Show onboarding (which includes permissions check)
+          console.log("First-time user detected - showing full onboarding flow");
+          setShowOnboarding(true);
+          setCurrentView("onboarding");
+        } else if (!permissionsResult.allGranted) {
+          // Returning user with missing permissions: Show standalone permissions
+          console.log("Returning user with missing permissions - showing permissions flow");
           setShowPermissionsFlow(true);
           setCurrentView("permissions");
+        } else {
+          // Everything is good: Go to chat
+          console.log("All permissions granted and onboarding complete - going to chat");
+          setCurrentView("chat");
         }
+
+        setOnboardingChecked(true);
       } catch (error) {
-        console.error("Error checking permissions:", error);
+        console.error("Error during app initialization:", error);
         setPermissionsChecked(true);
-        // Optionally show permissions flow even on error
+        setOnboardingChecked(true);
+        
+        // Fallback: show permissions flow on error
         setShowPermissionsFlow(true);
         setCurrentView("permissions");
       }
     };
 
-    checkInitialPermissions();
-  }, []);
-
-  // Check if this is a first-time user and show onboarding
-  useEffect(() => {
-    const checkFirstTimeUser = async () => {
-      try {
-        // In dev mode, always show onboarding for QA purposes
-        const isDevMode = import.meta.env.DEV;
-
-        if (isDevMode) {
-          console.log("Dev mode detected - showing onboarding for QA");
-          setShowOnboarding(true);
-          setCurrentView("onboarding");
-          setOnboardingChecked(true);
-          return;
-        }
-
-        // Check if user has completed onboarding before
-        const hasCompletedOnboarding = localStorage.getItem(
-          "juno-onboarding-completed"
-        );
-
-        if (!hasCompletedOnboarding) {
-          setShowOnboarding(true);
-          setCurrentView("onboarding");
-        }
-        setOnboardingChecked(true);
-      } catch (error) {
-        console.error("Error checking onboarding status:", error);
-        setOnboardingChecked(true);
-      }
-    };
-
-    checkFirstTimeUser();
+    initializeApp();
   }, []);
 
   // Play boot sound on app startup
@@ -1861,6 +1856,7 @@ function App() {
                 <OnboardingFlow
                   onComplete={handleOnboardingComplete}
                   onSkip={handleOnboardingSkip}
+                  permissionsAlreadyGranted={permissionsGranted}
                 />
               </ScrollArea>
             </div>
