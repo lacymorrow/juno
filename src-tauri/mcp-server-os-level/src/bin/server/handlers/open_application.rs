@@ -27,8 +27,8 @@ pub async fn open_application_handler(
     JsonResponse<OpenApplicationWithElementsResponse>,
     (StatusCode, JsonResponse<serde_json::Value>),
 > {
-    // Create Desktop automation instance with auto-redirect for better UX
-    let desktop = match Desktop::new_with_auto_redirect(false, true, true) {
+    // Create Desktop automation instance with auto-redirect disabled for user control
+    let desktop = match Desktop::new_with_auto_redirect(false, true, false) {
         Ok(desktop) => desktop,
         Err(err) => {
             return Err((

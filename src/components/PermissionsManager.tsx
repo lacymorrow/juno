@@ -62,7 +62,7 @@ export function PermissionsManager({
   variant = "splash",
   showHeader = true,
   showSkipOption = false,
-  autoRedirectEnabled = true,
+  autoRedirectEnabled = false,
   className = "",
   onComplete,
   onSkip,
