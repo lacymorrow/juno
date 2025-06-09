@@ -48,6 +48,7 @@ struct ActiveMonitor {
     start_time: SystemTime,
 }
 
+#[derive(Debug, Clone)]
 pub struct ExecutionMonitor {
     active_monitors: Arc<Mutex<HashMap<String, ActiveMonitor>>>,
     completed_entries: Arc<Mutex<Vec<CommandLogEntry>>>,

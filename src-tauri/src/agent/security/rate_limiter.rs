@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tracing::{warn, debug, error};
@@ -22,13 +22,13 @@ pub struct ToolLimits {
 #[derive(Debug)]
 struct CommandCounter {
     count: u32,
-    window_start: Instant,
+    window_start: SystemTime,
     recent_commands: VecDeque<CommandInstance>,
 }
 
 #[derive(Debug, Clone)]
 struct CommandInstance {
-    timestamp: Instant,
+    timestamp: SystemTime,
     command: String,
     was_dangerous: bool,
     was_file_operation: bool,
@@ -43,9 +43,38 @@ pub enum AbusePattern {
     ExcessiveResourceUsage { cpu_percent: f32, memory_mb: u64 },
 }
 
+/// Rate limiting configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    pub max_commands_per_minute: u32,
+    pub max_dangerous_commands_per_hour: u32,
+    pub violation_cooldown: Duration,
+    pub max_violations_before_lockout: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_commands_per_minute: 60,
+            max_dangerous_commands_per_hour: 10,
+            violation_cooldown: Duration::from_secs(300), // 5 minutes
+            max_violations_before_lockout: 3,
+        }
+    }
+}
+
+/// Rate limit violation record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandRecord {
+    pub timestamp: SystemTime,
+    pub command: String,
+    pub risk_level: super::RiskLevel,
+}
+
+/// Rate limit violation details
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitViolation {
-    pub timestamp: Instant,
+    pub timestamp: SystemTime,
     pub tool_name: String,
     pub command: String,
     pub violation_type: ViolationType,
@@ -62,7 +91,8 @@ pub enum ViolationType {
     AbusePattern(AbusePattern),
 }
 
-pub struct CommandRateLimiter {
+#[derive(Debug, Clone)]
+pub struct RateLimiter {
     global_limits: GlobalLimits,
     tool_limits: HashMap<String, ToolLimits>,
     command_counters: Arc<Mutex<HashMap<String, CommandCounter>>>,
@@ -97,18 +127,22 @@ impl CommandCounter {
     fn new() -> Self {
         Self {
             count: 0,
-            window_start: Instant::now(),
+            window_start: SystemTime::now(),
             recent_commands: VecDeque::new(),
         }
     }
 
     fn add_command(&mut self, command: String, is_dangerous: bool, is_file_operation: bool) {
-        let now = Instant::now();
+        let now = SystemTime::now();
         
         // Clean old commands (older than 1 hour)
         while let Some(front) = self.recent_commands.front() {
-            if now.duration_since(front.timestamp) > Duration::from_secs(3600) {
-                self.recent_commands.pop_front();
+            if let Ok(duration) = now.duration_since(front.timestamp) {
+                if duration > Duration::from_secs(3600) {
+                    self.recent_commands.pop_front();
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
@@ -133,7 +167,7 @@ impl CommandCounter {
     }
 
     fn get_rate_per_minute(&self) -> f32 {
-        let now = Instant::now();
+        let now = SystemTime::now();
         let one_minute_ago = now - Duration::from_secs(60);
         
         let recent_count = self.recent_commands
@@ -145,7 +179,7 @@ impl CommandCounter {
     }
 
     fn get_dangerous_rate_per_hour(&self) -> f32 {
-        let now = Instant::now();
+        let now = SystemTime::now();
         let one_hour_ago = now - Duration::from_secs(3600);
         
         let dangerous_count = self.recent_commands
@@ -157,7 +191,7 @@ impl CommandCounter {
     }
 
     fn get_file_operation_rate_per_minute(&self) -> f32 {
-        let now = Instant::now();
+        let now = SystemTime::now();
         let one_minute_ago = now - Duration::from_secs(60);
         
         let file_op_count = self.recent_commands
@@ -169,7 +203,7 @@ impl CommandCounter {
     }
 
     fn get_failed_commands_in_window(&self, window: Duration) -> u32 {
-        let now = Instant::now();
+        let now = SystemTime::now();
         let window_start = now - window;
         
         self.recent_commands
@@ -179,24 +213,29 @@ impl CommandCounter {
     }
 
     fn detect_rapid_execution(&self) -> Option<f32> {
-        if self.recent_commands.len() < 3 {
-            return None;
-        }
-
-        let now = Instant::now();
+        let now = SystemTime::now();
         let recent_commands: Vec<_> = self.recent_commands
             .iter()
-            .filter(|cmd| now.duration_since(cmd.timestamp) < Duration::from_secs(10))
+            .filter(|cmd| {
+                if let Ok(duration) = now.duration_since(cmd.timestamp) {
+                    duration < Duration::from_secs(10)
+                } else {
+                    false
+                }
+            })
             .collect();
 
         if recent_commands.len() >= 3 {
-            let time_span = recent_commands.first().unwrap().timestamp
-                .duration_since(recent_commands.last().unwrap().timestamp);
-            
-            if time_span.as_secs_f32() > 0.0 {
-                let rate = recent_commands.len() as f32 / time_span.as_secs_f32();
-                if rate > 2.0 { // More than 2 commands per second
-                    return Some(rate);
+            if let Some(first) = recent_commands.first() {
+                if let Some(last) = recent_commands.last() {
+                    if let Ok(time_span) = first.timestamp.duration_since(last.timestamp) {
+                        if time_span.as_secs_f32() > 0.0 {
+                            let rate = recent_commands.len() as f32 / time_span.as_secs_f32();
+                            if rate > 2.0 { // More than 2 commands per second
+                                return Some(rate);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -205,7 +244,7 @@ impl CommandCounter {
     }
 }
 
-impl CommandRateLimiter {
+impl RateLimiter {
     pub fn new(global_limits: GlobalLimits) -> Self {
         Self {
             global_limits,
@@ -384,7 +423,7 @@ impl CommandRateLimiter {
         limit: f32,
     ) {
         let violation = RateLimitViolation {
-            timestamp: Instant::now(),
+            timestamp: SystemTime::now(),
             tool_name,
             command,
             violation_type,
@@ -416,7 +455,7 @@ impl CommandRateLimiter {
     /// Get recent violations
     pub async fn get_recent_violations(&self) -> usize {
         let violations = self.violations.lock().await;
-        let one_hour_ago = Instant::now() - Duration::from_secs(3600);
+        let one_hour_ago = SystemTime::now() - Duration::from_secs(3600);
         violations
             .iter()
             .filter(|v| v.timestamp > one_hour_ago)
@@ -504,7 +543,7 @@ mod tests {
             max_dangerous_commands_per_hour: 1,
             max_file_operations_per_minute: 1,
         };
-        let limiter = CommandRateLimiter::new(limits);
+        let limiter = RateLimiter::new(limits);
 
         // First two commands should pass
         assert!(limiter.check_rate_limit("test_tool", "echo hello").await.unwrap());
@@ -516,7 +555,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dangerous_command_detection() {
-        let limiter = CommandRateLimiter::new(GlobalLimits::default());
+        let limiter = RateLimiter::new(GlobalLimits::default());
 
         assert!(limiter.is_dangerous_command("sudo rm -rf /"));
         assert!(limiter.is_dangerous_command("chmod 777 /etc"));
@@ -526,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_operation_detection() {
-        let limiter = CommandRateLimiter::new(GlobalLimits::default());
+        let limiter = RateLimiter::new(GlobalLimits::default());
 
         assert!(limiter.is_file_operation_command("rm file.txt"));
         assert!(limiter.is_file_operation_command("mv file1 file2"));
@@ -537,7 +576,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_abuse_pattern_detection() {
-        let limiter = CommandRateLimiter::new(GlobalLimits::default());
+        let limiter = RateLimiter::new(GlobalLimits::default());
 
         // Rapidly execute commands to trigger abuse detection
         for i in 0..5 {

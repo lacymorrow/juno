@@ -30,6 +30,7 @@ pub enum FileChangeType {
     AttributesChanged,
 }
 
+#[derive(Debug, Clone)]
 pub struct FileMonitor {
     protected_paths: HashSet<PathBuf>,
     change_log: Arc<Mutex<Vec<FileChangeEntry>>>,
@@ -173,7 +174,7 @@ impl FileMonitor {
         let change_log = self.change_log.lock().await;
         change_log
             .iter()
-            .filter(|entry| entry.command_id.as_ref() == Some(command_id))
+            .filter(|entry| entry.command_id.as_ref() == Some(&command_id.to_string()))
             .cloned()
             .collect()
     }

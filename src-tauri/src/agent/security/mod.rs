@@ -9,7 +9,7 @@ pub use command_validator::{CommandValidator, DangerousPattern, RiskLevel, Valid
 pub use approval_manager::{ApprovalManager, PendingApproval, ApprovalDecision};
 pub use execution_monitor::{ExecutionMonitor, CommandLogEntry};
 pub use file_monitor::{FileMonitor, FileChangeEntry, FileChangeType};
-pub use rate_limiter::{CommandRateLimiter, GlobalLimits};
+pub use rate_limiter::{RateLimiter, GlobalLimits};
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
@@ -93,13 +93,14 @@ impl Default for SecurityConfig {
 }
 
 /// Core security manager that coordinates all security subsystems
+#[derive(Debug, Clone)]
 pub struct SecurityManager {
     config: SecurityConfig,
     validator: CommandValidator,
     approval_manager: ApprovalManager,
     execution_monitor: ExecutionMonitor,
     file_monitor: FileMonitor,
-    rate_limiter: CommandRateLimiter,
+    rate_limiter: RateLimiter,
 }
 
 impl SecurityManager {
@@ -110,7 +111,7 @@ impl SecurityManager {
         );
         let execution_monitor = ExecutionMonitor::new();
         let file_monitor = FileMonitor::new(&config.file_monitoring.protected_paths)?;
-        let rate_limiter = CommandRateLimiter::new(GlobalLimits {
+        let rate_limiter = RateLimiter::new(GlobalLimits {
             max_commands_per_minute: config.rate_limiting.max_commands_per_minute,
             max_dangerous_commands_per_hour: config.rate_limiting.max_dangerous_commands_per_hour,
             max_file_operations_per_minute: 30, // Additional safety limit
@@ -171,6 +172,23 @@ impl SecurityManager {
     }
 
     /// Start monitoring a command execution
+    pub async fn start_execution_monitoring(&self, command: &str, tool_name: &str) -> Result<String, String> {
+        Ok(self.execution_monitor.start_monitoring(command, tool_name).await)
+    }
+
+    /// End monitoring a command execution
+    pub async fn end_execution_monitoring(&self, monitor_id: &str) -> Result<(), String> {
+        // For now, just complete with default values
+        self.execution_monitor.complete_monitoring(
+            monitor_id, 
+            Some(0), 
+            "", 
+            "", 
+            Duration::from_secs(0)
+        ).await
+    }
+
+    /// Start monitoring a command execution (legacy method)
     pub async fn start_monitoring(&self, command: &str, tool_name: &str) -> String {
         self.execution_monitor.start_monitoring(command, tool_name).await
     }

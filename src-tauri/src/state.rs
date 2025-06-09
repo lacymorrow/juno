@@ -639,7 +639,7 @@ impl AppState {
     /// Get security manager
     pub async fn get_security_manager(&self) -> Option<SecurityManager> {
         let manager_guard = self.security_manager.lock().await;
-        manager_guard.clone()
+        manager_guard.as_ref().cloned()
     }
 
     /// Check if security manager is available

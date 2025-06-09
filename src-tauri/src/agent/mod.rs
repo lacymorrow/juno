@@ -15,6 +15,6 @@ pub use core::*;
 // Re-export key security types for easy access
 pub use security::{
     SecurityManager, SecurityConfig, CommandValidator, ApprovalManager,
-    ExecutionMonitor, FileMonitor, CommandRateLimiter, RiskLevel
+    ExecutionMonitor, FileMonitor, RateLimiter, RiskLevel
 };
 

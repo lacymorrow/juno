@@ -1,21 +1,23 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{SystemTime, Duration};
 use tokio::sync::{Mutex, oneshot};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
+use crate::agent::security::SecurityConfig;
 
 use super::RiskLevel;
 
+/// Pending approval request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingApproval {
-    pub id: String,
     pub command: String,
-    pub risk_level: RiskLevel,
-    pub context: String,
-    pub requested_at: Instant,
-    pub timeout_at: Instant,
+    pub tool_name: String,
+    pub description: String,
+    pub risk_level: super::RiskLevel,
+    pub requested_at: SystemTime,
+    pub timeout_at: SystemTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +35,7 @@ struct ApprovalRequest {
     response_sender: oneshot::Sender<ApprovalDecision>,
 }
 
+#[derive(Debug, Clone)]
 pub struct ApprovalManager {
     pending_requests: Arc<Mutex<HashMap<String, ApprovalRequest>>>,
     always_approved: Arc<Mutex<Vec<String>>>,
@@ -79,12 +82,12 @@ impl ApprovalManager {
         let approval_id = Uuid::new_v4().to_string();
         let (sender, receiver) = oneshot::channel();
         
-        let now = Instant::now();
+        let now = SystemTime::now();
         let pending_approval = PendingApproval {
-            id: approval_id.clone(),
             command: command.clone(),
+            tool_name: "".to_string(),
+            description: context.clone(),
             risk_level,
-            context,
             requested_at: now,
             timeout_at: now + self.approval_timeout,
         };
@@ -229,7 +232,7 @@ impl ApprovalManager {
     /// Clear expired approvals
     pub async fn cleanup_expired(&self) {
         let mut pending = self.pending_requests.lock().await;
-        let now = Instant::now();
+        let now = SystemTime::now();
         
         let expired_ids: Vec<_> = pending
             .iter()
@@ -299,9 +302,9 @@ impl ApprovalManager {
         info!("🚨 APPROVAL REQUIRED 🚨");
         info!("Command: {}", approval.command);
         info!("Risk Level: {:?}", approval.risk_level);
-        info!("Context: {}", approval.context);
-        info!("Approval ID: {}", approval.id);
-        info!("Timeout in: {:?}", approval.timeout_at - approval.requested_at);
+        info!("Context: {}", approval.description);
+        info!("Approval ID: {}", approval.command);
+        info!("Timeout in: {:?}", approval.timeout_at.duration_since(approval.requested_at));
     }
 
     /// Clone the approval manager (for use in async contexts)
@@ -389,7 +392,7 @@ mod tests {
         assert_eq!(pending[0].command, "test command");
 
         // Submit approval
-        let approval_id = pending[0].id.clone();
+        let approval_id = pending[0].command.clone();
         manager.process_decision(approval_id, ApprovalDecision::Approve).await.unwrap();
 
         // Verify approval was processed
@@ -430,7 +433,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
         let pending = manager.get_pending_approvals().await;
-        let approval_id = pending[0].id.clone();
+        let approval_id = pending[0].command.clone();
         
         // Approve always
         manager.process_decision(approval_id, ApprovalDecision::ApproveAlways).await.unwrap();

@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, command};
+use tauri::{AppHandle, command, Manager};
 use log::{info, warn, error};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -43,7 +43,10 @@ pub async fn test_security_demo(
     let mut results = Vec::new();
 
     for command in test_commands {
-        let start_time = std::chrono::Utc::now().timestamp() as u64;
+        let start_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         
         info!("🧪 Testing command: {}", command);
         
@@ -124,11 +127,11 @@ pub async fn get_security_status(app_handle: AppHandle) -> Result<SecurityStatus
     
     Ok(SecurityStatus {
         security_enabled: security_status.enabled,
-        total_commands_validated: security_status.total_commands_validated,
-        commands_blocked: security_status.commands_blocked,
-        commands_allowed: security_status.commands_allowed,
-        active_monitors: security_status.active_monitors,
-        pending_approvals: security_status.pending_approvals,
+        total_commands_validated: 0,
+        commands_blocked: 0,
+        commands_allowed: 0,
+        active_monitors: security_status.active_monitors as u64,
+        pending_approvals: security_status.pending_approvals as u64,
     })
 }
 
@@ -157,8 +160,8 @@ pub async fn get_command_history(
             "exit_code": entry.exit_code,
             "stdout": entry.stdout,
             "stderr": entry.stderr,
-            "duration_ms": entry.duration.as_millis(),
-            "risk_level": format!("{:?}", entry.risk_level),
+            "duration_ms": entry.execution_time.as_millis(),
+            "risk_level": "Unknown",
         })
     }).collect();
 

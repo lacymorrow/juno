@@ -5,7 +5,7 @@ use tracing::{debug, warn, error};
 
 use super::CommandValidationConfig;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum RiskLevel {
     Low,      // Safe commands, minimal logging
     Medium,   // Potentially risky, log and warn
@@ -29,6 +29,7 @@ pub struct ValidationResult {
     pub matched_patterns: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
 pub struct CommandValidator {
     dangerous_patterns: Vec<DangerousPattern>,
     config: CommandValidationConfig,
