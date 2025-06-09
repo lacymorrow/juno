@@ -27,6 +27,8 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::MCPManager;
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
+use crate::constants::app_identity;
+use crate::constants::permission_types;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,7 +175,9 @@ impl AppState {
             // Initialize Always Listening mode state
             always_listening_active: Arc::new(Mutex::new(false)),
             always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
-            always_listening_wake_words: Arc::new(Mutex::new(vec!["hey juno".to_string(), "computer".to_string()])),
+            always_listening_wake_words: Arc::new(Mutex::new(
+                app_identity::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect()
+            )),
             // Initialize agent execution status tracking
             agent_execution_active: Arc::new(Mutex::new(false)),
             agent_execution_id: Arc::new(Mutex::new(None)),
@@ -918,35 +922,42 @@ mod tests {
 
         // Create a mock permissions state with correct structure
         use crate::commands::permissions::{PermissionsState, PermissionStatus};
-        let permissions_state = PermissionsState {
-            accessibility: PermissionStatus {
-                permission_type: "accessibility".to_string(),
+        let mock_permissions = vec![
+            PermissionStatus {
+                permission_type: permission_types::ACCESSIBILITY.to_string(),
                 granted: true,
                 required: true,
-                description: "Accessibility control".to_string(),
-                instructions: "Grant in System Preferences".to_string(),
+                description: "Accessibility permission is granted".to_string(),
+                instructions: "No action needed".to_string(),
             },
-            screen_recording: PermissionStatus {
-                permission_type: "screen_recording".to_string(),
+            PermissionStatus {
+                permission_type: permission_types::SCREEN_RECORDING.to_string(),
                 granted: false,
                 required: true,
-                description: "Screen recording".to_string(),
+                description: "Screen recording permission is denied".to_string(),
                 instructions: "Grant in System Preferences".to_string(),
             },
-            microphone: PermissionStatus {
-                permission_type: "microphone".to_string(),
+            PermissionStatus {
+                permission_type: permission_types::MICROPHONE.to_string(),
                 granted: true,
                 required: false,
-                description: "Microphone access".to_string(),
-                instructions: "Grant in System Preferences".to_string(),
+                description: "Microphone permission not determined".to_string(),
+                instructions: "Will prompt when needed".to_string(),
             },
-            input_monitoring: PermissionStatus {
-                permission_type: "input_monitoring".to_string(),
+            PermissionStatus {
+                permission_type: permission_types::INPUT_MONITORING.to_string(),
                 granted: true,
                 required: true,
-                description: "Input monitoring".to_string(),
-                instructions: "Grant in System Preferences".to_string(),
+                description: "Input monitoring permission is granted".to_string(),
+                instructions: "No action needed".to_string(),
             },
+        ];
+        
+        let permissions_state = PermissionsState {
+            accessibility: mock_permissions[0].clone(),
+            screen_recording: mock_permissions[1].clone(),
+            microphone: mock_permissions[2].clone(),
+            input_monitoring: mock_permissions[3].clone(),
             all_granted: false,
             app_name: "TestApp".to_string(),
         };
@@ -1083,8 +1094,8 @@ mod tests {
         {
             let wake_words = state.always_listening_wake_words.lock().unwrap();
             assert_eq!(wake_words.len(), 2);
-            assert!(wake_words.contains(&"hey juno".to_string()));
-            assert!(wake_words.contains(&"computer".to_string()));
+            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[0].to_string()));
+            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[1].to_string()));
         }
 
         // Update configuration
