@@ -31,6 +31,23 @@
         "skipTaskbar": true,
         "visible": true,
         "shadow": false
+      },
+      {
+        "label": "settings",
+        "title": "Juno Settings",
+        "url": "/settings",
+        "width": 800,
+        "height": 600,
+        "minWidth": 700,
+        "minHeight": 500,
+        "hiddenTitle": false,
+        "resizable": true,
+        "visible": false,
+        "center": true,
+        "skipTaskbar": false,
+        "shadow": true,
+        "transparent": false,
+        "alwaysOnTop": false
       }
     ],
     "security": {
