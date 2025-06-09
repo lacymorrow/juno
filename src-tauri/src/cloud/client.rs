@@ -1,23 +1,25 @@
-use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::sync::Arc;
-use tokio::sync::{Mutex as TokioMutex, mpsc};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot, broadcast};
 use tokio::time;
 use tokio_tungstenite::{connect_async, WebSocketStream, MaybeTlsStream};
 use tokio_tungstenite::tungstenite::{Message, protocol::CloseFrame};
 use futures_util::{SinkExt, StreamExt};
-use tauri::{AppHandle, Emitter, Manager};
-use tracing::{info, warn, error, debug};
 use url::Url;
+use tracing::{info, warn, error, debug};
+use tauri::{AppHandle, Manager, Emitter};
 
 use super::types::{
-    CloudCommand, CloudError, ConnectionState, DeviceResponse, DeviceStatus, DeviceState, SystemInfo,
-    HardwareInfo, WebSocketMessage, MessageType, AuthResponse,
+    CloudError, CloudCommand, DeviceResponse, DeviceStatus, AuthResponse,
+    WebSocketMessage, MessageType, ConnectionState, HardwareInfo, DeviceState, SystemInfo
 };
 use super::config::CloudConfig;
-use super::auth::{DeviceAuth, CloudCredentials};
+use super::auth::DeviceAuth;
 use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
+
+// Type alias for WebSocket sender to simplify function signatures
+type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
 
 /// Cloud client for WebSocket communication
 #[derive(Debug)]
@@ -250,7 +252,7 @@ impl CloudClient {
     }
 
     /// Authenticate with the cloud server
-    async fn authenticate(&self, ws_sender: &mut futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>) -> Result<(), CloudError> {
+    async fn authenticate(&self, ws_sender: &mut WsSender) -> Result<(), CloudError> {
         info!("Authenticating with cloud server");
 
         let auth_data = self.auth.create_auth_message()?;
@@ -273,7 +275,7 @@ impl CloudClient {
     }
 
     /// Handle incoming WebSocket message
-    async fn handle_message(&self, text: String, ws_sender: Arc<TokioMutex<futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>>) -> Result<(), CloudError> {
+    async fn handle_message(&self, text: String, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
         debug!("Received message: {}", text);
 
         let message: WebSocketMessage = serde_json::from_str(&text)?;
@@ -317,7 +319,7 @@ impl CloudClient {
     }
 
     /// Handle incoming command from cloud
-    async fn handle_command(&self, command: CloudCommand, ws_sender: Arc<TokioMutex<futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>>>) -> Result<(), CloudError> {
+    async fn handle_command(&self, command: CloudCommand, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
         info!("Processing command from cloud: {}", command.id);
 
         // Process the command
