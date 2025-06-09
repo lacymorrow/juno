@@ -6,6 +6,7 @@
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::sync::{Arc, Mutex};
+use crate::constants::audio;
 
 /// Messages that can be sent to the audio capture thread
 #[derive(Debug, Clone)]
@@ -52,7 +53,7 @@ impl Default for VoiceControllerConfig {
     fn default() -> Self {
         Self {
             capture_sample_rate: None, // Use device default
-            whisper_sample_rate: 16000,
+            whisper_sample_rate: audio::WHISPER_SAMPLE_RATE,
             partial_buffer_duration_ms: 1500,
             final_buffer_duration_ms: 5000,
             developer_playback_enabled: false,

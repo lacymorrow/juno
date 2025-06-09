@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import { defineConfig } from "vite";
+import { PORTS } from "./src/lib/constants";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -22,14 +23,14 @@ export default defineConfig(async () => ({
 	clearScreen: false,
 	// 2. tauri expects a fixed port, fail if that port is not available
 	server: {
-		port: 1420,
+		port: PORTS.VITE_DEV_PORT,
 		strictPort: true,
 		host: host || false,
 		hmr: host
 			? {
 				protocol: "ws",
 				host,
-				port: 1421,
+				port: PORTS.VITE_HMR_PORT,
 			}
 			: undefined,
 		watch: {

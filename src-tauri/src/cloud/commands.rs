@@ -15,6 +15,7 @@ use super::types::{
 };
 use super::security::CloudSecurity;
 use crate::state::AppState;
+use crate::constants::permission_types;
 
 /// Remote command that can be executed on the device
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -494,14 +495,16 @@ impl CloudCommandProcessor {
     async fn get_permissions_status(&self) -> Result<serde_json::Value, CloudError> {
         let app_state = self.app_handle.state::<AppState>();
 
+        let required_permissions = vec![
+            permission_types::ACCESSIBILITY,
+            permission_types::SCREEN_RECORDING,
+            permission_types::MICROPHONE
+        ];
+
         let permissions = serde_json::json!({
             "permissions_checked": app_state.are_permissions_checked(),
             "desktop_available": app_state.is_desktop_available(),
-            "required_permissions": [
-                "accessibility",
-                "screen_recording",
-                "microphone"
-            ],
+            "required_permissions": required_permissions,
             "status": if app_state.is_desktop_available() { "granted" } else { "pending" }
         });
 
