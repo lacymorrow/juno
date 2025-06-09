@@ -1,11 +1,17 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
-use crate::state::AppState;
-use std::env;
-use tauri::{AppHandle, State};
+use tauri::State;
 use tracing::info;
+use crate::state::AppState;
+use tauri::{AppHandle, WebviewWindow, Wry};
+use tracing::{warn, error};
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
+use std::collections::HashMap;
+use std::fs;
+use crate::cloud::CloudClient;
+use crate::anthropic::submit_query;
+use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
