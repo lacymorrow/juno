@@ -258,6 +258,7 @@ pub(crate) fn focus(element: &MacOSUIElement) -> Result<(), AutomationError> {
 // --- New Mouse Functions ---
 
 /// Get the current mouse cursor position.
+#[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn get_cursor_position() -> Result<(f64, f64), AutomationError> {
     // 1. Create an event source.
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
@@ -280,6 +281,7 @@ pub(crate) fn get_cursor_position() -> Result<(f64, f64), AutomationError> {
 }
 
 /// Move the mouse cursor to the specified coordinates.
+#[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn mouse_move(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = CGPoint::new(x, y);
     debug!("Moving mouse to ({}, {})", x, y);
@@ -398,6 +400,7 @@ pub(crate) fn left_click(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Res
 }
 
 /// Simulate a right click (down + up) at specified coordinates.
+#[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = CGPoint::new(x, y);
     debug!("Performing right click at ({}, {})", x, y);
@@ -419,6 +422,7 @@ pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
 }
 
 /// Simulate a middle click (down + up) at specified coordinates.
+#[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn middle_click(x: f64, y: f64) -> Result<(), AutomationError> {
     let point = CGPoint::new(x, y);
     debug!("Performing middle click at ({}, {})", x, y);
