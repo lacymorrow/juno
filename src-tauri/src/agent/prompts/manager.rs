@@ -95,6 +95,17 @@ impl PromptManager {
 
     /// Get the default system prompt (backwards compatibility)
     pub fn get_default_system_prompt(&self) -> String {
+        // In development mode, use the self-aware development prompt
+        if cfg!(debug_assertions) {
+            // Try to get the development prompt first
+            if let Ok(dev_prompt) = self.get_prompt(PromptType::SystemDefaultDevelopment, None) {
+                return dev_prompt;
+            }
+            // If development prompt is not available, log and fall back to default
+            warn!("Development prompt not available in debug mode, falling back to default");
+        }
+        
+        // Production mode or fallback: use the standard prompt
         self.get_prompt(PromptType::SystemDefault, None)
             .unwrap_or_else(|_| DefaultPrompts::system_default().content)
     }
