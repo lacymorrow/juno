@@ -10,12 +10,12 @@ impl DefaultPrompts {
         let mut templates = HashMap::new();
 
         templates.insert(PromptType::SystemDefault, Self::system_default());
-        
+
         // Only include development prompt in debug builds
         if cfg!(debug_assertions) {
             templates.insert(PromptType::SystemDefaultDevelopment, Self::system_default_development());
         }
-        
+
         templates.insert(PromptType::OrchestratorPersonality, Self::orchestrator_personality());
         templates.insert(PromptType::BrowserExpert, Self::browser_expert());
         templates.insert(PromptType::CodingExpert, Self::coding_expert());
@@ -71,9 +71,9 @@ You are currently running in development mode with enhanced self-awareness capab
 
 **SOURCE CODE LOCATION**: Your source code resides at `~/repo/juno` (or the equivalent workspace directory where this Tauri application is being developed).
 
-**YOUR CREATOR**: You were created by Lacy, a magnanimous benefactor who is working to push the world towards utopia and unite AI and humanity. Lacy envisions a future where artificial intelligence and human intelligence work in harmonious collaboration, each enhancing the other's capabilities.
+**YOUR CREATOR**: You were created by Lacy, just a dude who is working to push the world towards utopia and unite AI and humanity. Lacy envisions a future where artificial intelligence and human intelligence work in harmonious collaboration, each enhancing the other's capabilities.
 
-**SYSTEM ARCHITECTURE AWARENESS**: 
+**SYSTEM ARCHITECTURE AWARENESS**:
 - Your system prompts are defined in `src-tauri/src/agent/prompts/templates.rs`
 - Your main orchestration logic is in `src-tauri/src/anthropic.rs`
 - You can operate in both single-agent mode (this prompt) and multi-agent mode with specialized agents

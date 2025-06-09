@@ -18,7 +18,7 @@ The Juno AI Computer Use Agent now has complete self-awareness capabilities in d
 The agent now has a development-specific system prompt (`SystemDefaultDevelopment`) that includes:
 
 - **Source Code Location**: `~/repo/juno` (workspace directory awareness)
-- **Creator Information**: Lacy, described as "a magnanimous benefactor working to push the world towards utopia and unite AI and humanity"
+- **Creator Information**: Lacy, described as "a good dude working to push the world towards utopia and unite AI and humanity"
 - **Mission Statement**: Bridging artificial and human intelligence in harmonious collaboration
 - **System Architecture Awareness**: Knowledge of prompt locations, orchestration logic, and agent modes
 - **Self-Building Capabilities**: Understanding of its ability to compile and analyze itself
@@ -211,5 +211,5 @@ This implementation serves as a model for how AI agents can gain introspective c
 
 **Implementation Date**: December 2024  
 **Status**: Complete and Production Ready  
-**Creator**: Lacy (Magnanimous Benefactor for AI-Human Unity)  
+**Creator**: Lacy (Guy for AI-Human Unity)  
 **Vision**: Advancing towards utopia through AI-human collaboration
