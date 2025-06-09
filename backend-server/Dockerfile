@@ -20,7 +20,7 @@ RUN npm ci --only=production && \
 
 # Copy application source
 COPY src/ ./src/
-COPY .env.example ./.env.example
+COPY env.example ./env.example
 
 # Create necessary directories with proper permissions
 RUN mkdir -p data logs && \
