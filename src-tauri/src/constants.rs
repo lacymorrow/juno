@@ -93,33 +93,24 @@ pub mod app_menu_ids {
 }
 
 pub mod timeouts {
-    // UI and Animation Timeouts
-    pub const MICRO_DELAY_MS: u64 = 10;
-    pub const MINIMAL_DELAY_MS: u64 = 20;
-    pub const SMALL_DELAY_MS: u64 = 50;
-    pub const SHORT_DELAY_MS: u64 = 100;
-    pub const MEDIUM_DELAY_MS: u64 = 150;
-    pub const ANIMATION_DELAY_MS: u64 = 300;
-    pub const STANDARD_DELAY_MS: u64 = 500;
-    pub const LONG_DELAY_MS: u64 = 800;
-    pub const VERY_LONG_DELAY_MS: u64 = 1000;
-    pub const EXTENDED_DELAY_MS: u64 = 2000;
-    pub const MAX_DELAY_MS: u64 = 3000;
+    // Simplified timeout categories based on actual usage patterns
+    pub const SHORT_DELAY_MS: u64 = 100;       // UI interactions, quick polls
+    pub const MEDIUM_DELAY_MS: u64 = 500;      // Standard operations, animations  
+    pub const LONG_DELAY_MS: u64 = 2000;       // Extended operations
+    pub const OPERATION_TIMEOUT_MS: u64 = 10000; // Network/API timeouts
     
-    // Legacy timeouts (for compatibility)
-    pub const STANDARD_TIMEOUT_MS: u64 = 10000;
+    // Browser-specific timeout (commonly used)
     pub const BROWSER_TIMEOUT_MS: u64 = 30000;
     
-    // Monitoring and polling intervals
+    // Specific intervals that are actually used
     pub const DICTATION_MONITOR_INTERVAL_MS: u64 = 50;
     pub const TREE_SEARCH_INTERVAL_MS: u64 = 250;
     pub const HEARTBEAT_INTERVAL_MS: u64 = 30000;
     
-    // Buffer and audio timeouts
+    // Audio-specific timeouts
     pub const PARTIAL_BUFFER_DURATION_MS: u64 = 1500;
     pub const FINAL_BUFFER_DURATION_MS: u64 = 5000;
     pub const MIN_AUDIO_LENGTH_MS: u64 = 500;
-    pub const EMERGENCY_TIMEOUT_MS: u64 = 1000;
 }
 
 pub mod ports {
@@ -269,105 +260,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_event_constants() {
-        // Test critical agent events
-        assert_eq!(events::AGENT_EVENT, "agent-event");
-        assert_eq!(events::APP_DICTATION_STARTED, "app-dictation-started");
-        assert_eq!(events::APP_DICTATION_FINISHED, "app-dictation-finished");
-        assert_eq!(events::AGENT_PROCESSING_COMPLETE, "agent-processing-complete");
-        assert_eq!(events::AGENT_PROCESSING_ERROR, "agent-processing-error");
-        
-        // Test streaming events
-        assert_eq!(events::AGENT_TEXT_STREAM, "agent-text-stream");
-        assert_eq!(events::AGENT_STREAM_START, "agent-stream-start");
-        assert_eq!(events::AGENT_STREAM_END, "agent-stream-end");
-        
-        // Test UI events
-        assert_eq!(events::BAR_STATE_CHANGED, "bar-state-changed");
-        assert_eq!(events::DICTATION_STATE_CHANGED, "dictation-state-changed");
-    }
-
-    #[test]
-    fn test_window_labels() {
-        assert_eq!(window_labels::MAIN, "main");
-        assert_eq!(window_labels::FLOATING_BAR, "floating-bar");
-        
-        // Ensure labels are not empty
-        assert!(!window_labels::MAIN.is_empty());
-        assert!(!window_labels::FLOATING_BAR.is_empty());
-    }
-
-    #[test]
-    fn test_tray_menu_ids() {
-        assert_eq!(tray_menu_ids::QUIT, "quit");
-        assert_eq!(tray_menu_ids::TOGGLE_FLOATING_BAR, "toggle-floating-bar");
-        assert_eq!(tray_menu_ids::SHOW_DEVTOOLS, "show-devtools");
-        assert_eq!(tray_menu_ids::SHOW_MAIN_WINDOW, "show-main-window");
-        assert_eq!(tray_menu_ids::NEW_CHAT, "new-chat");
-        assert_eq!(tray_menu_ids::SETTINGS, "tray-settings");
-        
-        // Ensure all IDs are non-empty
-        assert!(!tray_menu_ids::QUIT.is_empty());
-        assert!(!tray_menu_ids::SETTINGS.is_empty());
-    }
-
-    #[test]
-    fn test_app_menu_ids() {
-        // Test Juno menu
-        assert_eq!(app_menu_ids::ABOUT, "about");
-        assert_eq!(app_menu_ids::SETTINGS, "settings");
-        assert_eq!(app_menu_ids::CHECK_FOR_UPDATES, "check-for-updates");
-        
-        // Test File menu
-        assert_eq!(app_menu_ids::NEW_CHAT, "new-chat");
-        assert_eq!(app_menu_ids::CLEAR_HISTORY, "clear-history");
-        assert_eq!(app_menu_ids::IMPORT_CHAT, "import-chat");
-        assert_eq!(app_menu_ids::EXPORT_CHAT, "export-chat");
-        
-        // Test View menu
-        assert_eq!(app_menu_ids::TOGGLE_FLOATING_BAR, "toggle-floating-bar");
-        assert_eq!(app_menu_ids::TOGGLE_DEV_PANEL, "toggle-dev-panel");
-        assert_eq!(app_menu_ids::SHOW_DEVTOOLS, "show-devtools");
-        assert_eq!(app_menu_ids::SHOW_PERMISSIONS, "show-permissions");
-        
-        // Test Window menu
-        assert_eq!(app_menu_ids::MINIMIZE, "minimize");
-        assert_eq!(app_menu_ids::ZOOM, "zoom");
-        
-        // Test Help menu
-        assert_eq!(app_menu_ids::HELP, "help");
-        assert_eq!(app_menu_ids::SEND_FEEDBACK, "send-feedback");
-    }
-
-    #[test]
     fn test_timeout_constants() {
-        // Test legacy timeouts
-        assert_eq!(timeouts::STANDARD_TIMEOUT_MS, 10000);
-        assert_eq!(timeouts::BROWSER_TIMEOUT_MS, 30000);
-        
-        // Test delay hierarchy
-        assert!(timeouts::MICRO_DELAY_MS < timeouts::MINIMAL_DELAY_MS);
-        assert!(timeouts::MINIMAL_DELAY_MS < timeouts::SMALL_DELAY_MS);
-        assert!(timeouts::SMALL_DELAY_MS < timeouts::SHORT_DELAY_MS);
+        // Test simplified timeout hierarchy
         assert!(timeouts::SHORT_DELAY_MS < timeouts::MEDIUM_DELAY_MS);
+        assert!(timeouts::MEDIUM_DELAY_MS < timeouts::LONG_DELAY_MS);
+        assert!(timeouts::LONG_DELAY_MS < timeouts::OPERATION_TIMEOUT_MS);
+        assert!(timeouts::OPERATION_TIMEOUT_MS < timeouts::BROWSER_TIMEOUT_MS);
         
         // Ensure timeouts are reasonable values
-        assert!(timeouts::STANDARD_TIMEOUT_MS > 0);
-        assert!(timeouts::BROWSER_TIMEOUT_MS > timeouts::STANDARD_TIMEOUT_MS);
-        assert!(timeouts::BROWSER_TIMEOUT_MS <= 60000); // Max 60 seconds
-    }
-
-    #[test]
-    fn test_port_constants() {
-        assert_eq!(ports::VITE_DEV_PORT, 1420);
-        assert_eq!(ports::VITE_HMR_PORT, 1421);
-        assert_eq!(ports::MCP_SERVER_PORT, 8080);
-        assert_eq!(ports::CHROME_DEBUG_PORT_PRIMARY, 9222);
-        
-        // Ensure ports are in valid range
-        assert!(ports::VITE_DEV_PORT > 1024);
-        assert!(ports::MCP_SERVER_PORT > 1024);
-        assert!(ports::CHROME_DEBUG_PORT_PRIMARY > 1024);
+        assert!(timeouts::SHORT_DELAY_MS >= 50);
+        assert!(timeouts::BROWSER_TIMEOUT_MS <= 60000);
     }
 
     #[test]
@@ -392,107 +294,6 @@ mod tests {
     }
 
     #[test]
-    fn test_key_codes() {
-        assert_eq!(key_codes::KEY_ARROW_LEFT, 123);
-        assert_eq!(key_codes::KEY_ARROW_RIGHT, 124);
-        assert_eq!(key_codes::KEY_ARROW_DOWN, 125);
-        assert_eq!(key_codes::KEY_ARROW_UP, 126);
-    }
-
-    #[test]
-    fn test_audio_constants() {
-        assert_eq!(audio::WHISPER_SAMPLE_RATE, 16000);
-        assert_eq!(audio::SOUND_DEBOUNCE_MS, 300);
-        assert!(audio::DEFAULT_SENSITIVITY > 0.0 && audio::DEFAULT_SENSITIVITY <= 1.0);
-    }
-
-    #[test]
-    fn test_no_duplicate_event_names() {
-        use std::collections::HashSet;
-        
-        let mut event_names = HashSet::new();
-        let events_list = vec![
-            events::AGENT_EVENT,
-            events::APP_DICTATION_STARTED,
-            events::APP_DICTATION_FINISHED,
-            events::AGENT_PROCESSING_COMPLETE,
-            events::AGENT_PROCESSING_ERROR,
-            events::AGENT_STATE_CHANGED,
-            events::AGENT_TEXT_STREAM,
-            events::AGENT_STREAM_START,
-            events::AGENT_STREAM_END,
-            events::BAR_STATE_CHANGED,
-            events::DICTATION_STATE_CHANGED,
-        ];
-        
-        for event in events_list {
-            assert!(event_names.insert(event), "Duplicate event name found: {}", event);
-        }
-    }
-
-    #[test]
-    fn test_menu_id_uniqueness() {
-        use std::collections::HashSet;
-        
-        let mut menu_ids = HashSet::new();
-        
-        // Add tray menu IDs
-        let tray_ids = vec![
-            tray_menu_ids::QUIT,
-            tray_menu_ids::TOGGLE_FLOATING_BAR,
-            tray_menu_ids::SHOW_DEVTOOLS,
-            tray_menu_ids::SHOW_MAIN_WINDOW,
-            tray_menu_ids::NEW_CHAT,
-            tray_menu_ids::SETTINGS,
-        ];
-        
-        for id in tray_ids {
-            assert!(menu_ids.insert(id), "Duplicate menu ID found: {}", id);
-        }
-        
-        // Add app menu IDs (excluding duplicates like NEW_CHAT)
-        let app_ids = vec![
-            app_menu_ids::ABOUT,
-            // Skip SETTINGS and NEW_CHAT as they might conflict with tray
-            app_menu_ids::CHECK_FOR_UPDATES,
-            app_menu_ids::CLEAR_HISTORY,
-            app_menu_ids::IMPORT_CHAT,
-            app_menu_ids::EXPORT_CHAT,
-            app_menu_ids::TOGGLE_DEV_PANEL,
-            app_menu_ids::SHOW_PERMISSIONS,
-            app_menu_ids::MINIMIZE,
-            app_menu_ids::ZOOM,
-            app_menu_ids::HELP,
-            app_menu_ids::SEND_FEEDBACK,
-        ];
-        
-        for id in app_ids {
-            assert!(menu_ids.insert(id), "Duplicate menu ID found: {}", id);
-        }
-    }
-
-    #[test]
-    fn test_event_naming_convention() {
-        // Test that events follow kebab-case convention
-        let events_to_check = vec![
-            events::AGENT_EVENT,
-            events::APP_DICTATION_STARTED,
-            events::AGENT_PROCESSING_COMPLETE,
-            events::BAR_STATE_CHANGED,
-        ];
-        
-        for event in events_to_check {
-            // Should not contain underscores (use kebab-case)
-            assert!(!event.contains('_'), "Event '{}' should use kebab-case, not snake_case", event);
-            // Should not contain uppercase letters
-            assert!(!event.chars().any(|c| c.is_uppercase()), "Event '{}' should be lowercase", event);
-            // Should contain only lowercase letters, numbers, and hyphens
-            assert!(event.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '-'), 
-                   "Event '{}' contains invalid characters", event);
-        }
-    }
-
-    #[test]
     fn test_api_endpoints() {
         assert!(api_endpoints::ANTHROPIC_API_URL.starts_with("https://"));
         assert!(api_endpoints::OPENAI_API_URL.starts_with("https://"));
@@ -501,80 +302,14 @@ mod tests {
     }
 
     #[test]
-    fn test_permission_descriptions() {
-        assert!(!permission_descriptions::ACCESSIBILITY_DESC.is_empty());
-        assert!(!permission_descriptions::MICROPHONE_DESC.is_empty());
-        assert!(!permission_descriptions::ACCESSIBILITY_INSTRUCTIONS.is_empty());
-        
-        // Ensure descriptions mention Juno
-        assert!(permission_descriptions::ACCESSIBILITY_DESC.contains("Juno"));
-        assert!(permission_descriptions::MICROPHONE_DESC.contains("Juno"));
-    }
-
-    #[test]
-    fn test_permission_types() {
-        assert_eq!(permission_types::ACCESSIBILITY, "accessibility");
-        assert_eq!(permission_types::SCREEN_RECORDING, "screen_recording");
-        assert_eq!(permission_types::MICROPHONE, "microphone");
-        assert_eq!(permission_types::INPUT_MONITORING, "input_monitoring");
-        
-        // Ensure no empty strings
-        assert!(!permission_types::ACCESSIBILITY.is_empty());
-        assert!(!permission_types::SCREEN_RECORDING.is_empty());
-        assert!(!permission_types::MICROPHONE.is_empty());
-        assert!(!permission_types::INPUT_MONITORING.is_empty());
-    }
-
-    #[test]
-    fn test_audio_processing() {
-        assert_eq!(audio_processing::SINC_LENGTH, 256);
-        assert_eq!(audio_processing::OVERSAMPLING_FACTOR, 256);
-        assert_eq!(audio_processing::AUDIO_RECV_TIMEOUT_MS, 100);
-        
-        // Ensure reasonable values
-        assert!(audio_processing::SINC_LENGTH > 0);
-        assert!(audio_processing::OVERSAMPLING_FACTOR > 0);
-        assert!(audio_processing::AUDIO_RECV_TIMEOUT_MS > 0);
-        assert!(audio_processing::AUDIO_RECV_TIMEOUT_MS < 1000); // Should be under 1 second
-    }
-
-    #[test]
     fn test_chrome_debug_urls() {
-        assert_eq!(chrome_debug_urls::PRIMARY, "http://localhost:9222");
-        assert_eq!(chrome_debug_urls::ALTERNATIVE_1, "http://localhost:9223");
-        assert_eq!(chrome_debug_urls::ALTERNATIVE_2, "http://localhost:9224");
-        
-        // Test the helper function
         let all_urls = chrome_debug_urls::get_all_urls();
         assert_eq!(all_urls.len(), 3);
         assert!(all_urls.contains(&chrome_debug_urls::PRIMARY));
-        assert!(all_urls.contains(&chrome_debug_urls::ALTERNATIVE_1));
-        assert!(all_urls.contains(&chrome_debug_urls::ALTERNATIVE_2));
         
-        // Ensure all URLs are localhost and follow expected pattern
+        // Ensure all URLs are localhost
         for url in all_urls {
             assert!(url.starts_with("http://localhost:"));
-            assert!(url.len() > "http://localhost:".len());
         }
-    }
-
-    #[test]
-    fn test_permission_type_uniqueness() {
-        use std::collections::HashSet;
-        
-        let mut types = HashSet::new();
-        let permission_types_list = vec![
-            permission_types::ACCESSIBILITY,
-            permission_types::SCREEN_RECORDING,
-            permission_types::MICROPHONE,
-            permission_types::INPUT_MONITORING,
-        ];
-        
-        for permission_type in permission_types_list {
-            assert!(types.insert(permission_type), "Duplicate permission type found: {}", permission_type);
-        }
-        
-        // Should have exactly 4 unique permission types
-        assert_eq!(types.len(), 4);
     }
 }

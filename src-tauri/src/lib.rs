@@ -61,13 +61,13 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
     let mut modifiers = ShortcutModifiers::empty();
     let key_part = parts.last()?;
 
-    // Parse modifiers with better alias support
+    // Parse modifiers with essential aliases only
     for part in &parts[..parts.len() - 1] {
         match part.to_lowercase().as_str() {
-            "alt" | "option" | "opt" => modifiers |= ShortcutModifiers::ALT,
-            "cmd" | "command" | "meta" | "super" => modifiers |= ShortcutModifiers::META,
-            "ctrl" | "control" | "ctl" => modifiers |= ShortcutModifiers::CONTROL,
-            "shift" | "shft" => modifiers |= ShortcutModifiers::SHIFT,
+            "alt" | "option" => modifiers |= ShortcutModifiers::ALT,
+            "cmd" | "command" => modifiers |= ShortcutModifiers::META,
+            "ctrl" | "control" => modifiers |= ShortcutModifiers::CONTROL,
+            "shift" => modifiers |= ShortcutModifiers::SHIFT,
             _ => {
                 warn!("Unknown modifier: {}", part);
                 return None;
@@ -75,7 +75,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         }
     }
 
-    // Parse the main key with expanded support and better normalization
+    // Parse the main key with simplified, commonly-used aliases only
     let normalized_key = key_part.to_lowercase();
     let code = match normalized_key.as_str() {
         // Letters (case-insensitive)
@@ -106,19 +106,19 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "y" => Code::KeyY,
         "z" => Code::KeyZ,
 
-        // Numbers with multiple aliases
-        "0" | "digit0" | "zero" => Code::Digit0,
-        "1" | "digit1" | "one" => Code::Digit1,
-        "2" | "digit2" | "two" => Code::Digit2,
-        "3" | "digit3" | "three" => Code::Digit3,
-        "4" | "digit4" | "four" => Code::Digit4,
-        "5" | "digit5" | "five" => Code::Digit5,
-        "6" | "digit6" | "six" => Code::Digit6,
-        "7" | "digit7" | "seven" => Code::Digit7,
-        "8" | "digit8" | "eight" => Code::Digit8,
-        "9" | "digit9" | "nine" => Code::Digit9,
+        // Numbers with minimal aliases
+        "0" | "digit0" => Code::Digit0,
+        "1" | "digit1" => Code::Digit1,
+        "2" | "digit2" => Code::Digit2,
+        "3" | "digit3" => Code::Digit3,
+        "4" | "digit4" => Code::Digit4,
+        "5" | "digit5" => Code::Digit5,
+        "6" | "digit6" => Code::Digit6,
+        "7" | "digit7" => Code::Digit7,
+        "8" | "digit8" => Code::Digit8,
+        "9" | "digit9" => Code::Digit9,
 
-        // Function keys with expanded range
+        // Function keys
         "f1" => Code::F1,
         "f2" => Code::F2,
         "f3" => Code::F3,
@@ -144,75 +144,62 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
         "f23" => Code::F23,
         "f24" => Code::F24,
 
-        // Arrow keys with aliases
-        "arrowup" | "up" | "uparrow" => Code::ArrowUp,
-        "arrowdown" | "down" | "downarrow" => Code::ArrowDown,
-        "arrowleft" | "left" | "leftarrow" => Code::ArrowLeft,
-        "arrowright" | "right" | "rightarrow" => Code::ArrowRight,
+        // Arrow keys with essential aliases only
+        "up" | "arrowup" => Code::ArrowUp,
+        "down" | "arrowdown" => Code::ArrowDown,
+        "left" | "arrowleft" => Code::ArrowLeft,
+        "right" | "arrowright" => Code::ArrowRight,
 
-        // Special keys with comprehensive aliases
-        "space" | "spacebar" | " " => Code::Space,
+        // Special keys with common aliases only
+        "space" | " " => Code::Space,
         "escape" | "esc" => Code::Escape,
-        "enter" | "return" | "ret" => Code::Enter,
-        "tab" | "tabulator" => Code::Tab,
-        "backspace" | "bksp" | "bs" => Code::Backspace,
+        "enter" | "return" => Code::Enter,
+        "tab" => Code::Tab,
+        "backspace" => Code::Backspace,
         "delete" | "del" => Code::Delete,
         "home" => Code::Home,
         "end" => Code::End,
-        "pageup" | "pgup" | "pageupward" => Code::PageUp,
-        "pagedown" | "pgdn" | "pagedownward" => Code::PageDown,
-        "insert" | "ins" => Code::Insert,
+        "pageup" | "pgup" => Code::PageUp,
+        "pagedown" | "pgdn" => Code::PageDown,
+        "insert" => Code::Insert,
 
-        // System and media keys
-        "printscreen" | "prtsc" | "print" => Code::PrintScreen,
-        "scrolllock" | "scrlk" => Code::ScrollLock,
-        "pause" | "pausebreak" => Code::Pause,
-        "capslock" | "caps" => Code::CapsLock,
-        "numlock" | "numlk" => Code::NumLock,
+        // System keys
+        "printscreen" => Code::PrintScreen,
+        "scrolllock" => Code::ScrollLock,
+        "pause" => Code::Pause,
+        "capslock" => Code::CapsLock,
+        "numlock" => Code::NumLock,
 
-        // Punctuation with better coverage
+        // Basic punctuation
         "," | "comma" => Code::Comma,
-        "." | "period" | "dot" => Code::Period,
-        "/" | "slash" | "forwardslash" => Code::Slash,
+        "." | "period" => Code::Period,
+        "/" | "slash" => Code::Slash,
         ";" | "semicolon" => Code::Semicolon,
-        "'" | "quote" | "apostrophe" | "singlequote" => Code::Quote,
-        "[" | "bracketleft" | "leftbracket" | "openbracket" => Code::BracketLeft,
-        "]" | "bracketright" | "rightbracket" | "closebracket" => Code::BracketRight,
+        "'" | "quote" => Code::Quote,
+        "[" | "leftbracket" => Code::BracketLeft,
+        "]" | "rightbracket" => Code::BracketRight,
         "\\" | "backslash" => Code::Backslash,
-        "`" | "backquote" | "backtick" | "grave" => Code::Backquote,
-        "-" | "minus" | "hyphen" | "dash" => Code::Minus,
-        "=" | "equal" | "equals" => Code::Equal,
+        "`" | "backquote" => Code::Backquote,
+        "-" | "minus" => Code::Minus,
+        "=" | "equal" => Code::Equal,
 
-        // Numpad keys
-        "numpad0" | "kp0" => Code::Numpad0,
-        "numpad1" | "kp1" => Code::Numpad1,
-        "numpad2" | "kp2" => Code::Numpad2,
-        "numpad3" | "kp3" => Code::Numpad3,
-        "numpad4" | "kp4" => Code::Numpad4,
-        "numpad5" | "kp5" => Code::Numpad5,
-        "numpad6" | "kp6" => Code::Numpad6,
-        "numpad7" | "kp7" => Code::Numpad7,
-        "numpad8" | "kp8" => Code::Numpad8,
-        "numpad9" | "kp9" => Code::Numpad9,
-        "numpadplus" | "kpplus" | "numpad+" => Code::NumpadAdd,
-        "numpadminus" | "kpminus" | "numpad-" => Code::NumpadSubtract,
-        "numpadmultiply" | "kpmultiply" | "numpad*" => Code::NumpadMultiply,
-        "numpaddivide" | "kpdivide" | "numpad/" => Code::NumpadDivide,
-        "numpadenter" | "kpenter" => Code::NumpadEnter,
-        "numpaddecimal" | "kpdecimal" | "numpad." => Code::NumpadDecimal,
-
-        // Additional punctuation and symbols
-        "\"" | "doublequote" | "quotation" => Code::Quote, // Map to same as single quote for compatibility
-        ":" | "colon" => Code::Semicolon, // Often on same key as semicolon
-        "<" | "less" | "lessthan" => Code::Comma, // Often on same key as comma
-        ">" | "greater" | "greaterthan" => Code::Period, // Often on same key as period
-        "?" | "question" | "questionmark" => Code::Slash, // Often on same key as slash
-        "{" | "leftbrace" | "openbrace" => Code::BracketLeft, // Often on same key as [
-        "}" | "rightbrace" | "closebrace" => Code::BracketRight, // Often on same key as ]
-        "|" | "pipe" | "verticalbar" => Code::Backslash, // Often on same key as \
-        "~" | "tilde" => Code::Backquote, // Often on same key as `
-        "_" | "underscore" => Code::Minus, // Often on same key as -
-        "+" | "plus" => Code::Equal, // Often on same key as =
+        // Numpad keys with standard aliases
+        "numpad0" => Code::Numpad0,
+        "numpad1" => Code::Numpad1,
+        "numpad2" => Code::Numpad2,
+        "numpad3" => Code::Numpad3,
+        "numpad4" => Code::Numpad4,
+        "numpad5" => Code::Numpad5,
+        "numpad6" => Code::Numpad6,
+        "numpad7" => Code::Numpad7,
+        "numpad8" => Code::Numpad8,
+        "numpad9" => Code::Numpad9,
+        "numpadplus" | "numpad+" => Code::NumpadAdd,
+        "numpadminus" | "numpad-" => Code::NumpadSubtract,
+        "numpadmultiply" | "numpad*" => Code::NumpadMultiply,
+        "numpaddivide" | "numpad/" => Code::NumpadDivide,
+        "numpadenter" => Code::NumpadEnter,
+        "numpaddecimal" | "numpad." => Code::NumpadDecimal,
 
         _ => {
             warn!("Unknown key: {}", key_part);
