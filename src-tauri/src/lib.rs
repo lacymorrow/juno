@@ -2074,6 +2074,8 @@ mod tests {
         let cli = crate::cli::Cli {
             tts_provider: None,
             check_accessibility: false,
+            test_focused_element_ns: false,
+            tts_text: None,
         };
 
         let result = runner::handle_non_desktop_cli_commands(&cli);

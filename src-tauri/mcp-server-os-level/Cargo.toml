@@ -28,9 +28,10 @@ tower-http = { version = "0.4.0", features = ["cors", "trace"] }
 
 # Common dependencies that might be needed based on original code
 log = "0.4.22"
-macos-accessibility-client = "0.0.1"
 
-# macOS specific dependencies (moved here from [features])
+# macOS specific dependencies (moved to target-specific section)
+[target.'cfg(target_os = "macos")'.dependencies]
+macos-accessibility-client = "0.0.1"
 accessibility = "0.2.0"
 accessibility-sys = "0.2.0"
 core-foundation = "0.10.0"
