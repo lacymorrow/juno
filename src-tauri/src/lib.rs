@@ -13,6 +13,8 @@ use tauri::{
     AppHandle, // Keep AppHandle
     Emitter, // Import Emitter trait for .emit()
     Listener, // Added Listener for .listen()
+    WebviewWindow,
+    Wry,
 };
 use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
@@ -24,7 +26,7 @@ use std::sync::Mutex; // Added for VoiceController state access
 use {
     cocoa::{
         appkit::{NSWindow, NSWindowCollectionBehavior},
-        base::{id as cocoa_id, nil, YES, NO, BOOL},
+        base::{id as cocoa_id, nil, NO, BOOL},
         foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
