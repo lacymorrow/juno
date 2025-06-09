@@ -491,11 +491,11 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
 }
 
 /// Get information about installed applications (performance-optimized scan)
-async fn get_installed_applications_info(running_apps: &[RunningApplicationInfo]) -> Vec<InstalledApplicationInfo> {
+async fn get_installed_applications_info(_running_apps: &[RunningApplicationInfo]) -> Vec<InstalledApplicationInfo> {
     #[cfg(target_os = "macos")]
     {
         let mut installed_apps = Vec::new();
-        let running_bundle_ids: std::collections::HashSet<String> = running_apps
+        let running_bundle_ids: std::collections::HashSet<String> = _running_apps
             .iter()
             .filter_map(|app| app.bundle_id.clone())
             .collect();
