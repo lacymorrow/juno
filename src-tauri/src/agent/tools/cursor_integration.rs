@@ -1,14 +1,7 @@
-//! Cursor IDE integration for enhanced development workflows.
-//! Provides file navigation, suggestion display, and multi-method access for development tasks.
-//! Used by: Enhanced coding tools for direct IDE communication.
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tracing::{info, warn, error, debug};
-use std::process::Command;
-use std::env;
-use std::path::Path;
 
 use crate::agent::structs::{ToolCall, ToolResult, ToolDefinition};
 use crate::agent::traits::ToolProvider;
@@ -16,36 +9,16 @@ use crate::agent::structs::AgentError;
 use crate::state::AppState;
 
 /// Cursor IDE integration using computer use automation
-/// 
-/// Provides seamless integration with Cursor IDE through multiple access methods
-/// including command line interface and GUI automation fallback.
-/// 
-/// Used by: Enhanced coding tools and main agent for IDE interaction
 pub struct CursorIntegration {
     app_state: AppState,
 }
 
 impl CursorIntegration {
-    /// Creates a new Cursor IDE integration instance
-    /// 
-    /// Used by: Tool registration system during agent initialization
-    /// 
-    /// # Arguments
-    /// * `app_state` - Application state for accessing system resources
     pub fn new(app_state: AppState) -> Self {
         Self { app_state }
     }
 
-    /// Opens a file in Cursor IDE with optional line and column positioning.
-    /// Attempts command line interface first, falls back to GUI if needed.
-    /// Used by: Enhanced coding tools for precise file navigation.
-    /// 
-    /// # Arguments
-    /// * `file_path` - Path to the file to open
-    /// * `line_number` - Optional line number to navigate to
-    /// 
-    /// # Returns
-    /// * Success result with method used and execution details
+    /// Open a file in Cursor IDE at a specific line
     pub async fn open_file_in_cursor(&self, file_path: &str, line_number: Option<u64>) -> Result<Value, AgentError> {
         info!("🔍 [CURSOR] Opening file: {} {}", file_path,
             line_number.map(|l| format!("at line {}", l)).unwrap_or_default());
@@ -81,18 +54,6 @@ impl CursorIntegration {
     }
 
     /// Use computer use automation to open file via Cursor GUI
-    /// 
-    /// Fallback method that uses keyboard shortcuts and GUI automation
-    /// to open files when command line interface is not available.
-    /// 
-    /// Used by: open_file_in_cursor as fallback method
-    /// 
-    /// # Arguments
-    /// * `file_path` - Path to the file to open
-    /// * `line_number` - Optional line number to navigate to
-    /// 
-    /// # Returns
-    /// * GUI automation steps and execution plan
     async fn open_file_via_gui(&self, file_path: &str, line_number: Option<u64>) -> Result<Value, AgentError> {
         // Use keyboard shortcut to open file dialog (Cmd+O on macOS)
         let mut steps = Vec::new();
@@ -147,16 +108,7 @@ impl CursorIntegration {
         }))
     }
 
-    /// Displays a contextual message or suggestion in Cursor IDE.
-    /// Formats messages appropriately for different file types and contexts.
-    /// Used by: Enhanced coding tools for providing development guidance.
-    /// 
-    /// # Arguments
-    /// * `message` - The suggestion or message to display
-    /// * `file_path` - Optional file context for appropriate formatting
-    /// 
-    /// # Returns
-    /// * Formatted suggestion with display method information
+    /// Send a suggestion or message to display in Cursor
     pub async fn show_suggestion_in_cursor(&self, message: &str, file_path: Option<&str>) -> Result<Value, AgentError> {
         info!("💡 [CURSOR] Showing suggestion: {}", message);
 
@@ -185,19 +137,6 @@ impl CursorIntegration {
     }
 
     /// Navigate to a specific location in Cursor
-    /// 
-    /// Opens a file and navigates to precise line and column coordinates,
-    /// combining file opening with exact positioning for development workflow.
-    /// 
-    /// Used by: Enhanced coding tools for precise code navigation
-    /// 
-    /// # Arguments
-    /// * `file_path` - Path to the file to navigate to
-    /// * `line_number` - Optional line number for positioning
-    /// * `column` - Optional column number for precise cursor placement
-    /// 
-    /// # Returns
-    /// * Navigation result with positioning information and steps taken
     pub async fn navigate_to_location(&self, file_path: &str, line_number: Option<u64>, column: Option<u64>) -> Result<Value, AgentError> {
         info!("📍 [CURSOR] Navigating to: {} {}:{}",
             file_path,
@@ -244,18 +183,6 @@ impl CursorIntegration {
     }
 
     /// Execute a bash command using the existing bash tool
-    /// 
-    /// Provides access to command line execution for Cursor CLI operations.
-    /// Currently returns mock results but designed for integration with
-    /// the main command execution system.
-    /// 
-    /// Used by: open_file_in_cursor for command line operations
-    /// 
-    /// # Arguments
-    /// * `command` - Bash command to execute
-    /// 
-    /// # Returns
-    /// * Command execution result with stdout, stderr, and exit code
     async fn execute_bash_command(&self, command: &str) -> Result<Value, AgentError> {
         // This would use the existing bash command execution capability
         // For now, return a mock result
@@ -269,17 +196,6 @@ impl CursorIntegration {
     }
 
     /// Detect appropriate comment style for a file
-    /// 
-    /// Analyzes file extension to determine the correct comment syntax
-    /// for suggestion formatting and code insertion.
-    /// 
-    /// Used by: show_suggestion_in_cursor for language-appropriate formatting
-    /// 
-    /// # Arguments
-    /// * `file_path` - Path to analyze for language detection
-    /// 
-    /// # Returns
-    /// * Language identifier for comment style selection
     fn detect_comment_style(&self, file_path: &str) -> String {
         let extension = std::path::Path::new(file_path)
             .extension()
@@ -300,18 +216,6 @@ impl CursorIntegration {
 
 #[async_trait]
 impl ToolProvider for CursorIntegration {
-    /// Executes the specified Cursor IDE integration tool
-    /// 
-    /// Routes tool calls to the appropriate Cursor integration methods
-    /// based on the tool name and handles parameter validation.
-    /// 
-    /// Used by: Agent tool execution system when Cursor tools are invoked
-    /// 
-    /// # Arguments
-    /// * `tool_call` - Tool call with name and input parameters
-    /// 
-    /// # Returns
-    /// * Tool execution result or error if tool not found
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         match tool_call.name.as_str() {
             "cursor_open_file" => {
@@ -366,15 +270,6 @@ impl ToolProvider for CursorIntegration {
         }
     }
 
-    /// Lists all available Cursor IDE integration tools
-    /// 
-    /// Provides tool definitions for all Cursor integration capabilities
-    /// including file opening, suggestion display, and navigation.
-    /// 
-    /// Used by: Agent initialization and tool discovery systems
-    /// 
-    /// # Returns
-    /// * Vector of tool definitions for all Cursor integration tools
     async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
         Ok(vec![
             ToolDefinition {
@@ -437,28 +332,4 @@ impl ToolProvider for CursorIntegration {
             },
         ])
     }
-}
-
-/// Detects if Cursor IDE is available in the system.
-/// Checks common installation paths and PATH environment variable.
-/// Used by: Tool initialization for determining IDE availability.
-pub fn is_cursor_available() -> bool {
-    // Implementation of is_cursor_available function
-    true
-}
-
-/// Formats a comment appropriately for the given file type.
-/// Handles language-specific comment syntax for proper IDE integration.
-/// Used by: Suggestion display for language-appropriate formatting.
-fn format_comment_for_language(message: &str, file_path: &str) -> String {
-    // Implementation of format_comment_for_language function
-    String::new()
-}
-
-/// Executes a cursor command with the given arguments.
-/// Handles command execution with proper error reporting and timeout.
-/// Used by: All cursor operations for consistent command execution.
-async fn execute_cursor_command(args: Vec<&str>) -> Result<Value, String> {
-    // Implementation of execute_cursor_command function
-    Ok(json!({}))
 }
