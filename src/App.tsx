@@ -1250,7 +1250,14 @@ function App() {
                                       : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
                                   )}
                                 >
-                                  {msg.content}
+                                  {msg.role === "assistant" && (!msg.content || msg.content.trim() === "") ? (
+                                    <span className="text-muted-foreground italic flex items-center gap-2">
+                                      <span>✓</span>
+                                      <span>Task completed successfully</span>
+                                    </span>
+                                  ) : (
+                                    msg.content
+                                  )}
                                   {msg.screenshot_base64 && (
                                     <div
                                       className={cn(
