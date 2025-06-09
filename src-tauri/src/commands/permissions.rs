@@ -509,7 +509,8 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
 
     #[cfg(target_os = "macos")]
     {
-        let granted = try_accessibility_test().await;
+        let granted = check_accessibility_permissions_with_auto_redirect(false, false)
+            .unwrap_or(false);
 
         Ok(PermissionStatus {
             permission_type: permission_types::ACCESSIBILITY.to_string(),
@@ -545,14 +546,8 @@ async fn check_accessibility_permission_with_auto_redirect(auto_open_settings: b
 
     #[cfg(target_os = "macos")]
     {
-        let granted = match check_accessibility_permissions_with_auto_redirect(true, auto_open_settings) {
-            Ok(granted) => granted,
-            Err(e) => {
-                warn!("Error checking accessibility permissions with auto-redirect: {}", e);
-                // Fall back to our own test
-                try_accessibility_test().await
-            }
-        };
+        let granted = check_accessibility_permissions_with_auto_redirect(true, auto_open_settings)
+            .unwrap_or(false);
 
         Ok(PermissionStatus {
             permission_type: permission_types::ACCESSIBILITY.to_string(),

@@ -1,0 +1,22 @@
+{
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "sleepApplication": false,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  },
+  "environments": {
+    "production": {
+      "variables": {
+        "NODE_ENV": "production",
+        "PORT": "8080",
+        "LOG_LEVEL": "info",
+        "DB_PATH": "./data/juno.db",
+        "RATE_LIMIT_MAX_REQUESTS": "100"
+      }
+    }
+  }
+}
