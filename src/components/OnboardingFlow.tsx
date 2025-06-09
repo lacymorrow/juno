@@ -321,7 +321,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
           markStepCompleted("permissions");
           setCurrentStep("voice-setup");
         }}
-        autoRedirectEnabled={true}
+        autoRedirectEnabled={false}
       />
 
       <div className="flex gap-4 justify-center">

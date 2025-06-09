@@ -57,7 +57,7 @@ export function PermissionsFlow({
   onSkip,
   showSkipOption = false,
   className = "",
-  autoRedirectEnabled = true,
+  autoRedirectEnabled = false,
 }: PermissionsFlowProps) {
   const [permissions, setPermissions] = useState<PermissionsState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
