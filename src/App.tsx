@@ -750,6 +750,24 @@ function App() {
     };
   }, []);
 
+  // Listen for TTS audio ready events
+  useEffect(() => {
+    const unlisten = listen<{ audio_base64: string }>(
+      "tts-audio-ready",
+      (event) => {
+        console.log("TTS audio ready event received");
+        const { audio_base64 } = event.payload;
+        if (audio_base64) {
+          playAudioFromBase64(audio_base64);
+        }
+      }
+    );
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
     const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
