@@ -27,6 +27,7 @@ use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 use crate::agent::tools::mcp_integration::MCPManager;
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
+use crate::constants::app_identity;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,7 +174,9 @@ impl AppState {
             // Initialize Always Listening mode state
             always_listening_active: Arc::new(Mutex::new(false)),
             always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
-            always_listening_wake_words: Arc::new(Mutex::new(vec!["hey juno".to_string(), "computer".to_string()])),
+            always_listening_wake_words: Arc::new(Mutex::new(
+                app_identity::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect()
+            )),
             // Initialize agent execution status tracking
             agent_execution_active: Arc::new(Mutex::new(false)),
             agent_execution_id: Arc::new(Mutex::new(None)),
@@ -1073,8 +1076,8 @@ mod tests {
         {
             let wake_words = state.always_listening_wake_words.lock().unwrap();
             assert_eq!(wake_words.len(), 2);
-            assert!(wake_words.contains(&"hey juno".to_string()));
-            assert!(wake_words.contains(&"computer".to_string()));
+            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[0].to_string()));
+            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[1].to_string()));
         }
         
         // Update configuration
