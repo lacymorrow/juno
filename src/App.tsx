@@ -1,7 +1,6 @@
 import { AgentStatusIndicator } from "@/components/AgentStatusIndicator"; // Import the AgentStatusIndicator component
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
-import SettingsWindow from "@/components/SettingsWindow";
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
@@ -983,11 +982,6 @@ function App() {
     window.addEventListener("popstate", handleLocationChange);
     return () => window.removeEventListener("popstate", handleLocationChange);
   }, []);
-
-  // If this is the settings window, render only the settings
-  if (currentPath === "/settings") {
-    return <SettingsWindow />;
-  }
 
   // If this is the floating bar, render only the floating bar
   if (currentPath === "/floating-bar") {
