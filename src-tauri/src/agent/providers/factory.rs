@@ -85,8 +85,15 @@ impl Provider {
     pub fn models(&self) -> Vec<String> {
         match self {
             Provider::Anthropic => vec![
+                // Claude 4 models (latest)
+                "claude-opus-4-20250514".to_string(),
+                "claude-sonnet-4-20250514".to_string(),
+                // Claude 3.7 models
+                "claude-3-7-sonnet-20250219".to_string(),
+                // Claude 3.5 models
                 "claude-3-5-sonnet-20241022".to_string(),
                 "claude-3-5-haiku-20241022".to_string(),
+                // Claude 3 models (legacy but still supported)
                 "claude-3-opus-20240229".to_string(),
             ],
             Provider::OpenAI => vec![
@@ -101,10 +108,10 @@ impl Provider {
                 "claude-3-5-sonnet-20241022".to_string(),
             ],
             Provider::Gemini => vec![
-                "gemini-pro".to_string(),
-                "gemini-pro-vision".to_string(),
                 "gemini-1.5-pro".to_string(),
                 "gemini-1.5-flash".to_string(),
+                "gemini-pro".to_string(),
+                "gemini-pro-vision".to_string(),
             ],
         }
     }
@@ -112,7 +119,7 @@ impl Provider {
     /// Get default model for the provider
     pub fn default_model(&self) -> &'static str {
         match self {
-            Provider::Anthropic => "claude-3-5-sonnet-20241022",
+            Provider::Anthropic => "claude-3-7-sonnet-20250219", // Use the current working model as default
             Provider::OpenAI => "gpt-4o",
             Provider::Rig => "gpt-4o",
             Provider::Gemini => "gemini-1.5-pro",
