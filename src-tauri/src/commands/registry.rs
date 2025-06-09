@@ -19,9 +19,24 @@ macro_rules! generate_invoke_handler {
             submit_orchestrated_query,
             get_orchestrator_status,
             configure_orchestrator,
+            create_orchestrator_task,
             get_task_history,
             get_active_tasks,
             get_agent_capabilities,
+            cancel_task,
+
+            // MCP Integration Commands
+            get_mcp_tools,
+            add_mcp_server,
+            remove_mcp_server,
+            start_mcp_server,
+            stop_mcp_server,
+            get_mcp_server_statuses,
+            execute_mcp_task,
+
+            // Workflow Commands
+            get_workflow_templates,
+            execute_workflow_template,
 
             // Anthropic-specific Commands
             crate::anthropic::clear_conversation_history,
@@ -189,9 +204,42 @@ pub mod categories {
         "submit_orchestrated_query",
         "get_orchestrator_status",
         "configure_orchestrator",
+        "create_orchestrator_task",
         "get_task_history",
         "get_active_tasks",
-        "get_agent_capabilities"
+        "get_agent_capabilities",
+        "cancel_task"
+    ];
+
+    /// MCP integration commands (handled by commands/mcp.rs)
+    pub const MCP: &[&str] = &[
+        "get_mcp_tools",
+        "add_mcp_server",
+        "remove_mcp_server",
+        "start_mcp_server",
+        "stop_mcp_server",
+        "get_mcp_servers",
+        "get_mcp_server_statuses",
+        "update_mcp_server",
+        "set_mcp_server_enabled",
+        "test_mcp_server_connection",
+        "initialize_mcp_servers"
+    ];
+
+    /// Workflow orchestration commands (handled by commands/orchestrator.rs)
+    pub const WORKFLOW: &[&str] = &[
+        "get_workflow_templates",
+        "execute_workflow_template",
+        "execute_mcp_task"
+    ];
+
+    /// Memory management commands (handled by commands/memory.rs)
+    pub const MEMORY: &[&str] = &[
+        "get_memory_status",
+        "clear_conversation_memory",
+        "clean_orphaned_tool_calls",
+        "get_conversation_messages",
+        "get_last_n_messages"
     ];
 
     /// Mouse interaction commands
@@ -243,6 +291,9 @@ pub mod categories {
     pub const ALL_CATEGORIES: &[(&str, &[&str])] = &[
         ("Core", CORE),
         ("Agent", AGENT),
+        ("MCP", MCP),
+        ("Workflow", WORKFLOW),
+        ("Memory", MEMORY),
         ("Mouse", MOUSE),
         ("QA Test", QA_TEST),
         ("Keyboard", KEYBOARD),

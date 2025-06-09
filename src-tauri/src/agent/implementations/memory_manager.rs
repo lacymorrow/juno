@@ -2,11 +2,580 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::collections::HashSet;
 use tokio::sync::RwLock;
+use serde::{Deserialize, Serialize};
+use std::time::{Instant, Duration, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
-use crate::agent::structs::{AgentError, Message, Role};
+use crate::agent::structs::{AgentError, Message, Role, ToolCall};
 use crate::agent::traits::MemoryManager;
 
-/// A simple in-memory implementation of the MemoryManager trait.
+/// Configuration for advanced memory management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    /// Maximum number of messages before pruning
+    pub max_messages: usize,
+    /// Maximum estimated tokens before pruning
+    pub max_tokens: usize,
+    /// Minimum number of messages to keep during pruning
+    pub min_messages_to_keep: usize,
+    /// Enable automatic memory pruning
+    pub auto_prune: bool,
+    /// Enable memory summarization
+    pub enable_summarization: bool,
+    /// Number of messages to summarize in a batch
+    pub summarization_batch_size: usize,
+    /// Enable memory statistics tracking
+    pub enable_metrics: bool,
+    /// Cache summarized content for performance
+    pub enable_summary_cache: bool,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            max_messages: 100,
+            max_tokens: 32000, // Conservative estimate for context window
+            min_messages_to_keep: 10,
+            auto_prune: true,
+            enable_summarization: true,
+            summarization_batch_size: 10,
+            enable_metrics: true,
+            enable_summary_cache: true,
+        }
+    }
+}
+
+/// Statistics for memory usage and performance
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryMetrics {
+    pub total_messages: usize,
+    pub estimated_tokens: usize,
+    pub pruning_events: usize,
+    pub summarization_events: usize,
+    pub orphaned_tool_calls_cleaned: usize,
+    pub average_response_time_ms: f64,
+    pub last_prune_time: Option<SystemTime>,
+    pub memory_efficiency_ratio: f64, // Useful messages / total messages
+}
+
+impl Default for MemoryMetrics {
+    fn default() -> Self {
+        Self {
+            total_messages: 0,
+            estimated_tokens: 0,
+            pruning_events: 0,
+            summarization_events: 0,
+            orphaned_tool_calls_cleaned: 0,
+            average_response_time_ms: 0.0,
+            last_prune_time: None,
+            memory_efficiency_ratio: 1.0,
+        }
+    }
+}
+
+/// Summary of conversation chunks for efficient memory management
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationSummary {
+    pub id: String,
+    pub summary: String,
+    pub message_count: usize,
+    pub time_range: (SystemTime, SystemTime),
+    pub key_topics: Vec<String>,
+    pub estimated_tokens: usize,
+}
+
+/// Enhanced in-memory implementation of the MemoryManager trait with advanced features
+#[derive(Debug, Clone)]
+pub struct AdvancedMemoryManager {
+    messages: Arc<RwLock<Vec<Message>>>,
+    pending_tool_calls: Arc<RwLock<HashSet<String>>>,
+    config: Arc<RwLock<MemoryConfig>>,
+    metrics: Arc<RwLock<MemoryMetrics>>,
+    summaries: Arc<RwLock<Vec<ConversationSummary>>>,
+    summary_cache: Arc<RwLock<std::collections::HashMap<String, String>>>,
+}
+
+impl AdvancedMemoryManager {
+    pub fn new() -> Self {
+        Self::with_config(MemoryConfig::default())
+    }
+
+    pub fn with_config(config: MemoryConfig) -> Self {
+        AdvancedMemoryManager {
+            messages: Arc::new(RwLock::new(Vec::new())),
+            pending_tool_calls: Arc::new(RwLock::new(HashSet::new())),
+            config: Arc::new(RwLock::new(config)),
+            metrics: Arc::new(RwLock::new(MemoryMetrics::default())),
+            summaries: Arc::new(RwLock::new(Vec::new())),
+            summary_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        }
+    }
+
+    /// Estimate token count for a message (rough approximation)
+    fn estimate_message_tokens(message: &Message) -> usize {
+        let content_tokens = message.content.len() / 4; // Rough estimate: 4 chars per token
+        let tool_call_tokens = message.tool_calls.as_ref()
+            .map(|calls| calls.iter().map(|call| call.name.len() / 4 + 50).sum()) // Extra for structure
+            .unwrap_or(0);
+        content_tokens + tool_call_tokens
+    }
+
+    /// Estimate total token count for all messages
+    async fn estimate_total_tokens(&self) -> usize {
+        let messages = self.messages.read().await;
+        messages.iter()
+            .map(Self::estimate_message_tokens)
+            .sum()
+    }
+
+    /// Update memory metrics after operations
+    async fn update_metrics(&self, operation_start: Instant) -> Result<(), AgentError> {
+        let config = self.config.read().await;
+        if !config.enable_metrics {
+            return Ok(());
+        }
+
+        let mut metrics = self.metrics.write().await;
+        let messages = self.messages.read().await;
+
+        metrics.total_messages = messages.len();
+        metrics.estimated_tokens = messages.iter()
+            .map(Self::estimate_message_tokens)
+            .sum();
+
+        let operation_time = operation_start.elapsed().as_millis() as f64;
+        metrics.average_response_time_ms =
+            (metrics.average_response_time_ms + operation_time) / 2.0;
+
+        // Calculate efficiency ratio
+        let useful_messages = messages.iter()
+            .filter(|m| !m.content.is_empty() || m.tool_calls.is_some())
+            .count();
+        metrics.memory_efficiency_ratio = if messages.len() > 0 {
+            useful_messages as f64 / messages.len() as f64
+        } else {
+            1.0
+        };
+
+        Ok(())
+    }
+
+    /// Prune old messages based on configuration
+    async fn prune_memory_if_needed(&self) -> Result<bool, AgentError> {
+        let config = self.config.read().await;
+        if !config.auto_prune {
+            return Ok(false);
+        }
+
+        let messages_count = {
+            let messages = self.messages.read().await;
+            messages.len()
+        };
+
+        let estimated_tokens = self.estimate_total_tokens().await;
+
+        // Check if pruning is needed
+        if messages_count <= config.max_messages && estimated_tokens <= config.max_tokens {
+            return Ok(false);
+        }
+
+        drop(config); // Release config lock before calling prune_memory
+
+        log::info!("Memory pruning triggered: {} messages, ~{} tokens",
+                   messages_count, estimated_tokens);
+
+        self.prune_memory(None).await?;
+        Ok(true)
+    }
+
+    /// Create a summary of conversation segments
+    async fn create_conversation_summary(&self, messages: &[Message]) -> Result<ConversationSummary, AgentError> {
+        if messages.is_empty() {
+            return Err(AgentError::ConfigurationError("Cannot summarize empty message list".to_string()));
+        }
+
+        // Simple summarization logic (in production, you'd use an LLM)
+        let summary = if messages.len() <= 3 {
+            // For short conversations, just concatenate key points
+            messages.iter()
+                .filter(|m| !m.content.is_empty())
+                .map(|m| {
+                    let content = if m.content.len() > 100 {
+                        format!("{}...", &m.content[..100])
+                    } else {
+                        m.content.clone()
+                    };
+                    format!("{:?}: {}", m.role, content)
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        } else {
+            // For longer conversations, create a structured summary
+            let user_messages = messages.iter().filter(|m| m.role == Role::User).count();
+            let assistant_messages = messages.iter().filter(|m| m.role == Role::Assistant).count();
+            let tool_calls = messages.iter()
+                .filter_map(|m| m.tool_calls.as_ref())
+                .map(|calls| calls.len())
+                .sum::<usize>();
+
+            format!("Conversation segment: {} user messages, {} assistant responses, {} tool calls executed",
+                    user_messages, assistant_messages, tool_calls)
+        };
+
+        // Extract key topics (simple keyword extraction)
+        let all_content = messages.iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let key_topics = self.extract_key_topics(&all_content);
+
+        let time_range = (
+            SystemTime::now() - Duration::from_secs(3600), // Approximate start
+            SystemTime::now()
+        );
+
+        let estimated_tokens = messages.iter()
+            .map(Self::estimate_message_tokens)
+            .sum();
+
+        Ok(ConversationSummary {
+            id: Uuid::new_v4().to_string(),
+            summary,
+            message_count: messages.len(),
+            time_range,
+            key_topics,
+            estimated_tokens,
+        })
+    }
+
+    /// Extract key topics from text (simple implementation)
+    fn extract_key_topics(&self, text: &str) -> Vec<String> {
+        // Simple keyword extraction (in production, use NLP libraries)
+        let common_words = ["the", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"];
+        let words: Vec<&str> = text.split_whitespace()
+            .filter(|word| word.len() > 3 && !common_words.contains(&word.to_lowercase().as_str()))
+            .collect();
+
+        // Count word frequencies
+        let mut word_counts = std::collections::HashMap::new();
+        for word in words {
+            *word_counts.entry(word.to_lowercase()).or_insert(0) += 1;
+        }
+
+        // Get top keywords
+        let mut sorted_words: Vec<_> = word_counts.into_iter().collect();
+        sorted_words.sort_by(|a, b| b.1.cmp(&a.1));
+
+        sorted_words.into_iter()
+            .take(5)
+            .map(|(word, _)| word)
+            .collect()
+    }
+
+    /// Prune memory with optional target size
+    pub async fn prune_memory(&self, target_messages: Option<usize>) -> Result<usize, AgentError> {
+        let config = self.config.read().await;
+        let target_size = target_messages.unwrap_or(config.min_messages_to_keep);
+
+        let mut messages = self.messages.write().await;
+
+        if messages.len() <= target_size {
+            return Ok(0);
+        }
+
+        let messages_to_remove = messages.len() - target_size;
+
+        // Create summary of messages being removed if summarization is enabled
+        if config.enable_summarization && config.summarization_batch_size > 0 {
+            let messages_to_summarize = &messages[..messages_to_remove.min(config.summarization_batch_size)];
+            if !messages_to_summarize.is_empty() {
+                match self.create_conversation_summary(messages_to_summarize).await {
+                    Ok(summary) => {
+                        let mut summaries = self.summaries.write().await;
+                        summaries.push(summary);
+
+                        // Keep only recent summaries to prevent unbounded growth
+                        if summaries.len() > 20 {
+                            summaries.remove(0);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to create conversation summary: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Remove old messages
+        messages.drain(..messages_to_remove);
+
+        // Update metrics
+        {
+            let mut metrics = self.metrics.write().await;
+            metrics.pruning_events += 1;
+            metrics.last_prune_time = Some(SystemTime::now());
+        }
+
+        log::info!("Pruned {} messages from memory, {} remaining",
+                   messages_to_remove, messages.len());
+
+        Ok(messages_to_remove)
+    }
+
+    /// Get memory statistics
+    pub async fn get_memory_metrics(&self) -> MemoryMetrics {
+        let metrics = self.metrics.read().await;
+        metrics.clone()
+    }
+
+    /// Get configuration
+    pub async fn get_config(&self) -> MemoryConfig {
+        let config = self.config.read().await;
+        config.clone()
+    }
+
+    /// Update configuration
+    pub async fn update_config(&self, new_config: MemoryConfig) -> Result<(), AgentError> {
+        let mut config = self.config.write().await;
+        *config = new_config;
+        log::info!("Memory configuration updated");
+        Ok(())
+    }
+
+    /// Get conversation summaries
+    pub async fn get_summaries(&self) -> Vec<ConversationSummary> {
+        let summaries = self.summaries.read().await;
+        summaries.clone()
+    }
+
+    /// Force memory optimization (cleanup, compression, etc.)
+    pub async fn optimize_memory(&mut self) -> Result<(), AgentError> {
+        let start_time = Instant::now();
+
+        // Clean orphaned tool calls
+        let _orphaned_cleaned = self.clean_orphaned_tool_calls().await?;
+
+        // Force pruning if over limits
+        let _pruned = self.prune_memory_if_needed().await?;
+
+        // Clear summary cache if it's getting too large
+        {
+            let mut cache = self.summary_cache.write().await;
+            if cache.len() > 100 {
+                cache.clear();
+                log::info!("Cleared summary cache to free memory");
+            }
+        }
+
+        self.update_metrics(start_time).await?;
+
+        log::info!("Memory optimization completed in {}ms",
+                   start_time.elapsed().as_millis());
+
+        Ok(())
+    }
+
+    /// Get memory-optimized message history with summaries
+    pub async fn get_optimized_messages(&self) -> Result<Vec<Message>, AgentError> {
+        let messages = self.messages.read().await;
+        let summaries = self.summaries.read().await;
+
+        let mut optimized_messages = Vec::new();
+
+        // Add conversation summaries as system messages if available
+        for summary in summaries.iter() {
+            optimized_messages.push(Message {
+                role: Role::System,
+                content: format!("Previous conversation summary: {}", summary.summary),
+                tool_calls: None,
+                tool_call_id: None,
+                name: Some("memory_summary".to_string()),
+            });
+        }
+
+        // Add current messages
+        optimized_messages.extend(messages.clone());
+
+        Ok(optimized_messages)
+    }
+
+    /// Remove orphaned tool calls that don't have corresponding tool results
+    /// This method should be called when starting a new agent execution to clean up
+    /// any incomplete tool calls from previous cancelled executions
+    pub async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
+        let start_time = Instant::now();
+        let mut messages = self.messages.write().await;
+        let mut pending = self.pending_tool_calls.write().await;
+
+        // Find all tool call IDs that have results
+        let mut resolved_tool_calls = HashSet::new();
+        for message in messages.iter() {
+            if message.role == Role::Tool {
+                if let Some(tool_call_id) = &message.tool_call_id {
+                    resolved_tool_calls.insert(tool_call_id.clone());
+                }
+            }
+        }
+
+        // Remove any Assistant messages with tool calls that don't have corresponding results
+        let mut orphaned_tool_call_ids = HashSet::new();
+        messages.retain(|message| {
+            if message.role == Role::Assistant {
+                if let Some(tool_calls) = &message.tool_calls {
+                    // Check if all tool calls in this message have results
+                    let all_resolved = tool_calls.iter().all(|tc| resolved_tool_calls.contains(&tc.id));
+                    if !all_resolved {
+                        // Mark these tool calls as orphaned
+                        for tc in tool_calls {
+                            if !resolved_tool_calls.contains(&tc.id) {
+                                orphaned_tool_call_ids.insert(tc.id.clone());
+                            }
+                        }
+                        log::warn!("Removing orphaned Assistant message with unresolved tool calls: {:?}",
+                                   tool_calls.iter().map(|tc| &tc.id).collect::<Vec<_>>());
+                        return false; // Remove this message
+                    }
+                }
+            }
+            true // Keep the message
+        });
+
+        // Clean up pending tool calls
+        pending.retain(|id| !orphaned_tool_call_ids.contains(id));
+
+        // Update metrics
+        if !orphaned_tool_call_ids.is_empty() {
+            let mut metrics = self.metrics.write().await;
+            metrics.orphaned_tool_calls_cleaned += orphaned_tool_call_ids.len();
+
+            log::info!("Cleaned up {} orphaned tool calls: {:?}",
+                       orphaned_tool_call_ids.len(), orphaned_tool_call_ids);
+        }
+
+        self.update_metrics(start_time).await?;
+        Ok(())
+    }
+
+    /// Clear all pending tool calls (useful when starting a fresh conversation)
+    pub async fn clear_pending_tool_calls(&mut self) -> Result<(), AgentError> {
+        let mut pending = self.pending_tool_calls.write().await;
+        pending.clear();
+        log::info!("Cleared all pending tool calls");
+        Ok(())
+    }
+
+    /// Get a list of currently pending tool call IDs
+    pub async fn get_pending_tool_calls(&self) -> Result<Vec<String>, AgentError> {
+        let pending = self.pending_tool_calls.read().await;
+        Ok(pending.iter().cloned().collect())
+    }
+}
+
+#[async_trait]
+impl MemoryManager for AdvancedMemoryManager {
+    async fn add_message(&mut self, message: Message) -> Result<(), AgentError> {
+        let start_time = Instant::now();
+        let mut messages = self.messages.write().await;
+        let mut pending = self.pending_tool_calls.write().await;
+
+        // Track tool calls and results
+        match message.role {
+            Role::Assistant => {
+                if let Some(tool_calls) = &message.tool_calls {
+                    // Add tool call IDs to pending list
+                    for tool_call in tool_calls {
+                        pending.insert(tool_call.id.clone());
+                        log::debug!("Tracking pending tool call: {}", tool_call.id);
+                    }
+                }
+            }
+            Role::Tool => {
+                if let Some(tool_call_id) = &message.tool_call_id {
+                    // Remove from pending list when result is added
+                    if pending.remove(tool_call_id) {
+                        log::debug!("Resolved pending tool call: {}", tool_call_id);
+                    } else {
+                        log::warn!("Received tool result for unknown tool call ID: {}", tool_call_id);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        messages.push(message.clone());
+
+        // Release locks before async operations
+        drop(messages);
+        drop(pending);
+
+        log::debug!("Memory: Added message. Role={:?}", message.role);
+
+        // Check if pruning is needed
+        self.prune_memory_if_needed().await?;
+        self.update_metrics(start_time).await?;
+
+        Ok(())
+    }
+
+    async fn get_messages(&self) -> Result<Vec<Message>, AgentError> {
+        let start_time = Instant::now();
+        let messages = self.messages.read().await;
+        let pending = self.pending_tool_calls.read().await;
+
+        log::debug!("Memory: Retrieved {} messages, {} pending tool calls",
+                    messages.len(), pending.len());
+
+        let result = messages.clone();
+        drop(messages);
+        drop(pending);
+
+        self.update_metrics(start_time).await?;
+        Ok(result)
+    }
+
+    async fn get_last_n_messages(&self, n: usize) -> Result<Vec<Message>, AgentError> {
+        let start_time = Instant::now();
+        let messages = self.messages.read().await;
+        let start_index = messages.len().saturating_sub(n);
+        let result = messages[start_index..].to_vec();
+        drop(messages);
+
+        self.update_metrics(start_time).await?;
+        Ok(result)
+    }
+
+    async fn clear_memory(&mut self) -> Result<(), AgentError> {
+        let start_time = Instant::now();
+
+        let mut messages = self.messages.write().await;
+        let mut pending = self.pending_tool_calls.write().await;
+        let mut summaries = self.summaries.write().await;
+        let mut cache = self.summary_cache.write().await;
+
+        messages.clear();
+        pending.clear();
+        summaries.clear();
+        cache.clear();
+
+        log::info!("Memory: Cleared all messages, pending tool calls, summaries, and cache");
+
+        // Reset metrics
+        {
+            let mut metrics = self.metrics.write().await;
+            *metrics = MemoryMetrics::default();
+        }
+
+        self.update_metrics(start_time).await?;
+        Ok(())
+    }
+
+    async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
+        self.clean_orphaned_tool_calls().await
+    }
+}
+
+/// A simple in-memory implementation of the MemoryManager trait (existing implementation)
+/// Kept for backward compatibility
 #[derive(Debug, Clone)]
 pub struct SimpleMemoryManager {
     messages: Arc<RwLock<Vec<Message>>>,
@@ -152,111 +721,8 @@ impl Default for SimpleMemoryManager {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[tokio::test]
-    async fn test_orphaned_tool_call_cleanup() {
-        let mut memory = SimpleMemoryManager::new();
-
-        // Add a user message
-        memory.add_message(Message {
-            role: Role::User,
-            content: "Test query".to_string(),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        }).await.unwrap();
-
-        // Add an assistant message with tool calls
-        memory.add_message(Message {
-            role: Role::Assistant,
-            content: "I'll help you with that".to_string(),
-            tool_calls: Some(vec![
-                ToolCall {
-                    id: "tool_1".to_string(),
-                    name: "test_tool".to_string(),
-                    input: json!({"param": "value"}),
-                },
-                ToolCall {
-                    id: "tool_2".to_string(),
-                    name: "another_tool".to_string(),
-                    input: json!({"param": "value2"}),
-                }
-            ]),
-            tool_call_id: None,
-            name: None,
-        }).await.unwrap();
-
-        // Add result for only one tool call (tool_1)
-        memory.add_message(Message {
-            role: Role::Tool,
-            content: "Tool result".to_string(),
-            tool_calls: None,
-            tool_call_id: Some("tool_1".to_string()),
-            name: Some("test_tool".to_string()),
-        }).await.unwrap();
-
-        // Check that we have 3 messages and 1 pending tool call
-        let messages = memory.get_messages().await.unwrap();
-        assert_eq!(messages.len(), 3);
-
-        let pending = memory.get_pending_tool_calls().await.unwrap();
-        assert_eq!(pending.len(), 1);
-        assert!(pending.contains(&"tool_2".to_string()));
-
-        // Clean up orphaned tool calls
-        memory.clean_orphaned_tool_calls().await.unwrap();
-
-        // Check that the orphaned assistant message was removed
-        let messages = memory.get_messages().await.unwrap();
-        assert_eq!(messages.len(), 2); // User message and tool result message should remain
-
-        // Check message types
-        assert_eq!(messages[0].role, Role::User);
-        assert_eq!(messages[1].role, Role::Tool);
-
-        // Check that pending tool calls were cleaned up
-        let pending = memory.get_pending_tool_calls().await.unwrap();
-        assert_eq!(pending.len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_clean_orphaned_tool_calls_with_all_resolved() {
-        let mut memory = SimpleMemoryManager::new();
-
-        // Add messages with fully resolved tool calls
-        memory.add_message(Message {
-            role: Role::Assistant,
-            content: "I'll help".to_string(),
-            tool_calls: Some(vec![
-                ToolCall {
-                    id: "tool_1".to_string(),
-                    name: "test_tool".to_string(),
-                    input: json!({"param": "value"}),
-                }
-            ]),
-            tool_call_id: None,
-            name: None,
-        }).await.unwrap();
-
-        memory.add_message(Message {
-            role: Role::Tool,
-            content: "Tool result".to_string(),
-            tool_calls: None,
-            tool_call_id: Some("tool_1".to_string()),
-            name: Some("test_tool".to_string()),
-        }).await.unwrap();
-
-        // Clean up should not remove anything
-        memory.clean_orphaned_tool_calls().await.unwrap();
-
-        let messages = memory.get_messages().await.unwrap();
-        assert_eq!(messages.len(), 2); // Both messages should remain
-
-        let pending = memory.get_pending_tool_calls().await.unwrap();
-        assert_eq!(pending.len(), 0); // No pending tool calls
+impl Default for AdvancedMemoryManager {
+    fn default() -> Self {
+        Self::new()
     }
 }

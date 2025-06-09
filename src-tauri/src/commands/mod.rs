@@ -27,6 +27,7 @@ pub mod sound;
 pub mod tools;
 pub mod cloud;
 pub mod mcp;
+pub mod memory;
 pub mod always_listening;
 
 // Re-export commands for easy access in lib.rs
@@ -43,6 +44,7 @@ pub use self::sound::*;
 pub use self::tools::*;
 pub use self::cloud::*;
 pub use self::mcp::*;
+pub use self::memory::*;
 pub use self::always_listening::*;
 
 // Explicitly re-export tool functions to ensure they're available
