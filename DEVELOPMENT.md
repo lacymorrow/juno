@@ -148,17 +148,136 @@ tool_provider.register_async_tool(definition, executor).await;
 ```bash
 ./run-all-tests.sh           # Comprehensive test suite
 ./test-rust-units.sh         # Rust unit tests
-bun run test                 # Frontend tests
+npm test                     # Frontend tests (TypeScript/React)
+npm run test:watch           # Watch mode for development
 cargo check                  # REQUIRED compilation check
+cargo test --manifest-path src-tauri/Cargo.toml  # Rust tests directly
 ```
 
+### Frontend Testing (TypeScript/React)
+
+**Technology Stack:**
+- **Vitest**: Test runner and framework with TypeScript support
+- **Testing Library**: React component testing with user-centric queries
+- **jsdom**: Browser environment simulation for DOM testing
+- **vi (Vitest)**: Mocking and assertion utilities
+
+**Configuration:**
+- `vitest.config.ts`: Path alias resolution (`@` → `./src`) matching main vite config
+- `src/test/setup.ts`: Test environment setup with mocks for browser APIs
+
+**Test Structure:**
+```
+src/
+├── components/__tests__/
+│   ├── VoiceStatusIndicator.test.tsx
+│   └── DevToolsPanel.test.tsx
+└── lib/__tests__/
+    └── utils.test.ts
+```
+
+**Component Testing Patterns:**
+- **Tauri API Mocking**: Complete `@tauri-apps/api/core` and `@tauri-apps/api/event` mocks
+- **Plugin Mocking**: Voice transcription and system-level plugins
+- **Icon Mocking**: Lucide React icon components for UI testing
+- **Async Testing**: Proper handling of async operations with waitFor
+- **User Interactions**: FireEvent for button clicks and user input simulation
+
+**Coverage Areas:**
+- Component rendering and state management
+- Event handling and user interactions
+- Tauri API integration and error handling
+- Utility function validation and edge cases
+- Async operations and promise handling
+
+### Backend Testing (Rust)
+
+**Technology Stack:**
+- **Cargo Test**: Native Rust test framework
+- **tokio-test**: Async runtime testing utilities
+- **serde_json**: JSON serialization/deserialization validation
+- **mockall**: Mock object framework for complex dependencies
+
+**Test Categories:**
+
+#### 1. Core Data Structures (`src-tauri/src/agent/structs.rs`)
+- **Agent Errors**: Complete `AgentError` enum testing with error message validation
+- **Message Types**: User/Assistant message serialization and deserialization
+- **Tool Results**: Tool execution result handling and formatting
+- **Error Handling**: Edge cases and error propagation patterns
+
+#### 2. State Management (`src-tauri/src/state.rs`)
+- **AppState**: Initialization, configuration updates, and getter methods
+- **KeyboardShortcuts**: Platform-specific defaults and customization
+- **Permissions State**: Permission status tracking and updates
+- **Memory Management**: Arc-based state sharing and thread safety
+- **Async Operations**: Tokio mutex handling and deadlock prevention
+
+#### 3. Configuration System (`src-tauri/src/constants.rs`)
+- **Event Constants**: String value validation for all event types
+- **Default Values**: Platform-specific configuration defaults
+- **Invariants**: Ensuring critical constants remain unchanged
+
+**Testing Patterns:**
+- **Async Testing**: `#[tokio::test]` for async function testing
+- **Serialization Testing**: JSON roundtrip validation with serde
+- **Error Propagation**: Comprehensive error handling validation
+- **Thread Safety**: Multi-threaded access patterns with Arc/Mutex
+- **Timeout Handling**: Async operations with proper timeout controls
+
 ### Development Testing
+
+**Pre-commit Checklist:**
+- [ ] `cargo check --manifest-path src-tauri/Cargo.toml` passes
+- [ ] `npm test` passes with no failing tests
+- [ ] No compilation warnings or errors
+- [ ] New code includes appropriate test coverage
+
+**Testing During Development:**
 - Monitor debug logs during development
 - Test multi-turn conversations for memory persistence
 - Verify tool execution with real desktop interactions
 - Test voice integration end-to-end
 - Validate event flow with browser dev tools
-- Test permission scenarios
+- Test permission scenarios across different states
+
+**Mock Strategy:**
+- **Frontend**: Mock all Tauri APIs and external dependencies
+- **Backend**: Mock external services and system APIs only when necessary
+- **Integration Points**: Focus on API boundaries and data flow
+- **Async Operations**: Use proper async testing patterns with tokio-test
+
+### Test Organization
+
+**File Naming Conventions:**
+- Frontend: `*.test.tsx` for React components, `*.test.ts` for utilities
+- Backend: `#[cfg(test)]` modules at the end of source files
+- Integration: `tests/` directory for cross-component testing
+
+**Coverage Goals:**
+- **Frontend**: >90% line coverage for utilities, >80% for components
+- **Backend**: >95% for core logic, >80% for integration points
+- **Critical Paths**: 100% coverage for error handling and state management
+
+**Continuous Integration:**
+- All tests must pass on the target platform (macOS)
+- Cross-platform compatibility testing where applicable
+- Performance regression testing for critical paths
+- Memory leak detection for long-running operations
+
+### Platform Considerations
+
+**macOS Specific Testing:**
+- Permission state changes require actual macOS testing
+- Accessibility API integration needs system-level validation
+- Voice integration requires microphone access for full testing
+- Screen recording features need proper system permissions
+
+**Development vs Production:**
+- Built app testing for permission validation
+- Bundle identifier differences between dev and production
+- Entitlements and Info.plist inclusion verification
+- Code signing impact on accessibility features
 
 ## Performance Considerations
 
