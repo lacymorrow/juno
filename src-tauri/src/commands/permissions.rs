@@ -69,9 +69,7 @@ pub async fn check_permissions_status(app: AppHandle) -> Result<PermissionsState
     let input_monitoring = check_input_monitoring_permission().await?;
 
     let all_granted = accessibility.granted &&
-                     screen_recording.granted &&
-                     microphone.granted &&
-                     input_monitoring.granted;
+                     screen_recording.granted;
 
     let permissions_state = PermissionsState {
         accessibility,
@@ -102,9 +100,7 @@ pub async fn check_permissions_status_with_auto_redirect(app: AppHandle, auto_op
     let input_monitoring = check_input_monitoring_permission().await?;
 
     let all_granted = accessibility.granted &&
-                     screen_recording.granted &&
-                     microphone.granted &&
-                     input_monitoring.granted;
+                     screen_recording.granted;
 
     let permissions_state = PermissionsState {
         accessibility,
@@ -1044,8 +1040,8 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
         Ok(PermissionStatus {
             permission_type: "microphone".to_string(),
             granted,
-            required: true,
-            description: "Required for voice transcription and dictation features".to_string(),
+            required: false,
+            description: "Optional for voice transcription and dictation features".to_string(),
             instructions: "Go to System Preferences > Privacy & Security > Microphone and add Juno".to_string(),
         })
     }
