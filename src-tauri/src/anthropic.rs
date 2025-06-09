@@ -83,6 +83,25 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
+/// Simple JSX content detection
+fn is_jsx_content(content: &str) -> bool {
+    // Check for common JSX patterns
+    content.contains("<") && content.contains(">") && (
+        content.contains("Card") ||
+        content.contains("Alert") ||
+        content.contains("Button") ||
+        content.contains("Badge") ||
+        content.contains("Circle") ||
+        content.contains("Rectangle") ||
+        content.contains("Triangle") ||
+        content.contains("StatusCard") ||
+        content.contains("ColorShowcase") ||
+        content.contains("VisualDemo") ||
+        content.contains("className=") ||
+        content.contains("jsx") ||
+        content.contains("React")
+    )
+}
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
 
@@ -604,12 +623,30 @@ async fn execute_specialized_agent_task(
     match specialist_runner.run(specialist_query, tokio::sync::watch::channel(false).1).await {
         Ok(result) => {
             info!("Specialist {} agent completed successfully", agent_type);
-            Ok(serde_json::json!({
-                "success": true,
-                "agent_type": agent_type,
-                "result": result,
-                "message": format!("{} agent completed the task successfully", agent_type)
-            }))
+
+            // Check if the result contains JSX content
+            let is_jsx = is_jsx_content(&result);
+
+            if is_jsx {
+                // If the result contains JSX, return it directly to preserve JSX rendering
+                info!("Specialist {} agent returned JSX content, preserving for rendering", agent_type);
+                Ok(serde_json::json!({
+                    "success": true,
+                    "agent_type": agent_type,
+                    "result": result,
+                    "is_jsx": true,
+                    "message": format!("{} agent completed the task successfully with visual components", agent_type)
+                }))
+            } else {
+                // Standard non-JSX response
+                Ok(serde_json::json!({
+                    "success": true,
+                    "agent_type": agent_type,
+                    "result": result,
+                    "is_jsx": false,
+                    "message": format!("{} agent completed the task successfully", agent_type)
+                }))
+            }
         }
         Err(e) => {
             error!("Specialist {} agent failed: {}", agent_type, e);

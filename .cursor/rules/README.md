@@ -10,6 +10,7 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 
 ### 🔧 System Integration & Features
 - **[mcp-integration-system.mdc](mcp-integration-system.mdc)** ✅ - Complete MCP (Model Context Protocol) integration system with external tool servers, protocol compliance, and UI management
+- **[jsx-visual-response-system.mdc](jsx-visual-response-system.mdc)** ✅ - JSX Visual Response System enabling rich React component responses instead of raw SVG/HTML code
 - **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** ✅ - macOS permission handling fixes, built app permission detection, and system settings automation
 - **[streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)** ✅ - AI response streaming system with real-time UI updates and event handling
 - **[cloud-control-system.mdc](cloud-control-system.mdc)** ✅ - Cloud connectivity and remote control capabilities
@@ -56,6 +57,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ### ✅ Complete Features
 - **AI Computer Use**: All 17 Anthropic Computer Use actions implemented
 - **Voice Interaction**: Complete three-mode voice system with production-ready functionality
+- **JSX Visual Responses**: Rich React component responses instead of raw SVG/HTML code
 - **Hierarchical Agents**: Orchestrator with specialist agents for different domains
 - **MCP Integration**: External tool server support with protocol compliance
 - **Cloud Control**: Remote connectivity and command execution

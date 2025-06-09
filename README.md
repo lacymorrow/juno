@@ -22,6 +22,7 @@ bun run tauri dev
 ✅ **Complete macOS platform support** with accessibility APIs  
 ✅ **Multi-agent architecture** with intelligent task delegation  
 ✅ **Voice integration** with dual modes (Agent/Dictation)  
+✅ **JSX Visual Responses** with rich React component rendering  
 ✅ **Timer system** for long-running tasks with context resumption  
 ✅ **Browser automation** and advanced web interaction
 ✅ **MCP integration** for external tool server management
