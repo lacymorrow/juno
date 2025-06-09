@@ -21,6 +21,7 @@ Juno is a production-ready Tauri v2 desktop application implementing a hierarchi
 - **[src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs)** - Tauri app initialization and command registration
 - **[src-tauri/src/state.rs](mdc:src-tauri/src/state.rs)** - Centralized application state management
 - **[src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs)** - Main orchestrator agent entry point
+- **[src-tauri/src/agent/providers/factory.rs](mdc:src-tauri/src/agent/providers/factory.rs)** - AI provider factory and model management
 - **[ARCHITECTURE.md](mdc:ARCHITECTURE.md)** - Detailed architectural documentation
 
 ## Hierarchical Agent System ⭐
@@ -51,6 +52,110 @@ pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
 - **Browser Agent** ([agents/browser_agent.rs](mdc:src-tauri/src/agents/browser_agent.rs)): Web automation and content extraction
 - **Desktop Agent** ([agents/desktop_agent.rs](mdc:src-tauri/src/agents/desktop_agent.rs)): Native app interaction and UI automation
 - **File Agent** ([agents/file_agent.rs](mdc:src-tauri/src/agents/file_agent.rs)): Code editing and file system operations
+
+## AI Provider System & Model Management ⭐
+
+### Provider Architecture Pattern
+Located in [src-tauri/src/agent/providers/factory.rs](mdc:src-tauri/src/agent/providers/factory.rs):
+
+```rust
+// Data-driven model definitions - single source of truth
+Provider::Anthropic => &[
+    ModelDefinition {
+        id: model_ids::CLAUDE_4_OPUS,
+        name: "Claude 4 Opus",
+        category: ModelCategory::ComputerUse,
+        supports_computer_use: true,
+        is_recommended: true,
+    },
+    // ... other models
+]
+```
+
+### Scalable Model Management
+```rust
+// Centralized model constants
+mod model_ids {
+    pub const CLAUDE_4_OPUS: &str = "claude-opus-4-20250514";
+    pub const OPENAI_CUA: &str = "computer-use-preview";
+    // ... all model IDs defined once
+}
+
+// Auto-generated provider methods from definitions
+pub fn models(&self) -> Vec<String> {
+    self.model_definitions().iter().map(|def| def.id.to_string()).collect()
+}
+```
+
+### Provider Support Matrix
+| Provider | Computer Use | General Chat | Recommended Default |
+|----------|--------------|--------------|-------------------|
+| **Anthropic** | Claude 4, 3.7, 3.5 models | All models | Claude 3.7 Sonnet |
+| **OpenAI** | Computer-Using Agent (CUA) | GPT-4o, GPT-4 models | Computer-Using Agent |
+| **Rig AI** | Claude 3.5 (via Rig) | GPT models (via Rig) | Claude 3.5 Sonnet |
+| **Google Gemini** | None | Gemini 1.5, Pro models | Gemini 1.5 Pro |
+
+### Model Categories
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelCategory {
+    ComputerUse,   // Models that support desktop automation
+    GeneralChat,   // Models for text-only conversations
+}
+```
+
+### Provider Configuration Pattern
+```rust
+// Provider-specific brain creation with fallback
+let brain = match Provider::from_str(&provider_str) {
+    Some(Provider::Anthropic) => AnthropicBrain::from_env()?,
+    Some(Provider::OpenAI) => OpenAIBrain::from_env()?,
+    // ... with automatic fallback to Anthropic
+    None => {
+        warn!("Unknown provider '{}'. Falling back to Anthropic.", provider_str);
+        AnthropicBrain::from_env()?
+    }
+};
+```
+
+### Model Selection UI Integration
+Frontend components in [src/components/Settings.tsx](mdc:src/components/Settings.tsx):
+
+```typescript
+// Provider info with computer use capabilities
+interface ProviderInfo {
+  id: string;
+  name: string;
+  models: string[];
+  model_info: ModelInfo[];
+  computer_use_supported: boolean;
+  is_available: boolean;
+}
+
+// Model capability indicators
+{modelInfo.supports_computer_use ? (
+  <Badge variant="default">🖥️ Computer Use</Badge>
+) : (
+  <Badge variant="secondary">💬 Chat Only</Badge>
+)}
+```
+
+### Adding New Models (Scalable Pattern)
+```rust
+// 1. Add model ID constant
+pub const NEW_MODEL: &str = "new-model-id";
+
+// 2. Add to provider's model_definitions()
+ModelDefinition {
+    id: model_ids::NEW_MODEL,
+    name: "New Model Name",
+    category: ModelCategory::ComputerUse, // or GeneralChat
+    supports_computer_use: true,
+    is_recommended: false,
+},
+
+// 3. All other methods auto-update from definition
+```
 
 ## State Management Patterns
 

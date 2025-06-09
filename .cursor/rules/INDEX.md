@@ -224,10 +224,12 @@ This documentation structure provides comprehensive guidance for maintaining and
 ## 🎯 Find Rules By Topic
 
 ### Architecture & Core Systems
-- **System Architecture** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc)
-- **Agent Hierarchy** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc) (Section: Hierarchical Agent System)
-- **State Management** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc) (Section: State Management Patterns)
-- **Error Handling** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc) (Section: Error Handling Patterns)
+- **System Architecture** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#hierarchical-agent-system) ⭐
+- **Agent Hierarchy** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#agent-architecture-pattern)
+- **State Management** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#state-management-patterns)
+- **Error Handling** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#error-handling-patterns)
+- **Tool System** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#tool-system-patterns)
+- **AI Provider Management** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#ai-provider-system--model-management) ⭐ **NEW**
 
 ### Voice System
 - **All Voice Modes Overview** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc)
@@ -312,3 +314,82 @@ echo $?
 ---
 
 💡 **Quick Start**: Read [README.md](README.md) for complete overview, then dive into specific rule files based on your implementation needs. 
+
+### 🎤 **Voice System** (Complete Three-Mode Implementation)
+- **Voice Modes Overview** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc) ⭐
+- **Always Listening Mode** → [06-always-listening-mode.mdc](06-always-listening-mode.mdc) / [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)
+- **Dictation Mode** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#dictation-mode)
+- **Agent Mode** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#agent-mode)
+- **Mode Separation** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#mode-separation-and-integration)
+
+### 🔧 **System Integration**
+- **MCP Integration** → [mcp-integration-system.mdc](mcp-integration-system.mdc) ⭐
+- **Tool Discovery** → [mcp-integration-system.mdc](mcp-integration-system.mdc#tool-discovery-and-registration)
+- **External Servers** → [mcp-integration-system.mdc](mcp-integration-system.mdc#mcp-server-management)
+- **JSX Visual Responses** → [jsx-visual-response-system.mdc](jsx-visual-response-system.mdc)
+- **Streaming Responses** → [streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)
+- **Cloud Control** → [cloud-control-system.mdc](cloud-control-system.mdc)
+
+### 🐛 **Testing & Debugging**
+- **WebSocket Debugging** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)
+- **Permission Testing** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc#testing-and-validation)
+- **Voice System Testing** → [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc#testing-and-validation)
+- **Integration Testing** → [successful-merge-documentation.mdc](successful-merge-documentation.mdc)
+
+## 🚀 **Common Use Cases**
+
+### **I want to...**
+
+#### **Understand the System**
+- **Learn the architecture** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc) ⭐
+- **Understand AI providers** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#ai-provider-system--model-management) ⭐ **NEW**
+- **See what's implemented** → [README.md](README.md#implementation-status)
+- **Get quick overview** → [SUMMARY.md](SUMMARY.md)
+
+#### **Add New Features**
+- **Add new AI provider** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#provider-configuration-pattern) **NEW**
+- **Add new model** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#adding-new-models-scalable-pattern) **NEW**
+- **Add new tool** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#tool-system-patterns)
+- **Add MCP server** → [mcp-integration-system.mdc](mcp-integration-system.mdc#adding-new-mcp-servers)
+- **Add voice feature** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#implementation-patterns)
+
+#### **Fix Issues**
+- **Permission problems** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc) ⭐
+- **Security issues** → [security-stability-fixes.mdc](security-stability-fixes.mdc) ⭐
+- **Voice not working** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#troubleshooting)
+- **Network/WebSocket issues** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)
+- **Model switching issues** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#provider-configuration-pattern) **NEW**
+
+#### **Test & Validate**
+- **Test permissions** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc#testing-and-validation)
+- **Test voice modes** → [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc#testing-and-validation)
+- **Test WebSocket** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc#testing-procedures)
+- **Test AI providers** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#model-selection-ui-integration) **NEW**
+- **Validate security** → [security-stability-fixes.mdc](security-stability-fixes.mdc#testing-and-validation)
+
+## 📋 **Implementation Checklists**
+
+### **New AI Provider Checklist** ✅ NEW
+- [ ] Add model constants to `model_ids` module
+- [ ] Define `ModelDefinition` structs with capabilities
+- [ ] Implement `model_definitions()` method
+- [ ] Add provider brain implementation
+- [ ] Update UI with provider info and capability indicators
+- [ ] Test model switching and capability detection
+- [ ] Validate computer use functionality
+
+### **New Feature Checklist**
+- [ ] Review [core-architecture-patterns.mdc](core-architecture-patterns.mdc) for patterns
+- [ ] Check [security-stability-fixes.mdc](security-stability-fixes.mdc) for security requirements
+- [ ] Implement proper error handling with `AgentError`
+- [ ] Add appropriate tool definitions if needed
+- [ ] Test with real-world scenarios
+- [ ] Update documentation
+
+### **Security Review Checklist**
+- [ ] Input validation implemented
+- [ ] Path traversal protection added
+- [ ] Command injection prevention in place
+- [ ] Error handling without `.unwrap()`
+- [ ] Resource limits and DoS prevention
+- [ ] Permission handling with graceful degradation

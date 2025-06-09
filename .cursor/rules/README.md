@@ -5,12 +5,16 @@ This directory contains **consolidated cursor rules** for the Juno AI Computer U
 ## 📁 Rules Directory Structure
 
 ### 🎯 Core Architecture & Development
-- **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** ✅ - Hierarchical agent system, state management patterns, tool system architecture, and development guidelines
+- **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** ✅ - Hierarchical agent system, AI provider & model management, state management patterns, tool system architecture, and development guidelines
 - **[README.md](README.md)** ✅ - This documentation file providing complete overview of rules structure
 
 ### 🔒 Security & Stability
 - **[security-stability-fixes.mdc](security-stability-fixes.mdc)** ✅ **NEW** - Comprehensive security hardening documentation with production-ready protections, stability fixes, and development guidelines
 - **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** ✅ - macOS permission handling fixes, built app permission detection, and system settings automation
+
+### 🤖 AI Provider & Model Management
+- **Integrated in [core-architecture-patterns.mdc](core-architecture-patterns.mdc)** ✅ **NEW** - Scalable AI provider system with data-driven model definitions, support for Anthropic Claude, OpenAI CUA, Rig AI, and Google Gemini models
+- **Model Switcher Implementation** ✅ **NEW** - Complete UI integration for choosing between AI models with computer use capability indicators and provider status
 
 ### 🔧 System Integration & Features
 - **[mcp-integration-system.mdc](mcp-integration-system.mdc)** ✅ - Complete MCP (Model Context Protocol) integration system with external tool servers, protocol compliance, and UI management
@@ -66,6 +70,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ### ✅ Complete Features
 - **AI Computer Use**: All 17 Anthropic Computer Use actions implemented
+- **AI Provider System**: Multi-provider support with Anthropic Claude, OpenAI CUA, Rig AI, and Google Gemini models
+- **Model Management**: Scalable model switcher with computer use capability detection and user-friendly selection interface
 - **Voice Interaction**: Complete three-mode voice system with production-ready functionality
 - **JSX Visual Responses**: Rich React component responses instead of raw SVG/HTML code
 - **Hierarchical Agents**: Orchestrator with specialist agents for different domains
@@ -79,6 +85,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ### 🏗️ Architecture Components
 - **Orchestrator Agent**: Main agent with persistent memory and conversation continuity
 - **Specialist Agents**: Domain-specific agents (browser, desktop, file) with isolated memory
+- **AI Provider Factory**: Centralized model management with data-driven definitions and auto-generated methods
+- **Model Categories**: Computer Use vs General Chat classification with capability indicators
+- **Provider Support Matrix**: Clear mapping of which models support desktop automation vs text-only
 - **Tool Providers**: Shared tool execution system with lazy initialization and security validation
 - **State Management**: Centralized AppState with thread-safe access patterns and crash prevention
 - **Voice Plugin**: Custom Whisper.cpp-based transcription with multi-mode support and stability controls
@@ -89,9 +98,17 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ### File Organization Patterns
 - **Core Files**: Entry points and main application logic in [src-tauri/src/](../src-tauri/src/)
 - **Agent System**: Hierarchical agent implementations in [src-tauri/src/agents/](../src-tauri/src/agents/)
+- **AI Providers**: Provider factory and model management in [src-tauri/src/agent/providers/](../src-tauri/src/agent/providers/)
 - **Commands**: Tauri command handlers in [src-tauri/src/commands/](../src-tauri/src/commands/)
 - **Voice System**: Voice transcription plugin in [tauri-plugin-voice-transcription/](../tauri-plugin-voice-transcription/)
 - **Frontend**: React components and UI in [src/](../src/)
+
+### 🤖 AI Provider Standards (NEW)
+- **Model Definitions**: Define models once using `ModelDefinition` structs with centralized constants
+- **Provider Implementation**: Implement `model_definitions()` method for each provider with all metadata
+- **Computer Use Detection**: Clearly categorize models as `ComputerUse` or `GeneralChat` capabilities
+- **Default Model Selection**: First recommended model becomes provider default
+- **UI Integration**: Provider info includes `computer_use_supported` and `model_info` arrays
 
 ### 🔒 Security Standards (MANDATORY)
 - **Input Validation**: All user inputs must be validated against whitelists before processing
@@ -127,9 +144,16 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ### For New Features
 1. **Start with** [core-architecture-patterns.mdc](core-architecture-patterns.mdc) for architectural understanding
 2. **Review security requirements** in [security-stability-fixes.mdc](security-stability-fixes.mdc) for all input handling
-3. **Review relevant system docs** (MCP, voice, permissions) based on feature requirements
-4. **Follow established patterns** for state management, error handling, and tool integration
+3. **Review relevant system docs** (MCP, voice, permissions, AI providers) based on feature requirements
+4. **Follow established patterns** for state management, error handling, tool integration, and model management
 5. **Test comprehensively** with real-world scenarios and edge cases
+
+### For AI Provider & Model Development
+1. **Provider Implementation** - Follow data-driven pattern in [core-architecture-patterns.mdc](core-architecture-patterns.mdc) 
+2. **Model Management** - Use centralized constants and `ModelDefinition` structs for scalability
+3. **Computer Use Capabilities** - Clearly categorize models and implement capability detection
+4. **UI Integration** - Provide capability indicators and provider status in settings interface
+5. **Testing** - Verify model switching works across all providers and maintains state correctly
 
 ### For Bug Fixes
 1. **Check security implications** first - [security-stability-fixes.mdc](security-stability-fixes.mdc)
