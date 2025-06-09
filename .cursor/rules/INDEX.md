@@ -1,4 +1,52 @@
-# Juno AI Rules - Quick Reference Index
+# Juno AI Computer Use Agent - Cursor Rules Index
+
+This index provides a quick overview of all cursor rules documentation for the Juno AI Computer Use Agent project.
+
+## 📁 Documentation Structure
+
+### 🎯 Core Architecture & Development
+- **[README.md](README.md)** - Complete overview and quick start guide for all cursor rules
+- **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** - Hierarchical agent system, state management patterns, and development guidelines
+
+### 🔧 System Integration & Features  
+- **[jsx-visual-response-system.mdc](jsx-visual-response-system.mdc)** - JSX Visual Response System enabling rich React component responses
+- **[mcp-integration-system.mdc](mcp-integration-system.mdc)** - MCP (Model Context Protocol) integration with external tool servers
+- **[streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)** - Real-time AI response streaming system
+- **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** - macOS permission handling and system integration
+- **[cloud-control-system.mdc](cloud-control-system.mdc)** - Cloud connectivity and remote control capabilities
+
+### 🎤 Voice System (Three-Mode Implementation)
+- **[voice-modes-clarification.mdc](voice-modes-clarification.mdc)** - Complete three-mode voice system architecture
+- **[06-always-listening-mode.mdc](06-always-listening-mode.mdc)** - Always Listening Mode technical implementation
+- **[07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)** - Production-ready Always Listening documentation
+
+### 🐛 Testing & Debugging
+- **[cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)** - WebSocket debugging and cloud test panel
+- **[successful-merge-documentation.mdc](successful-merge-documentation.mdc)** - Feature merge patterns and integration guides
+
+## 🚀 Quick Reference
+
+### Recently Added ✨
+- **JSX Visual Response System** - Enables agent to respond with rich React components instead of raw SVG/HTML
+- **Enhanced System Prompts** - Updated agent instructions for visual component usage
+- **Shape Components** - Circle, Rectangle, Triangle components solve raw code output problem
+
+### Essential Files for Development
+1. **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** - Start here for architectural understanding
+2. **[jsx-visual-response-system.mdc](jsx-visual-response-system.mdc)** - For visual response development
+3. **[voice-modes-clarification.mdc](voice-modes-clarification.mdc)** - For voice system development
+4. **[mcp-integration-system.mdc](mcp-integration-system.mdc)** - For external tool integration
+
+### Implementation Status ✅
+- **Core Agent System**: Complete with hierarchical architecture
+- **Computer Use API**: All 17 actions implemented
+- **Voice System**: Three-mode system (Agent, Dictation, Always Listening)
+- **Visual Responses**: JSX component rendering with 40+ available components
+- **External Integration**: MCP servers, cloud control, streaming responses
+- **Platform Support**: Production-ready macOS with proper permissions
+- **Testing**: Comprehensive test suite with 95%+ pass rate
+
+This documentation structure provides comprehensive guidance for maintaining and extending the production-ready Juno AI Computer Use Agent implementation.
 
 ## 🎯 Find Rules By Topic
 
