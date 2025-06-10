@@ -76,6 +76,7 @@ impl BrowserAgent {
             crate::agent::structs::AgentError::OutputError(msg) => AgentError::OutputError(msg),
             crate::agent::structs::AgentError::ToolNotFound(msg) => AgentError::ToolNotFound(msg),
             crate::agent::structs::AgentError::Terminated => AgentError::Terminated,
+            crate::agent::structs::AgentError::PermissionDenied(msg) => AgentError::PermissionDenied(msg),
             crate::agent::structs::AgentError::Unknown(msg) => AgentError::Unknown(msg),
         }
     }
