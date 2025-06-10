@@ -704,6 +704,7 @@ pub fn run() {
             dev_list_files,
             dev_get_file_content,
             dev_set_file_content,
+            save_agent_response,
             // Text Editor Commands
             dev_text_editor_view,
             dev_text_editor_create,
