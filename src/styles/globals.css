@@ -223,3 +223,106 @@
     transform: scale(0.98);
   }
 }
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Dynamic Tool Notification Styles */
+.tool-notification {
+  font-family: system-ui, -apple-system, sans-serif;
+  border-left: 3px solid #3b82f6;
+}
+
+/* Tool Category Styles */
+.anthropiccomputeruse-category {
+  border-left-color: #8b5cf6; /* Purple for computer use tools */
+}
+
+.desktop-category {
+  border-left-color: #10b981; /* Green for desktop tools */
+}
+
+.browser-category {
+  border-left-color: #f59e0b; /* Orange for browser tools */
+}
+
+.timer-category {
+  border-left-color: #ef4444; /* Red for timer tools */
+}
+
+.basic-category {
+  border-left-color: #6b7280; /* Gray for basic tools */
+}
+
+.mcp-category {
+  border-left-color: #06b6d4; /* Cyan for MCP tools */
+}
+
+.screenshot-category {
+  border-left-color: #ec4899; /* Pink for screenshot tools */
+  background: linear-gradient(90deg, rgba(236, 72, 153, 0.1), transparent);
+}
+
+/* Event Type Styles */
+.request-event {
+  opacity: 0.9;
+  animation: slideIn 0.3s ease-out;
+}
+
+.result-event {
+  opacity: 1;
+  font-weight: 500;
+}
+
+/* Success/Failure Styles */
+.success-result {
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.1), transparent);
+}
+
+.failure-result {
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.1), transparent);
+}
+
+/* Special notification types */
+.screenshot-notification {
+  border-left-color: #ec4899;
+  background: linear-gradient(90deg, rgba(236, 72, 153, 0.15), transparent);
+  font-weight: 600;
+}
+
+.thinking-notification {
+  border-left-color: #8b5cf6;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.1), transparent);
+  font-style: italic;
+}
+
+.generic-content-notification {
+  border-left-color: #3b82f6;
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), transparent);
+}
+
+/* Animation for tool notifications */
+@keyframes slideIn {
+  from {
+    transform: translateX(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .tool-notification {
+    font-size: 0.9rem;
+    padding: 8px 12px;
+  }
+}

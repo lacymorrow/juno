@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
+import { FloatingBar } from "@/Bar";
 import {
   ArrowRight,
   ArrowLeft,
@@ -62,6 +63,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("welcome");
   const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
+  const [demoBarExpanded, setDemoBarExpanded] = useState(false);
 
   // Dynamically determine steps based on permissions state
   const steps: OnboardingStep[] = permissionsAlreadyGranted 
@@ -105,6 +107,13 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
       setCompletedSteps(prev => new Set([...prev, "permissions"]));
     }
   }, [permissionsAlreadyGranted]);
+
+  // Reset demo bar state when leaving welcome step
+  useEffect(() => {
+    if (currentStep !== "welcome") {
+      setDemoBarExpanded(false);
+    }
+  }, [currentStep]);
 
   // Handle example prompt selection
   const handleExamplePromptSelect = async (prompt: string) => {
@@ -178,6 +187,27 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
     }
   ];
 
+  // Helper function to get explicit color classes to prevent layout shifts
+  const getFeatureCardClasses = (color: string) => {
+    const colorClasses = {
+      blue: "border-blue-200 hover:border-blue-300",
+      green: "border-green-200 hover:border-green-300", 
+      purple: "border-purple-200 hover:border-purple-300",
+      orange: "border-orange-200 hover:border-orange-300"
+    };
+    return colorClasses[color as keyof typeof colorClasses] || "border-gray-200 hover:border-gray-300";
+  };
+
+  const getIconClasses = (color: string) => {
+    const iconClasses = {
+      blue: "bg-blue-100 text-blue-600",
+      green: "bg-green-100 text-green-600",
+      purple: "bg-purple-100 text-purple-600", 
+      orange: "bg-orange-100 text-orange-600"
+    };
+    return iconClasses[color as keyof typeof iconClasses] || "bg-gray-100 text-gray-600";
+  };
+
   // Render individual steps
   const renderWelcomeStep = () => (
     <div className="max-w-2xl mx-auto text-center space-y-8">
@@ -198,6 +228,69 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
           Your intelligent desktop companion that can see, understand, and control your computer like a human would.
         </p>
       </div>
+
+      {/* FloatingBar Demo Section */}
+      <Card className="border-2 border-purple-200 bg-purple-50/50">
+        <CardContent className="p-6">
+          <div className="text-center space-y-4">
+            <h3 className="font-semibold text-purple-900 mb-3">Meet Your AI Assistant</h3>
+            <p className="text-sm text-purple-800 mb-4">
+              This is Juno's main interface - a simple bar that's always ready to help
+            </p>
+            
+            {/* Demo FloatingBar - Static Preview */}
+            <div className="flex justify-center mb-4">
+              <div className="relative bg-background rounded-lg border-2 border-dashed border-purple-300 p-8 w-80 h-20 flex items-center justify-center">
+                <div 
+                  className={`flex items-center justify-center bg-black/90 text-white rounded-full shadow-lg border border-white/20 backdrop-blur-md transition-all duration-300 hover:scale-105 cursor-pointer ${
+                    demoBarExpanded 
+                      ? "h-[40px] w-[240px] px-3" 
+                      : "h-[20px] w-[60px] px-2"
+                  }`}
+                  onClick={() => setDemoBarExpanded(!demoBarExpanded)}
+                >
+                  {demoBarExpanded ? (
+                    <div className="flex items-center justify-between w-full h-full">
+                      <input
+                        type="text"
+                        placeholder="Type a command..."
+                        className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/50"
+                        readOnly
+                      />
+                      <button className="text-muted-foreground hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m22 2-7 20-4-9-9-4Z"/>
+                          <path d="M22 2 11 13"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-5 h-[4px] bg-emerald-400 rounded-full"></div>
+                  )}
+                </div>
+                <div className="absolute -top-2 -left-2 text-xs text-purple-600 bg-purple-100 px-2 py-1 rounded">
+                  {demoBarExpanded ? "Click to collapse!" : "Click to expand!"}
+                </div>
+              </div>
+            </div>
+            
+            <div className="text-left space-y-2 max-w-sm mx-auto">
+              <div className="flex items-center gap-2 text-sm text-purple-800">
+                <div className="w-2 h-2 bg-purple-500 rounded-full flex-shrink-0"></div>
+                <span>Click the bar to give voice or text commands</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-purple-800">
+                <div className="w-2 h-2 bg-purple-500 rounded-full flex-shrink-0"></div>
+                <span>Stays out of your way until you need it</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-purple-800">
+                <div className="w-2 h-2 bg-purple-500 rounded-full flex-shrink-0"></div>
+                <span>Works with any app or website</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="border-2 border-blue-200 bg-blue-50/50">
         <CardContent className="p-6">
@@ -252,11 +345,11 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
 
       <div className="grid md:grid-cols-2 gap-6">
         {featureCards.map((feature, index) => (
-          <Card key={index} className={`border-2 transition-all duration-300 hover:shadow-lg border-${feature.color}-200`}>
+          <Card key={index} className={`border-2 transition-colors duration-200 hover:shadow-lg ${getFeatureCardClasses(feature.color)}`}>
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-lg bg-${feature.color}-100`}>
-                  <feature.icon className={`w-6 h-6 text-${feature.color}-600`} />
+                <div className={`p-3 rounded-lg ${getIconClasses(feature.color)}`}>
+                  <feature.icon className="w-6 h-6" />
                 </div>
                 <CardTitle className="text-lg">{feature.title}</CardTitle>
               </div>
@@ -481,7 +574,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             <div className="text-left space-y-2">
               <div className="flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">Type your request in the chat box below</span>
+                <span className="text-sm text-green-800">Start chatting once setup is complete</span>
               </div>
               <div className="flex items-center gap-2">
                 <Mic className="w-4 h-4 text-green-600" />
@@ -541,7 +634,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             <button
               key={step}
               onClick={() => index <= currentStepIndex ? skipToStep(step) : undefined}
-              className={`w-3 h-3 rounded-full transition-all ${
+              className={`w-3 h-3 rounded-full transition-colors duration-200 ${
                 index === currentStepIndex
                   ? "bg-primary ring-2 ring-primary/20"
                   : completedSteps.has(step) || (step === "permissions" && permissionsAlreadyGranted)

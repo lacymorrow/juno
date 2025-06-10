@@ -198,6 +198,28 @@ macro_rules! generate_invoke_handler {
             list_ai_providers,
             set_ai_provider,
             get_agent_execution_progress,
+
+            // Always Listening Commands
+            get_always_listening_status,
+            set_always_listening_status,
+            toggle_always_listening_mode,
+            get_always_listening_sensitivity,
+            set_always_listening_sensitivity,
+            get_always_listening_wake_words,
+            set_always_listening_wake_words,
+
+            // Notification Commands
+            get_notification_settings,
+            set_notification_type,
+            set_notification_sound_enabled,
+            set_notification_duration,
+            set_notification_position,
+            set_notification_show_icons,
+            set_notification_persist_important,
+            check_notification_permission,
+            request_notification_permission,
+            send_notification,
+            test_notification,
         ]
     };
 }

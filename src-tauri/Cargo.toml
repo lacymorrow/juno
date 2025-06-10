@@ -68,6 +68,7 @@ hound = "3.5"
 cpal = "0.15"
 rubato = "0.14.1"
 chrono = "0.4"
+html-escape = "0.2"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 lazy_static = "1.4"
 # Voice transcription plugin
@@ -89,6 +90,7 @@ url = "2.4"
 gethostname = "0.4"
 tauri-plugin-websocket = "2.0"
 regex = "1.0"
+tauri-plugin-autostart = "2.3.0"
 
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem

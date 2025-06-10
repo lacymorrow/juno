@@ -20,6 +20,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
+import { notificationService } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -27,7 +28,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowLeft,
+  Code,
+  Copy,
   DogIcon,
+  FileText,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -36,7 +40,9 @@ import {
   Trash2,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
+import { Toaster } from "sonner";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
@@ -275,6 +281,10 @@ function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
+  // Copy and save operation state
+  const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+
   // Onboarding state
   const [_showOnboarding, setShowOnboarding] = useState(false);
   const [_onboardingChecked, setOnboardingChecked] = useState(false);
@@ -297,6 +307,10 @@ function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
+        // Initialize notification service
+        await notificationService.initialize();
+        console.log("Notification service initialized");
+
         // First check permissions
         const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
@@ -1246,6 +1260,70 @@ function App() {
       const { type, payload } = event.payload;
       const currentTime = Date.now();
 
+      // Show transparent notifications for tool calls
+      if (type === "tool_call_request" && "tool_name" in payload) {
+        const requestPayload = payload as ToolCallRequestPayload;
+        const toolName = requestPayload.tool_name;
+
+        // Get user-friendly tool name
+        const friendlyToolName = getFriendlyToolName(toolName);
+
+        // Show notification based on tool type
+        if (isScreenshotTool(toolName)) {
+          toast.info(`📸 Taking screenshot...`, {
+            description: "AI is capturing the current screen",
+            duration: 3000,
+          });
+        } else if (isFileOperationTool(toolName)) {
+          toast.info(`📁 ${friendlyToolName}`, {
+            description: "AI is working with files",
+            duration: 2000,
+          });
+        } else if (isBrowserTool(toolName)) {
+          toast.info(`🌐 ${friendlyToolName}`, {
+            description: "AI is using the browser",
+            duration: 2000,
+          });
+        } else if (isSystemTool(toolName)) {
+          toast.info(`⚙️ ${friendlyToolName}`, {
+            description: "AI is using system controls",
+            duration: 2000,
+          });
+        } else {
+          // Generic tool notification
+          toast.info(`🔧 ${friendlyToolName}`, {
+            description: "AI is using a tool",
+            duration: 2000,
+          });
+        }
+      } else if (type === "tool_call_result" && "tool_name" in payload) {
+        const resultPayload = payload as ToolCallResultPayload;
+        const toolName = resultPayload.tool_name;
+        const success = resultPayload.success;
+
+        // Show completion notification for important tools
+        if (isScreenshotTool(toolName)) {
+          if (success) {
+            toast.success(`📸 Screenshot captured`, {
+              description: "AI has successfully captured the screen",
+              duration: 2000,
+            });
+          } else {
+            toast.error(`📸 Screenshot failed`, {
+              description: "AI could not capture the screen",
+              duration: 3000,
+            });
+          }
+        } else if (!success && isImportantTool(toolName)) {
+          // Show error notifications for failed important tools
+          const friendlyToolName = getFriendlyToolName(toolName);
+          toast.error(`❌ ${friendlyToolName} failed`, {
+            description: "The AI tool encountered an error",
+            duration: 3000,
+          });
+        }
+      }
+
       setConversation((prev) => {
         let newMessage: ChatMessage | null = null;
 
@@ -1301,6 +1379,84 @@ function App() {
       unlistenPromise.then((unlistenFn) => unlistenFn());
     };
   }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
+
+  // Helper functions for tool categorization
+  const isScreenshotTool = (toolName: string): boolean => {
+    return (
+      toolName.includes("screenshot") ||
+      toolName.includes("capture") ||
+      toolName === "screenshot" ||
+      toolName === "capture_screenshot" ||
+      toolName === "capture_element_screenshot" ||
+      toolName === "browser_screenshot"
+    );
+  };
+
+  const isFileOperationTool = (toolName: string): boolean => {
+    return (
+      toolName.includes("file") ||
+      toolName.includes("read") ||
+      toolName.includes("write") ||
+      toolName.includes("list") ||
+      toolName === "write_file" ||
+      toolName === "read_file" ||
+      toolName === "list_directory"
+    );
+  };
+
+  const isBrowserTool = (toolName: string): boolean => {
+    return (
+      toolName.includes("browser") ||
+      toolName.includes("navigate") ||
+      toolName.includes("click") ||
+      toolName.includes("web")
+    );
+  };
+
+  const isSystemTool = (toolName: string): boolean => {
+    return (
+      toolName.includes("mouse") ||
+      toolName.includes("keyboard") ||
+      toolName.includes("key") ||
+      toolName.includes("click") ||
+      toolName.includes("type") ||
+      toolName === "execute_shell_command"
+    );
+  };
+
+  const isImportantTool = (toolName: string): boolean => {
+    return (
+      isScreenshotTool(toolName) ||
+      isFileOperationTool(toolName) ||
+      isBrowserTool(toolName) ||
+      isSystemTool(toolName)
+    );
+  };
+
+  const getFriendlyToolName = (toolName: string): string => {
+    // Convert snake_case tool names to user-friendly names
+    const friendlyNames: { [key: string]: string } = {
+      capture_screenshot: "Taking screenshot",
+      capture_element_screenshot: "Taking element screenshot",
+      browser_screenshot: "Taking browser screenshot",
+      write_file: "Writing file",
+      read_file: "Reading file",
+      list_directory: "Listing directory",
+      browser_navigate: "Navigating to webpage",
+      browser_click: "Clicking element",
+      browser_type: "Typing in browser",
+      execute_shell_command: "Running shell command",
+      mouse_click: "Clicking mouse",
+      mouse_move: "Moving mouse",
+      key_press: "Pressing key",
+      type_text: "Typing text",
+    };
+
+    return (
+      friendlyNames[toolName] ||
+      toolName.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+    );
+  };
 
   // Listen for streaming events
   useEffect(() => {
@@ -1928,6 +2084,260 @@ function App() {
     );
   };
 
+  // Copy and Save handlers for agent responses with enhanced feedback
+  const handleCopyResponse = useCallback(
+    async (content: string, messageIndex: number) => {
+      const messageId = `copy-${messageIndex}`;
+      setCopyingMessageId(messageId);
+
+      try {
+        await navigator.clipboard.writeText(content);
+        console.log("✅ Copied to clipboard successfully");
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: "✅ Response copied to clipboard",
+            timestamp: Date.now(),
+          },
+        ]);
+      } catch (error) {
+        console.error("❌ Failed to copy to clipboard:", error);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `❌ Failed to copy to clipboard: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } finally {
+        // Clear loading state after a brief delay for visual feedback
+        setTimeout(() => setCopyingMessageId(null), 1000);
+      }
+    },
+    []
+  );
+
+  const handleSaveResponse = useCallback(
+    async (
+      content: string,
+      format: "html" | "markdown",
+      messageIndex: number
+    ) => {
+      const messageId = `save-${format}-${messageIndex}`;
+      setSavingMessageId(messageId);
+
+      try {
+        console.log(`💾 Saving response as ${format.toUpperCase()}...`);
+        const filePath = await invoke("save_agent_response", {
+          content,
+          format,
+          suggested_filename: `agent_response_${Date.now()}`,
+        });
+        console.log(`✅ Response saved to: ${filePath}`);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `✅ Response saved as ${format.toUpperCase()} to: ${filePath}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } catch (error) {
+        console.error(`❌ Failed to save response as ${format}:`, error);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `❌ Failed to save response as ${format.toUpperCase()}: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } finally {
+        // Clear loading state after a brief delay for visual feedback
+        setTimeout(() => setSavingMessageId(null), 1000);
+      }
+    },
+    []
+  );
+
+  // Enhanced agent event listener for dynamic tool notifications
+  useEffect(() => {
+    const unlistenAgentEvent = listen<{
+      type: string;
+      payload: {
+        tool_name?: string;
+        tool_category?: string;
+        tool_description?: string;
+        notification_level?: string;
+        estimated_duration?: string;
+        execution_time_ms?: number;
+        success?: boolean;
+        content?: string;
+        screenshot_base64?: string;
+        [key: string]: any;
+      };
+    }>("agent-event", (event) => {
+      const { type: eventType, payload } = event.payload;
+
+      // Handle different event types with dynamic metadata
+      switch (eventType) {
+        case "tool_call_request": {
+          const notificationLevel = payload.notification_level || "standard";
+
+          // Only show notifications for non-silent tools
+          if (notificationLevel !== "silent") {
+            const message =
+              payload.content || `🔧 Executing ${payload.tool_name}...`;
+            const duration = getNotificationDuration(
+              notificationLevel,
+              payload.estimated_duration
+            );
+
+            toast.info(message, {
+              duration,
+              className: getNotificationClassName(
+                payload.tool_category,
+                "request"
+              ),
+            });
+          }
+          break;
+        }
+
+        case "tool_call_result": {
+          const notificationLevel = payload.notification_level || "standard";
+          const success = payload.success ?? true;
+
+          // Only show notifications for non-silent tools
+          if (notificationLevel !== "silent") {
+            const message =
+              payload.content ||
+              (success ? `✅ Tool completed` : `❌ Tool failed`);
+
+            const duration = getNotificationDuration(notificationLevel);
+            const toastType = success ? "success" : "error";
+
+            toast[toastType](message, {
+              duration,
+              className: getNotificationClassName(
+                payload.tool_category,
+                "result",
+                success
+              ),
+            });
+
+            // Special handling for screenshot results
+            if (payload.screenshot_base64 && success) {
+              toast.success("📸 Screenshot captured", {
+                duration: 3000,
+                className: "screenshot-notification",
+              });
+            }
+          }
+          break;
+        }
+
+        case "thinking": {
+          if (payload.content) {
+            toast.info(`💭 ${payload.content}`, {
+              duration: 2000,
+              className: "thinking-notification",
+            });
+          }
+          break;
+        }
+
+        case "screenshot": {
+          toast.success("📸 Screenshot captured", {
+            duration: 3000,
+            className: "screenshot-notification",
+          });
+          break;
+        }
+
+        case "generic_content": {
+          if (payload.content) {
+            toast.info(payload.content, {
+              duration: 4000,
+              className: "generic-content-notification",
+            });
+          }
+          break;
+        }
+
+        default:
+          // Handle unknown event types gracefully
+          console.log("Unknown agent event type:", eventType, payload);
+          break;
+      }
+    });
+
+    return () => {
+      unlistenAgentEvent.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Helper function to determine notification duration based on level and estimated duration
+  const getNotificationDuration = (
+    notificationLevel: string,
+    estimatedDuration?: string
+  ): number => {
+    // Base duration by notification level
+    const baseDurations = {
+      minimal: 1500,
+      standard: 3000,
+      detailed: 5000,
+    };
+
+    const baseDuration =
+      baseDurations[notificationLevel as keyof typeof baseDurations] || 3000;
+
+    // Adjust based on estimated duration
+    if (estimatedDuration) {
+      const durationMultipliers = {
+        instant: 0.5,
+        short: 0.8,
+        medium: 1.0,
+        long: 1.5,
+      };
+      const multiplier =
+        durationMultipliers[
+          estimatedDuration as keyof typeof durationMultipliers
+        ] || 1.0;
+      return Math.round(baseDuration * multiplier);
+    }
+
+    return baseDuration;
+  };
+
+  // Helper function to get notification styling based on tool category
+  const getNotificationClassName = (
+    toolCategory?: string,
+    eventType?: string,
+    success?: boolean
+  ): string => {
+    let className = "tool-notification";
+
+    // Add category-specific styling
+    if (toolCategory) {
+      className += ` ${toolCategory.toLowerCase()}-category`;
+    }
+
+    // Add event type styling
+    if (eventType) {
+      className += ` ${eventType}-event`;
+    }
+
+    // Add success/failure styling for results
+    if (eventType === "result" && success !== undefined) {
+      className += success ? " success-result" : " failure-result";
+    }
+
+    return className;
+  };
+
   return (
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
@@ -2172,62 +2582,180 @@ function App() {
                                     : "justify-start"
                                 }`}
                               >
-                                <span
-                                  className={cn(
-                                    "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
-                                    msg.role === "user"
-                                      ? "bg-primary text-primary-foreground"
-                                      : msg.role === "assistant"
-                                      ? "bg-muted"
-                                      : msg.role === "system" &&
-                                        msg.screenshot_base64
-                                      ? "bg-muted/80 border border-primary/20 p-2"
-                                      : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
-                                  )}
-                                >
+                                <div className="relative group max-w-[85%]">
+                                  <span
+                                    className={cn(
+                                      "inline-block w-full px-3 py-1.5 rounded-lg shadow-sm",
+                                      msg.role === "user"
+                                        ? "bg-primary text-primary-foreground"
+                                        : msg.role === "assistant"
+                                        ? "bg-muted"
+                                        : msg.role === "system" &&
+                                          msg.screenshot_base64
+                                        ? "bg-muted/80 border border-primary/20 p-2"
+                                        : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
+                                    )}
+                                  >
+                                    {msg.role === "assistant" &&
+                                    (!msg.content ||
+                                      msg.content.trim() === "") ? (
+                                      <span className="text-muted-foreground italic flex items-center gap-2">
+                                        <span>✓</span>
+                                        <span>Task completed successfully</span>
+                                      </span>
+                                    ) : msg.isJsx ||
+                                      (msg.role === "assistant" &&
+                                        isJsxContent(msg.content)) ? (
+                                      <JsxMessageRenderer jsx={msg.content} />
+                                    ) : (
+                                      msg.content
+                                    )}
+                                    {msg.screenshot_base64 && (
+                                      <div
+                                        className={cn(
+                                          "mt-2",
+                                          msg.role !== "system" &&
+                                            "border-t pt-2"
+                                        )}
+                                      >
+                                        <div className="text-xs text-muted-foreground mb-1">
+                                          {msg.role === "system"
+                                            ? "Screenshot captured by AI:"
+                                            : "Screenshot:"}
+                                        </div>
+                                        <div className="relative">
+                                          <img
+                                            src={`data:image/png;base64,${msg.screenshot_base64}`}
+                                            alt="Screenshot"
+                                            className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                                          />
+                                          <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+                                        </div>
+                                      </div>
+                                    )}
+                                    {/* Show typing indicator for streaming messages */}
+                                    {msg.isStreaming && (
+                                      <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
+                                        |
+                                      </span>
+                                    )}
+                                  </span>
+
+                                  {/* Action buttons for assistant messages with content - positioned at bottom */}
                                   {msg.role === "assistant" &&
-                                  (!msg.content ||
-                                    msg.content.trim() === "") ? (
-                                    <span className="text-muted-foreground italic flex items-center gap-2">
-                                      <span>✓</span>
-                                      <span>Task completed successfully</span>
-                                    </span>
-                                  ) : msg.isJsx ||
-                                    (msg.role === "assistant" &&
-                                      isJsxContent(msg.content)) ? (
-                                    <JsxMessageRenderer jsx={msg.content} />
-                                  ) : (
-                                    msg.content
-                                  )}
-                                  {msg.screenshot_base64 && (
-                                    <div
-                                      className={cn(
-                                        "mt-2",
-                                        msg.role !== "system" && "border-t pt-2"
-                                      )}
-                                    >
-                                      <div className="text-xs text-muted-foreground mb-1">
-                                        {msg.role === "system"
-                                          ? "Screenshot captured by AI:"
-                                          : "Screenshot:"}
+                                    msg.content &&
+                                    msg.content.trim() !== "" &&
+                                    !msg.isStreaming && (
+                                      <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
+                                        <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                              "h-7 w-7 p-0 transition-all duration-150 relative",
+                                              copyingMessageId ===
+                                                `copy-${index}`
+                                                ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
+                                                : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
+                                            )}
+                                            onClick={() =>
+                                              handleCopyResponse(
+                                                msg.content,
+                                                index
+                                              )
+                                            }
+                                            disabled={
+                                              copyingMessageId ===
+                                              `copy-${index}`
+                                            }
+                                            title={
+                                              copyingMessageId ===
+                                              `copy-${index}`
+                                                ? "Copying..."
+                                                : "Copy response to clipboard"
+                                            }
+                                          >
+                                            {copyingMessageId ===
+                                            `copy-${index}` ? (
+                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                              <Copy size={14} />
+                                            )}
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                              "h-7 w-7 p-0 transition-all duration-150 relative",
+                                              savingMessageId ===
+                                                `save-html-${index}`
+                                                ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
+                                                : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
+                                            )}
+                                            onClick={() =>
+                                              handleSaveResponse(
+                                                msg.content,
+                                                "html",
+                                                index
+                                              )
+                                            }
+                                            disabled={
+                                              savingMessageId ===
+                                              `save-html-${index}`
+                                            }
+                                            title={
+                                              savingMessageId ===
+                                              `save-html-${index}`
+                                                ? "Saving HTML..."
+                                                : "Save as HTML file with professional styling"
+                                            }
+                                          >
+                                            {savingMessageId ===
+                                            `save-html-${index}` ? (
+                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                              <Code size={14} />
+                                            )}
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                              "h-7 w-7 p-0 transition-all duration-150 relative",
+                                              savingMessageId ===
+                                                `save-markdown-${index}`
+                                                ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
+                                                : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
+                                            )}
+                                            onClick={() =>
+                                              handleSaveResponse(
+                                                msg.content,
+                                                "markdown",
+                                                index
+                                              )
+                                            }
+                                            disabled={
+                                              savingMessageId ===
+                                              `save-markdown-${index}`
+                                            }
+                                            title={
+                                              savingMessageId ===
+                                              `save-markdown-${index}`
+                                                ? "Saving Markdown..."
+                                                : "Save as Markdown file for documentation"
+                                            }
+                                          >
+                                            {savingMessageId ===
+                                            `save-markdown-${index}` ? (
+                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                              <FileText size={14} />
+                                            )}
+                                          </Button>
+                                        </div>
                                       </div>
-                                      <div className="relative">
-                                        <img
-                                          src={`data:image/png;base64,${msg.screenshot_base64}`}
-                                          alt="Screenshot"
-                                          className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-                                        />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-                                      </div>
-                                    </div>
-                                  )}
-                                  {/* Show typing indicator for streaming messages */}
-                                  {msg.isStreaming && (
-                                    <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
-                                      |
-                                    </span>
-                                  )}
-                                </span>
+                                    )}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -2340,6 +2868,15 @@ function App() {
           {appVersion}
         </div>
       )}
+
+      {/* Toast notifications */}
+      <Toaster 
+        position="bottom-right"
+        expand={true}
+        richColors={true}
+        closeButton={true}
+        duration={5000}
+      />
     </main>
   );
 }

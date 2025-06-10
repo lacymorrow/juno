@@ -137,7 +137,7 @@ pub async fn submit_query(
 
     // Generate a unique execution ID for this agent run
     let execution_id = uuid::Uuid::new_v4().to_string();
-    
+
     // Mark agent execution as started with max iterations (both modes use 15)
     const MAX_ITERATIONS: u32 = 15;
     state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
@@ -248,7 +248,7 @@ pub async fn submit_query(
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
                     crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
-                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id);
                     return Err(err_msg);
                 }
             };
@@ -289,7 +289,7 @@ pub async fn submit_query(
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
                     crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
-                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id);
                     return Err(err_msg);
                 }
             };

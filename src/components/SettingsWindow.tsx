@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AlertCircle,
+  Bell,
   Brain,
   CheckCircle,
   ExternalLink,
@@ -50,6 +51,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import NotificationSettings from "@/components/settings/sections/NotificationSettings";
 
 interface SettingsCategory {
   id: string;
@@ -70,6 +72,12 @@ const settingsCategories: SettingsCategory[] = [
     name: "Voice & Audio",
     icon: <Mic className="w-8 h-8" />,
     description: "Voice transcription and audio settings",
+  },
+  {
+    id: "notifications",
+    name: "Notifications",
+    icon: <Bell className="w-8 h-8" />,
+    description: "System and toast notification preferences",
   },
   {
     id: "ai",
@@ -692,6 +700,8 @@ function SettingsContent({
         return <GeneralSettings settings={settings} />;
       case "voice":
         return <VoiceSettings settings={settings} />;
+      case "notifications":
+        return <NotificationSettings />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
       case "network":
@@ -1191,6 +1201,11 @@ function NetworkSettings({
   const [newServerJson, setNewServerJson] = useState("");
 
   const getMcpServerStatusBadge = (status: any) => {
+    // Handle undefined/null status
+    if (!status) {
+      return <Badge variant="outline">Disconnected</Badge>;
+    }
+
     if (status.Connected !== undefined) {
       return (
         <Badge variant="default" className="bg-green-500">
@@ -1209,6 +1224,11 @@ function NetworkSettings({
   };
 
   const getMcpServerStatusIcon = (status: any) => {
+    // Handle undefined/null status
+    if (!status) {
+      return <Square className="h-4 w-4 text-gray-400" />;
+    }
+
     if (status.Connected !== undefined) {
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     } else if (status.Connecting !== undefined) {
@@ -1237,7 +1257,7 @@ function NetworkSettings({
         max_retries: parsedServer.max_retries || 3,
       };
 
-      await invoke("add_mcp_server", { server: newServer });
+      await invoke("add_mcp_server", { config: newServer });
       toast.success("MCP server added successfully");
       setNewServerJson("");
       await settings.loadMcpServers();
@@ -2167,6 +2187,21 @@ function AdvancedSettings({
 }: {
   settings: ReturnType<typeof useSettings>;
 }) {
+  const [debugMode, setDebugMode] = React.useState(false);
+
+  // Load debug mode status on mount
+  React.useEffect(() => {
+    const loadDebugMode = async () => {
+      try {
+        const enabled = await invoke("get_debug_mode");
+        setDebugMode(enabled as boolean);
+      } catch (error) {
+        console.error("Failed to get debug mode status:", error);
+      }
+    };
+    loadDebugMode();
+  }, []);
+
   return (
     <div className="space-y-6">
       <div>
@@ -2188,9 +2223,11 @@ function AdvancedSettings({
                 </div>
               </div>
               <Switch
+                checked={debugMode}
                 onCheckedChange={async (enabled) => {
                   try {
                     await invoke("set_debug_mode", { enabled });
+                    setDebugMode(enabled);
                     toast.success(
                       `Debug mode ${enabled ? "enabled" : "disabled"}`
                     );
@@ -2209,18 +2246,8 @@ function AdvancedSettings({
                 </div>
               </div>
               <Switch
-                onCheckedChange={async (enabled) => {
-                  try {
-                    await invoke("set_performance_monitoring", { enabled });
-                    toast.success(
-                      `Performance monitoring ${
-                        enabled ? "enabled" : "disabled"
-                      }`
-                    );
-                  } catch (error) {
-                    toast.error("Failed to toggle performance monitoring");
-                  }
-                }}
+                checked={settings.performanceMonitoringEnabled}
+                onCheckedChange={settings.handlePerformanceMonitoringChange}
               />
             </div>
           </CardContent>

@@ -8,6 +8,7 @@ use tracing::warn;
 // Declare the submodules
 pub mod registry;
 pub mod app_url;
+pub mod autostart;
 pub mod core;
 pub mod dev;
 pub mod dictation;
@@ -30,13 +31,16 @@ pub mod cloud;
 pub mod mcp;
 pub mod memory;
 pub mod always_listening;
+pub mod notifications;
 
 // Re-export commands for easy access in lib.rs
+pub use self::autostart::*;
 pub use self::core::*;
 pub use self::dev::*;
 pub use self::dictation::*;
 pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
 pub use self::floating_bar::*;
+pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};
 pub use self::mouse::*;
 pub use self::permissions::*;
 pub use self::shell::*;

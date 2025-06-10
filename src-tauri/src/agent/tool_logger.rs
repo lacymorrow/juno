@@ -1,10 +1,14 @@
-use serde::Serialize;
-use serde_json::{Value};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn, error};
-use futures::FutureExt;
+use crate::agent::structs::AgentError;
+use crate::state::AppState;
 use chrono::{DateTime, Local};
+use futures::FutureExt;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Mutex as TokioMutex;
+use tracing::{debug, error, info, warn};
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -349,6 +353,11 @@ struct ToolCallRequestPayload {
     tool_name: String,
     tool_args: Value, // Keep as Value for flexibility
     content: Option<String>, // Optional descriptive content
+    // NEW: Dynamic tool metadata for intelligent notifications
+    tool_category: Option<String>, // Tool category for dynamic icon/message selection
+    tool_description: Option<String>, // Tool description for context
+    notification_level: String, // "silent", "minimal", "standard", "detailed"
+    estimated_duration: Option<String>, // "instant", "short", "medium", "long"
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -358,6 +367,10 @@ struct ToolCallResultPayload {
     success: bool,
     content: Option<String>, // Optional descriptive content
     screenshot_base64: Option<String>, // Optional screenshot from the tool
+    // NEW: Additional result metadata
+    tool_category: Option<String>, // Tool category for consistent handling
+    execution_time_ms: Option<u64>, // Actual execution time for performance tracking
+    notification_level: String, // Match the request level
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -417,6 +430,39 @@ pub fn log_tool_call_request(app_handle: &AppHandle, tool_name: &str, tool_args:
             tool_name: tool_name.to_string(),
             tool_args,
             content,
+            tool_category: None,
+            tool_description: None,
+            notification_level: "standard".to_string(),
+            estimated_duration: None,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// NEW: Enhanced tool call request logging with dynamic metadata
+pub async fn log_enhanced_tool_call_request(
+    app_handle: &AppHandle,
+    tool_name: &str,
+    tool_args: Value,
+    content: Option<String>,
+    app_state: Option<&crate::state::AppState>
+) {
+    let mut tool_metadata = ToolMetadata::determine_for_tool_with_inputs(
+        tool_name, 
+        Some(tool_args.clone()), 
+        app_state
+    ).await;
+
+    let event = AgentEvent {
+        event_type: "tool_call_request".to_string(),
+        payload: AgentEventPayload::ToolCallRequest(ToolCallRequestPayload {
+            tool_name: tool_name.to_string(),
+            tool_args,
+            content: content.or_else(|| tool_metadata.generate_start_message()),
+            tool_category: Some(tool_metadata.category),
+            tool_description: tool_metadata.description,
+            notification_level: tool_metadata.notification_level,
+            estimated_duration: tool_metadata.estimated_duration,
         }),
     };
     emit_agent_event(app_handle, event);
@@ -439,85 +485,402 @@ pub fn log_tool_call_result(
             success,
             content,
             screenshot_base64,
+            tool_category: None,
+            execution_time_ms: None,
+            notification_level: "standard".to_string(),
         }),
     };
     emit_agent_event(app_handle, event);
 }
 
-// Example usage for emitting a screenshot event (if not part of a tool result):
-pub fn log_screenshot(app_handle: &AppHandle, screenshot_base64: String, content: Option<String>) {
+// NEW: Enhanced tool call result logging with metadata and timing
+pub async fn log_enhanced_tool_call_result(
+    app_handle: &AppHandle,
+    tool_name: &str,
+    tool_output: Value,
+    success: bool,
+    content: Option<String>,
+    screenshot_base64: Option<String>,
+    execution_time_ms: Option<u64>,
+    app_state: Option<&crate::state::AppState>
+) {
+    // For result logging, we need to reconstruct the metadata without the original inputs
+    // We'll create a basic metadata and use the provided content if available
+    let mut tool_metadata = ToolMetadata::determine_for_tool(tool_name, app_state).await;
+
     let event = AgentEvent {
-        event_type: "screenshot".to_string(),
-        payload: AgentEventPayload::Screenshot(ScreenshotPayload {
+        event_type: "tool_call_result".to_string(),
+        payload: AgentEventPayload::ToolCallResult(ToolCallResultPayload {
+            tool_name: tool_name.to_string(),
+            tool_output,
+            success,
+            content: content.or_else(|| tool_metadata.generate_result_message(success, execution_time_ms)),
             screenshot_base64,
-            content,
+            tool_category: Some(tool_metadata.category),
+            execution_time_ms,
+            notification_level: tool_metadata.notification_level,
         }),
     };
     emit_agent_event(app_handle, event);
 }
 
-// Function to log a generic content message (can be used by system, or for other status updates)
-pub fn log_generic_content(app_handle: &AppHandle, content_text: &str) {
+// NEW: Enhanced tool call result logging with original inputs for better details
+pub async fn log_enhanced_tool_call_result_with_inputs(
+    app_handle: &AppHandle,
+    tool_name: &str,
+    tool_inputs: Option<Value>,
+    tool_output: Value,
+    success: bool,
+    content: Option<String>,
+    screenshot_base64: Option<String>,
+    execution_time_ms: Option<u64>,
+    app_state: Option<&crate::state::AppState>
+) {
+    // Use the original inputs to get detailed metadata for result messages
+    let mut tool_metadata = if let Some(inputs) = tool_inputs {
+        ToolMetadata::determine_for_tool_with_inputs(tool_name, Some(inputs), app_state).await
+    } else {
+        ToolMetadata::determine_for_tool(tool_name, app_state).await
+    };
+
     let event = AgentEvent {
-        event_type: "generic_content".to_string(), // Or another specific type if needed
-        payload: AgentEventPayload::GenericContent(GenericContentPayload {
-            content: content_text.to_string(),
+        event_type: "tool_call_result".to_string(),
+        payload: AgentEventPayload::ToolCallResult(ToolCallResultPayload {
+            tool_name: tool_name.to_string(),
+            tool_output,
+            success,
+            content: content.or_else(|| tool_metadata.generate_result_message(success, execution_time_ms)),
+            screenshot_base64,
+            tool_category: Some(tool_metadata.category),
+            execution_time_ms,
+            notification_level: tool_metadata.notification_level,
         }),
     };
     emit_agent_event(app_handle, event);
 }
 
-// NEW: Streaming event functions
-/// Emit a streaming text chunk event
-pub fn emit_streaming_text_chunk(app_handle: &AppHandle, chunk: String, message_id: Option<String>) {
-    #[derive(Clone, Debug, Serialize)]
-    struct StreamingTextEvent {
-        chunk: String,
-        message_id: Option<String>,
-    }
-
-    let event = StreamingTextEvent {
-        chunk,
-        message_id,
-    };
-
-    info!("Emitting streaming text chunk: {:?}", event.chunk);
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_TEXT_STREAM, event) {
-        warn!("Failed to emit streaming text chunk: {}", e);
-    }
+/// Tool metadata for dynamic notification generation
+#[derive(Debug, Clone)]
+struct ToolMetadata {
+    category: String,
+    description: Option<String>,
+    notification_level: String,
+    estimated_duration: Option<String>,
+    icon: String,
+    action_verb: String,
+    // NEW: Store actual tool inputs for detailed messaging
+    tool_inputs: Option<Value>,
 }
 
-/// Emit a stream start event
-pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
-    #[derive(Clone, Debug, Serialize)]
-    struct StreamStartEvent {
-        message_id: String,
+impl ToolMetadata {
+    /// Determine tool metadata dynamically based on tool name and configuration
+    async fn determine_for_tool(tool_name: &str, app_state: Option<&crate::state::AppState>) -> Self {
+        // Try to get more detailed info from tool configuration if available
+        if let Some(app_state) = app_state {
+            let config_manager = app_state.get_tool_config_manager().await;
+            let config_guard = config_manager.lock().await;
+            if let Some(tool_config) = config_guard.get_tool_config(tool_name) {
+                return Self::from_tool_config(&tool_config);
+            }
+        }
+
+        // Fallback to pattern-based detection
+        Self::from_tool_name_patterns(tool_name)
     }
 
-    let event = StreamStartEvent { message_id };
-
-    info!("Emitting stream start for message: {}", event.message_id);
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_START, event) {
-        warn!("Failed to emit stream start: {}", e);
-    }
-}
-
-/// Emit a stream end event
-pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
-    #[derive(Clone, Debug, Serialize)]
-    struct StreamEndEvent {
-        message_id: String,
-        complete_text: String,
+    /// Determine tool metadata with inputs for enhanced detail extraction
+    async fn determine_for_tool_with_inputs(
+        tool_name: &str, 
+        tool_inputs: Option<Value>,
+        app_state: Option<&crate::state::AppState>
+    ) -> Self {
+        let mut metadata = Self::determine_for_tool(tool_name, app_state).await;
+        metadata.tool_inputs = tool_inputs;
+        metadata
     }
 
-    let event = StreamEndEvent {
-        message_id,
-        complete_text,
-    };
+    /// Create metadata from tool configuration
+    fn from_tool_config(config: &crate::agent::tools::ToolConfig) -> Self {
+        use crate::agent::tools::ToolCategory;
 
-    info!("Emitting stream end for message: {}", event.message_id);
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event) {
-        warn!("Failed to emit stream end: {}", e);
+        let (icon, action_verb, notification_level, estimated_duration) = match config.category {
+            ToolCategory::AnthropicComputerUse => {
+                match config.name.as_str() {
+                    "screenshot" => ("📸", "Taking screenshot", "standard", Some("instant")),
+                    "click" => ("👆", "Clicking", "minimal", Some("instant")),
+                    "type" => ("⌨️", "Typing", "minimal", Some("short")),
+                    "key" => ("🔤", "Pressing keys", "standard", Some("instant")), // Changed to standard for key details
+                    "scroll" => ("📜", "Scrolling", "minimal", Some("instant")),
+                    "drag" => ("🖱️", "Dragging", "minimal", Some("short")),
+                    "move" => ("↗️", "Moving cursor", "silent", Some("instant")),
+                    _ => ("🖥️", "Interacting with screen", "standard", Some("short"))
+                }
+            },
+            ToolCategory::Desktop => ("🖥️", "Controlling desktop", "standard", Some("short")),
+            ToolCategory::Browser => ("🌐", "Browser action", "standard", Some("medium")),
+            ToolCategory::Timer => ("⏰", "Managing timer", "standard", Some("instant")),
+            ToolCategory::Basic => {
+                if config.name.contains("file") {
+                    ("📁", "File operation", "standard", Some("short"))
+                } else if config.name.contains("command") || config.name.contains("shell") || config.name.contains("bash") || config.name.contains("terminal") {
+                    ("⚡", "Running command", "detailed", Some("medium")) // Changed to detailed for command details
+                } else {
+                    ("🔧", "Basic operation", "standard", Some("short"))
+                }
+            },
+            ToolCategory::MCP => ("🔌", "External tool", "standard", Some("medium")),
+        };
+
+        Self {
+            category: format!("{:?}", config.category),
+            description: config.description.clone(),
+            notification_level: notification_level.to_string(),
+            estimated_duration: estimated_duration.map(|s| s.to_string()),
+            icon: icon.to_string(),
+            action_verb: action_verb.to_string(),
+            tool_inputs: None,
+        }
+    }
+
+    /// Fallback pattern-based detection for tools not in configuration
+    fn from_tool_name_patterns(tool_name: &str) -> Self {
+        let (icon, action_verb, category, notification_level, estimated_duration) = match tool_name {
+            // Screenshot tools - always highly visible
+            name if name.contains("screenshot") => ("📸", "Taking screenshot", "Screenshot", "standard", Some("instant")),
+
+            // Mouse and click actions - minimal notifications
+            name if name.contains("click") => ("👆", "Clicking", "Mouse", "minimal", Some("instant")),
+            name if name.contains("drag") => ("🖱️", "Dragging", "Mouse", "minimal", Some("short")),
+            name if name.contains("move") && name.contains("mouse") => ("↗️", "Moving cursor", "Mouse", "silent", Some("instant")),
+
+            // Keyboard actions - standard notifications for better visibility of key details
+            name if name.contains("type") => ("⌨️", "Typing", "Keyboard", "standard", Some("short")), // Changed to standard
+            name if name.contains("key") || name.contains("press") => ("🔤", "Pressing keys", "Keyboard", "standard", Some("instant")), // Changed to standard
+
+            // File operations - standard notifications
+            name if name.contains("file") && name.contains("read") => ("📖", "Reading file", "File", "standard", Some("short")),
+            name if name.contains("file") && (name.contains("write") || name.contains("save")) => ("💾", "Writing file", "File", "standard", Some("short")),
+            name if name.contains("file") => ("📁", "File operation", "File", "standard", Some("short")),
+
+            // Command execution - detailed notifications to show full commands
+            name if name.contains("command") || name.contains("shell") || name.contains("terminal") || name.contains("bash") || name.contains("exec") || name.contains("run") => 
+                ("⚡", "Running command", "Command", "detailed", Some("medium")),
+
+            // Browser actions
+            name if name.contains("browser") || name.contains("navigate") => ("🌐", "Browser action", "Browser", "standard", Some("medium")),
+
+            // Desktop automation
+            name if name.contains("desktop") || name.contains("application") => ("🖥️", "Desktop action", "Desktop", "standard", Some("short")),
+
+            // Timer and scheduling
+            name if name.contains("timer") => ("⏰", "Timer action", "Timer", "standard", Some("instant")),
+
+            // MCP tools
+            name if name.contains("mcp") => ("🔌", "External tool", "MCP", "standard", Some("medium")),
+
+            // Default fallback
+            _ => ("🔧", "Tool execution", "General", "standard", Some("short")),
+        };
+
+        Self {
+            category: category.to_string(),
+            description: None,
+            notification_level: notification_level.to_string(),
+            estimated_duration: estimated_duration.map(|s| s.to_string()),
+            icon: icon.to_string(),
+            action_verb: action_verb.to_string(),
+            tool_inputs: None,
+        }
+    }
+
+    /// Extract key details from tool inputs for display
+    fn extract_key_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract key information
+        if let Some(key) = inputs.get("key").and_then(|v| v.as_str()) {
+            let modifier = inputs.get("modifier")
+                .and_then(|v| v.as_str())
+                .map(|m| format!("{}+", m))
+                .unwrap_or_default();
+            return Some(format!("{}{}", modifier, key));
+        }
+        
+        None
+    }
+    
+    /// Extract command details from tool inputs for display
+    fn extract_command_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract command information
+        if let Some(command) = inputs.get("command").and_then(|v| v.as_str()) {
+            // Truncate very long commands for display
+            if command.len() > 100 {
+                return Some(format!("{}...", &command[..97]));
+            }
+            return Some(command.to_string());
+        }
+        
+        None
+    }
+    
+    /// Extract text details from tool inputs for display
+    fn extract_text_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract text information
+        if let Some(text) = inputs.get("text").and_then(|v| v.as_str()) {
+            // Truncate very long text for display
+            if text.len() > 50 {
+                return Some(format!("\"{}...\"", &text[..47]));
+            }
+            return Some(format!("\"{}\"", text));
+        }
+        
+        None
+    }
+    
+    /// Extract file path details from tool inputs for display
+    fn extract_file_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract file path information
+        if let Some(path) = inputs.get("path").and_then(|v| v.as_str()) {
+            // Show just the filename for brevity
+            if let Some(filename) = std::path::Path::new(path).file_name() {
+                if let Some(filename_str) = filename.to_str() {
+                    return Some(filename_str.to_string());
+                }
+            }
+            // Fallback to showing truncated path
+            if path.len() > 30 {
+                return Some(format!("...{}", &path[path.len()-27..]));
+            }
+            return Some(path.to_string());
+        }
+        
+        None
+    }
+
+    /// Generate a start message for notifications with enhanced details
+    fn generate_start_message(&self) -> Option<String> {
+        match self.notification_level.as_str() {
+            "silent" => None,
+            "minimal" => Some(format!("{} {}", self.icon, self.action_verb)),
+            "standard" => {
+                // Include specific details for standard level
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add specific details based on tool type
+                if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                } else if self.category == "Keyboard" && self.action_verb.contains("Typing") {
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{}...", message))
+            },
+            "detailed" => {
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add comprehensive details for detailed level
+                if self.category == "Command" {
+                    if let Some(command_details) = self.extract_command_details() {
+                        message = format!("{}: {}", message, command_details);
+                    }
+                } else if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{} {}", message,
+                    self.description.as_deref().unwrap_or("in progress")))
+            },
+            _ => Some(format!("{} {}", self.icon, self.action_verb)),
+        }
+    }
+
+    /// Generate a result message for notifications with enhanced details
+    fn generate_result_message(&self, success: bool, execution_time_ms: Option<u64>) -> Option<String> {
+        match self.notification_level.as_str() {
+            "silent" => None,
+            "minimal" => {
+                if success {
+                    Some(format!("{} ✅", self.icon))
+                } else {
+                    Some(format!("{} ❌", self.icon))
+                }
+            },
+            "standard" => {
+                let status = if success { "completed" } else { "failed" };
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add specific details for context
+                if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{} {}", message, status))
+            },
+            "detailed" => {
+                let status = if success { "completed" } else { "failed" };
+                let timing = execution_time_ms
+                    .map(|ms| format!(" ({}ms)", ms))
+                    .unwrap_or_default();
+                
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add comprehensive details
+                if self.category == "Command" {
+                    if let Some(command_details) = self.extract_command_details() {
+                        message = format!("{}: {}", message, command_details);
+                    }
+                } else if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{} {}{}", message, status, timing))
+            },
+            _ => {
+                let status = if success { "✅" } else { "❌" };
+                Some(format!("{} {}", self.icon, status))
+            }
+        }
     }
 }
 
@@ -600,3 +963,33 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
 //     //     warn!("DevTools window not found, cannot log tool usage event to it.");
 //     // }
 // }
+
+pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
+    let event = AgentEvent {
+        event_type: "stream_start".to_string(),
+        payload: AgentEventPayload::GenericContent(GenericContentPayload {
+            content: format!("Stream started with message ID: {}", message_id),
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>) {
+    let event = AgentEvent {
+        event_type: "streaming_text_chunk".to_string(),
+        payload: AgentEventPayload::GenericContent(GenericContentPayload {
+            content: text,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+pub fn emit_stream_end(app_handle: &AppHandle, message_id: String) {
+    let event = AgentEvent {
+        event_type: "stream_end".to_string(),
+        payload: AgentEventPayload::GenericContent(GenericContentPayload {
+            content: format!("Stream ended with message ID: {}", message_id),
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
