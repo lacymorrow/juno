@@ -65,7 +65,7 @@ export default function ModularSettingsWindow() {
       case "voice":
         return <VoiceSettings settings={settings} />;
       case "notifications":
-        return <NotificationSettings settings={settings} />;
+        return <NotificationSettings />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
       default:

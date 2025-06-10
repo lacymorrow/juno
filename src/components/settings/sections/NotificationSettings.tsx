@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,11 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Bell, BellOff, Volume2, VolumeX, TestTube, Shield, Info } from "lucide-react";
 import { NotificationSettings as NotificationSettingsType, NotificationType, SystemNotificationPermission } from "@/types/notifications";
 
-interface NotificationSettingsProps {
-  settings: any; // From useSettings hook
-}
-
-export default function NotificationSettings({ settings }: NotificationSettingsProps) {
+export default function NotificationSettings() {
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsType>({
     type: "system",
     sound_enabled: true,
@@ -24,13 +20,13 @@ export default function NotificationSettings({ settings }: NotificationSettingsP
     show_icons: true,
     persist_important: true,
   });
-  
+
   const [systemPermission, setSystemPermission] = useState<SystemNotificationPermission>({
     granted: false,
     denied: false,
     default: true,
   });
-  
+
   const [loading, setLoading] = useState(false);
   const [permissionLoading, setPermissionLoading] = useState(false);
 
@@ -50,7 +46,7 @@ export default function NotificationSettings({ settings }: NotificationSettingsP
         show_icons: boolean;
         persist_important: boolean;
       }>("get_notification_settings");
-      
+
       setNotificationSettings({
         type: current.notification_type as NotificationType,
         sound_enabled: current.sound_enabled,
@@ -79,7 +75,7 @@ export default function NotificationSettings({ settings }: NotificationSettingsP
     try {
       const permission = await invoke<SystemNotificationPermission>("request_notification_permission");
       setSystemPermission(permission);
-      
+
       if (permission.granted) {
         toast.success("Notification permission granted!");
       } else if (permission.denied) {
@@ -233,8 +229,8 @@ export default function NotificationSettings({ settings }: NotificationSettingsP
 
           {/* Test Notification Button */}
           <div className="pt-4">
-            <Button 
-              onClick={testNotification} 
+            <Button
+              onClick={testNotification}
               disabled={loading || notificationSettings.type === "disabled"}
               variant="outline"
               className="flex items-center gap-2"
@@ -263,7 +259,7 @@ export default function NotificationSettings({ settings }: NotificationSettingsP
               <div className="space-y-1">
                 <p className="text-sm font-medium">Permission Status</p>
                 <p className="text-sm text-gray-600">
-                  {systemPermission.granted 
+                  {systemPermission.granted
                     ? "Juno can show system notifications"
                     : systemPermission.denied
                     ? "Permission denied. Enable in System Settings > Notifications"
@@ -419,8 +415,8 @@ export default function NotificationSettings({ settings }: NotificationSettingsP
           </CardHeader>
           <CardContent>
             <p className="text-sm text-gray-600">
-              All notifications are currently disabled. Juno will not show any notifications 
-              for agent actions, completions, or errors. You can re-enable them by selecting 
+              All notifications are currently disabled. Juno will not show any notifications
+              for agent actions, completions, or errors. You can re-enable them by selecting
               a different notification type above.
             </p>
           </CardContent>
