@@ -312,9 +312,10 @@ impl ToolProvider for LocalToolProvider {
                     serde_json::json!({ "error": e })
                 });
 
-                tool_logger::log_enhanced_tool_call_result(
+                tool_logger::log_enhanced_tool_call_result_with_inputs(
                     app_handle,
                     tool_name,
+                    Some(tool_call.input.clone()), // Pass the original inputs for detailed messaging
                     output,
                     success,
                     None, // content
