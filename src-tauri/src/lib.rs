@@ -875,6 +875,18 @@ pub fn run() {
             // Performance Monitoring Commands
             set_performance_monitoring,
             get_performance_monitoring,
+            // Notification Commands
+            commands::notifications::get_notification_settings,
+            commands::notifications::set_notification_type,
+            commands::notifications::set_notification_sound_enabled,
+            commands::notifications::set_notification_duration,
+            commands::notifications::set_notification_position,
+            commands::notifications::set_notification_show_icons,
+            commands::notifications::set_notification_persist_important,
+            commands::notifications::check_notification_permission,
+            commands::notifications::request_notification_permission,
+            commands::notifications::send_notification,
+            commands::notifications::test_notification,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
