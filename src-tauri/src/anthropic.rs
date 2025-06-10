@@ -50,6 +50,7 @@ pub(crate) struct AnthropicContentBlock {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SubmitQueryResult {
     pub text: String,
+    pub spoken_text: Option<String>, // Optional separate content for TTS
     pub audio_base64: Option<String>,
     pub agent_state: String, // Send final state to frontend
     pub screenshot_base64: Option<String>, // Optional screenshot data from the session
@@ -337,9 +338,13 @@ pub async fn submit_query(
     let mut final_response = match agent_result {
         Ok(message) => {
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
-
+            
+            // Check if there's stored spoken content from a dual content finish
+            let spoken_content = state.get_last_spoken_content();
+            
             SubmitQueryResult {
                 text: message.clone(),
+                spoken_text: spoken_content, // Use stored spoken content if available
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: "Finished".to_string(),
                 screenshot_base64: None, // Capture screenshot if needed
@@ -372,6 +377,7 @@ pub async fn submit_query(
             };
             SubmitQueryResult {
                 text: msg.clone(),
+                spoken_text: None, // Error messages use same content for speech
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: state_str,
                 screenshot_base64: None,
@@ -380,8 +386,13 @@ pub async fn submit_query(
     };
 
     // --- Generate TTS Audio ---
-    // Try to generate TTS for the response text if TTS is enabled
-    let tts_enabled = match crate::tts::invoke_tts(final_response.text.clone(), state.clone()).await {
+    // Use spoken_text if available, otherwise fall back to text
+    let tts_content = final_response.spoken_text.as_ref().unwrap_or(&final_response.text).clone();
+    
+    // Clear spoken content from app state now that we've used it
+    state.clear_last_spoken_content();
+    
+    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone()).await {
         Ok(audio_result) => {
             if audio_result != "TTS_DISABLED_BY_SETTING" {
                 final_response.audio_base64 = Some(audio_result.clone());
@@ -439,6 +450,23 @@ pub async fn submit_query(
             Some(text_for_bar)
         ).await;
     });
+
+    // --- Emit agent error event for main chat interface ---
+    if final_response.agent_state == "Failed" || final_response.agent_state == "Cancelled" {
+        let error_event_handle = app_handle.clone();
+        let error_state = final_response.agent_state.clone();
+        let error_text = final_response.text.clone();
+        tauri::async_runtime::spawn(async move {
+            let event_data = serde_json::json!({
+                "agent_state": error_state,
+                "error_message": error_text,
+                "original_query": query
+            });
+            if let Err(e) = error_event_handle.emit("agent-error", event_data) {
+                warn!("Failed to emit agent-error event: {}", e);
+            }
+        });
+    }
 
     // Final response is now fully handled by streaming events
     // The frontend will reconstruct the complete response from stream events

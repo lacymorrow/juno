@@ -163,6 +163,17 @@ where
                     let final_response = text;
                     return Ok(final_response);
                 }
+                AgentAction::FinishWithDualContent { typed_content, spoken_content } => {
+                    log::info!("Agent finished with dual content - typed: \"{}\" spoken: \"{}\"", typed_content, spoken_content);
+                    
+                    // Store the spoken content in app state for TTS retrieval
+                    let app_state = self.app_handle.state::<crate::state::AppState>();
+                    app_state.set_last_spoken_content(Some(spoken_content));
+                    
+                    self.transition_state(AgentState::Finished).await;
+                    // Return typed content for display, spoken content will be handled by TTS separately
+                    return Ok(typed_content);
+                }
                  AgentAction::RespondToUser(text) => {
                     log::info!("Agent intermediate response: {}", text);
                     // Add the assistant's response to memory
@@ -455,6 +466,10 @@ where
              AgentAction::Finish(response) => {
                  // This action will terminate the loop when returned to run()
                  Ok(AgentAction::Finish(response))
+             }
+             AgentAction::FinishWithDualContent { typed_content, spoken_content } => {
+                 // This action will terminate the loop when returned to run()
+                 Ok(AgentAction::FinishWithDualContent { typed_content, spoken_content })
              }
              AgentAction::Error(e) => {
                  // Propagate the error up to the run loop
