@@ -2167,6 +2167,21 @@ function AdvancedSettings({
 }: {
   settings: ReturnType<typeof useSettings>;
 }) {
+  const [debugMode, setDebugMode] = React.useState(false);
+
+  // Load debug mode status on mount
+  React.useEffect(() => {
+    const loadDebugMode = async () => {
+      try {
+        const enabled = await invoke("get_debug_mode");
+        setDebugMode(enabled as boolean);
+      } catch (error) {
+        console.error("Failed to get debug mode status:", error);
+      }
+    };
+    loadDebugMode();
+  }, []);
+
   return (
     <div className="space-y-6">
       <div>
@@ -2188,9 +2203,11 @@ function AdvancedSettings({
                 </div>
               </div>
               <Switch
+                checked={debugMode}
                 onCheckedChange={async (enabled) => {
                   try {
                     await invoke("set_debug_mode", { enabled });
+                    setDebugMode(enabled);
                     toast.success(
                       `Debug mode ${enabled ? "enabled" : "disabled"}`
                     );
