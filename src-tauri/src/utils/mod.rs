@@ -136,7 +136,7 @@ pub mod permission_validator {
     use crate::agent::core::AgentError;
     use crate::state::AppState;
     use crate::commands::permissions::check_permissions_status;
-    use tauri::AppHandle;
+    use tauri::{AppHandle, Manager};
     use tracing::{warn, info, debug};
 
     /// Required permissions for different tool categories
@@ -181,7 +181,7 @@ pub mod permission_validator {
     ) -> Result<(), AgentError> {
         // First check if desktop is available (basic accessibility check)
         let app_state = app_handle.state::<AppState>();
-        
+
         debug!("Validating {} for tool '{}'", required.description(), tool_name);
 
         // Check the specific permissions based on requirement
