@@ -96,6 +96,9 @@ export function useSettings() {
   // Sound Settings
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
+  // Performance Monitoring Settings
+  const [performanceMonitoringEnabled, setPerformanceMonitoringEnabled] = useState<boolean>(true);
+
   // Always Listening Settings
   const [alwaysListeningActive, setAlwaysListeningActive] = useState<boolean>(false);
   const [alwaysListeningSensitivity, setAlwaysListeningSensitivity] = useState<number>(0.5);
@@ -178,6 +181,10 @@ export function useSettings() {
       // Load sound settings
       const currentSoundEnabled = await invoke<boolean>("get_sound_enabled");
       setSoundEnabled(currentSoundEnabled);
+
+      // Load performance monitoring settings
+      const currentPerformanceMonitoringEnabled = await invoke<boolean>("get_performance_monitoring");
+      setPerformanceMonitoringEnabled(currentPerformanceMonitoringEnabled);
 
       // Load always listening settings
       const alwaysListeningStatus = await invoke<boolean>("get_always_listening_status");
@@ -395,6 +402,17 @@ export function useSettings() {
     }
   };
 
+  const handlePerformanceMonitoringChange = async (enabled: boolean) => {
+    try {
+      await invoke("set_performance_monitoring", { enabled });
+      setPerformanceMonitoringEnabled(enabled);
+      toast.success(`Performance monitoring ${enabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      console.error("Failed to set performance monitoring:", error);
+      toast.error("Failed to update performance monitoring setting");
+    }
+  };
+
   const handleAgentModeChange = async (newMode: string) => {
     try {
       await invoke("set_agent_mode", { mode: newMode });
@@ -463,6 +481,7 @@ export function useSettings() {
     agentMode,
     dictationClipboardEnabled,
     soundEnabled,
+    performanceMonitoringEnabled,
     alwaysListeningActive,
     alwaysListeningSensitivity,
     alwaysListeningWakeWords,
@@ -491,6 +510,7 @@ export function useSettings() {
     handleActiveProviderChange,
     handleSaveProviderSettings,
     handleSoundEnabledChange,
+    handlePerformanceMonitoringChange,
     handleAgentModeChange,
     handleDictationClipboardChange,
     handleAlwaysListeningToggle,
