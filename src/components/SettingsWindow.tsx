@@ -2209,18 +2209,8 @@ function AdvancedSettings({
                 </div>
               </div>
               <Switch
-                onCheckedChange={async (enabled) => {
-                  try {
-                    await invoke("set_performance_monitoring", { enabled });
-                    toast.success(
-                      `Performance monitoring ${
-                        enabled ? "enabled" : "disabled"
-                      }`
-                    );
-                  } catch (error) {
-                    toast.error("Failed to toggle performance monitoring");
-                  }
-                }}
+                checked={settings.performanceMonitoringEnabled}
+                onCheckedChange={settings.handlePerformanceMonitoringChange}
               />
             </div>
           </CardContent>

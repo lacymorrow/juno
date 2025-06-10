@@ -866,6 +866,11 @@ pub fn run() {
             // Onboarding Commands
             commands::core::store_first_prompt,
             commands::core::get_first_onboarding_prompt,
+            list_ai_providers,
+            set_ai_provider,
+            // Performance Monitoring Commands
+            set_performance_monitoring,
+            get_performance_monitoring,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
