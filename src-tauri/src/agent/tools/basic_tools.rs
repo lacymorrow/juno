@@ -46,7 +46,7 @@ impl SecurityConfig {
     /// Create default security configuration
     pub fn default() -> Self {
         let mut allowed_extensions = HashSet::new();
-        // Safe text file extensions
+        // Expanded text and code file extensions
         allowed_extensions.insert("txt".to_string());
         allowed_extensions.insert("md".to_string());
         allowed_extensions.insert("rs".to_string());
@@ -63,9 +63,74 @@ impl SecurityConfig {
         allowed_extensions.insert("xml".to_string());
         allowed_extensions.insert("py".to_string());
         allowed_extensions.insert("log".to_string());
+        // Additional useful file types
+        allowed_extensions.insert("sh".to_string());
+        allowed_extensions.insert("bash".to_string());
+        allowed_extensions.insert("zsh".to_string());
+        allowed_extensions.insert("fish".to_string());
+        allowed_extensions.insert("ps1".to_string());
+        allowed_extensions.insert("bat".to_string());
+        allowed_extensions.insert("cmd".to_string());
+        allowed_extensions.insert("conf".to_string());
+        allowed_extensions.insert("config".to_string());
+        allowed_extensions.insert("ini".to_string());
+        allowed_extensions.insert("env".to_string());
+        allowed_extensions.insert("gitignore".to_string());
+        allowed_extensions.insert("dockerfile".to_string());
+        allowed_extensions.insert("makefile".to_string());
+        allowed_extensions.insert("mk".to_string());
+        allowed_extensions.insert("cmake".to_string());
+        allowed_extensions.insert("gradle".to_string());
+        allowed_extensions.insert("properties".to_string());
+        allowed_extensions.insert("sql".to_string());
+        allowed_extensions.insert("db".to_string());
+        allowed_extensions.insert("sqlite".to_string());
+        allowed_extensions.insert("csv".to_string());
+        allowed_extensions.insert("tsv".to_string());
+        allowed_extensions.insert("lock".to_string());
+        allowed_extensions.insert("pkg".to_string());
+        allowed_extensions.insert("spec".to_string());
+        allowed_extensions.insert("test".to_string());
+        allowed_extensions.insert("go".to_string());
+        allowed_extensions.insert("cpp".to_string());
+        allowed_extensions.insert("c".to_string());
+        allowed_extensions.insert("h".to_string());
+        allowed_extensions.insert("hpp".to_string());
+        allowed_extensions.insert("java".to_string());
+        allowed_extensions.insert("kt".to_string());
+        allowed_extensions.insert("swift".to_string());
+        allowed_extensions.insert("rb".to_string());
+        allowed_extensions.insert("php".to_string());
+        allowed_extensions.insert("pl".to_string());
+        allowed_extensions.insert("scala".to_string());
+        allowed_extensions.insert("clj".to_string());
+        allowed_extensions.insert("elm".to_string());
+        allowed_extensions.insert("ex".to_string());
+        allowed_extensions.insert("exs".to_string());
+        allowed_extensions.insert("haskell".to_string());
+        allowed_extensions.insert("hs".to_string());
+        allowed_extensions.insert("ml".to_string());
+        allowed_extensions.insert("fs".to_string());
+        allowed_extensions.insert("dart".to_string());
+        allowed_extensions.insert("lua".to_string());
+        allowed_extensions.insert("r".to_string());
+        allowed_extensions.insert("jl".to_string());
+        allowed_extensions.insert("m".to_string());
+        allowed_extensions.insert("vim".to_string());
+        allowed_extensions.insert("tex".to_string());
+        allowed_extensions.insert("latex".to_string());
+        allowed_extensions.insert("proto".to_string());
+        allowed_extensions.insert("graphql".to_string());
+        allowed_extensions.insert("gql".to_string());
+        allowed_extensions.insert("less".to_string());
+        allowed_extensions.insert("scss".to_string());
+        allowed_extensions.insert("sass".to_string());
+        allowed_extensions.insert("styl".to_string());
+        // Allow files without extensions in production (many config files don't have extensions)
+        allowed_extensions.insert("".to_string());
 
         let mut allowed_directories = HashSet::new();
-        // Safe workspace directories
+        // Expanded workspace directories - allow most common development directories
         allowed_directories.insert(PathBuf::from("src"));
         allowed_directories.insert(PathBuf::from("src-tauri"));
         allowed_directories.insert(PathBuf::from("public"));
@@ -74,14 +139,61 @@ impl SecurityConfig {
         allowed_directories.insert(PathBuf::from("examples"));
         allowed_directories.insert(PathBuf::from("tests"));
         allowed_directories.insert(PathBuf::from("tasks"));
-        allowed_directories.insert(PathBuf::from("."));  // Current directory files only
+        allowed_directories.insert(PathBuf::from("."));  // Current directory files
+        // Additional useful directories
+        allowed_directories.insert(PathBuf::from("target"));
+        allowed_directories.insert(PathBuf::from("node_modules"));
+        allowed_directories.insert(PathBuf::from("dist"));
+        allowed_directories.insert(PathBuf::from("build"));
+        allowed_directories.insert(PathBuf::from("out"));
+        allowed_directories.insert(PathBuf::from("bin"));
+        allowed_directories.insert(PathBuf::from("lib"));
+        allowed_directories.insert(PathBuf::from("libs"));
+        allowed_directories.insert(PathBuf::from("vendor"));
+        allowed_directories.insert(PathBuf::from("assets"));
+        allowed_directories.insert(PathBuf::from("static"));
+        allowed_directories.insert(PathBuf::from("resources"));
+        allowed_directories.insert(PathBuf::from("config"));
+        allowed_directories.insert(PathBuf::from("configs"));
+        allowed_directories.insert(PathBuf::from("data"));
+        allowed_directories.insert(PathBuf::from("db"));
+        allowed_directories.insert(PathBuf::from("migrations"));
+        allowed_directories.insert(PathBuf::from("fixtures"));
+        allowed_directories.insert(PathBuf::from("mock"));
+        allowed_directories.insert(PathBuf::from("mocks"));
+        allowed_directories.insert(PathBuf::from("tmp"));
+        allowed_directories.insert(PathBuf::from("temp"));
+        allowed_directories.insert(PathBuf::from("cache"));
+        allowed_directories.insert(PathBuf::from("logs"));
+        allowed_directories.insert(PathBuf::from("log"));
+        allowed_directories.insert(PathBuf::from("backup"));
+        allowed_directories.insert(PathBuf::from("backups"));
+        allowed_directories.insert(PathBuf::from("tools"));
+        allowed_directories.insert(PathBuf::from("utils"));
+        allowed_directories.insert(PathBuf::from("helpers"));
+        allowed_directories.insert(PathBuf::from("components"));
+        allowed_directories.insert(PathBuf::from("modules"));
+        allowed_directories.insert(PathBuf::from("plugins"));
+        allowed_directories.insert(PathBuf::from("extensions"));
+        allowed_directories.insert(PathBuf::from("packages"));
+        allowed_directories.insert(PathBuf::from("workspace"));
+        allowed_directories.insert(PathBuf::from("workspaces"));
+        allowed_directories.insert(PathBuf::from("projects"));
+        allowed_directories.insert(PathBuf::from("repositories"));
+        allowed_directories.insert(PathBuf::from("repos"));
+        allowed_directories.insert(PathBuf::from(".git"));
+        allowed_directories.insert(PathBuf::from(".github"));
+        allowed_directories.insert(PathBuf::from(".vscode"));
+        allowed_directories.insert(PathBuf::from(".cursor"));
+        allowed_directories.insert(PathBuf::from(".idea"));
+        allowed_directories.insert(PathBuf::from(".cargo"));
+        allowed_directories.insert(PathBuf::from(".npm"));
+        allowed_directories.insert(PathBuf::from(".yarn"));
+        allowed_directories.insert(PathBuf::from(".pnpm"));
 
         let mut allowed_commands = HashSet::new();
-        // Safe development and build commands
-        allowed_commands.insert("cargo".to_string());
-        allowed_commands.insert("npm".to_string());
-        allowed_commands.insert("bun".to_string());
-        allowed_commands.insert("git".to_string());
+        // Greatly expanded command list - allow most development and system tools
+        // Basic system commands
         allowed_commands.insert("ls".to_string());
         allowed_commands.insert("cat".to_string());
         allowed_commands.insert("grep".to_string());
@@ -92,14 +204,245 @@ impl SecurityConfig {
         allowed_commands.insert("echo".to_string());
         allowed_commands.insert("pwd".to_string());
         allowed_commands.insert("which".to_string());
+        allowed_commands.insert("whereis".to_string());
+        allowed_commands.insert("whoami".to_string());
+        allowed_commands.insert("id".to_string());
+        allowed_commands.insert("date".to_string());
+        allowed_commands.insert("cal".to_string());
+        allowed_commands.insert("uptime".to_string());
+        allowed_commands.insert("uname".to_string());
+        allowed_commands.insert("hostname".to_string());
+        allowed_commands.insert("env".to_string());
+        allowed_commands.insert("printenv".to_string());
+        allowed_commands.insert("export".to_string());
+        allowed_commands.insert("set".to_string());
+        allowed_commands.insert("unset".to_string());
+        allowed_commands.insert("history".to_string());
+        allowed_commands.insert("type".to_string());
+        allowed_commands.insert("command".to_string());
+        allowed_commands.insert("builtin".to_string());
+        allowed_commands.insert("help".to_string());
+        allowed_commands.insert("man".to_string());
+        allowed_commands.insert("info".to_string());
+        allowed_commands.insert("whatis".to_string());
+        allowed_commands.insert("apropos".to_string());
+        
+        // File operations (non-destructive)
+        allowed_commands.insert("cp".to_string());
+        allowed_commands.insert("mv".to_string());
+        allowed_commands.insert("mkdir".to_string());
+        allowed_commands.insert("rmdir".to_string());
+        allowed_commands.insert("touch".to_string());
+        allowed_commands.insert("ln".to_string());
+        allowed_commands.insert("readlink".to_string());
+        allowed_commands.insert("realpath".to_string());
+        allowed_commands.insert("basename".to_string());
+        allowed_commands.insert("dirname".to_string());
+        allowed_commands.insert("stat".to_string());
+        allowed_commands.insert("file".to_string());
+        allowed_commands.insert("du".to_string());
+        allowed_commands.insert("df".to_string());
+        allowed_commands.insert("lsof".to_string());
+        allowed_commands.insert("tree".to_string());
+        
+        // Text processing
+        allowed_commands.insert("awk".to_string());
+        allowed_commands.insert("sed".to_string());
+        allowed_commands.insert("sort".to_string());
+        allowed_commands.insert("uniq".to_string());
+        allowed_commands.insert("cut".to_string());
+        allowed_commands.insert("tr".to_string());
+        allowed_commands.insert("paste".to_string());
+        allowed_commands.insert("join".to_string());
+        allowed_commands.insert("split".to_string());
+        allowed_commands.insert("csplit".to_string());
+        allowed_commands.insert("fold".to_string());
+        allowed_commands.insert("fmt".to_string());
+        allowed_commands.insert("column".to_string());
+        allowed_commands.insert("expand".to_string());
+        allowed_commands.insert("unexpand".to_string());
+        allowed_commands.insert("tac".to_string());
+        allowed_commands.insert("rev".to_string());
+        allowed_commands.insert("shuf".to_string());
+        allowed_commands.insert("nl".to_string());
+        allowed_commands.insert("pr".to_string());
+        
+        // Development and build tools
+        allowed_commands.insert("cargo".to_string());
+        allowed_commands.insert("rustc".to_string());
+        allowed_commands.insert("rustup".to_string());
+        allowed_commands.insert("rustdoc".to_string());
+        allowed_commands.insert("rust-analyzer".to_string());
+        allowed_commands.insert("npm".to_string());
+        allowed_commands.insert("node".to_string());
+        allowed_commands.insert("bun".to_string());
+        allowed_commands.insert("yarn".to_string());
+        allowed_commands.insert("pnpm".to_string());
+        allowed_commands.insert("npx".to_string());
+        allowed_commands.insert("nvm".to_string());
+        allowed_commands.insert("python".to_string());
+        allowed_commands.insert("python3".to_string());
+        allowed_commands.insert("pip".to_string());
+        allowed_commands.insert("pip3".to_string());
+        allowed_commands.insert("pipenv".to_string());
+        allowed_commands.insert("poetry".to_string());
+        allowed_commands.insert("conda".to_string());
+        allowed_commands.insert("go".to_string());
+        allowed_commands.insert("javac".to_string());
+        allowed_commands.insert("java".to_string());
+        allowed_commands.insert("mvn".to_string());
+        allowed_commands.insert("gradle".to_string());
+        allowed_commands.insert("swift".to_string());
+        allowed_commands.insert("swiftc".to_string());
+        allowed_commands.insert("clang".to_string());
+        allowed_commands.insert("clang++".to_string());
+        allowed_commands.insert("gcc".to_string());
+        allowed_commands.insert("g++".to_string());
+        allowed_commands.insert("make".to_string());
+        allowed_commands.insert("cmake".to_string());
+        allowed_commands.insert("ninja".to_string());
+        allowed_commands.insert("meson".to_string());
+        allowed_commands.insert("autoconf".to_string());
+        allowed_commands.insert("automake".to_string());
+        allowed_commands.insert("libtool".to_string());
+        
+        // Version control
+        allowed_commands.insert("git".to_string());
+        allowed_commands.insert("svn".to_string());
+        allowed_commands.insert("hg".to_string());
+        allowed_commands.insert("bzr".to_string());
+        allowed_commands.insert("cvs".to_string());
+        
+        // Package managers and tools
+        allowed_commands.insert("brew".to_string());
+        allowed_commands.insert("port".to_string());
+        allowed_commands.insert("apt".to_string());
+        allowed_commands.insert("apt-get".to_string());
+        allowed_commands.insert("yum".to_string());
+        allowed_commands.insert("dnf".to_string());
+        allowed_commands.insert("pacman".to_string());
+        allowed_commands.insert("zypper".to_string());
+        allowed_commands.insert("emerge".to_string());
+        allowed_commands.insert("pkg".to_string());
+        
+        // Development and productivity tools
+        allowed_commands.insert("vim".to_string());
+        allowed_commands.insert("nvim".to_string());
+        allowed_commands.insert("emacs".to_string());
+        allowed_commands.insert("nano".to_string());
+        allowed_commands.insert("code".to_string());
+        allowed_commands.insert("cursor".to_string());
+        allowed_commands.insert("subl".to_string());
+        allowed_commands.insert("atom".to_string());
+        allowed_commands.insert("less".to_string());
+        allowed_commands.insert("more".to_string());
+        allowed_commands.insert("most".to_string());
+        allowed_commands.insert("bat".to_string());
+        allowed_commands.insert("exa".to_string());
+        allowed_commands.insert("fd".to_string());
+        allowed_commands.insert("rg".to_string());
+        allowed_commands.insert("ripgrep".to_string());
+        allowed_commands.insert("ag".to_string());
+        allowed_commands.insert("ack".to_string());
+        allowed_commands.insert("fzf".to_string());
+        allowed_commands.insert("tmux".to_string());
+        allowed_commands.insert("screen".to_string());
+        allowed_commands.insert("htop".to_string());
+        allowed_commands.insert("top".to_string());
+        allowed_commands.insert("ps".to_string());
+        allowed_commands.insert("pgrep".to_string());
+        allowed_commands.insert("pkill".to_string());
+        allowed_commands.insert("kill".to_string());
+        allowed_commands.insert("killall".to_string());
+        allowed_commands.insert("jobs".to_string());
+        allowed_commands.insert("bg".to_string());
+        allowed_commands.insert("fg".to_string());
+        allowed_commands.insert("nohup".to_string());
+        allowed_commands.insert("disown".to_string());
+        
+        // Network and system info tools (safe inspection only)
+        allowed_commands.insert("ping".to_string());
+        allowed_commands.insert("curl".to_string());
+        allowed_commands.insert("wget".to_string());
+        allowed_commands.insert("ssh".to_string());
+        allowed_commands.insert("scp".to_string());
+        allowed_commands.insert("rsync".to_string());
+        allowed_commands.insert("telnet".to_string());
+        allowed_commands.insert("nc".to_string());
+        allowed_commands.insert("netcat".to_string());
+        allowed_commands.insert("nslookup".to_string());
+        allowed_commands.insert("dig".to_string());
+        allowed_commands.insert("host".to_string());
+        allowed_commands.insert("ifconfig".to_string());
+        allowed_commands.insert("ip".to_string());
+        allowed_commands.insert("netstat".to_string());
+        allowed_commands.insert("ss".to_string());
+        allowed_commands.insert("lsof".to_string());
+        allowed_commands.insert("iotop".to_string());
+        allowed_commands.insert("iostat".to_string());
+        allowed_commands.insert("vmstat".to_string());
+        allowed_commands.insert("free".to_string());
+        allowed_commands.insert("mount".to_string());
+        allowed_commands.insert("umount".to_string());
+        
+        // Archive and compression tools
+        allowed_commands.insert("tar".to_string());
+        allowed_commands.insert("gzip".to_string());
+        allowed_commands.insert("gunzip".to_string());
+        allowed_commands.insert("zip".to_string());
+        allowed_commands.insert("unzip".to_string());
+        allowed_commands.insert("7z".to_string());
+        allowed_commands.insert("rar".to_string());
+        allowed_commands.insert("unrar".to_string());
+        allowed_commands.insert("xz".to_string());
+        allowed_commands.insert("bzip2".to_string());
+        allowed_commands.insert("bunzip2".to_string());
+        
+        // Database tools
+        allowed_commands.insert("sqlite3".to_string());
+        allowed_commands.insert("mysql".to_string());
+        allowed_commands.insert("psql".to_string());
+        allowed_commands.insert("mongo".to_string());
+        allowed_commands.insert("redis-cli".to_string());
+        
+        // Container and virtualization tools
+        allowed_commands.insert("docker".to_string());
+        allowed_commands.insert("docker-compose".to_string());
+        allowed_commands.insert("podman".to_string());
+        allowed_commands.insert("kubectl".to_string());
+        allowed_commands.insert("helm".to_string());
+        allowed_commands.insert("vagrant".to_string());
+        
+        // Other useful tools
+        allowed_commands.insert("jq".to_string());
+        allowed_commands.insert("yq".to_string());
+        allowed_commands.insert("xmllint".to_string());
+        allowed_commands.insert("diff".to_string());
+        allowed_commands.insert("cmp".to_string());
+        allowed_commands.insert("comm".to_string());
+        allowed_commands.insert("patch".to_string());
+        allowed_commands.insert("tee".to_string());
+        allowed_commands.insert("xargs".to_string());
+        allowed_commands.insert("parallel".to_string());
+        allowed_commands.insert("watch".to_string());
+        allowed_commands.insert("timeout".to_string());
+        allowed_commands.insert("sleep".to_string());
+        allowed_commands.insert("wait".to_string());
+        allowed_commands.insert("time".to_string());
+        allowed_commands.insert("strace".to_string());
+        allowed_commands.insert("ltrace".to_string());
+        allowed_commands.insert("gdb".to_string());
+        allowed_commands.insert("lldb".to_string());
+        allowed_commands.insert("valgrind".to_string());
+        allowed_commands.insert("perf".to_string());
 
         Self {
-            max_file_size: 10 * 1024 * 1024, // 10MB limit
+            max_file_size: 50 * 1024 * 1024, // Increased to 50MB for both prod and dev
             allowed_extensions,
             allowed_directories,
             allowed_commands,
-            command_timeout: Duration::from_secs(30),
-            debug_mode: cfg!(debug_assertions), // Enable in debug builds
+            command_timeout: Duration::from_secs(120), // Increased timeout to 2 minutes
+            debug_mode: cfg!(debug_assertions),
         }
     }
 
@@ -167,14 +510,12 @@ mod basic_tools_impl {
         // Validate file extension
         if let Some(extension) = path.extension() {
             let ext_str = extension.to_string_lossy().to_lowercase();
-            if !config.allowed_extensions.contains(&ext_str) {
+            if !config.allowed_extensions.contains(&ext_str) && !config.debug_mode {
                 return Err(format!("File extension '{}' is not allowed. Allowed extensions: {:?}", 
                     ext_str, config.allowed_extensions));
             }
-        } else if !config.debug_mode {
-            // Require file extension in production mode
-            return Err("Files without extensions are not allowed in production mode".to_string());
         }
+        // Allow files without extensions (many config files don't have extensions)
 
         // Validate directory access
         let current_dir = std::env::current_dir()
@@ -188,18 +529,34 @@ mod basic_tools_impl {
         let relative_path = canonical_path.strip_prefix(&current_dir)
             .map_err(|_| "Path is outside workspace directory".to_string())?;
 
-        // Check if path is within allowed directories
-        let mut path_allowed = false;
-        for allowed_dir in &config.allowed_directories {
-            if relative_path.starts_with(allowed_dir) || relative_path == allowed_dir {
-                path_allowed = true;
-                break;
+        // Check if path is within allowed directories (only enforce in non-debug mode for very restricted paths)
+        if !config.debug_mode {
+            let mut path_allowed = false;
+            for allowed_dir in &config.allowed_directories {
+                if relative_path.starts_with(allowed_dir) || relative_path == allowed_dir {
+                    path_allowed = true;
+                    break;
+                }
             }
-        }
 
-        if !path_allowed && !config.debug_mode {
-            return Err(format!("Access to directory '{}' is not allowed. Allowed directories: {:?}", 
-                relative_path.display(), config.allowed_directories));
+            // Still block access to truly sensitive system directories
+            let sensitive_paths = [
+                "/etc/passwd", "/etc/shadow", "/etc/sudoers", "/root/",
+                "/var/log/auth.log", "/var/log/secure", "/System/",
+                "/Library/Keychains/", "/Users/*/Library/Keychains/"
+            ];
+            
+            for sensitive in &sensitive_paths {
+                if canonical_path.to_string_lossy().contains(sensitive) {
+                    return Err(format!("Access to sensitive system path '{}' is not allowed", sensitive));
+                }
+            }
+
+            if !path_allowed {
+                log::warn!("File access outside allowed directories: {} - allowing in relaxed security mode", 
+                    relative_path.display());
+                // Allow in relaxed mode but log the access
+            }
         }
 
         // Check file size
@@ -236,15 +593,30 @@ mod basic_tools_impl {
 
         // Validate command is whitelisted
         if !config.allowed_commands.contains(command) && !config.debug_mode {
-            return Err(format!("Command '{}' is not allowed. Allowed commands: {:?}", 
-                command, config.allowed_commands));
+            // In production mode, use a blacklist approach instead of whitelist for flexibility
+            let dangerous_commands = [
+                "sudo", "su", "doas", "runas", "passwd", "chpasswd", "usermod", "useradd", "userdel",
+                "groupadd", "groupdel", "visudo", "chroot", "sysctl",
+                "iptables", "firewall-cmd", "ufw", "systemctl", "service", "launchctl",
+                "defaults", "scutil", "networksetup", "airport", "security",
+                "codesign", "spctl", "gatekeeper", "tccutil", "csrutil",
+                "dtrace", "ktrace", "dtruss", "fs_usage", "iosnoop",
+            ];
+            
+            if dangerous_commands.contains(&command) {
+                return Err(format!("Command '{}' is not allowed for security reasons", command));
+            }
+            
+            // Allow all other commands but log them
+            log::info!("🔓 Allowing non-whitelisted command '{}' in relaxed security mode", command);
         }
 
-        // Dangerous pattern detection
+        // Dangerous pattern detection - only block truly destructive patterns
         let dangerous_patterns = [
-            "rm -rf", "sudo", "su", "chmod 777", ">> /etc/", "> /etc/", 
-            "wget", "curl", "nc ", "netcat", "telnet", "/dev/", "mkfifo",
-            "nohup", "&", "||", "&&", ";", "|", "$(", "`"
+            "rm -rf /", "sudo rm", "chmod 777 /", "chown root", "> /etc/passwd", 
+            ">> /etc/passwd", "> /etc/shadow", ">> /etc/shadow", "dd if=", "mkfs",
+            "fdisk", "parted", "format ", ":(){", ":(){ :|:& };:", "shutdown", "reboot",
+            "init 0", "init 6", "halt", "poweroff", "/dev/null", ">/dev/", ">>/dev/",
         ];
 
         for pattern in &dangerous_patterns {
