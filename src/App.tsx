@@ -21,8 +21,10 @@ import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
 import { cn } from "@/lib/utils";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowLeft,
   DogIcon,
@@ -39,10 +41,6 @@ import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
 import "./styles/globals.css";
-import { getCurrentWindow } from '@tauri-apps/api/window';
-
-// Add version constant at the top after imports
-const APP_VERSION = "0.1.0";
 
 // Type for conversation messages
 type ChatMessage = {
@@ -247,6 +245,7 @@ function App() {
   >("checking");
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false); // State for collapsible panel
   const [currentView, setCurrentView] = useState<AppView>("chat"); // State for current view
+  const [appVersion, setAppVersion] = useState<string>(""); // Dynamic version state
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
@@ -268,16 +267,30 @@ function App() {
     title: "",
     description: "",
     email: "",
-    priority: "medium"
+    priority: "medium",
   });
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  // Onboarding state  
+  // Onboarding state
   const [_showOnboarding, setShowOnboarding] = useState(false);
   const [_onboardingChecked, setOnboardingChecked] = useState(false);
+
+  // Fetch app version dynamically
+  useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const version = await getVersion();
+        setAppVersion(`v${version}`);
+      } catch (error) {
+        console.error("Failed to get app version:", error);
+        setAppVersion("v0.0.0");
+      }
+    };
+    fetchVersion();
+  }, []);
 
   // Consolidated startup flow - check both permissions and onboarding status
   useEffect(() => {
@@ -292,13 +305,15 @@ function App() {
         }>("check_permissions_status");
 
         setPermissionsChecked(true);
-        
+
         // Store permissions result for OnboardingFlow
         setPermissionsGranted(permissionsResult.allGranted);
 
         // Then check onboarding status
         const isDevMode = import.meta.env.DEV;
-        const hasCompletedOnboarding = localStorage.getItem("juno-onboarding-completed");
+        const hasCompletedOnboarding = localStorage.getItem(
+          "juno-onboarding-completed"
+        );
 
         // Decision logic for which flow to show
         if (isDevMode) {
@@ -308,17 +323,23 @@ function App() {
           setCurrentView("onboarding");
         } else if (!hasCompletedOnboarding) {
           // First-time user: Show onboarding (which includes permissions check)
-          console.log("First-time user detected - showing full onboarding flow");
+          console.log(
+            "First-time user detected - showing full onboarding flow"
+          );
           setShowOnboarding(true);
           setCurrentView("onboarding");
         } else if (!permissionsResult.allGranted) {
           // Returning user with missing permissions: Show standalone permissions
-          console.log("Returning user with missing permissions - showing permissions flow");
+          console.log(
+            "Returning user with missing permissions - showing permissions flow"
+          );
           setShowPermissionsFlow(true);
           setCurrentView("permissions");
         } else {
           // Everything is good: Go to chat
-          console.log("All permissions granted and onboarding complete - going to chat");
+          console.log(
+            "All permissions granted and onboarding complete - going to chat"
+          );
           setCurrentView("chat");
         }
 
@@ -327,7 +348,7 @@ function App() {
         console.error("Error during app initialization:", error);
         setPermissionsChecked(true);
         setOnboardingChecked(true);
-        
+
         // Fallback: show permissions flow on error
         setShowPermissionsFlow(true);
         setCurrentView("permissions");
@@ -661,9 +682,9 @@ function App() {
       const feedbackType = event.payload;
 
       // Set feedback type and open modal
-      setFeedbackData(prev => ({
+      setFeedbackData((prev) => ({
         ...prev,
-        type: feedbackType === "issue" ? "issue" : "general"
+        type: feedbackType === "issue" ? "issue" : "general",
       }));
       setActiveModal("feedback");
     });
@@ -701,11 +722,14 @@ function App() {
         console.log("✅ Window minimized successfully");
       } catch (error) {
         console.error("❌ Failed to minimize window:", error);
-        setConversation(prev => [...prev, {
-          role: "system",
-          content: `Failed to minimize window: ${error}`,
-          timestamp: Date.now()
-        }]);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `Failed to minimize window: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
       }
     });
 
@@ -723,30 +747,43 @@ function App() {
         }
       } catch (error) {
         console.error("❌ Failed to toggle window zoom:", error);
-        setConversation(prev => [...prev, {
-          role: "system",
-          content: `Failed to toggle window zoom: ${error}`,
-          timestamp: Date.now()
-        }]);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `Failed to toggle window zoom: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
       }
     });
 
-    const unlistenFullscreen = listen("toggle-fullscreen-requested", async () => {
-      console.log("Toggle fullscreen requested from menu");
-      try {
-        const window = getCurrentWindow();
-        const isFullscreen = await window.isFullscreen();
-        await window.setFullscreen(!isFullscreen);
-        console.log(`✅ Window fullscreen ${!isFullscreen ? 'enabled' : 'disabled'} successfully`);
-      } catch (error) {
-        console.error("❌ Failed to toggle fullscreen:", error);
-        setConversation(prev => [...prev, {
-          role: "system",
-          content: `Failed to toggle fullscreen: ${error}`,
-          timestamp: Date.now()
-        }]);
+    const unlistenFullscreen = listen(
+      "toggle-fullscreen-requested",
+      async () => {
+        console.log("Toggle fullscreen requested from menu");
+        try {
+          const window = getCurrentWindow();
+          const isFullscreen = await window.isFullscreen();
+          await window.setFullscreen(!isFullscreen);
+          console.log(
+            `✅ Window fullscreen ${
+              !isFullscreen ? "enabled" : "disabled"
+            } successfully`
+          );
+        } catch (error) {
+          console.error("❌ Failed to toggle fullscreen:", error);
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `Failed to toggle fullscreen: ${error}`,
+              timestamp: Date.now(),
+            },
+          ]);
+        }
       }
-    });
+    );
 
     const unlistenUpdate = listen("update-check-requested", () => {
       console.log("Update check requested from menu");
@@ -766,35 +803,45 @@ function App() {
     setIsCheckingUpdate(true);
     try {
       console.log("🔍 Checking for updates...");
-      
+
       // Use backend command to check for updates
-      const updateResult = await invoke("check_for_updates") as { available: boolean; version?: string; notes?: string };
-      
+      const updateResult = (await invoke("check_for_updates")) as {
+        available: boolean;
+        version?: string;
+        notes?: string;
+      };
+
       if (updateResult.available) {
         const updateInfo: UpdateInfo = {
           available: true,
           version: updateResult.version,
-          notes: updateResult.notes
+          notes: updateResult.notes,
         };
         setUpdateInfo(updateInfo);
         setActiveModal("update");
         console.log("✅ Update available:", updateInfo);
       } else {
         // Show "no updates" message in chat
-        setConversation(prev => [...prev, {
-          role: "system",
-          content: "✅ You're running the latest version of Juno AI.",
-          timestamp: Date.now()
-        }]);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: "✅ You're running the latest version of Juno AI.",
+            timestamp: Date.now(),
+          },
+        ]);
         console.log("✅ No updates available");
       }
     } catch (error) {
       console.error("❌ Failed to check for updates:", error);
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: `Failed to check for updates: ${error}`,
-        timestamp: Date.now()
-      }]);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `Failed to check for updates: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
     } finally {
       setIsCheckingUpdate(false);
     }
@@ -804,31 +851,41 @@ function App() {
   const handleInstallUpdate = async () => {
     try {
       console.log("🚀 Installing update...");
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: "🚀 Installing update... The application will restart automatically.",
-        timestamp: Date.now()
-      }]);
-      
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content:
+            "🚀 Installing update... The application will restart automatically.",
+          timestamp: Date.now(),
+        },
+      ]);
+
       await invoke("install_update");
     } catch (error) {
       console.error("❌ Failed to install update:", error);
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: `Failed to install update: ${error}`,
-        timestamp: Date.now()
-      }]);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `Failed to install update: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
     }
   };
 
   // Chat export implementation - simplified version using backend save dialog
   const handleExportChat = async () => {
     if (conversation.length === 0) {
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: "No conversation to export.",
-        timestamp: Date.now()
-      }]);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: "No conversation to export.",
+          timestamp: Date.now(),
+        },
+      ]);
       return;
     }
 
@@ -837,35 +894,41 @@ function App() {
       const exportData: ChatExport = {
         version: "1.0",
         exported_at: new Date().toISOString(),
-        conversation: conversation.filter(msg => msg.role !== "system"), // Exclude system messages
+        conversation: conversation.filter((msg) => msg.role !== "system"), // Exclude system messages
         metadata: {
           total_messages: conversation.length,
-          export_type: "filtered"
-        }
+          export_type: "filtered",
+        },
       };
 
       // Use backend command to handle file save dialog and writing
-      const result = await invoke("save_chat_export", { 
-        data: JSON.stringify(exportData, null, 2)
-      }) as { success: boolean; path?: string; error?: string };
-      
+      const result = (await invoke("save_chat_export", {
+        data: JSON.stringify(exportData, null, 2),
+      })) as { success: boolean; path?: string; error?: string };
+
       if (result.success && result.path) {
-        setConversation(prev => [...prev, {
-          role: "system",
-          content: `✅ Chat exported successfully to: ${result.path}`,
-          timestamp: Date.now()
-        }]);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `✅ Chat exported successfully to: ${result.path}`,
+            timestamp: Date.now(),
+          },
+        ]);
         console.log("✅ Chat exported successfully to:", result.path);
       } else {
         throw new Error(result.error || "Export failed");
       }
     } catch (error) {
       console.error("❌ Failed to export chat:", error);
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: `Failed to export chat: ${error}`,
-        timestamp: Date.now()
-      }]);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `Failed to export chat: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
     } finally {
       setIsExporting(false);
       setActiveModal(null);
@@ -877,40 +940,48 @@ function App() {
     setIsImporting(true);
     try {
       // Use backend command to handle file open dialog and reading
-      const result = await invoke("load_chat_import") as { 
-        success: boolean; 
-        data?: string; 
+      const result = (await invoke("load_chat_import")) as {
+        success: boolean;
+        data?: string;
         error?: string;
         messageCount?: number;
       };
 
       if (result.success && result.data) {
         const importData: ChatExport = JSON.parse(result.data);
-        
+
         // Validate import format
-        if (!importData.conversation || !Array.isArray(importData.conversation)) {
+        if (
+          !importData.conversation ||
+          !Array.isArray(importData.conversation)
+        ) {
           throw new Error("Invalid chat export format");
         }
 
         // Confirm import with user
         const confirmImport = window.confirm(
-          `Import ${result.messageCount || importData.conversation.length} messages? This will replace your current conversation.`
+          `Import ${
+            result.messageCount || importData.conversation.length
+          } messages? This will replace your current conversation.`
         );
 
         if (confirmImport) {
           // Add timestamps to imported messages if missing
-          const importedMessages = importData.conversation.map(msg => ({
+          const importedMessages = importData.conversation.map((msg) => ({
             ...msg,
-            timestamp: msg.timestamp || Date.now()
+            timestamp: msg.timestamp || Date.now(),
           }));
 
           setConversation(importedMessages);
-          
-          setConversation(prev => [...prev, {
-            role: "system",
-            content: `✅ Chat imported successfully. Loaded ${importedMessages.length} messages.`,
-            timestamp: Date.now()
-          }]);
+
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `✅ Chat imported successfully. Loaded ${importedMessages.length} messages.`,
+              timestamp: Date.now(),
+            },
+          ]);
           console.log("✅ Chat imported successfully:", importData);
         }
       } else {
@@ -921,11 +992,14 @@ function App() {
       }
     } catch (error) {
       console.error("❌ Failed to import chat:", error);
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: `Failed to import chat: ${error}`,
-        timestamp: Date.now()
-      }]);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `Failed to import chat: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
     } finally {
       setIsImporting(false);
       setActiveModal(null);
@@ -941,33 +1015,40 @@ function App() {
 
     try {
       console.log("📝 Submitting feedback:", feedbackData);
-      
+
       // Create GitHub issue URL or mailto link for feedback
       if (feedbackData.type === "issue") {
         const title = encodeURIComponent(feedbackData.title);
         const body = encodeURIComponent(
-          `**Priority:** ${feedbackData.priority}\n\n**Description:**\n${feedbackData.description}\n\n**Contact:** ${feedbackData.email || 'Not provided'}`
+          `**Priority:** ${feedbackData.priority}\n\n**Description:**\n${
+            feedbackData.description
+          }\n\n**Contact:** ${feedbackData.email || "Not provided"}`
         );
         const githubUrl = `https://github.com/lacymorrow/juno/issues/new?title=${title}&body=${body}`;
-        
+
         // Open GitHub issues page
         await invoke("open_url", { url: githubUrl });
       } else {
         // For general feedback, create mailto link
-        const subject = encodeURIComponent(`Juno AI Feedback: ${feedbackData.title}`);
+        const subject = encodeURIComponent(
+          `Juno AI Feedback: ${feedbackData.title}`
+        );
         const body = encodeURIComponent(
           `Priority: ${feedbackData.priority}\n\nDescription:\n${feedbackData.description}`
         );
         const mailtoUrl = `mailto:feedback@juno-ai.com?subject=${subject}&body=${body}`;
-        
+
         await invoke("open_url", { url: mailtoUrl });
       }
 
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: "✅ Feedback form opened. Thank you for your input!",
-        timestamp: Date.now()
-      }]);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: "✅ Feedback form opened. Thank you for your input!",
+          timestamp: Date.now(),
+        },
+      ]);
 
       // Reset form and close modal
       setFeedbackData({
@@ -975,16 +1056,19 @@ function App() {
         title: "",
         description: "",
         email: "",
-        priority: "medium"
+        priority: "medium",
       });
       setActiveModal(null);
     } catch (error) {
       console.error("❌ Failed to submit feedback:", error);
-      setConversation(prev => [...prev, {
-        role: "system",
-        content: `Failed to open feedback form: ${error}`,
-        timestamp: Date.now()
-      }]);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `Failed to open feedback form: ${error}`,
+          timestamp: Date.now(),
+        },
+      ]);
     }
   };
 
@@ -1419,27 +1503,52 @@ function App() {
           return (
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Help & Documentation</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Help & Documentation
+                </h2>
                 <button
                   onClick={() => setActiveModal(null)}
                   className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 </button>
               </div>
               <div className="space-y-4 text-gray-700 dark:text-gray-300">
                 <section>
-                  <h3 className="text-lg font-semibold mb-2">🎙️ Voice Controls</h3>
+                  <h3 className="text-lg font-semibold mb-2">
+                    🎙️ Voice Controls
+                  </h3>
                   <ul className="list-disc list-inside space-y-1">
-                    <li><strong>Option + D:</strong> Toggle Agent Mode (AI conversations)</li>
-                    <li><strong>Option + Space:</strong> Toggle Dictation Mode (voice typing)</li>
-                    <li><strong>Wake Words:</strong> Say "Hey Juno" or "Computer" (Always Listening Mode)</li>
+                    <li>
+                      <strong>Option + D:</strong> Toggle Agent Mode (AI
+                      conversations)
+                    </li>
+                    <li>
+                      <strong>Option + Space:</strong> Toggle Dictation Mode
+                      (voice typing)
+                    </li>
+                    <li>
+                      <strong>Wake Words:</strong> Say "Hey Juno" or "Computer"
+                      (Always Listening Mode)
+                    </li>
                   </ul>
                 </section>
                 <section>
-                  <h3 className="text-lg font-semibold mb-2">💬 Chat Features</h3>
+                  <h3 className="text-lg font-semibold mb-2">
+                    💬 Chat Features
+                  </h3>
                   <ul className="list-disc list-inside space-y-1">
                     <li>Type your questions and press Enter</li>
                     <li>Use voice commands for hands-free interaction</li>
@@ -1448,7 +1557,9 @@ function App() {
                   </ul>
                 </section>
                 <section>
-                  <h3 className="text-lg font-semibold mb-2">🛠️ Tools & Automation</h3>
+                  <h3 className="text-lg font-semibold mb-2">
+                    🛠️ Tools & Automation
+                  </h3>
                   <ul className="list-disc list-inside space-y-1">
                     <li>Screen capture and analysis</li>
                     <li>File operations and code analysis</li>
@@ -1457,9 +1568,13 @@ function App() {
                   </ul>
                 </section>
                 <section>
-                  <h3 className="text-lg font-semibold mb-2">⚙️ Settings & Permissions</h3>
+                  <h3 className="text-lg font-semibold mb-2">
+                    ⚙️ Settings & Permissions
+                  </h3>
                   <ul className="list-disc list-inside space-y-1">
-                    <li>Configure accessibility permissions for screen control</li>
+                    <li>
+                      Configure accessibility permissions for screen control
+                    </li>
                     <li>Adjust voice recognition settings</li>
                     <li>Customize keyboard shortcuts</li>
                     <li>Enable developer tools for advanced features</li>
@@ -1467,7 +1582,8 @@ function App() {
                 </section>
                 <div className="pt-4 border-t border-gray-200 dark:border-gray-600">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    For more detailed documentation, visit our GitHub repository or contact support.
+                    For more detailed documentation, visit our GitHub repository
+                    or contact support.
                   </p>
                 </div>
               </div>
@@ -1478,24 +1594,47 @@ function App() {
           return (
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Submit Feedback</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Submit Feedback
+                </h2>
                 <button
                   onClick={() => setActiveModal(null)}
                   className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 </button>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); handleSubmitFeedback(); }} className="space-y-4">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSubmitFeedback();
+                }}
+                className="space-y-4"
+              >
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Feedback Type
                   </label>
                   <select
                     value={feedbackData.type}
-                    onChange={(e) => setFeedbackData(prev => ({ ...prev, type: e.target.value as "issue" | "feature" | "general" }))}
+                    onChange={(e) =>
+                      setFeedbackData((prev) => ({
+                        ...prev,
+                        type: e.target.value as "issue" | "feature" | "general",
+                      }))
+                    }
                     className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                   >
                     <option value="general">General Feedback</option>
@@ -1510,7 +1649,12 @@ function App() {
                   <input
                     type="text"
                     value={feedbackData.title}
-                    onChange={(e) => setFeedbackData(prev => ({ ...prev, title: e.target.value }))}
+                    onChange={(e) =>
+                      setFeedbackData((prev) => ({
+                        ...prev,
+                        title: e.target.value,
+                      }))
+                    }
                     className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                     placeholder="Brief summary of your feedback"
                     required
@@ -1522,7 +1666,12 @@ function App() {
                   </label>
                   <textarea
                     value={feedbackData.description}
-                    onChange={(e) => setFeedbackData(prev => ({ ...prev, description: e.target.value }))}
+                    onChange={(e) =>
+                      setFeedbackData((prev) => ({
+                        ...prev,
+                        description: e.target.value,
+                      }))
+                    }
                     className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white h-24"
                     placeholder="Detailed description of your feedback"
                     required
@@ -1534,7 +1683,12 @@ function App() {
                   </label>
                   <select
                     value={feedbackData.priority}
-                    onChange={(e) => setFeedbackData(prev => ({ ...prev, priority: e.target.value as "low" | "medium" | "high" }))}
+                    onChange={(e) =>
+                      setFeedbackData((prev) => ({
+                        ...prev,
+                        priority: e.target.value as "low" | "medium" | "high",
+                      }))
+                    }
                     className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                   >
                     <option value="low">Low</option>
@@ -1549,7 +1703,12 @@ function App() {
                   <input
                     type="email"
                     value={feedbackData.email}
-                    onChange={(e) => setFeedbackData(prev => ({ ...prev, email: e.target.value }))}
+                    onChange={(e) =>
+                      setFeedbackData((prev) => ({
+                        ...prev,
+                        email: e.target.value,
+                      }))
+                    }
                     className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                     placeholder="your.email@example.com"
                   />
@@ -1577,23 +1736,39 @@ function App() {
           return (
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Export Chat</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Export Chat
+                </h2>
                 <button
                   onClick={() => setActiveModal(null)}
                   className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 </button>
               </div>
               <div className="space-y-4">
                 <p className="text-gray-700 dark:text-gray-300">
-                  Export your current conversation to a JSON file for backup or sharing.
+                  Export your current conversation to a JSON file for backup or
+                  sharing.
                 </p>
                 <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm">
-                  <strong>Messages to export:</strong> {conversation.filter(msg => msg.role !== "system").length}<br />
-                  <strong>Format:</strong> JSON<br />
+                  <strong>Messages to export:</strong>{" "}
+                  {conversation.filter((msg) => msg.role !== "system").length}
+                  <br />
+                  <strong>Format:</strong> JSON
+                  <br />
                   <strong>Includes:</strong> All user and assistant messages
                 </div>
                 <div className="flex gap-3 pt-2">
@@ -1619,22 +1794,37 @@ function App() {
           return (
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Import Chat</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Import Chat
+                </h2>
                 <button
                   onClick={() => setActiveModal(null)}
                   className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 </button>
               </div>
               <div className="space-y-4">
                 <p className="text-gray-700 dark:text-gray-300">
-                  Import a previously exported chat conversation from a JSON file.
+                  Import a previously exported chat conversation from a JSON
+                  file.
                 </p>
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded text-sm text-yellow-800 dark:text-yellow-200">
-                  <strong>Warning:</strong> This will replace your current conversation. Make sure to export it first if you want to keep it.
+                  <strong>Warning:</strong> This will replace your current
+                  conversation. Make sure to export it first if you want to keep
+                  it.
                 </div>
                 <div className="flex gap-3 pt-2">
                   <button
@@ -1659,13 +1849,25 @@ function App() {
           return updateInfo ? (
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Update Available</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  Update Available
+                </h2>
                 <button
                   onClick={() => setActiveModal(null)}
                   className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg
+                    className="w-6 h-6"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 </button>
               </div>
@@ -1676,14 +1878,22 @@ function App() {
                   </p>
                   {updateInfo.version && (
                     <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded">
-                      <p className="text-sm"><strong>Version:</strong> {updateInfo.version}</p>
-                      {updateInfo.date && <p className="text-sm"><strong>Date:</strong> {updateInfo.date}</p>}
+                      <p className="text-sm">
+                        <strong>Version:</strong> {updateInfo.version}
+                      </p>
+                      {updateInfo.date && (
+                        <p className="text-sm">
+                          <strong>Date:</strong> {updateInfo.date}
+                        </p>
+                      )}
                     </div>
                   )}
                   {updateInfo.notes && (
                     <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
                       <p className="text-sm font-medium mb-1">Release Notes:</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">{updateInfo.notes}</p>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        {updateInfo.notes}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -2112,10 +2322,10 @@ function App() {
           )}
         </div>
       </div>
-      
+
       {/* Enhanced modal system */}
       {renderModal()}
-      
+
       {/* Update check loading indicator */}
       {isCheckingUpdate && (
         <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg">
@@ -2124,9 +2334,11 @@ function App() {
       )}
 
       {/* Version display in bottom left corner */}
-      <div className="fixed bottom-2 left-2 text-xs text-muted-foreground/50 pointer-events-none select-none">
-        v{APP_VERSION}
-      </div>
+      {appVersion && (
+        <div className="fixed bottom-2 left-2 text-xs text-muted-foreground/50 pointer-events-none select-none">
+          {appVersion}
+        </div>
+      )}
     </main>
   );
 }
