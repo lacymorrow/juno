@@ -1,9 +1,9 @@
 //! # Desktop Tools Module
-//! 
+//!
 //! Cross-platform desktop automation tools for computer use agents.
 //! Provides comprehensive desktop interaction capabilities including mouse control,
 //! keyboard input, screen capture, UI element interaction, and clipboard operations.
-//! 
+//!
 //! ## Core Capabilities:
 //! - Screen capture and element screenshots
 //! - Mouse control (click, drag, move, up/down)
@@ -11,11 +11,11 @@
 //! - UI element accessibility and interaction
 //! - Clipboard operations (get/set)
 //! - Window scrolling and focus management
-//! 
+//!
 //! ## Platform Support:
 //! - macOS: Full support via computer_use_ai_sdk
 //! - Other platforms: Limited support, some features may not be available
-//! 
+//!
 //! ## Usage
 //! Used by: Anthropic Computer Use agents, desktop automation workflows, UI testing
 //! Registration: Called via `register_desktop_tools()` and `setup_tools()` during agent setup
@@ -42,20 +42,20 @@ use std::sync::Arc;
 // as they might be needed by the stubbed function later.
 
 /// Registers additional computer use tools beyond the basic desktop tools.
-/// 
+///
 /// This function provides advanced desktop automation tools including scrolling,
 /// waiting, key control, and mouse operations. These tools extend the basic
 /// desktop capabilities with more sophisticated interaction patterns.
-/// 
+///
 /// Used by: Advanced computer use workflows, complex automation scenarios
-/// 
+///
 /// # Arguments
 /// * `provider` - Mutable reference to LocalToolProvider for tool registration
 /// * `app_handle` - Tauri app handle for state access and command execution
-/// 
+///
 /// # Returns
 /// `Result<(), String>` - Success or error message
-/// 
+///
 /// # Tools Registered
 /// - `scroll`: Window/element scrolling with direction and amount
 /// - `wait`: Pause execution for specified duration
@@ -63,7 +63,7 @@ use std::sync::Arc;
 /// - `hold_key`: Hold key down for duration or until released
 /// - `release_key`: Release previously held keys
 /// - `left_mouse_down`: Press left mouse button down at coordinates
-/// - `left_mouse_up`: Release left mouse button at coordinates  
+/// - `left_mouse_up`: Release left mouse button at coordinates
 /// - `triple_click`: Perform triple-click at coordinates
 // Stub function to resolve compilation error
 async fn register_additional_computer_use_tools(
@@ -384,25 +384,25 @@ async fn register_additional_computer_use_tools(
 }
 
 /// Registers core desktop tools with the tool provider.
-/// 
+///
 /// This function provides fundamental desktop automation capabilities including
 /// UI element interaction, screen capture, text input, clipboard operations,
 /// and mouse control. These are the essential tools for desktop automation.
-/// 
+///
 /// Used by: Agent initialization, desktop automation workflows, UI testing
-/// 
+///
 /// # Arguments
 /// * `provider` - Mutable reference to LocalToolProvider for tool registration
 /// * `_state` - App state (currently unused but kept for interface consistency)
 /// * `app_handle` - Tauri app handle for state access and command execution
-/// 
+///
 /// # Tools Registered
 /// - `get_focused_element_info`: Get accessibility info for focused UI element
 /// - `capture_screenshot`: Take full desktop screenshot
 /// - `capture_element_screenshot`: Screenshot of focused element
 /// - `type_text`: Type text into active application
 /// - `get_clipboard`: Get current clipboard text content
-/// - `set_clipboard`: Set clipboard text content  
+/// - `set_clipboard`: Set clipboard text content
 /// - `desktop_click`: Click at screen coordinates with modifiers
 /// - `mouse_position`: Get current mouse cursor position
 /// - `mouse_drag`: Drag from start to end coordinates
@@ -563,7 +563,7 @@ pub async fn register_desktop_tools(
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::key::dev_type_text(app.clone(), state_manager, args.text, args.delay).await
+                    commands::keyboard::type_text(args.text, state_manager).await
                 })
             });
             result.map_err(|e| format!("Error typing text: {}", e))?;
@@ -687,7 +687,7 @@ pub async fn register_desktop_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::mouse::dev_desktop_click(app.clone(), state_manager, args.x, args.y, args.click_type, args.modifier).await
+                    commands::mouse::dev_left_click(app.clone(), state_manager, args.x, args.y, args.modifier).await
                 })
             });
             inner_result.map_err(|e| format!("Error clicking: {}", e))?;
@@ -1118,21 +1118,21 @@ pub async fn register_desktop_tools(
 }
 
 /// Sets up the complete tool provider with desktop tools and MCP integration.
-/// 
+///
 /// This is the main setup function that initializes all desktop automation capabilities
 /// and integrates with Model Context Protocol (MCP) servers for extensibility.
 /// It serves as a wrapper for register_desktop_tools with additional MCP setup.
-/// 
+///
 /// Used by: Agent initialization, main tool provider setup in application startup
-/// 
+///
 /// # Arguments
 /// * `provider` - Mutable reference to LocalToolProvider for tool registration
 /// * `state` - App state containing MCP manager and configuration
 /// * `app_handle` - Tauri app handle for state access and command execution
-/// 
+///
 /// # Returns
 /// `Arc<Mutex<LocalToolProvider>>` - Thread-safe shared tool provider instance
-/// 
+///
 /// # Features
 /// - Registers all desktop automation tools
 /// - Initializes MCP server connections
