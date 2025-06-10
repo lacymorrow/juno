@@ -16,12 +16,15 @@ bun install && cp .env.example .env
 bun run tauri dev
 ```
 
+**💡 Pro Tip**: Enable auto-launch in Settings → General → Startup Behavior to have Juno start automatically when you log in!
+
 ## 🎯 Implementation Status
 
 ✅ **All 17 Computer Use actions** (screenshot, mouse, keyboard, scroll, wait)  
 ✅ **Complete macOS platform support** with accessibility APIs  
 ✅ **Multi-agent architecture** with intelligent task delegation  
 ✅ **Voice integration** with dual modes (Agent/Dictation)  
+✅ **Auto-launch functionality** with seamless startup integration  
 ✅ **JSX Visual Responses** with rich React component rendering  
 ✅ **Timer system** for long-running tasks with context resumption  
 ✅ **Browser automation** and advanced web interaction
