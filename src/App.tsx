@@ -244,6 +244,7 @@ function formatFullTimestamp(timestamp: number): string {
 
 function App() {
   const [query, setQuery] = useState("");
+  const [lastSubmittedQuery, setLastSubmittedQuery] = useState(""); // Track last query for error recovery
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [serverStatus, setServerStatus] = useState<
@@ -505,11 +506,8 @@ function App() {
       };
       setConversation((prev) => [...prev, userMessage]);
 
-      // If we reach here for dictation:
-      // - text is not empty.
-      // - serverStatus check was skipped (or passed if not dictation).
-      // - isProcessing check was skipped (or passed if not dictation).
-
+      // Store the query before clearing it, for potential error recovery
+      setLastSubmittedQuery(text);
       setQuery(""); // Clear input immediately IF it was from the manual input field
       setIsProcessing(true); // Set processing state
 
@@ -527,6 +525,10 @@ function App() {
         };
         setConversation((prev) => [...prev, errorMessage]);
         setIsProcessing(false); // Reset processing on error
+        
+        // Restore the input so user can retry
+        console.log("Restoring input due to submitQuery error:", text);
+        setQuery(text);
       }
       // No finally block to set isProcessing(false) here, as the event listener handles it on success.
     },
@@ -2336,6 +2338,45 @@ function App() {
 
     return className;
   };
+
+  // Listen for agent error events to restore input for retry
+  useEffect(() => {
+    const unlisten = listen<{
+      agent_state: string;
+      error_message: string;
+      original_query: string;
+    }>("agent-error", (event) => {
+      console.log("Agent error event received:", event.payload);
+      const { agent_state, error_message, original_query } = event.payload;
+
+      // Restore the input so user can retry their query
+      if (original_query && original_query.trim()) {
+        console.log("Restoring input due to agent error:", original_query);
+        setQuery(original_query);
+      }
+
+      // Also ensure processing state is reset
+      setIsProcessing(false);
+
+      // Show error in conversation if not already shown via streaming
+      const errorExists = conversation.some(
+        (msg) => msg.role === "system" && msg.content.includes(error_message)
+      );
+      
+      if (!errorExists) {
+        const errorMessage: ChatMessage = {
+          role: "system",
+          content: `Agent ${agent_state.toLowerCase()}: ${error_message}`,
+          timestamp: Date.now(),
+        };
+        setConversation((prev) => [...prev, errorMessage]);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [conversation]);
 
   return (
     <main className="h-screen flex flex-col">
