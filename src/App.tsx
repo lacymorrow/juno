@@ -72,6 +72,7 @@ type ChatMessage = {
 // Type for the result from submit_query
 type SubmitQueryResult = {
   text: string;
+  spoken_text?: string; // Optional separate content for TTS speech
   audio_base64?: string; // Optional base64 audio data
   agent_state: string;
   screenshot_base64?: string; // Optional base64 screenshot data
