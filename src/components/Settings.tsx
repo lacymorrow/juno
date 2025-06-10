@@ -847,7 +847,7 @@ const Settings: React.FC<SettingsProps> = ({
         max_retries: parsedEnvVars.max_retries || 3,
       };
 
-      await invoke("add_mcp_server", { server: newServer });
+      await invoke("add_mcp_server", { config: newServer });
       toast.success("MCP server added successfully");
       setMcpJsonData("");
       await loadMcpServers();
