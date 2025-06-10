@@ -1,13 +1,29 @@
 import { useSettings } from "@/hooks/useSettings";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Brain,
+  Keyboard,
   Mic,
+  MonitorSpeaker,
+  Network,
   Settings,
   Bell,
+	Shield,
+	Terminal,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { GeneralSettings, VoiceSettings, AIProviderSettings, NotificationSettings } from './index';
+import {
+  GeneralSettings,
+  VoiceSettings,
+  AIProviderSettings,
+  SecuritySettings,
+  AdvancedSettings,
+  NetworkSettings,
+  ShortcutsSettings,
+  ToolsSettings,
+	NotificationSettings
+} from './index';
 import { SettingsCategory } from './types';
 
 const settingsCategories: SettingsCategory[] = [
@@ -35,6 +51,36 @@ const settingsCategories: SettingsCategory[] = [
     icon: <Brain className="w-8 h-8" />,
     description: "Configure AI models and providers",
   },
+  {
+    id: "network",
+    name: "Network",
+    icon: <Network className="w-8 h-8" />,
+    description: "MCP servers and network configuration",
+  },
+  {
+    id: "security",
+    name: "Security & Privacy",
+    icon: <Shield className="w-8 h-8" />,
+    description: "Permissions and security settings",
+  },
+  {
+    id: "shortcuts",
+    name: "Keyboard Shortcuts",
+    icon: <Keyboard className="w-8 h-8" />,
+    description: "Customize keyboard shortcuts",
+  },
+  {
+    id: "tools",
+    name: "Tools",
+    icon: <MonitorSpeaker className="w-8 h-8" />,
+    description: "Configure available tools and features",
+  },
+  {
+    id: "advanced",
+    name: "Advanced",
+    icon: <Terminal className="w-8 h-8" />,
+    description: "Advanced settings and developer options",
+  },
 ];
 
 export default function ModularSettingsWindow() {
@@ -46,7 +92,7 @@ export default function ModularSettingsWindow() {
     // Set up the window properly for macOS
     const setupWindow = async () => {
       try {
-        await window.setTitle("Juno Settings (Modular)");
+        await window.setTitle("Juno Settings");
         if (window.label === "settings") {
           console.log("Modular settings window initialized");
         }
@@ -58,6 +104,14 @@ export default function ModularSettingsWindow() {
     setupWindow();
   }, [window]);
 
+  const handleCloseWindow = async () => {
+    try {
+      await invoke("close_settings_window");
+    } catch (error) {
+      console.error("Failed to close settings window:", error);
+    }
+  };
+
   const renderCategoryContent = () => {
     switch (selectedCategory) {
       case "general":
@@ -68,6 +122,16 @@ export default function ModularSettingsWindow() {
         return <NotificationSettings />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
+      case "network":
+        return <NetworkSettings settings={settings} />;
+      case "security":
+        return <SecuritySettings settings={settings} />;
+      case "shortcuts":
+        return <ShortcutsSettings settings={settings} />;
+      case "tools":
+        return <ToolsSettings settings={settings} />;
+      case "advanced":
+        return <AdvancedSettings settings={settings} />;
       default:
         return <GeneralSettings settings={settings} />;
     }
@@ -78,8 +142,7 @@ export default function ModularSettingsWindow() {
       {/* Sidebar with categories - macOS style */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900">Settings (Modular)</h1>
-          <p className="text-xs text-gray-500 mt-1">Testing modular components</p>
+          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
@@ -112,6 +175,16 @@ export default function ModularSettingsWindow() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Footer with close button */}
+        <div className="p-4 border-t border-gray-200">
+          <button
+            onClick={handleCloseWindow}
+            className="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
+          >
+            Close Settings
+          </button>
         </div>
       </div>
 
