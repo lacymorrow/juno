@@ -31,6 +31,7 @@ pub mod cloud;
 pub mod mcp;
 pub mod memory;
 pub mod always_listening;
+pub mod notifications;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;

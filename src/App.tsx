@@ -20,6 +20,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
+import { notificationService } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -41,6 +42,7 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
+import { Toaster } from "sonner";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
@@ -304,6 +306,10 @@ function App() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
+        // Initialize notification service
+        await notificationService.initialize();
+        console.log("Notification service initialized");
+
         // First check permissions
         const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
@@ -2861,6 +2867,15 @@ function App() {
           {appVersion}
         </div>
       )}
+
+      {/* Toast notifications */}
+      <Toaster 
+        position="bottom-right"
+        expand={true}
+        richColors={true}
+        closeButton={true}
+        duration={5000}
+      />
     </main>
   );
 }
