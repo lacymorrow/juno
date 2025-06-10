@@ -26,14 +26,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  ArrowLeft,
   DogIcon,
+  Server,
+  Send,
+  Plus,
+  Trash2,
+  ArrowLeft,
   PanelLeftClose,
   PanelLeftOpen,
-  Plus,
-  Send,
-  Server,
-  Trash2,
+  Copy,
+  FileText,
+  Code
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
@@ -1927,6 +1930,32 @@ function App() {
     );
   };
 
+  // Copy and Save handlers for agent responses
+  const handleCopyResponse = useCallback(async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      // Show notification or toast (you could enhance this with a toast system)
+      console.log("Copied to clipboard");
+      // Optional: Add visual feedback like a toast notification
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error);
+    }
+  }, []);
+
+  const handleSaveResponse = useCallback(async (content: string, format: "html" | "markdown") => {
+    try {
+      const filePath = await invoke("save_agent_response", {
+        content,
+        format,
+        suggested_filename: `agent_response_${Date.now()}`
+      });
+      console.log(`Response saved to: ${filePath}`);
+      // Optional: Add visual feedback like a toast notification
+    } catch (error) {
+      console.error(`Failed to save response as ${format}:`, error);
+    }
+  }, []);
+
   return (
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
@@ -2171,62 +2200,100 @@ function App() {
                                     : "justify-start"
                                 }`}
                               >
-                                <span
-                                  className={cn(
-                                    "inline-block max-w-[85%] px-3 py-1.5 rounded-lg shadow-sm",
-                                    msg.role === "user"
-                                      ? "bg-primary text-primary-foreground"
-                                      : msg.role === "assistant"
-                                      ? "bg-muted"
-                                      : msg.role === "system" &&
-                                        msg.screenshot_base64
-                                      ? "bg-muted/80 border border-primary/20 p-2"
-                                      : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
-                                  )}
-                                >
-                                  {msg.role === "assistant" &&
-                                  (!msg.content ||
-                                    msg.content.trim() === "") ? (
-                                    <span className="text-muted-foreground italic flex items-center gap-2">
-                                      <span>✓</span>
-                                      <span>Task completed successfully</span>
-                                    </span>
-                                  ) : msg.isJsx ||
-                                    (msg.role === "assistant" &&
-                                      isJsxContent(msg.content)) ? (
-                                    <JsxMessageRenderer jsx={msg.content} />
-                                  ) : (
-                                    msg.content
-                                  )}
-                                  {msg.screenshot_base64 && (
-                                    <div
-                                      className={cn(
-                                        "mt-2",
-                                        msg.role !== "system" && "border-t pt-2"
-                                      )}
-                                    >
-                                      <div className="text-xs text-muted-foreground mb-1">
-                                        {msg.role === "system"
-                                          ? "Screenshot captured by AI:"
-                                          : "Screenshot:"}
+                                <div className="relative group max-w-[85%]">
+                                  <span
+                                    className={cn(
+                                      "inline-block w-full px-3 py-1.5 rounded-lg shadow-sm",
+                                      msg.role === "user"
+                                        ? "bg-primary text-primary-foreground"
+                                        : msg.role === "assistant"
+                                        ? "bg-muted"
+                                        : msg.role === "system" &&
+                                          msg.screenshot_base64
+                                        ? "bg-muted/80 border border-primary/20 p-2"
+                                        : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
+                                    )}
+                                  >
+                                    {msg.role === "assistant" &&
+                                    (!msg.content ||
+                                      msg.content.trim() === "") ? (
+                                      <span className="text-muted-foreground italic flex items-center gap-2">
+                                        <span>✓</span>
+                                        <span>Task completed successfully</span>
+                                      </span>
+                                    ) : msg.isJsx ||
+                                      (msg.role === "assistant" &&
+                                        isJsxContent(msg.content)) ? (
+                                      <JsxMessageRenderer jsx={msg.content} />
+                                    ) : (
+                                      msg.content
+                                    )}
+                                    {msg.screenshot_base64 && (
+                                      <div
+                                        className={cn(
+                                          "mt-2",
+                                          msg.role !== "system" && "border-t pt-2"
+                                        )}
+                                      >
+                                        <div className="text-xs text-muted-foreground mb-1">
+                                          {msg.role === "system"
+                                            ? "Screenshot captured by AI:"
+                                            : "Screenshot:"}
+                                        </div>
+                                        <div className="relative">
+                                          <img
+                                            src={`data:image/png;base64,${msg.screenshot_base64}`}
+                                            alt="Screenshot"
+                                            className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+                                          />
+                                          <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+                                        </div>
                                       </div>
-                                      <div className="relative">
-                                        <img
-                                          src={`data:image/png;base64,${msg.screenshot_base64}`}
-                                          alt="Screenshot"
-                                          className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-                                        />
-                                        <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-                                      </div>
+                                    )}
+                                    {/* Show typing indicator for streaming messages */}
+                                    {msg.isStreaming && (
+                                      <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
+                                        |
+                                      </span>
+                                    )}
+                                  </span>
+                                  
+                                  {/* Action buttons for assistant messages with content */}
+                                  {msg.role === "assistant" && 
+                                   msg.content && 
+                                   msg.content.trim() !== "" && 
+                                   !msg.isStreaming && (
+                                    <div className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 bg-background border shadow-md hover:bg-muted"
+                                        onClick={() => handleCopyResponse(msg.content)}
+                                        title="Copy response"
+                                      >
+                                        <Copy size={12} />
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 bg-background border shadow-md hover:bg-muted"
+                                        onClick={() => handleSaveResponse(msg.content, "html")}
+                                        title="Save as HTML"
+                                      >
+                                        <Code size={12} />
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 bg-background border shadow-md hover:bg-muted"
+                                        onClick={() => handleSaveResponse(msg.content, "markdown")}
+                                        title="Save as Markdown"
+                                      >
+                                        <FileText size={12} />
+                                      </Button>
                                     </div>
                                   )}
-                                  {/* Show typing indicator for streaming messages */}
-                                  {msg.isStreaming && (
-                                    <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
-                                      |
-                                    </span>
-                                  )}
-                                </span>
+                                </div>
                               </div>
                             )}
                           </div>
