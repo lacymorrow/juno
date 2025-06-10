@@ -47,6 +47,10 @@ pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod cloud; // Cloud connectivity and remote control
 pub mod voice_control;
 
+// Test utilities module - only included in test builds
+#[cfg(test)]
+pub mod test_utils;
+
 // Embed tray icon data directly in the binary - no file system dependencies
 const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
 

@@ -73,7 +73,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 lazy_static = "1.4"
 # Voice transcription plugin
 tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription" }
-tauri-plugin-process = "2.2.1"
+tauri-plugin-process = "2.0.1"
 tauri-plugin-store = "2.0.1"
 # logging = { path = "../logging" } # Commented out due to path issue and no current usages
 # rabDab = { path = "../rabDab" }   # Commented out due to path issue and no current usages
@@ -102,4 +102,52 @@ macos-proxy = ["tauri/macos-proxy", "cocoa", "objc"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
+# Core testing framework
 tokio-test = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.4"
+mockall = "0.12"
+wiremock = "0.6"
+assert_cmd = "2.0"
+predicates = "3.0"
+
+# Testing utilities
+tempfile = "3.10"
+serial_test = "3.0"
+once_cell = "1.19"
+env_logger = "0.10"
+test-log = "0.2"
+
+# Security testing
+quickcheck = "1.0"
+arbitrary = { version = "1.3", features = ["derive"] }
+
+# Performance testing
+flamegraph = "0.6"
+dhat = "0.3"
+
+# Test data generation
+fake = { version = "2.9", features = ["derive"] }
+rand = "0.8"
+
+# Additional testing support
+pretty_assertions = "1.4"
+rstest = "0.19"
+insta = "1.34"
+
+# Coverage and profiling (optional, for CI/CD)
+# tarpaulin = { version = "0.27", optional = true }
+
+[profile.test]
+# Optimize tests for faster execution
+opt-level = 1
+debug = true
+
+[profile.bench]
+# Optimize benchmarks for accurate performance measurement
+debug = true
+
+# Only include the benchmark that exists
+[[bench]]
+name = "agent_performance"
+harness = false
