@@ -103,6 +103,7 @@ pub struct AppState {
     pub dictation_active: Arc<Mutex<bool>>, // Track if Dictation Mode is active
     pub dictation_clipboard_enabled: Arc<Mutex<bool>>, // Track if Dictation Mode should save to clipboard
     pub sound_enabled: Arc<Mutex<bool>>, // Track if sound effects are enabled
+    pub performance_monitoring_enabled: Arc<Mutex<bool>>, // Track if performance monitoring is enabled
     pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
     // Permissions state tracking
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
@@ -125,6 +126,13 @@ pub struct AppState {
     pub always_listening_active: Arc<Mutex<bool>>, // Track if Always Listening Mode is active
     pub always_listening_sensitivity: Arc<Mutex<f32>>, // Sensitivity threshold for activation
     pub always_listening_wake_words: Arc<Mutex<Vec<String>>>, // Configurable wake words
+    // Notification settings
+    pub notification_type: Arc<Mutex<String>>, // "system", "toast", "both", or "disabled"
+    pub notification_sound_enabled: Arc<Mutex<bool>>, // Sound for notifications
+    pub notification_duration: Arc<Mutex<u32>>, // Duration in milliseconds for toast notifications
+    pub notification_position: Arc<Mutex<String>>, // Position for toast notifications
+    pub notification_show_icons: Arc<Mutex<bool>>, // Show icons in notifications
+    pub notification_persist_important: Arc<Mutex<bool>>, // Keep important notifications until dismissed
     // Agent execution status tracking
     pub agent_execution_active: Arc<Mutex<bool>>, // Track if an agent is currently executing
     pub agent_execution_id: Arc<Mutex<Option<String>>>, // Track the current agent execution ID
@@ -133,8 +141,12 @@ pub struct AppState {
     pub agent_max_steps: Arc<Mutex<Option<u32>>>, // Track the maximum iterations/steps allowed
     // First onboarding prompt storage
     pub first_onboarding_prompt: Arc<Mutex<Option<String>>>, // Store the first prompt selected during onboarding
+
     // Dual content communication - store spoken content separately for TTS
     pub last_spoken_content: Arc<Mutex<Option<String>>>, // Store spoken content separate from displayed text
+    // Debug mode tracking
+    pub debug_mode: Arc<Mutex<bool>>, // Track if debug mode is enabled
+
 }
 
 impl AppState {
@@ -156,6 +168,7 @@ impl AppState {
             dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
             dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
             sound_enabled: Arc::new(Mutex::new(true)), // Initialize sound effects as enabled by default
+            performance_monitoring_enabled: Arc::new(Mutex::new(true)), // Initialize performance monitoring as enabled by default
             timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
             // Initialize permissions state
             permissions_state: Arc::new(TokioMutex::new(None)),
@@ -180,6 +193,13 @@ impl AppState {
             always_listening_wake_words: Arc::new(Mutex::new(
                 app_identity::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect()
             )),
+            // Initialize notification settings
+            notification_type: Arc::new(Mutex::new("system".to_string())),
+            notification_sound_enabled: Arc::new(Mutex::new(true)),
+            notification_duration: Arc::new(Mutex::new(5000)),
+            notification_position: Arc::new(Mutex::new("bottom-right".to_string())),
+            notification_show_icons: Arc::new(Mutex::new(true)),
+            notification_persist_important: Arc::new(Mutex::new(true)),
             // Initialize agent execution status tracking
             agent_execution_active: Arc::new(Mutex::new(false)),
             agent_execution_id: Arc::new(Mutex::new(None)),
@@ -190,6 +210,8 @@ impl AppState {
             first_onboarding_prompt: Arc::new(Mutex::new(None)),
             // Dual content communication - store spoken content separately for TTS
             last_spoken_content: Arc::new(Mutex::new(None)),
+            // Initialize debug mode tracking
+            debug_mode: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -551,6 +573,23 @@ impl AppState {
         Ok(())
     }
 
+    // Performance monitoring methods
+
+    /// Check if performance monitoring is enabled
+    pub fn is_performance_monitoring_enabled(&self) -> bool {
+        self.performance_monitoring_enabled.lock()
+            .map(|enabled| *enabled)
+            .unwrap_or(false)
+    }
+
+    /// Set performance monitoring enabled state
+    pub fn set_performance_monitoring_enabled(&self, enabled: bool) {
+        if let Ok(mut monitoring_guard) = self.performance_monitoring_enabled.lock() {
+            *monitoring_guard = enabled;
+            log::info!("Performance monitoring {}", if enabled { "enabled" } else { "disabled" });
+        }
+    }
+
     // Production cloud connector methods
 
     /// Set production cloud connector
@@ -729,6 +768,16 @@ impl AppState {
     pub fn clear_last_spoken_content(&self) {
         let mut spoken_guard = self.last_spoken_content.lock().unwrap();
         *spoken_guard = None;
+
+    // Debug mode methods
+    pub fn set_debug_mode(&self, enabled: bool) {
+        let mut debug_guard = self.debug_mode.lock().unwrap();
+        *debug_guard = enabled;
+    }
+
+    pub fn is_debug_mode(&self) -> bool {
+        let debug_guard = self.debug_mode.lock().unwrap();
+        *debug_guard
     }
 }
 

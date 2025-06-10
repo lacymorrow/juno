@@ -847,7 +847,7 @@ const Settings: React.FC<SettingsProps> = ({
         max_retries: parsedEnvVars.max_retries || 3,
       };
 
-      await invoke("add_mcp_server", { server: newServer });
+      await invoke("add_mcp_server", { config: newServer });
       toast.success("MCP server added successfully");
       setMcpJsonData("");
       await loadMcpServers();
@@ -862,6 +862,11 @@ const Settings: React.FC<SettingsProps> = ({
   };
 
   const getMcpServerStatusBadge = (status: MCPServerStatus) => {
+    // Handle undefined/null status
+    if (!status) {
+      return <Badge variant="outline">Disconnected</Badge>;
+    }
+    
     if (status.Connected !== undefined) {
       return (
         <Badge variant="default" className="bg-green-500">
@@ -880,6 +885,11 @@ const Settings: React.FC<SettingsProps> = ({
   };
 
   const getMcpServerStatusIcon = (status: MCPServerStatus) => {
+    // Handle undefined/null status
+    if (!status) {
+      return <Square className="h-4 w-4 text-gray-400" />;
+    }
+    
     if (status.Connected !== undefined) {
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     } else if (status.Connecting !== undefined) {
