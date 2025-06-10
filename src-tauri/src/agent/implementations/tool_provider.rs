@@ -93,10 +93,25 @@ impl LocalToolProvider {
             definitions.insert(tool_name.clone(), definition);
         }
 
-        // Wrap the executor in an Arc and store it
+        // Wrap the executor with additional error handling for display-related operations
         let wrapped_executor: AsyncToolExecutor = Arc::new(move |input| {
             let fut = executor(input);
-            Box::pin(fut)
+            Box::pin(async move {
+                // Add specific handling for tools that might interact with display system
+                match fut.await {
+                    Ok(result) => Ok(result),
+                    Err(e) => {
+                        // Check if this is a display-related error
+                        if e.contains("displayID") || e.contains("RemoteLayerTree") || e.contains("scheduleDisplayLink") {
+                            warn!("Display-related error detected in tool execution: {}", e);
+                            // Return a more graceful error message
+                            Err(format!("Display system error (this may be temporary): {}", e))
+                        } else {
+                            Err(e)
+                        }
+                    }
+                }
+            })
         });
 
         {
@@ -163,32 +178,52 @@ impl LocalToolProvider {
     /// Refresh MCP tools from connected servers
     pub async fn refresh_mcp_tools(&mut self) -> Result<(), String> {
         if let Some(ref mcp_manager) = self.mcp_manager {
-            let manager_guard = mcp_manager.lock().await;
-            let mcp_tools = manager_guard.get_all_tools().await;
-            drop(manager_guard);
+            // Add timeout to prevent hanging on display-related operations
+            let timeout_duration = std::time::Duration::from_secs(10);
 
-            // Clear existing MCP tools first (they have prefixed names)
-            let mut defs = self.definitions.write().await;
-            defs.retain(|name, _| !name.contains("mcp-server-"));
+            let refresh_result = tokio::time::timeout(timeout_duration, async {
+                let manager_guard = mcp_manager.lock().await;
+                let mcp_tools = manager_guard.get_all_tools().await;
+                drop(manager_guard);
 
-            // Add fresh MCP tools to our local definitions
-            let mut added_count = 0;
-            for tool_info in mcp_tools {
-                if tool_info.enabled {
-                    defs.insert(tool_info.tool_definition.name.clone(), tool_info.tool_definition);
-                    added_count += 1;
+                // Clear existing MCP tools first (they have prefixed names)
+                let mut defs = self.definitions.write().await;
+                defs.retain(|name, _| !name.contains("mcp-server-"));
+
+                // Add fresh MCP tools to our local definitions
+                let mut added_count = 0;
+                for tool_info in mcp_tools {
+                    if tool_info.enabled {
+                        defs.insert(tool_info.tool_definition.name.clone(), tool_info.tool_definition);
+                        added_count += 1;
+                    }
+                }
+
+                log::info!("Refreshed and cached {} MCP tools in provider definitions", added_count);
+                Ok::<(), String>(())
+            }).await;
+
+            match refresh_result {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e),
+                Err(_) => {
+                    warn!("MCP tools refresh timed out after {:?}", timeout_duration);
+                    Err("MCP tools refresh timeout".to_string())
                 }
             }
-
-            log::info!("Refreshed and cached {} MCP tools in provider definitions", added_count);
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     /// Check if a tool is an MCP tool
     fn is_mcp_tool(&self, tool_name: &str) -> bool {
-        // MCP tools are prefixed with server name
-        tool_name.contains('_') &&
+        // MCP tools are typically prefixed with "mcp-server-" or contain server identifiers
+        let is_mcp_prefixed = tool_name.starts_with("mcp-server-") ||
+                             (tool_name.contains('_') && tool_name.contains('-'));
+
+        // Additional check: tool has MCP manager available and is not a local executor
+        is_mcp_prefixed &&
         self.mcp_manager.is_some() &&
         !self.executors.try_read().map(|execs| execs.contains_key(tool_name)).unwrap_or(false)
     }
@@ -238,38 +273,53 @@ impl ToolProvider for LocalToolProvider {
             let has_mcp_tools = all_tools.iter().any(|tool| tool.name.contains("mcp-server-"));
 
             if !has_mcp_tools {
-                let manager_guard = mcp_manager.lock().await;
-                let mcp_tools = manager_guard.get_all_tools().await;
-                drop(manager_guard);
+                // Add timeout to MCP tool fetching to prevent hanging on display-related operations
+                let timeout_duration = std::time::Duration::from_secs(5);
 
-                for tool_info in mcp_tools {
-                    if tool_info.enabled {
-                        all_tools.push(tool_info.tool_definition);
+                match tokio::time::timeout(timeout_duration, async {
+                    let manager_guard = mcp_manager.lock().await;
+                    let mcp_tools = manager_guard.get_all_tools().await;
+                    drop(manager_guard);
+                    mcp_tools
+                }).await {
+                    Ok(mcp_tools) => {
+                        for tool_info in mcp_tools {
+                            if tool_info.enabled {
+                                all_tools.push(tool_info.tool_definition);
+                            }
+                        }
+                        debug!("Fetched {} fresh MCP tools", all_tools.iter().filter(|t| t.name.contains("mcp-server-")).count());
+                    },
+                    Err(_) => {
+                        warn!("MCP tools fetch timed out after {:?}, continuing without MCP tools", timeout_duration);
                     }
                 }
-
-                log::debug!("Fetched {} fresh MCP tools", all_tools.iter().filter(|t| t.name.contains("mcp-server-")).count());
             } else {
-                log::debug!("Using cached MCP tools, skipping fresh fetch");
+                debug!("Using cached MCP tools, skipping fresh fetch");
             }
         }
 
-        // Debug logging to identify duplicates
+        // Debug logging to identify duplicates and deduplicate if needed
         let mut tool_names = std::collections::HashSet::new();
         let mut duplicates = Vec::new();
+        let mut unique_tools = Vec::new();
 
-        for tool in &all_tools {
-            if !tool_names.insert(tool.name.clone()) {
+        for tool in all_tools {
+            if tool_names.insert(tool.name.clone()) {
+                unique_tools.push(tool);
+            } else {
                 duplicates.push(tool.name.clone());
             }
         }
 
         if !duplicates.is_empty() {
-            log::error!("DUPLICATE TOOLS DETECTED: {:?}", duplicates);
-            log::debug!("All tool names: {:?}", all_tools.iter().map(|t| &t.name).collect::<Vec<_>>());
+            warn!("Removed {} duplicate tools: {:?}", duplicates.len(), duplicates);
+            debug!("Keeping {} unique tools", unique_tools.len());
         } else {
-            log::debug!("All {} tools are unique", all_tools.len());
+            debug!("All {} tools are unique", unique_tools.len());
         }
+
+        all_tools = unique_tools;
 
         Ok(all_tools)
     }
@@ -287,31 +337,44 @@ impl ToolProvider for LocalToolProvider {
             );
         }
 
-        // Execute tool directly (error recovery will be implemented in future iterations)
-        let result = if self.is_mcp_tool(tool_name) {
-            // Execute via MCP manager
-            if let Some(ref mcp_manager) = self.mcp_manager {
-                let manager_guard = mcp_manager.lock().await;
-                match manager_guard.execute_tool(&tool_call.name, tool_call.input.clone(), tool_call.id.clone()).await {
-                    Ok(tool_result) => Ok(tool_result),
-                    Err(e) => Err(e),
+        // Add timeout for all tool executions to prevent hanging, especially for display-related operations
+        let timeout_duration = std::time::Duration::from_secs(30);
+
+        let execution_result = tokio::time::timeout(timeout_duration, async {
+            // Execute tool directly (error recovery will be implemented in future iterations)
+            if self.is_mcp_tool(tool_name) {
+                // Execute via MCP manager
+                if let Some(ref mcp_manager) = self.mcp_manager {
+                    let manager_guard = mcp_manager.lock().await;
+                    match manager_guard.execute_tool(&tool_call.name, tool_call.input.clone(), tool_call.id.clone()).await {
+                        Ok(tool_result) => Ok(tool_result),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    Err(AgentError::ToolNotFound(format!("MCP tool '{}' requested but no MCP manager available", tool_name)))
                 }
             } else {
-                Err(AgentError::ToolNotFound(format!("MCP tool '{}' requested but no MCP manager available", tool_name)))
+                // Execute local tool
+                let executors_guard = self.executors.read().await;
+                if let Some(executor) = executors_guard.get(tool_name) {
+                    match executor(tool_call.input.clone()).await {
+                        Ok(output) => Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output,
+                        }),
+                        Err(error_msg) => Err(AgentError::ToolError(error_msg)),
+                    }
+                } else {
+                    Err(AgentError::ToolNotFound(tool_call.name.clone()))
+                }
             }
-        } else {
-            // Execute local tool
-            let executors_guard = self.executors.read().await;
-            if let Some(executor) = executors_guard.get(tool_name) {
-                match executor(tool_call.input.clone()).await {
-                    Ok(output) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output,
-                    }),
-                    Err(error_msg) => Err(AgentError::ToolError(error_msg)),
-                }
-            } else {
-                Err(AgentError::ToolNotFound(tool_call.name.clone()))
+        }).await;
+
+        let result = match execution_result {
+            Ok(result) => result,
+            Err(_) => {
+                warn!("Tool '{}' execution timed out after {:?}", tool_name, timeout_duration);
+                Err(AgentError::ToolError(format!("Tool '{}' execution timed out", tool_name)))
             }
         };
 
