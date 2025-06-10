@@ -38,12 +38,13 @@ import {
   Server,
   Trash2,
 } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
 import "./styles/globals.css";
+import { toast } from "sonner";
 
 // Type for conversation messages
 type ChatMessage = {
@@ -1252,6 +1253,70 @@ function App() {
       const { type, payload } = event.payload;
       const currentTime = Date.now();
 
+      // Show transparent notifications for tool calls
+      if (type === "tool_call_request" && "tool_name" in payload) {
+        const requestPayload = payload as ToolCallRequestPayload;
+        const toolName = requestPayload.tool_name;
+        
+        // Get user-friendly tool name
+        const friendlyToolName = getFriendlyToolName(toolName);
+        
+        // Show notification based on tool type
+        if (isScreenshotTool(toolName)) {
+          toast.info(`📸 Taking screenshot...`, {
+            description: "AI is capturing the current screen",
+            duration: 3000,
+          });
+        } else if (isFileOperationTool(toolName)) {
+          toast.info(`📁 ${friendlyToolName}`, {
+            description: "AI is working with files",
+            duration: 2000,
+          });
+        } else if (isBrowserTool(toolName)) {
+          toast.info(`🌐 ${friendlyToolName}`, {
+            description: "AI is using the browser",
+            duration: 2000,
+          });
+        } else if (isSystemTool(toolName)) {
+          toast.info(`⚙️ ${friendlyToolName}`, {
+            description: "AI is using system controls",
+            duration: 2000,
+          });
+        } else {
+          // Generic tool notification
+          toast.info(`🔧 ${friendlyToolName}`, {
+            description: "AI is using a tool",
+            duration: 2000,
+          });
+        }
+      } else if (type === "tool_call_result" && "tool_name" in payload) {
+        const resultPayload = payload as ToolCallResultPayload;
+        const toolName = resultPayload.tool_name;
+        const success = resultPayload.success;
+        
+        // Show completion notification for important tools
+        if (isScreenshotTool(toolName)) {
+          if (success) {
+            toast.success(`📸 Screenshot captured`, {
+              description: "AI has successfully captured the screen",
+              duration: 2000,
+            });
+          } else {
+            toast.error(`📸 Screenshot failed`, {
+              description: "AI could not capture the screen",
+              duration: 3000,
+            });
+          }
+        } else if (!success && isImportantTool(toolName)) {
+          // Show error notifications for failed important tools
+          const friendlyToolName = getFriendlyToolName(toolName);
+          toast.error(`❌ ${friendlyToolName} failed`, {
+            description: "The AI tool encountered an error",
+            duration: 3000,
+          });
+        }
+      }
+
       setConversation((prev) => {
         let newMessage: ChatMessage | null = null;
 
@@ -1307,6 +1372,71 @@ function App() {
       unlistenPromise.then((unlistenFn) => unlistenFn());
     };
   }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
+
+  // Helper functions for tool categorization
+  const isScreenshotTool = (toolName: string): boolean => {
+    return toolName.includes('screenshot') || 
+           toolName.includes('capture') ||
+           toolName === 'screenshot' ||
+           toolName === 'capture_screenshot' ||
+           toolName === 'capture_element_screenshot' ||
+           toolName === 'browser_screenshot';
+  };
+
+  const isFileOperationTool = (toolName: string): boolean => {
+    return toolName.includes('file') ||
+           toolName.includes('read') ||
+           toolName.includes('write') ||
+           toolName.includes('list') ||
+           toolName === 'write_file' ||
+           toolName === 'read_file' ||
+           toolName === 'list_directory';
+  };
+
+  const isBrowserTool = (toolName: string): boolean => {
+    return toolName.includes('browser') ||
+           toolName.includes('navigate') ||
+           toolName.includes('click') ||
+           toolName.includes('web');
+  };
+
+  const isSystemTool = (toolName: string): boolean => {
+    return toolName.includes('mouse') ||
+           toolName.includes('keyboard') ||
+           toolName.includes('key') ||
+           toolName.includes('click') ||
+           toolName.includes('type') ||
+           toolName === 'execute_shell_command';
+  };
+
+  const isImportantTool = (toolName: string): boolean => {
+    return isScreenshotTool(toolName) ||
+           isFileOperationTool(toolName) ||
+           isBrowserTool(toolName) ||
+           isSystemTool(toolName);
+  };
+
+  const getFriendlyToolName = (toolName: string): string => {
+    // Convert snake_case tool names to user-friendly names
+    const friendlyNames: { [key: string]: string } = {
+      'capture_screenshot': 'Taking screenshot',
+      'capture_element_screenshot': 'Taking element screenshot',
+      'browser_screenshot': 'Taking browser screenshot',
+      'write_file': 'Writing file',
+      'read_file': 'Reading file',
+      'list_directory': 'Listing directory',
+      'browser_navigate': 'Navigating to webpage',
+      'browser_click': 'Clicking element',
+      'browser_type': 'Typing in browser',
+      'execute_shell_command': 'Running shell command',
+      'mouse_click': 'Clicking mouse',
+      'mouse_move': 'Moving mouse',
+      'key_press': 'Pressing key',
+      'type_text': 'Typing text',
+    };
+
+    return friendlyNames[toolName] || toolName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
 
   // Listen for streaming events
   useEffect(() => {
