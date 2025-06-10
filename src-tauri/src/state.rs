@@ -126,6 +126,13 @@ pub struct AppState {
     pub always_listening_active: Arc<Mutex<bool>>, // Track if Always Listening Mode is active
     pub always_listening_sensitivity: Arc<Mutex<f32>>, // Sensitivity threshold for activation
     pub always_listening_wake_words: Arc<Mutex<Vec<String>>>, // Configurable wake words
+    // Notification settings
+    pub notification_type: Arc<Mutex<String>>, // "system", "toast", "both", or "disabled"
+    pub notification_sound_enabled: Arc<Mutex<bool>>, // Sound for notifications
+    pub notification_duration: Arc<Mutex<u32>>, // Duration in milliseconds for toast notifications
+    pub notification_position: Arc<Mutex<String>>, // Position for toast notifications
+    pub notification_show_icons: Arc<Mutex<bool>>, // Show icons in notifications
+    pub notification_persist_important: Arc<Mutex<bool>>, // Keep important notifications until dismissed
     // Agent execution status tracking
     pub agent_execution_active: Arc<Mutex<bool>>, // Track if an agent is currently executing
     pub agent_execution_id: Arc<Mutex<Option<String>>>, // Track the current agent execution ID
@@ -182,6 +189,13 @@ impl AppState {
             always_listening_wake_words: Arc::new(Mutex::new(
                 app_identity::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect()
             )),
+            // Initialize notification settings
+            notification_type: Arc::new(Mutex::new("system".to_string())),
+            notification_sound_enabled: Arc::new(Mutex::new(true)),
+            notification_duration: Arc::new(Mutex::new(5000)),
+            notification_position: Arc::new(Mutex::new("bottom-right".to_string())),
+            notification_show_icons: Arc::new(Mutex::new(true)),
+            notification_persist_important: Arc::new(Mutex::new(true)),
             // Initialize agent execution status tracking
             agent_execution_active: Arc::new(Mutex::new(false)),
             agent_execution_id: Arc::new(Mutex::new(None)),

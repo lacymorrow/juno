@@ -4,9 +4,10 @@ import {
   Brain,
   Mic,
   Settings,
+  Bell,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { GeneralSettings, VoiceSettings, AIProviderSettings } from './index';
+import { GeneralSettings, VoiceSettings, AIProviderSettings, NotificationSettings } from './index';
 import { SettingsCategory } from './types';
 
 const settingsCategories: SettingsCategory[] = [
@@ -21,6 +22,12 @@ const settingsCategories: SettingsCategory[] = [
     name: "Voice & Audio",
     icon: <Mic className="w-8 h-8" />,
     description: "Voice transcription and audio settings",
+  },
+  {
+    id: "notifications",
+    name: "Notifications",
+    icon: <Bell className="w-8 h-8" />,
+    description: "System and toast notification preferences",
   },
   {
     id: "ai",
@@ -57,6 +64,8 @@ export default function ModularSettingsWindow() {
         return <GeneralSettings settings={settings} />;
       case "voice":
         return <VoiceSettings settings={settings} />;
+      case "notifications":
+        return <NotificationSettings settings={settings} />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
       default:
