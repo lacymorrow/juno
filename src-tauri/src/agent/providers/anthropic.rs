@@ -637,7 +637,7 @@ impl AgentBrain for AnthropicBrain {
             ).await?;
 
             // Emit stream end event
-            crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, accumulated_text.clone());
+            crate::agent::tool_logger::emit_stream_end(&app_handle, message_id);
 
             // Process stop reason and return appropriate action
             match stop_reason.as_str() {
