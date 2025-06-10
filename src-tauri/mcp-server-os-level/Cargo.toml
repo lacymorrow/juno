@@ -29,16 +29,8 @@ tower-http = { version = "0.4.0", features = ["cors", "trace"] }
 # Common dependencies that might be needed based on original code
 log = "0.4.22"
 macos-accessibility-client = "0.0.1"
-
-# macOS specific dependencies (moved here from [features])
-accessibility = "0.2.0"
-accessibility-sys = "0.2.0"
-core-foundation = "0.10.0"
-core-foundation-sys = "0.8.7"
-core-graphics = "0.24.0"
 image = { version = "0.25.1", features = ["png"] }
 libc = "0.2"
-objc = "0.2.7"
 
 # Clipboard functionality now implemented using arboard (cross-platform, modern)
 # objc still needed for other platform interactions
@@ -56,9 +48,24 @@ windows = { version = "0.52", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 # dbus, atspi, etc. (if used)
 
+# macOS specific dependencies
+[target.'cfg(target_os = "macos")'.dependencies]
+accessibility = "0.2.0"
+accessibility-sys = "0.2.0"
+core-foundation = "0.10.0"
+core-foundation-sys = "0.8.7"
+core-graphics = "0.24.0"
+objc = "0.2.7"
+# Add Cidre for modern Apple framework bindings (macOS only)
+cidre = "0.1.0"
+
 [[bin]]
 name = "server"
 path = "src/bin/main.rs"
 
 [features]
 cargo-clippy = []
+# Cidre migration feature flags
+default = []
+use-cidre = []
+use-legacy-ffi = []
