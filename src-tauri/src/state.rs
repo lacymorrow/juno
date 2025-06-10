@@ -141,8 +141,12 @@ pub struct AppState {
     pub agent_max_steps: Arc<Mutex<Option<u32>>>, // Track the maximum iterations/steps allowed
     // First onboarding prompt storage
     pub first_onboarding_prompt: Arc<Mutex<Option<String>>>, // Store the first prompt selected during onboarding
+
+    // Dual content communication - store spoken content separately for TTS
+    pub last_spoken_content: Arc<Mutex<Option<String>>>, // Store spoken content separate from displayed text
     // Debug mode tracking
     pub debug_mode: Arc<Mutex<bool>>, // Track if debug mode is enabled
+
 }
 
 impl AppState {
@@ -204,6 +208,8 @@ impl AppState {
             agent_max_steps: Arc::new(Mutex::new(None)),
             // Initialize first onboarding prompt storage
             first_onboarding_prompt: Arc::new(Mutex::new(None)),
+            // Dual content communication - store spoken content separately for TTS
+            last_spoken_content: Arc::new(Mutex::new(None)),
             // Initialize debug mode tracking
             debug_mode: Arc::new(Mutex::new(false)),
         }
@@ -743,6 +749,25 @@ impl AppState {
         let prompt_guard = self.first_onboarding_prompt.lock().unwrap();
         prompt_guard.clone()
     }
+
+    // Dual content communication methods
+
+    /// Set the last spoken content for TTS
+    pub fn set_last_spoken_content(&self, content: Option<String>) {
+        let mut spoken_guard = self.last_spoken_content.lock().unwrap();
+        *spoken_guard = content;
+    }
+
+    /// Get the last spoken content for TTS
+    pub fn get_last_spoken_content(&self) -> Option<String> {
+        let spoken_guard = self.last_spoken_content.lock().unwrap();
+        spoken_guard.clone()
+    }
+
+    /// Clear the last spoken content
+    pub fn clear_last_spoken_content(&self) {
+        let mut spoken_guard = self.last_spoken_content.lock().unwrap();
+        *spoken_guard = None;
 
     // Debug mode methods
     pub fn set_debug_mode(&self, enabled: bool) {

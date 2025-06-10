@@ -209,6 +209,64 @@ impl AnthropicBrain {
         self.streaming_enabled = enabled;
     }
 
+    /// Generate dual content: keep original for typing, create concise version for speaking
+    fn generate_dual_content(original_text: &str) -> (String, String) {
+        let typed_content = original_text.to_string();
+        
+        // If the text is already short and concise, use it as-is
+        if original_text.len() <= 100 {
+            return (typed_content.clone(), typed_content);
+        }
+        
+        // Extract key information for speech
+        let spoken_content = Self::create_concise_speech_version(original_text);
+        
+        (typed_content, spoken_content)
+    }
+    
+    /// Create a concise version optimized for speech synthesis
+    fn create_concise_speech_version(text: &str) -> String {
+        // Remove markdown formatting for speech
+        let text = text.replace("**", "").replace("*", "").replace("#", "");
+        
+        // Split into sentences and prioritize key information
+        let sentences: Vec<&str> = text.split(['.', '!', '?'])
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        if sentences.is_empty() {
+            return text.clone();
+        }
+        
+        // For longer responses, summarize key points
+        if sentences.len() > 3 {
+            // Take first sentence (usually the main result) and key action sentences
+            let mut key_sentences = vec![sentences[0]];
+            
+            // Add sentences that contain action words or results
+            for sentence in sentences.iter().skip(1).take(2) {
+                let lower = sentence.to_lowercase();
+                if lower.contains("completed") || lower.contains("found") || 
+                   lower.contains("created") || lower.contains("updated") ||
+                   lower.contains("success") || lower.contains("done") ||
+                   lower.contains("result") || lower.contains("finished") {
+                    key_sentences.push(sentence);
+                }
+            }
+            
+            // If we only have the first sentence, add one more for context
+            if key_sentences.len() == 1 && sentences.len() > 1 {
+                key_sentences.push(sentences[1]);
+            }
+            
+            key_sentences.join(". ") + if !key_sentences.last().unwrap_or(&"").ends_with('.') { "." } else { "" }
+        } else {
+            // For shorter responses, keep as-is but clean up
+            sentences.join(". ") + if !text.ends_with(['.', '!', '?']) { "." } else { "" }
+        }
+    }
+
     /// Handle streaming response from Anthropic API
     async fn handle_streaming_response<F>(
         &self,
@@ -655,7 +713,16 @@ impl AgentBrain for AnthropicBrain {
                     if !tool_calls.is_empty() {
                         log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", stop_reason);
                     }
-                    Ok(AgentAction::Finish(accumulated_text))
+                    
+                    // Generate dual content for better TTS experience
+                    let (typed_content, spoken_content) = Self::generate_dual_content(&accumulated_text);
+                    
+                    if typed_content != spoken_content {
+                        log::info!("Generated dual content - typed: {} chars, spoken: {} chars", typed_content.len(), spoken_content.len());
+                        Ok(AgentAction::FinishWithDualContent { typed_content, spoken_content })
+                    } else {
+                        Ok(AgentAction::Finish(accumulated_text))
+                    }
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",
@@ -721,7 +788,16 @@ impl AgentBrain for AnthropicBrain {
                     if !tool_calls_to_execute.is_empty() {
                         log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", response_body.stop_reason);
                     }
-                    Ok(AgentAction::Finish(response_text))
+                    
+                    // Generate dual content for better TTS experience
+                    let (typed_content, spoken_content) = Self::generate_dual_content(&response_text);
+                    
+                    if typed_content != spoken_content {
+                        log::info!("Generated dual content - typed: {} chars, spoken: {} chars", typed_content.len(), spoken_content.len());
+                        Ok(AgentAction::FinishWithDualContent { typed_content, spoken_content })
+                    } else {
+                        Ok(AgentAction::Finish(response_text))
+                    }
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",

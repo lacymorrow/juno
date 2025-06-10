@@ -72,6 +72,7 @@ type ChatMessage = {
 // Type for the result from submit_query
 type SubmitQueryResult = {
   text: string;
+  spoken_text?: string; // Optional separate content for TTS speech
   audio_base64?: string; // Optional base64 audio data
   agent_state: string;
   screenshot_base64?: string; // Optional base64 screenshot data
@@ -244,6 +245,7 @@ function formatFullTimestamp(timestamp: number): string {
 
 function App() {
   const [query, setQuery] = useState("");
+  const [lastSubmittedQuery, setLastSubmittedQuery] = useState(""); // Track last query for error recovery
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [serverStatus, setServerStatus] = useState<
@@ -505,11 +507,8 @@ function App() {
       };
       setConversation((prev) => [...prev, userMessage]);
 
-      // If we reach here for dictation:
-      // - text is not empty.
-      // - serverStatus check was skipped (or passed if not dictation).
-      // - isProcessing check was skipped (or passed if not dictation).
-
+      // Store the query before clearing it, for potential error recovery
+      setLastSubmittedQuery(text);
       setQuery(""); // Clear input immediately IF it was from the manual input field
       setIsProcessing(true); // Set processing state
 
@@ -527,6 +526,10 @@ function App() {
         };
         setConversation((prev) => [...prev, errorMessage]);
         setIsProcessing(false); // Reset processing on error
+        
+        // Restore the input so user can retry
+        console.log("Restoring input due to submitQuery error:", text);
+        setQuery(text);
       }
       // No finally block to set isProcessing(false) here, as the event listener handles it on success.
     },
@@ -2337,51 +2340,71 @@ function App() {
     return className;
   };
 
+  // Listen for agent error events to restore input for retry
+  useEffect(() => {
+    const unlisten = listen<{
+      agent_state: string;
+      error_message: string;
+      original_query: string;
+    }>("agent-error", (event) => {
+      console.log("Agent error event received:", event.payload);
+      const { agent_state, error_message, original_query } = event.payload;
+
+      // Restore the input so user can retry their query
+      if (original_query && original_query.trim()) {
+        console.log("Restoring input due to agent error:", original_query);
+        setQuery(original_query);
+      }
+
+      // Also ensure processing state is reset
+      setIsProcessing(false);
+
+      // Show error in conversation if not already shown via streaming
+      const errorExists = conversation.some(
+        (msg) => msg.role === "system" && msg.content.includes(error_message)
+      );
+      
+      if (!errorExists) {
+        const errorMessage: ChatMessage = {
+          role: "system",
+          content: `Agent ${agent_state.toLowerCase()}: ${error_message}`,
+          timestamp: Date.now(),
+        };
+        setConversation((prev) => [...prev, errorMessage]);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [conversation]);
+
   return (
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
       <ClickVisualizer />
 
       <div className="w-screen h-screen bg-background text-foreground">
-        <div className="container mx-auto p-4 h-full flex flex-col">
+        <div className="container mx-auto p-2 h-full flex flex-col">
           {/* Header */}
-          <header className="flex justify-between items-center mb-4 p-4 border-b">
-            <div className="flex items-center gap-3">
-              <DogIcon size={32} className="text-blue-500" />
-              <div>
-                <h1 className="text-xl font-bold">
-                  {currentView === "settings"
-                    ? "Settings"
-                    : currentView === "devtools"
-                    ? "Developer Tools"
-                    : currentView === "permissions"
-                    ? "Permissions"
-                    : currentView === "onboarding"
-                    ? "Onboarding"
-                    : "Juno AI Assistant"}
-                </h1>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <Server
-                      size={14}
-                      className={
-                        serverStatus === "connected"
-                          ? "text-green-500"
-                          : serverStatus === "error"
-                          ? "text-red-500"
-                          : "text-yellow-500"
-                      }
-                    />
-                    <span>
-                      {serverStatus === "connected"
-                        ? "Connected"
+          <header className="flex items-center justify-between py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1">
+                <DogIcon size={16} className="text-blue-500" />
+                <span className="text-sm font-semibold">Juno AI</span>
+                <div className="flex items-center gap-1">
+                  <div
+                    className={cn(
+                      "w-1.5 h-1.5 rounded-full",
+                      serverStatus === "connected"
+                        ? "bg-green-500"
                         : serverStatus === "error"
-                        ? "Connection Error"
-                        : "Checking..."}
-                    </span>
-                  </div>
-                  {currentView === "chat" && serverStatus === "connected" && (
-                    <div className="border-l pl-4">
+                        ? "bg-red-500"
+                        : "bg-yellow-500"
+                    )}
+                  />
+                  {isProcessing && (
+                    <div className="text-xs text-muted-foreground">
                       <AgentExecutionProgressIndicator
                         compact
                         className="text-muted-foreground"
@@ -2394,16 +2417,16 @@ function App() {
 
             {/* Voice Status Indicator - only show in chat view */}
             {currentView === "chat" && (
-              <div className="flex-1 flex justify-center mx-4">
+              <div className="flex-1 flex justify-center mx-2">
                 <VoiceStatusIndicator
                   variant="compact"
-                  className="max-w-md"
-                  showText={true}
+                  className="max-w-xs"
+                  showText={false}
                 />
               </div>
             )}
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               {/* Back Button - show for settings and devtools views */}
               {(currentView === "settings" ||
                 currentView === "devtools" ||
@@ -2411,25 +2434,27 @@ function App() {
                 currentView === "onboarding") && (
                 <Button
                   variant="outline"
-                  size="icon"
+                  size="sm"
                   onClick={() => setCurrentView("chat")}
                   title="Back to Chat"
+                  className="h-7 w-7 p-0"
                 >
-                  <ArrowLeft size={18} />
+                  <ArrowLeft size={14} />
                 </Button>
               )}
               {/* Toggle Dev Panel Button - only show in chat view */}
               {currentView === "chat" && (
                 <Button
                   variant="outline"
-                  size="icon"
+                  size="sm"
                   onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
                   title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
+                  className="h-7 w-7 p-0"
                 >
                   {isDevPanelOpen ? (
-                    <PanelLeftClose size={18} />
+                    <PanelLeftClose size={14} />
                   ) : (
-                    <PanelLeftOpen size={18} />
+                    <PanelLeftOpen size={14} />
                   )}
                 </Button>
               )}
@@ -2449,8 +2474,8 @@ function App() {
             </div>
           ) : currentView === "devtools" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full p-4">
-                <h2 className="text-lg font-semibold mb-3 border-b pb-2">
+              <ScrollArea className="h-full w-full p-2">
+                <h2 className="text-sm font-semibold mb-2 border-b pb-1">
                   Developer Tools & Logs
                 </h2>
                 <DevToolsPanel />
@@ -2458,7 +2483,7 @@ function App() {
             </div>
           ) : currentView === "permissions" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full p-4">
+              <ScrollArea className="h-full w-full p-2">
                 <PermissionsFlow
                   onComplete={() => {
                     setShowPermissionsFlow(false);
@@ -2475,7 +2500,7 @@ function App() {
             </div>
           ) : currentView === "onboarding" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full p-4">
+              <ScrollArea className="h-full w-full p-2">
                 <OnboardingFlow
                   onComplete={handleOnboardingComplete}
                   onSkip={handleOnboardingSkip}
@@ -2493,29 +2518,28 @@ function App() {
                 defaultSize={isDevPanelOpen ? 50 : 100}
                 minSize={30}
               >
-                <div className="flex flex-col h-full p-4">
+                <div className="flex flex-col h-full p-2">
                   {/* Conversation Area */}
-                  <ScrollArea className="flex-1 min-h-0 mb-4 -mr-4 pr-4">
+                  <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4">
                     {conversation.length === 0 ? (
-                      /* Welcome message when conversation is empty */
-                      <div className="flex flex-col items-center justify-center h-full text-center space-y-6 p-8">
-                        <div className="space-y-4">
+                      /* Compact welcome message when conversation is empty */
+                      <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">
+                        <div className="space-y-1">
                           <DogIcon
-                            size={64}
+                            size={16}
                             className="text-blue-500 mx-auto"
                           />
                           <div>
-                            <h2 className="text-2xl font-bold mb-2">
-                              Welcome to Juno AI Assistant
+                            <h2 className="text-sm font-semibold">
+                              Juno AI
                             </h2>
-                            <p className="text-muted-foreground mb-6">
-                              Your intelligent desktop companion with advanced
-                              voice capabilities
+                            <p className="text-xs text-muted-foreground">
+                              AI desktop assistant
                             </p>
                           </div>
                         </div>
 
-                        {/* Example Prompts */}
+                        {/* Compact Example Prompts */}
                         <ExamplePrompts
                           onPromptSelect={handleExamplePromptSelect}
                         />
@@ -2764,18 +2788,6 @@ function App() {
                     <div ref={conversationEndRef} />
                   </ScrollArea>
 
-                  {/* Voice Shortcuts Helper - only show when there's a conversation */}
-                  {conversation.length > 0 && (
-                    <div className="flex justify-center mb-3">
-                      <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-1 rounded-full border">
-                        <span className="font-medium">Voice Shortcuts:</span>
-                        <span className="mx-2">⌥+D for AI Agent</span>
-                        <span className="mx-2">⌥+Space for Dictation</span>
-                        <span className="mx-2">Esc to Cancel</span>
-                      </div>
-                    </div>
-                  )}
-
                   {/* Input Form */}
                   <form
                     onSubmit={handleSubmit}
@@ -2831,13 +2843,13 @@ function App() {
 
                   {/* Dev Tools & Logs Panel */}
                   <ResizablePanel defaultSize={50} minSize={25}>
-                    <ScrollArea className="h-full w-full p-3">
+                    <ScrollArea className="h-full w-full p-2">
                       {/* Title (replaces CardHeader) */}
-                      <h2 className="text-lg font-semibold mb-3 border-b pb-2">
+                      <h2 className="text-sm font-semibold mb-2 border-b pb-1">
                         Developer Tools & Logs
                       </h2>
                       {/* DevToolsPanel Component */}
-                      <div className="border-b pb-3 mb-3">
+                      <div className="border-b pb-2 mb-2">
                         <DevToolsPanel />
                       </div>
                       {/* Logs Area */}
