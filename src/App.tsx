@@ -38,13 +38,13 @@ import {
   Server,
   Trash2,
 } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
 import "./styles/globals.css";
-import { toast } from "sonner";
 
 // Type for conversation messages
 type ChatMessage = {
@@ -1257,10 +1257,10 @@ function App() {
       if (type === "tool_call_request" && "tool_name" in payload) {
         const requestPayload = payload as ToolCallRequestPayload;
         const toolName = requestPayload.tool_name;
-        
+
         // Get user-friendly tool name
         const friendlyToolName = getFriendlyToolName(toolName);
-        
+
         // Show notification based on tool type
         if (isScreenshotTool(toolName)) {
           toast.info(`📸 Taking screenshot...`, {
@@ -1293,7 +1293,7 @@ function App() {
         const resultPayload = payload as ToolCallResultPayload;
         const toolName = resultPayload.tool_name;
         const success = resultPayload.success;
-        
+
         // Show completion notification for important tools
         if (isScreenshotTool(toolName)) {
           if (success) {
@@ -1375,67 +1375,80 @@ function App() {
 
   // Helper functions for tool categorization
   const isScreenshotTool = (toolName: string): boolean => {
-    return toolName.includes('screenshot') || 
-           toolName.includes('capture') ||
-           toolName === 'screenshot' ||
-           toolName === 'capture_screenshot' ||
-           toolName === 'capture_element_screenshot' ||
-           toolName === 'browser_screenshot';
+    return (
+      toolName.includes("screenshot") ||
+      toolName.includes("capture") ||
+      toolName === "screenshot" ||
+      toolName === "capture_screenshot" ||
+      toolName === "capture_element_screenshot" ||
+      toolName === "browser_screenshot"
+    );
   };
 
   const isFileOperationTool = (toolName: string): boolean => {
-    return toolName.includes('file') ||
-           toolName.includes('read') ||
-           toolName.includes('write') ||
-           toolName.includes('list') ||
-           toolName === 'write_file' ||
-           toolName === 'read_file' ||
-           toolName === 'list_directory';
+    return (
+      toolName.includes("file") ||
+      toolName.includes("read") ||
+      toolName.includes("write") ||
+      toolName.includes("list") ||
+      toolName === "write_file" ||
+      toolName === "read_file" ||
+      toolName === "list_directory"
+    );
   };
 
   const isBrowserTool = (toolName: string): boolean => {
-    return toolName.includes('browser') ||
-           toolName.includes('navigate') ||
-           toolName.includes('click') ||
-           toolName.includes('web');
+    return (
+      toolName.includes("browser") ||
+      toolName.includes("navigate") ||
+      toolName.includes("click") ||
+      toolName.includes("web")
+    );
   };
 
   const isSystemTool = (toolName: string): boolean => {
-    return toolName.includes('mouse') ||
-           toolName.includes('keyboard') ||
-           toolName.includes('key') ||
-           toolName.includes('click') ||
-           toolName.includes('type') ||
-           toolName === 'execute_shell_command';
+    return (
+      toolName.includes("mouse") ||
+      toolName.includes("keyboard") ||
+      toolName.includes("key") ||
+      toolName.includes("click") ||
+      toolName.includes("type") ||
+      toolName === "execute_shell_command"
+    );
   };
 
   const isImportantTool = (toolName: string): boolean => {
-    return isScreenshotTool(toolName) ||
-           isFileOperationTool(toolName) ||
-           isBrowserTool(toolName) ||
-           isSystemTool(toolName);
+    return (
+      isScreenshotTool(toolName) ||
+      isFileOperationTool(toolName) ||
+      isBrowserTool(toolName) ||
+      isSystemTool(toolName)
+    );
   };
 
   const getFriendlyToolName = (toolName: string): string => {
     // Convert snake_case tool names to user-friendly names
     const friendlyNames: { [key: string]: string } = {
-      'capture_screenshot': 'Taking screenshot',
-      'capture_element_screenshot': 'Taking element screenshot',
-      'browser_screenshot': 'Taking browser screenshot',
-      'write_file': 'Writing file',
-      'read_file': 'Reading file',
-      'list_directory': 'Listing directory',
-      'browser_navigate': 'Navigating to webpage',
-      'browser_click': 'Clicking element',
-      'browser_type': 'Typing in browser',
-      'execute_shell_command': 'Running shell command',
-      'mouse_click': 'Clicking mouse',
-      'mouse_move': 'Moving mouse',
-      'key_press': 'Pressing key',
-      'type_text': 'Typing text',
+      capture_screenshot: "Taking screenshot",
+      capture_element_screenshot: "Taking element screenshot",
+      browser_screenshot: "Taking browser screenshot",
+      write_file: "Writing file",
+      read_file: "Reading file",
+      list_directory: "Listing directory",
+      browser_navigate: "Navigating to webpage",
+      browser_click: "Clicking element",
+      browser_type: "Typing in browser",
+      execute_shell_command: "Running shell command",
+      mouse_click: "Clicking mouse",
+      mouse_move: "Moving mouse",
+      key_press: "Pressing key",
+      type_text: "Typing text",
     };
 
-    return friendlyNames[toolName] || toolName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    return (
+      friendlyNames[toolName] ||
+      toolName.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())
+    );
   };
 
   // Listen for streaming events
@@ -2141,6 +2154,182 @@ function App() {
     },
     []
   );
+
+  // Enhanced agent event listener for dynamic tool notifications
+  useEffect(() => {
+    const unlistenAgentEvent = listen<{
+      type: string;
+      payload: {
+        tool_name?: string;
+        tool_category?: string;
+        tool_description?: string;
+        notification_level?: string;
+        estimated_duration?: string;
+        execution_time_ms?: number;
+        success?: boolean;
+        content?: string;
+        screenshot_base64?: string;
+        [key: string]: any;
+      };
+    }>("agent-event", (event) => {
+      const { type: eventType, payload } = event.payload;
+
+      // Handle different event types with dynamic metadata
+      switch (eventType) {
+        case "tool_call_request": {
+          const notificationLevel = payload.notification_level || "standard";
+
+          // Only show notifications for non-silent tools
+          if (notificationLevel !== "silent") {
+            const message =
+              payload.content || `🔧 Executing ${payload.tool_name}...`;
+            const duration = getNotificationDuration(
+              notificationLevel,
+              payload.estimated_duration
+            );
+
+            toast.info(message, {
+              duration,
+              className: getNotificationClassName(
+                payload.tool_category,
+                "request"
+              ),
+            });
+          }
+          break;
+        }
+
+        case "tool_call_result": {
+          const notificationLevel = payload.notification_level || "standard";
+          const success = payload.success ?? true;
+
+          // Only show notifications for non-silent tools
+          if (notificationLevel !== "silent") {
+            const message =
+              payload.content ||
+              (success ? `✅ Tool completed` : `❌ Tool failed`);
+
+            const duration = getNotificationDuration(notificationLevel);
+            const toastType = success ? "success" : "error";
+
+            toast[toastType](message, {
+              duration,
+              className: getNotificationClassName(
+                payload.tool_category,
+                "result",
+                success
+              ),
+            });
+
+            // Special handling for screenshot results
+            if (payload.screenshot_base64 && success) {
+              toast.success("📸 Screenshot captured", {
+                duration: 3000,
+                className: "screenshot-notification",
+              });
+            }
+          }
+          break;
+        }
+
+        case "thinking": {
+          if (payload.content) {
+            toast.info(`💭 ${payload.content}`, {
+              duration: 2000,
+              className: "thinking-notification",
+            });
+          }
+          break;
+        }
+
+        case "screenshot": {
+          toast.success("📸 Screenshot captured", {
+            duration: 3000,
+            className: "screenshot-notification",
+          });
+          break;
+        }
+
+        case "generic_content": {
+          if (payload.content) {
+            toast.info(payload.content, {
+              duration: 4000,
+              className: "generic-content-notification",
+            });
+          }
+          break;
+        }
+
+        default:
+          // Handle unknown event types gracefully
+          console.log("Unknown agent event type:", eventType, payload);
+          break;
+      }
+    });
+
+    return () => {
+      unlistenAgentEvent.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Helper function to determine notification duration based on level and estimated duration
+  const getNotificationDuration = (
+    notificationLevel: string,
+    estimatedDuration?: string
+  ): number => {
+    // Base duration by notification level
+    const baseDurations = {
+      minimal: 1500,
+      standard: 3000,
+      detailed: 5000,
+    };
+
+    const baseDuration =
+      baseDurations[notificationLevel as keyof typeof baseDurations] || 3000;
+
+    // Adjust based on estimated duration
+    if (estimatedDuration) {
+      const durationMultipliers = {
+        instant: 0.5,
+        short: 0.8,
+        medium: 1.0,
+        long: 1.5,
+      };
+      const multiplier =
+        durationMultipliers[
+          estimatedDuration as keyof typeof durationMultipliers
+        ] || 1.0;
+      return Math.round(baseDuration * multiplier);
+    }
+
+    return baseDuration;
+  };
+
+  // Helper function to get notification styling based on tool category
+  const getNotificationClassName = (
+    toolCategory?: string,
+    eventType?: string,
+    success?: boolean
+  ): string => {
+    let className = "tool-notification";
+
+    // Add category-specific styling
+    if (toolCategory) {
+      className += ` ${toolCategory.toLowerCase()}-category`;
+    }
+
+    // Add event type styling
+    if (eventType) {
+      className += ` ${eventType}-event`;
+    }
+
+    // Add success/failure styling for results
+    if (eventType === "result" && success !== undefined) {
+      className += success ? " success-result" : " failure-result";
+    }
+
+    return className;
+  };
 
   return (
     <main className="h-screen flex flex-col">

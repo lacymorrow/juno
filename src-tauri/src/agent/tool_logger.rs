@@ -1,10 +1,14 @@
-use serde::Serialize;
-use serde_json::{Value};
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn, error};
-use futures::FutureExt;
+use crate::agent::structs::AgentError;
+use crate::state::AppState;
 use chrono::{DateTime, Local};
+use futures::FutureExt;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Mutex as TokioMutex;
+use tracing::{debug, error, info, warn};
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -349,6 +353,11 @@ struct ToolCallRequestPayload {
     tool_name: String,
     tool_args: Value, // Keep as Value for flexibility
     content: Option<String>, // Optional descriptive content
+    // NEW: Dynamic tool metadata for intelligent notifications
+    tool_category: Option<String>, // Tool category for dynamic icon/message selection
+    tool_description: Option<String>, // Tool description for context
+    notification_level: String, // "silent", "minimal", "standard", "detailed"
+    estimated_duration: Option<String>, // "instant", "short", "medium", "long"
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -358,6 +367,10 @@ struct ToolCallResultPayload {
     success: bool,
     content: Option<String>, // Optional descriptive content
     screenshot_base64: Option<String>, // Optional screenshot from the tool
+    // NEW: Additional result metadata
+    tool_category: Option<String>, // Tool category for consistent handling
+    execution_time_ms: Option<u64>, // Actual execution time for performance tracking
+    notification_level: String, // Match the request level
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -417,6 +430,35 @@ pub fn log_tool_call_request(app_handle: &AppHandle, tool_name: &str, tool_args:
             tool_name: tool_name.to_string(),
             tool_args,
             content,
+            tool_category: None,
+            tool_description: None,
+            notification_level: "standard".to_string(),
+            estimated_duration: None,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// NEW: Enhanced tool call request logging with dynamic metadata
+pub async fn log_enhanced_tool_call_request(
+    app_handle: &AppHandle,
+    tool_name: &str,
+    tool_args: Value,
+    content: Option<String>,
+    app_state: Option<&crate::state::AppState>
+) {
+    let mut tool_metadata = ToolMetadata::determine_for_tool(tool_name, app_state).await;
+
+    let event = AgentEvent {
+        event_type: "tool_call_request".to_string(),
+        payload: AgentEventPayload::ToolCallRequest(ToolCallRequestPayload {
+            tool_name: tool_name.to_string(),
+            tool_args,
+            content: content.or_else(|| tool_metadata.generate_start_message()),
+            tool_category: Some(tool_metadata.category),
+            tool_description: tool_metadata.description,
+            notification_level: tool_metadata.notification_level,
+            estimated_duration: tool_metadata.estimated_duration,
         }),
     };
     emit_agent_event(app_handle, event);
@@ -439,85 +481,200 @@ pub fn log_tool_call_result(
             success,
             content,
             screenshot_base64,
+            tool_category: None,
+            execution_time_ms: None,
+            notification_level: "standard".to_string(),
         }),
     };
     emit_agent_event(app_handle, event);
 }
 
-// Example usage for emitting a screenshot event (if not part of a tool result):
-pub fn log_screenshot(app_handle: &AppHandle, screenshot_base64: String, content: Option<String>) {
+// NEW: Enhanced tool call result logging with metadata and timing
+pub async fn log_enhanced_tool_call_result(
+    app_handle: &AppHandle,
+    tool_name: &str,
+    tool_output: Value,
+    success: bool,
+    content: Option<String>,
+    screenshot_base64: Option<String>,
+    execution_time_ms: Option<u64>,
+    app_state: Option<&crate::state::AppState>
+) {
+    let mut tool_metadata = ToolMetadata::determine_for_tool(tool_name, app_state).await;
+
     let event = AgentEvent {
-        event_type: "screenshot".to_string(),
-        payload: AgentEventPayload::Screenshot(ScreenshotPayload {
+        event_type: "tool_call_result".to_string(),
+        payload: AgentEventPayload::ToolCallResult(ToolCallResultPayload {
+            tool_name: tool_name.to_string(),
+            tool_output,
+            success,
+            content: content.or_else(|| tool_metadata.generate_result_message(success, execution_time_ms)),
             screenshot_base64,
-            content,
+            tool_category: Some(tool_metadata.category),
+            execution_time_ms,
+            notification_level: tool_metadata.notification_level,
         }),
     };
     emit_agent_event(app_handle, event);
 }
 
-// Function to log a generic content message (can be used by system, or for other status updates)
-pub fn log_generic_content(app_handle: &AppHandle, content_text: &str) {
-    let event = AgentEvent {
-        event_type: "generic_content".to_string(), // Or another specific type if needed
-        payload: AgentEventPayload::GenericContent(GenericContentPayload {
-            content: content_text.to_string(),
-        }),
-    };
-    emit_agent_event(app_handle, event);
+/// Tool metadata for dynamic notification generation
+#[derive(Debug, Clone)]
+struct ToolMetadata {
+    category: String,
+    description: Option<String>,
+    notification_level: String,
+    estimated_duration: Option<String>,
+    icon: String,
+    action_verb: String,
 }
 
-// NEW: Streaming event functions
-/// Emit a streaming text chunk event
-pub fn emit_streaming_text_chunk(app_handle: &AppHandle, chunk: String, message_id: Option<String>) {
-    #[derive(Clone, Debug, Serialize)]
-    struct StreamingTextEvent {
-        chunk: String,
-        message_id: Option<String>,
+impl ToolMetadata {
+    /// Determine tool metadata dynamically based on tool name and configuration
+    async fn determine_for_tool(tool_name: &str, app_state: Option<&crate::state::AppState>) -> Self {
+        // Try to get more detailed info from tool configuration if available
+        if let Some(app_state) = app_state {
+            let config_manager = app_state.get_tool_config_manager().await;
+            let config_guard = config_manager.lock().await;
+            if let Some(tool_config) = config_guard.get_tool_config(tool_name) {
+                return Self::from_tool_config(&tool_config);
+            }
+        }
+
+        // Fallback to pattern-based detection
+        Self::from_tool_name_patterns(tool_name)
     }
 
-    let event = StreamingTextEvent {
-        chunk,
-        message_id,
-    };
+    /// Create metadata from tool configuration
+    fn from_tool_config(config: &crate::agent::tools::ToolConfig) -> Self {
+        use crate::agent::tools::ToolCategory;
 
-    info!("Emitting streaming text chunk: {:?}", event.chunk);
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_TEXT_STREAM, event) {
-        warn!("Failed to emit streaming text chunk: {}", e);
+        let (icon, action_verb, notification_level, estimated_duration) = match config.category {
+            ToolCategory::AnthropicComputerUse => {
+                match config.name.as_str() {
+                    "screenshot" => ("📸", "Taking screenshot", "standard", Some("instant")),
+                    "click" => ("👆", "Clicking", "minimal", Some("instant")),
+                    "type" => ("⌨️", "Typing", "minimal", Some("short")),
+                    "key" => ("🔤", "Pressing keys", "minimal", Some("instant")),
+                    "scroll" => ("📜", "Scrolling", "minimal", Some("instant")),
+                    "drag" => ("🖱️", "Dragging", "minimal", Some("short")),
+                    "move" => ("↗️", "Moving cursor", "silent", Some("instant")),
+                    _ => ("🖥️", "Interacting with screen", "standard", Some("short"))
+                }
+            },
+            ToolCategory::Desktop => ("🖥️", "Controlling desktop", "standard", Some("short")),
+            ToolCategory::Browser => ("🌐", "Browser action", "standard", Some("medium")),
+            ToolCategory::Timer => ("⏰", "Managing timer", "standard", Some("instant")),
+            ToolCategory::Basic => {
+                if config.name.contains("file") {
+                    ("📁", "File operation", "standard", Some("short"))
+                } else if config.name.contains("command") || config.name.contains("shell") {
+                    ("⚡", "Running command", "standard", Some("medium"))
+                } else {
+                    ("🔧", "Basic operation", "standard", Some("short"))
+                }
+            },
+            ToolCategory::MCP => ("🔌", "External tool", "standard", Some("medium")),
+        };
+
+        Self {
+            category: format!("{:?}", config.category),
+            description: config.description.clone(),
+            notification_level: notification_level.to_string(),
+            estimated_duration: estimated_duration.map(|s| s.to_string()),
+            icon: icon.to_string(),
+            action_verb: action_verb.to_string(),
+        }
     }
-}
 
-/// Emit a stream start event
-pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
-    #[derive(Clone, Debug, Serialize)]
-    struct StreamStartEvent {
-        message_id: String,
+    /// Fallback pattern-based detection for tools not in configuration
+    fn from_tool_name_patterns(tool_name: &str) -> Self {
+        let (icon, action_verb, category, notification_level, estimated_duration) = match tool_name {
+            // Screenshot tools - always highly visible
+            name if name.contains("screenshot") => ("📸", "Taking screenshot", "Screenshot", "standard", Some("instant")),
+
+            // Mouse and click actions - minimal notifications
+            name if name.contains("click") => ("👆", "Clicking", "Mouse", "minimal", Some("instant")),
+            name if name.contains("drag") => ("🖱️", "Dragging", "Mouse", "minimal", Some("short")),
+            name if name.contains("move") && name.contains("mouse") => ("↗️", "Moving cursor", "Mouse", "silent", Some("instant")),
+
+            // Keyboard actions - minimal notifications
+            name if name.contains("type") => ("⌨️", "Typing", "Keyboard", "minimal", Some("short")),
+            name if name.contains("key") => ("🔤", "Pressing keys", "Keyboard", "minimal", Some("instant")),
+
+            // File operations - standard notifications
+            name if name.contains("file") && name.contains("read") => ("📖", "Reading file", "File", "standard", Some("short")),
+            name if name.contains("file") && (name.contains("write") || name.contains("save")) => ("💾", "Writing file", "File", "standard", Some("short")),
+            name if name.contains("file") => ("📁", "File operation", "File", "standard", Some("short")),
+
+            // Command execution - detailed notifications
+            name if name.contains("command") || name.contains("shell") || name.contains("terminal") => ("⚡", "Running command", "Command", "detailed", Some("medium")),
+
+            // Browser actions
+            name if name.contains("browser") || name.contains("navigate") => ("🌐", "Browser action", "Browser", "standard", Some("medium")),
+
+            // Desktop automation
+            name if name.contains("desktop") || name.contains("application") => ("🖥️", "Desktop action", "Desktop", "standard", Some("short")),
+
+            // Timer and scheduling
+            name if name.contains("timer") => ("⏰", "Timer action", "Timer", "standard", Some("instant")),
+
+            // MCP tools
+            name if name.contains("mcp") => ("🔌", "External tool", "MCP", "standard", Some("medium")),
+
+            // Default fallback
+            _ => ("🔧", "Tool execution", "General", "standard", Some("short")),
+        };
+
+        Self {
+            category: category.to_string(),
+            description: None,
+            notification_level: notification_level.to_string(),
+            estimated_duration: estimated_duration.map(|s| s.to_string()),
+            icon: icon.to_string(),
+            action_verb: action_verb.to_string(),
+        }
     }
 
-    let event = StreamStartEvent { message_id };
-
-    info!("Emitting stream start for message: {}", event.message_id);
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_START, event) {
-        warn!("Failed to emit stream start: {}", e);
-    }
-}
-
-/// Emit a stream end event
-pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
-    #[derive(Clone, Debug, Serialize)]
-    struct StreamEndEvent {
-        message_id: String,
-        complete_text: String,
+    /// Generate a start message for notifications
+    fn generate_start_message(&self) -> Option<String> {
+        match self.notification_level.as_str() {
+            "silent" => None,
+            "minimal" => Some(format!("{} {}", self.icon, self.action_verb)),
+            "standard" => Some(format!("{} {}...", self.icon, self.action_verb)),
+            "detailed" => Some(format!("{} {} {}", self.icon, self.action_verb,
+                self.description.as_deref().unwrap_or("in progress"))),
+            _ => Some(format!("{} {}", self.icon, self.action_verb)),
+        }
     }
 
-    let event = StreamEndEvent {
-        message_id,
-        complete_text,
-    };
-
-    info!("Emitting stream end for message: {}", event.message_id);
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event) {
-        warn!("Failed to emit stream end: {}", e);
+    /// Generate a result message for notifications
+    fn generate_result_message(&self, success: bool, execution_time_ms: Option<u64>) -> Option<String> {
+        match self.notification_level.as_str() {
+            "silent" => None,
+            "minimal" => {
+                if success {
+                    Some(format!("{} ✅", self.icon))
+                } else {
+                    Some(format!("{} ❌", self.icon))
+                }
+            },
+            "standard" => {
+                let status = if success { "completed" } else { "failed" };
+                Some(format!("{} {} {}", self.icon, self.action_verb, status))
+            },
+            "detailed" => {
+                let status = if success { "completed" } else { "failed" };
+                let timing = execution_time_ms
+                    .map(|ms| format!(" ({}ms)", ms))
+                    .unwrap_or_default();
+                Some(format!("{} {} {}{}", self.icon, self.action_verb, status, timing))
+            },
+            _ => {
+                let status = if success { "✅" } else { "❌" };
+                Some(format!("{} {}", self.icon, status))
+            }
+        }
     }
 }
 
@@ -600,3 +757,33 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
 //     //     warn!("DevTools window not found, cannot log tool usage event to it.");
 //     // }
 // }
+
+pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
+    let event = AgentEvent {
+        event_type: "stream_start".to_string(),
+        payload: AgentEventPayload::GenericContent(GenericContentPayload {
+            content: format!("Stream started with message ID: {}", message_id),
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>) {
+    let event = AgentEvent {
+        event_type: "streaming_text_chunk".to_string(),
+        payload: AgentEventPayload::GenericContent(GenericContentPayload {
+            content: text,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+pub fn emit_stream_end(app_handle: &AppHandle, message_id: String) {
+    let event = AgentEvent {
+        event_type: "stream_end".to_string(),
+        payload: AgentEventPayload::GenericContent(GenericContentPayload {
+            content: format!("Stream ended with message ID: {}", message_id),
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}

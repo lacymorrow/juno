@@ -5,17 +5,16 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::sync::Mutex;
 use tauri::AppHandle;
+use tauri::Manager;
 use serde_json::Value;
 use tracing::{debug, error, info, warn};
 use std::future::Future;
 use std::pin::Pin;
-
+use crate::agent::traits::{MemoryManager, ToolProvider};
+use crate::agent::tools::mcp_integration::MCPManager;
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
-use crate::agent::traits::ToolProvider;
 use crate::agent::tool_logger;
 use crate::state::AppState;
-use crate::agent::tools::mcp_integration::MCPManager;
-// Error recovery will be implemented in future iterations
 
 // Define an async tool function type
 // It takes a Value input and returns a BoxFuture that resolves to Result<Value, String>
@@ -41,7 +40,7 @@ pub struct LocalToolProvider {
 
 impl LocalToolProvider {
     pub fn new() -> Self {
-        LocalToolProvider {
+        Self {
             definitions: Arc::new(RwLock::new(HashMap::new())),
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: None,
@@ -49,9 +48,9 @@ impl LocalToolProvider {
         }
     }
 
-    /// Create a tool provider with an app handle for emitting events
+    /// Create a new tool provider with an app handle
     pub fn with_app_handle(app_handle: AppHandle) -> Self {
-        LocalToolProvider {
+        Self {
             definitions: Arc::new(RwLock::new(HashMap::new())),
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: Some(app_handle),
@@ -59,22 +58,18 @@ impl LocalToolProvider {
         }
     }
 
-    /// Create a tool provider with both app handle and MCP manager for external tool support
-    pub fn with_mcp_support(app_handle: AppHandle, mcp_manager: Arc<Mutex<MCPManager>>) -> Self {
-        LocalToolProvider {
-            definitions: Arc::new(RwLock::new(HashMap::new())),
-            executors: Arc::new(RwLock::new(HashMap::new())),
-            app_handle: Some(app_handle),
-            mcp_manager: Some(mcp_manager),
-        }
+    /// Add MCP manager to an existing provider
+    pub fn with_mcp_manager(mut self, mcp_manager: Arc<Mutex<MCPManager>>) -> Self {
+        self.mcp_manager = Some(mcp_manager);
+        self
     }
 
-    /// Set the app handle for emitting events
+    /// Set app handle on existing provider
     pub fn set_app_handle(&mut self, app_handle: AppHandle) {
         self.app_handle = Some(app_handle);
     }
 
-    /// Set the MCP manager for external tool support
+    /// Set MCP manager on existing provider
     pub fn set_mcp_manager(&mut self, mcp_manager: Arc<Mutex<MCPManager>>) {
         self.mcp_manager = Some(mcp_manager);
     }
@@ -276,72 +271,74 @@ impl ToolProvider for LocalToolProvider {
 
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         let tool_name = &tool_call.name;
+        let start_time = std::time::Instant::now(); // Track execution time
 
-        // Emit tool call request event if app handle is available
+        // Use enhanced tool call request logging if app handle is available
         if let Some(ref app_handle) = self.app_handle {
-            tool_logger::log_tool_call_request(
+            // Get app_state from app_handle when needed
+            let app_state_ref = app_handle.try_state::<crate::state::AppState>();
+            let app_state_option = app_state_ref.as_ref().map(|s| s.inner());
+
+            // Use enhanced logging with tool metadata
+            tool_logger::log_enhanced_tool_call_request(
                 app_handle,
                 tool_name,
                 tool_call.input.clone(),
-                Some(format!("Executing tool: {}", tool_name))
-            );
+                None,
+                app_state_option,
+            ).await;
+        } else {
+            // Fallback to standard logging
+            debug!("Executing tool: {} with input: {:?}", tool_name, tool_call.input);
         }
 
-        // Execute tool directly (error recovery will be implemented in future iterations)
-        let result = if self.is_mcp_tool(tool_name) {
-            // Execute via MCP manager
-            if let Some(ref mcp_manager) = self.mcp_manager {
-                let manager_guard = mcp_manager.lock().await;
-                match manager_guard.execute_tool(&tool_call.name, tool_call.input.clone(), tool_call.id.clone()).await {
-                    Ok(tool_result) => Ok(tool_result),
-                    Err(e) => Err(e),
-                }
-            } else {
-                Err(AgentError::ToolNotFound(format!("MCP tool '{}' requested but no MCP manager available", tool_name)))
+        // Get the executor
+        let executors = self.executors.read().await;
+        if let Some(executor) = executors.get(tool_name) {
+            let exec_fn = executor.clone();
+            drop(executors); // Release the lock before async execution
+
+            // Execute the tool
+            let result = exec_fn(tool_call.input.clone()).await;
+            let execution_time = start_time.elapsed();
+
+            // Log the result with enhanced logging if available
+            if let Some(ref app_handle) = self.app_handle {
+                let app_state_ref = app_handle.try_state::<crate::state::AppState>();
+                let app_state_option = app_state_ref.as_ref().map(|s| s.inner());
+
+                let success = result.is_ok();
+                let output = result.as_ref().map(|v| v.clone()).unwrap_or_else(|e| {
+                    serde_json::json!({ "error": e })
+                });
+
+                tool_logger::log_enhanced_tool_call_result(
+                    app_handle,
+                    tool_name,
+                    output,
+                    success,
+                    None, // content
+                    None, // screenshot_base64 - could be extracted from result if needed
+                    Some(execution_time.as_millis() as u64),
+                    app_state_option,
+                ).await;
+            }
+
+            // Convert the result
+            match result {
+                Ok(output) => Ok(ToolResult {
+                    call_id: tool_call.id,
+                    output: serde_json::json!({ "result": output.to_string() }),
+                }),
+                Err(error) => Ok(ToolResult {
+                    call_id: tool_call.id,
+                    output: serde_json::json!({ "error": error }),
+                }),
             }
         } else {
-            // Execute local tool
-            let executors_guard = self.executors.read().await;
-            if let Some(executor) = executors_guard.get(tool_name) {
-                match executor(tool_call.input.clone()).await {
-                    Ok(output) => Ok(ToolResult {
-                        call_id: tool_call.id.clone(),
-                        output,
-                    }),
-                    Err(error_msg) => Err(AgentError::ToolError(error_msg)),
-                }
-            } else {
-                Err(AgentError::ToolNotFound(tool_call.name.clone()))
-            }
-        };
-
-        // Emit tool call response event if app handle is available
-        if let Some(ref app_handle) = self.app_handle {
-            match &result {
-                Ok(tool_result) => {
-                    tool_logger::log_tool_call_result(
-                        app_handle,
-                        tool_name,
-                        tool_result.output.clone(),
-                        true, // success = true
-                        Some(format!("Tool {} completed successfully", tool_name)),
-                        None
-                    );
-                }
-                Err(error) => {
-                    tool_logger::log_tool_call_result(
-                        app_handle,
-                        tool_name,
-                        serde_json::json!({"error": error.to_string()}),
-                        false, // success = false
-                        Some(format!("Tool {} failed: {}", tool_name, error)),
-                        None
-                    );
-                }
-            }
+            warn!("Tool not found: {}", tool_name);
+            Err(AgentError::ToolNotFound(tool_name.clone()))
         }
-
-        result
     }
 }
 
