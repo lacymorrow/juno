@@ -447,7 +447,11 @@ pub async fn log_enhanced_tool_call_request(
     content: Option<String>,
     app_state: Option<&crate::state::AppState>
 ) {
-    let mut tool_metadata = ToolMetadata::determine_for_tool(tool_name, app_state).await;
+    let mut tool_metadata = ToolMetadata::determine_for_tool_with_inputs(
+        tool_name, 
+        Some(tool_args.clone()), 
+        app_state
+    ).await;
 
     let event = AgentEvent {
         event_type: "tool_call_request".to_string(),
@@ -500,7 +504,44 @@ pub async fn log_enhanced_tool_call_result(
     execution_time_ms: Option<u64>,
     app_state: Option<&crate::state::AppState>
 ) {
+    // For result logging, we need to reconstruct the metadata without the original inputs
+    // We'll create a basic metadata and use the provided content if available
     let mut tool_metadata = ToolMetadata::determine_for_tool(tool_name, app_state).await;
+
+    let event = AgentEvent {
+        event_type: "tool_call_result".to_string(),
+        payload: AgentEventPayload::ToolCallResult(ToolCallResultPayload {
+            tool_name: tool_name.to_string(),
+            tool_output,
+            success,
+            content: content.or_else(|| tool_metadata.generate_result_message(success, execution_time_ms)),
+            screenshot_base64,
+            tool_category: Some(tool_metadata.category),
+            execution_time_ms,
+            notification_level: tool_metadata.notification_level,
+        }),
+    };
+    emit_agent_event(app_handle, event);
+}
+
+// NEW: Enhanced tool call result logging with original inputs for better details
+pub async fn log_enhanced_tool_call_result_with_inputs(
+    app_handle: &AppHandle,
+    tool_name: &str,
+    tool_inputs: Option<Value>,
+    tool_output: Value,
+    success: bool,
+    content: Option<String>,
+    screenshot_base64: Option<String>,
+    execution_time_ms: Option<u64>,
+    app_state: Option<&crate::state::AppState>
+) {
+    // Use the original inputs to get detailed metadata for result messages
+    let mut tool_metadata = if let Some(inputs) = tool_inputs {
+        ToolMetadata::determine_for_tool_with_inputs(tool_name, Some(inputs), app_state).await
+    } else {
+        ToolMetadata::determine_for_tool(tool_name, app_state).await
+    };
 
     let event = AgentEvent {
         event_type: "tool_call_result".to_string(),
@@ -527,6 +568,8 @@ struct ToolMetadata {
     estimated_duration: Option<String>,
     icon: String,
     action_verb: String,
+    // NEW: Store actual tool inputs for detailed messaging
+    tool_inputs: Option<Value>,
 }
 
 impl ToolMetadata {
@@ -545,6 +588,17 @@ impl ToolMetadata {
         Self::from_tool_name_patterns(tool_name)
     }
 
+    /// Determine tool metadata with inputs for enhanced detail extraction
+    async fn determine_for_tool_with_inputs(
+        tool_name: &str, 
+        tool_inputs: Option<Value>,
+        app_state: Option<&crate::state::AppState>
+    ) -> Self {
+        let mut metadata = Self::determine_for_tool(tool_name, app_state).await;
+        metadata.tool_inputs = tool_inputs;
+        metadata
+    }
+
     /// Create metadata from tool configuration
     fn from_tool_config(config: &crate::agent::tools::ToolConfig) -> Self {
         use crate::agent::tools::ToolCategory;
@@ -555,7 +609,7 @@ impl ToolMetadata {
                     "screenshot" => ("📸", "Taking screenshot", "standard", Some("instant")),
                     "click" => ("👆", "Clicking", "minimal", Some("instant")),
                     "type" => ("⌨️", "Typing", "minimal", Some("short")),
-                    "key" => ("🔤", "Pressing keys", "minimal", Some("instant")),
+                    "key" => ("🔤", "Pressing keys", "standard", Some("instant")), // Changed to standard for key details
                     "scroll" => ("📜", "Scrolling", "minimal", Some("instant")),
                     "drag" => ("🖱️", "Dragging", "minimal", Some("short")),
                     "move" => ("↗️", "Moving cursor", "silent", Some("instant")),
@@ -568,8 +622,8 @@ impl ToolMetadata {
             ToolCategory::Basic => {
                 if config.name.contains("file") {
                     ("📁", "File operation", "standard", Some("short"))
-                } else if config.name.contains("command") || config.name.contains("shell") {
-                    ("⚡", "Running command", "standard", Some("medium"))
+                } else if config.name.contains("command") || config.name.contains("shell") || config.name.contains("bash") || config.name.contains("terminal") {
+                    ("⚡", "Running command", "detailed", Some("medium")) // Changed to detailed for command details
                 } else {
                     ("🔧", "Basic operation", "standard", Some("short"))
                 }
@@ -584,6 +638,7 @@ impl ToolMetadata {
             estimated_duration: estimated_duration.map(|s| s.to_string()),
             icon: icon.to_string(),
             action_verb: action_verb.to_string(),
+            tool_inputs: None,
         }
     }
 
@@ -598,17 +653,18 @@ impl ToolMetadata {
             name if name.contains("drag") => ("🖱️", "Dragging", "Mouse", "minimal", Some("short")),
             name if name.contains("move") && name.contains("mouse") => ("↗️", "Moving cursor", "Mouse", "silent", Some("instant")),
 
-            // Keyboard actions - minimal notifications
-            name if name.contains("type") => ("⌨️", "Typing", "Keyboard", "minimal", Some("short")),
-            name if name.contains("key") => ("🔤", "Pressing keys", "Keyboard", "minimal", Some("instant")),
+            // Keyboard actions - standard notifications for better visibility of key details
+            name if name.contains("type") => ("⌨️", "Typing", "Keyboard", "standard", Some("short")), // Changed to standard
+            name if name.contains("key") || name.contains("press") => ("🔤", "Pressing keys", "Keyboard", "standard", Some("instant")), // Changed to standard
 
             // File operations - standard notifications
             name if name.contains("file") && name.contains("read") => ("📖", "Reading file", "File", "standard", Some("short")),
             name if name.contains("file") && (name.contains("write") || name.contains("save")) => ("💾", "Writing file", "File", "standard", Some("short")),
             name if name.contains("file") => ("📁", "File operation", "File", "standard", Some("short")),
 
-            // Command execution - detailed notifications
-            name if name.contains("command") || name.contains("shell") || name.contains("terminal") => ("⚡", "Running command", "Command", "detailed", Some("medium")),
+            // Command execution - detailed notifications to show full commands
+            name if name.contains("command") || name.contains("shell") || name.contains("terminal") || name.contains("bash") || name.contains("exec") || name.contains("run") => 
+                ("⚡", "Running command", "Command", "detailed", Some("medium")),
 
             // Browser actions
             name if name.contains("browser") || name.contains("navigate") => ("🌐", "Browser action", "Browser", "standard", Some("medium")),
@@ -633,22 +689,135 @@ impl ToolMetadata {
             estimated_duration: estimated_duration.map(|s| s.to_string()),
             icon: icon.to_string(),
             action_verb: action_verb.to_string(),
+            tool_inputs: None,
         }
     }
 
-    /// Generate a start message for notifications
+    /// Extract key details from tool inputs for display
+    fn extract_key_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract key information
+        if let Some(key) = inputs.get("key").and_then(|v| v.as_str()) {
+            let modifier = inputs.get("modifier")
+                .and_then(|v| v.as_str())
+                .map(|m| format!("{}+", m))
+                .unwrap_or_default();
+            return Some(format!("{}{}", modifier, key));
+        }
+        
+        None
+    }
+    
+    /// Extract command details from tool inputs for display
+    fn extract_command_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract command information
+        if let Some(command) = inputs.get("command").and_then(|v| v.as_str()) {
+            // Truncate very long commands for display
+            if command.len() > 100 {
+                return Some(format!("{}...", &command[..97]));
+            }
+            return Some(command.to_string());
+        }
+        
+        None
+    }
+    
+    /// Extract text details from tool inputs for display
+    fn extract_text_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract text information
+        if let Some(text) = inputs.get("text").and_then(|v| v.as_str()) {
+            // Truncate very long text for display
+            if text.len() > 50 {
+                return Some(format!("\"{}...\"", &text[..47]));
+            }
+            return Some(format!("\"{}\"", text));
+        }
+        
+        None
+    }
+    
+    /// Extract file path details from tool inputs for display
+    fn extract_file_details(&self) -> Option<String> {
+        let inputs = self.tool_inputs.as_ref()?;
+        
+        // Extract file path information
+        if let Some(path) = inputs.get("path").and_then(|v| v.as_str()) {
+            // Show just the filename for brevity
+            if let Some(filename) = std::path::Path::new(path).file_name() {
+                if let Some(filename_str) = filename.to_str() {
+                    return Some(filename_str.to_string());
+                }
+            }
+            // Fallback to showing truncated path
+            if path.len() > 30 {
+                return Some(format!("...{}", &path[path.len()-27..]));
+            }
+            return Some(path.to_string());
+        }
+        
+        None
+    }
+
+    /// Generate a start message for notifications with enhanced details
     fn generate_start_message(&self) -> Option<String> {
         match self.notification_level.as_str() {
             "silent" => None,
             "minimal" => Some(format!("{} {}", self.icon, self.action_verb)),
-            "standard" => Some(format!("{} {}...", self.icon, self.action_verb)),
-            "detailed" => Some(format!("{} {} {}", self.icon, self.action_verb,
-                self.description.as_deref().unwrap_or("in progress"))),
+            "standard" => {
+                // Include specific details for standard level
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add specific details based on tool type
+                if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                } else if self.category == "Keyboard" && self.action_verb.contains("Typing") {
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{}...", message))
+            },
+            "detailed" => {
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add comprehensive details for detailed level
+                if self.category == "Command" {
+                    if let Some(command_details) = self.extract_command_details() {
+                        message = format!("{}: {}", message, command_details);
+                    }
+                } else if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{} {}", message,
+                    self.description.as_deref().unwrap_or("in progress")))
+            },
             _ => Some(format!("{} {}", self.icon, self.action_verb)),
         }
     }
 
-    /// Generate a result message for notifications
+    /// Generate a result message for notifications with enhanced details
     fn generate_result_message(&self, success: bool, execution_time_ms: Option<u64>) -> Option<String> {
         match self.notification_level.as_str() {
             "silent" => None,
@@ -661,14 +830,51 @@ impl ToolMetadata {
             },
             "standard" => {
                 let status = if success { "completed" } else { "failed" };
-                Some(format!("{} {} {}", self.icon, self.action_verb, status))
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add specific details for context
+                if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{} {}", message, status))
             },
             "detailed" => {
                 let status = if success { "completed" } else { "failed" };
                 let timing = execution_time_ms
                     .map(|ms| format!(" ({}ms)", ms))
                     .unwrap_or_default();
-                Some(format!("{} {} {}{}", self.icon, self.action_verb, status, timing))
+                
+                let mut message = format!("{} {}", self.icon, self.action_verb);
+                
+                // Add comprehensive details
+                if self.category == "Command" {
+                    if let Some(command_details) = self.extract_command_details() {
+                        message = format!("{}: {}", message, command_details);
+                    }
+                } else if self.category == "Keyboard" {
+                    if let Some(key_details) = self.extract_key_details() {
+                        message = format!("{} {}", message, key_details);
+                    }
+                    if let Some(text_details) = self.extract_text_details() {
+                        message = format!("{} {}", message, text_details);
+                    }
+                } else if self.category == "File" {
+                    if let Some(file_details) = self.extract_file_details() {
+                        message = format!("{} {}", message, file_details);
+                    }
+                }
+                
+                Some(format!("{} {}{}", message, status, timing))
             },
             _ => {
                 let status = if success { "✅" } else { "❌" };
