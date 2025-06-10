@@ -1,3 +1,4 @@
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -15,14 +16,86 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { SettingsSectionProps } from "../types";
+import { invoke } from "@tauri-apps/api/core";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
+  const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
+  const [autoLaunchLoading, setAutoLaunchLoading] = useState(false);
+
+  // Load auto-launch status on component mount
+  useEffect(() => {
+    const loadAutoLaunchStatus = async () => {
+      try {
+        const enabled = await invoke<boolean>('is_autostart_enabled');
+        setAutoLaunchEnabled(enabled);
+      } catch (error) {
+        console.error('Failed to load auto-launch status:', error);
+        // Default to false if unable to determine status
+        setAutoLaunchEnabled(false);
+      }
+    };
+
+    loadAutoLaunchStatus();
+  }, []);
+
+  const handleAutoLaunchChange = async (enabled: boolean) => {
+    if (autoLaunchLoading) return;
+
+    setAutoLaunchLoading(true);
+    
+    try {
+      if (enabled) {
+        await invoke<boolean>('enable_autostart');
+        setAutoLaunchEnabled(true);
+        console.log('Auto-launch enabled - Juno will start when you log in');
+      } else {
+        await invoke<boolean>('disable_autostart');
+        setAutoLaunchEnabled(false);
+        console.log('Auto-launch disabled');
+      }
+    } catch (error) {
+      console.error('Failed to update auto-launch setting:', error);
+      // Revert the state if the operation failed
+      const currentStatus = await invoke<boolean>('is_autostart_enabled').catch(() => false);
+      setAutoLaunchEnabled(currentStatus);
+    } finally {
+      setAutoLaunchLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">
           General Settings
         </h3>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Startup Behavior</CardTitle>
+            <CardDescription>
+              Configure how Juno behaves when starting up
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="auto-launch" className="text-sm font-medium">
+                  Launch at Login
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Automatically start Juno when you log in to your computer
+                </p>
+              </div>
+              <Switch
+                id="auto-launch"
+                checked={autoLaunchEnabled}
+                onCheckedChange={handleAutoLaunchChange}
+                disabled={autoLaunchLoading}
+              />
+            </div>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
