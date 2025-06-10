@@ -306,3 +306,21 @@ pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<O
     let prompt = state.get_first_onboarding_prompt();
     Ok(prompt)
 }
+
+/// Set debug mode enabled/disabled
+#[tauri::command]
+pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    info!("Setting debug mode to: {}", enabled);
+    
+    state.set_debug_mode(enabled);
+    
+    info!("Debug mode successfully set to: {}", enabled);
+    Ok(())
+}
+
+/// Get current debug mode status
+#[tauri::command]
+pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {
+    let debug_mode = state.is_debug_mode();
+    Ok(debug_mode)
+}
