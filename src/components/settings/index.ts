@@ -5,6 +5,12 @@ export { default as AIProviderSettings } from './sections/AIProviderSettings';
 export { default as SecuritySettings } from './sections/SecuritySettings';
 export { default as AdvancedSettings } from './sections/AdvancedSettings';
 export { default as NotificationSettings } from './sections/NotificationSettings';
+export { default as NetworkSettings } from './sections/NetworkSettings';
+export { default as ShortcutsSettings } from './sections/ShortcutsSettings';
+export { default as ToolsSettings } from './sections/ToolsSettings';
+
+// Export shared components
+export { default as ShortcutInput } from './ShortcutInput';
 
 // Export types
 export * from './types';
