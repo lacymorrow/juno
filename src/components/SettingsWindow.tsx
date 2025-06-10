@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AlertCircle,
+  Bell,
   Brain,
   CheckCircle,
   ExternalLink,
@@ -50,6 +51,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import NotificationSettings from "@/components/settings/sections/NotificationSettings";
 
 interface SettingsCategory {
   id: string;
@@ -70,6 +72,12 @@ const settingsCategories: SettingsCategory[] = [
     name: "Voice & Audio",
     icon: <Mic className="w-8 h-8" />,
     description: "Voice transcription and audio settings",
+  },
+  {
+    id: "notifications",
+    name: "Notifications",
+    icon: <Bell className="w-8 h-8" />,
+    description: "System and toast notification preferences",
   },
   {
     id: "ai",
@@ -692,6 +700,8 @@ function SettingsContent({
         return <GeneralSettings settings={settings} />;
       case "voice":
         return <VoiceSettings settings={settings} />;
+      case "notifications":
+        return <NotificationSettings />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
       case "network":
@@ -1195,7 +1205,7 @@ function NetworkSettings({
     if (!status) {
       return <Badge variant="outline">Disconnected</Badge>;
     }
-    
+
     if (status.Connected !== undefined) {
       return (
         <Badge variant="default" className="bg-green-500">
@@ -1218,7 +1228,7 @@ function NetworkSettings({
     if (!status) {
       return <Square className="h-4 w-4 text-gray-400" />;
     }
-    
+
     if (status.Connected !== undefined) {
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     } else if (status.Connecting !== undefined) {
