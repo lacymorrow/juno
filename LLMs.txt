@@ -438,6 +438,55 @@ struct MCPServerConfig {
 - Comprehensive audit trail
 - Enterprise-grade authentication
 
+## Auto-Launch System 🚀
+
+### Seamless Startup Integration
+**Location**: `src-tauri/src/commands/autostart.rs`
+
+**Complete Implementation**:
+- ✅ Backend Rust commands with error handling and persistence
+- ✅ Frontend React UI in General Settings section
+- ✅ macOS LaunchAgent integration for native startup behavior
+- ✅ Persistent JSON-based configuration storage
+- ✅ System and app settings synchronization
+
+**Core Commands**:
+```rust
+// Auto-launch management commands
+enable_autostart()     // Enable auto-launch on login
+disable_autostart()    // Disable auto-launch functionality  
+is_autostart_enabled() // Check current auto-launch status
+toggle_autostart()     // Toggle current state
+init_autostart()       // Sync settings on app startup
+```
+
+**Features**:
+- **System Integration**: Uses `MacosLauncher::LaunchAgent` for native macOS integration
+- **Local Persistence**: JSON-based settings storage with timestamps in `{app_config_dir}/autostart.json`
+- **Error Recovery**: Fallback to saved settings if system check fails
+- **Startup Sync**: Ensures system and app settings remain synchronized on app startup
+- **User Control**: Accessible toggle in Settings → General → Startup Behavior
+
+**Frontend Integration**: Complete UI implementation in `src/components/settings/sections/GeneralSettings.tsx`
+- Toggle switch with loading states and error handling
+- Automatic state reversion on operation failures
+- Real-time status display and user feedback
+
+**Dependencies**:
+- Backend: `tauri-plugin-autostart = "2.3.0"`
+- Frontend: `@tauri-apps/plugin-autostart = "^2.3.0"`
+- Permissions: `autostart:allow-enable`, `autostart:allow-disable`, `autostart:allow-is-enabled`
+
+**Storage Format**:
+```json
+{
+  "enabled": true,
+  "last_updated": "2024-01-15T10:30:45.123Z"
+}
+```
+
+**Cross-Platform Ready**: Foundation for Windows (Registry) and Linux (XDG autostart) support via tauri-plugin-autostart.
+
 ## macOS Permission System 🔧
 
 ### Critical Requirement

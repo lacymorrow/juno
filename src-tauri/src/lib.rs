@@ -224,7 +224,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 }
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*};
+use commands::{autostart::*, app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*};
 
 // Import specific sound commands from sound.rs
 use crate::commands::sound::{
@@ -530,6 +530,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None)) // Add autostart plugin
         .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
@@ -788,6 +789,11 @@ pub fn run() {
             is_tool_enabled,
             reset_tool_configuration,
             get_tool_configuration_summary,
+            // Autostart Commands
+            enable_autostart,
+            disable_autostart,
+            is_autostart_enabled,
+            toggle_autostart,
             // Floating Bar Commands
             floating_bar_click,
             floating_bar_focus_change,
@@ -2156,6 +2162,13 @@ pub fn run() {
                         }
                     }
                 });
+            });
+
+            // --- Initialize Autostart Configuration ---
+            let app_handle_for_autostart = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                commands::autostart::init_autostart(&app_handle_for_autostart);
+                tracing::info!("[Setup] Autostart configuration initialized successfully");
             });
 
             Ok(())
