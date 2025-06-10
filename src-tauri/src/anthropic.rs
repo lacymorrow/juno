@@ -137,8 +137,8 @@ pub async fn submit_query(
     // Generate a unique execution ID for this agent run
     let execution_id = uuid::Uuid::new_v4().to_string();
     
-    // Mark agent execution as started with max iterations (both modes use 15)
-    const MAX_ITERATIONS: u32 = 15;
+    // Mark agent execution as started with max iterations (both modes use increased limit)
+    const MAX_ITERATIONS: u32 = 35; // Increased from 15 to allow for more complex tasks
     state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
     info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
 
@@ -356,11 +356,27 @@ pub async fn submit_query(
                     ("Cancelled".to_string(), "Agent execution was cancelled.".to_string())
                 },
                 AgentError::MaxStepsReached => {
-                    // Play agent error sound for failure
-                    if let Err(e) = crate::commands::sound::play_agent_error_sound(app_handle.clone(), state.clone()).await {
-                        warn!("Failed to play error sound: {}", e);
+                    // Analyze if substantial progress was made by checking conversation history
+                    let memory_manager_arc = state.get_memory_manager().await;
+                    let memory_manager = memory_manager_arc.lock().await;
+                    
+                    let substantial_progress = analyze_task_progress(&memory_manager.get_messages().await.unwrap_or_default());
+
+                    if substantial_progress {
+                        // Agent made substantial progress but ran out of steps - this is "Partially Successful"
+                        info!("Agent reached maximum steps but made substantial progress - marking as partially successful");
+                        if let Err(e) = crate::commands::sound::play_agent_attention_sound(app_handle.clone(), state.clone()).await {
+                            warn!("Failed to play attention sound: {}", e);
+                        }
+                        ("Partially Successful".to_string(), "Agent made substantial progress but reached the maximum number of steps. The task may be partially complete.".to_string())
+                    } else {
+                        // Agent didn't make much progress - this is still a failure
+                        info!("Agent reached maximum steps without substantial progress - marking as failed");
+                        if let Err(e) = crate::commands::sound::play_agent_error_sound(app_handle.clone(), state.clone()).await {
+                            warn!("Failed to play error sound: {}", e);
+                        }
+                        ("Failed".to_string(), "Agent reached maximum steps without making substantial progress.".to_string())
                     }
-                    ("Failed".to_string(), "Agent reached maximum steps.".to_string())
                 },
                 _ => {
                     // Play agent error sound for other failures
@@ -726,4 +742,69 @@ pub async fn clear_conversation_history(state: State<'_, AppState>) -> Result<()
             Err(format!("Failed to clear conversation history: {}", e))
         }
     }
+}
+
+/// Analyze conversation history to determine if substantial progress was made
+fn analyze_task_progress(messages: &[crate::agent::structs::Message]) -> bool {
+    let mut tool_call_count = 0;
+    let mut successful_tool_calls = 0;
+    let mut has_file_operations = false;
+    let mut has_desktop_interactions = false;
+    let mut has_meaningful_output = false;
+
+    for message in messages {
+        match message.role {
+            crate::agent::structs::Role::Assistant => {
+                // Count tool calls from assistant messages
+                if let Some(ref tool_calls) = message.tool_calls {
+                    tool_call_count += tool_calls.len();
+                }
+                
+                // Check for meaningful content in assistant responses
+                if !message.content.trim().is_empty() && message.content.len() > 50 {
+                    has_meaningful_output = true;
+                }
+            },
+            crate::agent::structs::Role::Tool => {
+                // Count successful tool results (not error messages)
+                if !message.content.contains("Error:") && 
+                   !message.content.contains("failed") && 
+                   !message.content.contains("cancelled") {
+                    successful_tool_calls += 1;
+                    
+                    // Check for specific types of progress
+                    if let Some(ref tool_name) = message.name {
+                        match tool_name.as_str() {
+                            "create_file" | "write_file" | "edit_file" | "create_directory" | "run_shell_command" => {
+                                has_file_operations = true;
+                            },
+                            "type_text" | "key_press" | "mouse_click" | "capture_screenshot" => {
+                                has_desktop_interactions = true;
+                            },
+                            _ => {}
+                        }
+                    }
+                }
+            },
+            _ => {}
+        }
+    }
+
+    // Define criteria for substantial progress
+    let substantial_progress = 
+        // At least 3 tool calls attempted and majority successful
+        (tool_call_count >= 3 && successful_tool_calls >= (tool_call_count as f32 * 0.6) as usize) ||
+        // File operations indicate creative work was done
+        has_file_operations ||
+        // Desktop interactions with meaningful output
+        (has_desktop_interactions && has_meaningful_output) ||
+        // High number of successful tool calls regardless
+        successful_tool_calls >= 5;
+
+    info!(
+        "Progress analysis: {} tool calls attempted, {} successful, file_ops: {}, desktop: {}, meaningful_output: {}, substantial: {}",
+        tool_call_count, successful_tool_calls, has_file_operations, has_desktop_interactions, has_meaningful_output, substantial_progress
+    );
+
+    substantial_progress
 }

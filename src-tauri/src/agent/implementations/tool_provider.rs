@@ -277,15 +277,8 @@ impl ToolProvider for LocalToolProvider {
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         let tool_name = &tool_call.name;
 
-        // Emit tool call request event if app handle is available
-        if let Some(ref app_handle) = self.app_handle {
-            tool_logger::log_tool_call_request(
-                app_handle,
-                tool_name,
-                tool_call.input.clone(),
-                Some(format!("Executing tool: {}", tool_name))
-            );
-        }
+        // NOTE: Event emissions are handled by agent_runner.rs to avoid duplicates
+        // The agent_runner.rs properly logs both tool_call_request and tool_call_result events
 
         // Execute tool directly (error recovery will be implemented in future iterations)
         let result = if self.is_mcp_tool(tool_name) {
@@ -314,32 +307,6 @@ impl ToolProvider for LocalToolProvider {
                 Err(AgentError::ToolNotFound(tool_call.name.clone()))
             }
         };
-
-        // Emit tool call response event if app handle is available
-        if let Some(ref app_handle) = self.app_handle {
-            match &result {
-                Ok(tool_result) => {
-                    tool_logger::log_tool_call_result(
-                        app_handle,
-                        tool_name,
-                        tool_result.output.clone(),
-                        true, // success = true
-                        Some(format!("Tool {} completed successfully", tool_name)),
-                        None
-                    );
-                }
-                Err(error) => {
-                    tool_logger::log_tool_call_result(
-                        app_handle,
-                        tool_name,
-                        serde_json::json!({"error": error.to_string()}),
-                        false, // success = false
-                        Some(format!("Tool {} failed: {}", tool_name, error)),
-                        None
-                    );
-                }
-            }
-        }
 
         result
     }

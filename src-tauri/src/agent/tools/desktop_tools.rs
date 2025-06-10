@@ -378,6 +378,197 @@ async fn register_additional_computer_use_tools(
     provider.register_async_tool(triple_click_def, triple_click_exec).await;
     info!("Registered tool: triple_click");
 
+    // --- Execute Command Tool (Compound Tool for Efficiency) ---
+    #[derive(serde::Deserialize)]
+    struct ExecuteCommandInput { command: String, wait_after_ms: Option<u64> }
+
+    let execute_command_def = ToolDefinition {
+        name: "execute_command".to_string(),
+        description: "Efficiently executes a command by typing it and pressing Enter. This is more efficient than separate type_text and press_key calls.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "command": { "type": "string", "description": "The command to type and execute (e.g., 'mkdir hello_world', 'cd projects', 'ls -la')." },
+                "wait_after_ms": { "type": ["integer", "null"], "description": "Optional time in milliseconds to wait after pressing Enter. Defaults to 100ms." }
+            },
+            "required": ["command"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let execute_command_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<ExecuteCommandInput>(input)
+                .map_err(|e| format!("Failed to parse execute_command input: {}", e))?;
+
+            let wait_duration = args.wait_after_ms.unwrap_or(100); // Default 100ms wait
+
+            // Step 1: Type the command
+            let type_result = tokio::task::block_in_place(|| {
+                let state_manager = app.state::<AppState>();
+                tokio::runtime::Handle::current().block_on(
+                    commands::keyboard::type_text(args.command.clone(), state_manager)
+                )
+            });
+
+            if let Err(e) = type_result {
+                return Err(format!("Failed to type command '{}': {}", args.command, e));
+            }
+
+            // Step 2: Press Enter
+            let enter_result = tokio::task::block_in_place(|| {
+                let state_manager = app.state::<AppState>();
+                tokio::runtime::Handle::current().block_on(
+                    commands::keyboard::press_key("Return".to_string(), None, state_manager)
+                )
+            });
+
+            if let Err(e) = enter_result {
+                return Err(format!("Failed to press Enter after command '{}': {}", args.command, e));
+            }
+
+            // Step 3: Optional wait for command to process
+            if wait_duration > 0 {
+                let state_manager = app.state::<AppState>();
+                match state_manager.desktop.wait(wait_duration) {
+                    Ok(_) => {},
+                    Err(e) => return Err(format!("Error waiting after command: {}", e)),
+                }
+            }
+
+            Ok(json!({
+                "success": true,
+                "command": args.command,
+                "waited_ms": wait_duration
+            }))
+        }
+    };
+    provider.register_async_tool(execute_command_def, execute_command_exec).await;
+    info!("Registered tool: execute_command");
+
+    // --- Open File and Type Tool (Compound Tool for File Creation) ---
+    #[derive(serde::Deserialize)]
+    struct OpenFileAndTypeInput { 
+        filepath: String, 
+        content: String, 
+        editor_command: Option<String>,
+        wait_for_editor_ms: Option<u64>,
+        save_after_typing: Option<bool>
+    }
+
+    let open_file_and_type_def = ToolDefinition {
+        name: "open_file_and_type".to_string(),
+        description: "Efficiently opens a file in an editor and types content. Combines multiple steps: opening editor, waiting for it to load, typing content, and optionally saving.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "filepath": { "type": "string", "description": "The path to the file to open (e.g., 'hello.js', 'src/main.rs')." },
+                "content": { "type": "string", "description": "The content to type into the file once it's open." },
+                "editor_command": { "type": ["string", "null"], "description": "Command to open the editor. Defaults to 'code' (VS Code)." },
+                "wait_for_editor_ms": { "type": ["integer", "null"], "description": "Time in milliseconds to wait for editor to open. Defaults to 2000ms." },
+                "save_after_typing": { "type": ["boolean", "null"], "description": "Whether to save the file after typing content. Defaults to true." }
+            },
+            "required": ["filepath", "content"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let open_file_and_type_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<OpenFileAndTypeInput>(input)
+                .map_err(|e| format!("Failed to parse open_file_and_type input: {}", e))?;
+
+            let editor_cmd = args.editor_command.unwrap_or_else(|| "code".to_string());
+            let wait_duration = args.wait_for_editor_ms.unwrap_or(2000);
+            let should_save = args.save_after_typing.unwrap_or(true);
+
+            // Step 1: Open the file in editor
+            let open_command = format!("{} {}", editor_cmd, args.filepath);
+            let type_result = tokio::task::block_in_place(|| {
+                let state_manager = app.state::<AppState>();
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::keyboard::type_text(open_command.clone(), state_manager).await
+                })
+            });
+
+            if let Err(e) = type_result {
+                return Err(format!("Failed to type editor command '{}': {}", open_command, e));
+            }
+
+            // Step 2: Press Enter to execute the command
+            let enter_result = tokio::task::block_in_place(|| {
+                let state_manager = app.state::<AppState>();
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::keyboard::press_key("Return".to_string(), None, state_manager).await
+                })
+            });
+
+            if let Err(e) = enter_result {
+                return Err(format!("Failed to press Enter after editor command: {}", e));
+            }
+
+            // Step 3: Wait for editor to open and be ready
+            if wait_duration > 0 {
+                let state_manager = app.state::<AppState>();
+                match state_manager.desktop.wait(wait_duration) {
+                    Ok(_) => {},
+                    Err(e) => return Err(format!("Error waiting for editor to open: {}", e)),
+                }
+            }
+
+            // Step 4: Type the content
+            let content_result = tokio::task::block_in_place(|| {
+                let state_manager = app.state::<AppState>();
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    commands::keyboard::type_text(args.content.clone(), state_manager).await
+                })
+            });
+
+            if let Err(e) = content_result {
+                return Err(format!("Failed to type content into file: {}", e));
+            }
+
+            // Step 5: Save the file if requested
+            if should_save {
+                let save_result = tokio::task::block_in_place(|| {
+                    let state_manager = app.state::<AppState>();
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(async {
+                        commands::keyboard::press_key("s".to_string(), Some("cmd".to_string()), state_manager).await
+                    })
+                });
+
+                if let Err(e) = save_result {
+                    return Err(format!("Failed to save file: {}", e));
+                }
+
+                // Short wait for save to complete
+                let state_manager = app.state::<AppState>();
+                match state_manager.desktop.wait(500) {
+                    Ok(_) => {},
+                    Err(e) => return Err(format!("Error waiting for save to complete: {}", e)),
+                }
+            }
+
+            Ok(json!({
+                "success": true,
+                "filepath": args.filepath,
+                "content_length": args.content.len(),
+                "editor_command": editor_cmd,
+                "saved": should_save
+            }))
+        }
+    };
+    provider.register_async_tool(open_file_and_type_def, open_file_and_type_exec).await;
+    info!("Registered tool: open_file_and_type");
+
     // TODO: Add other tools as needed, e.g., window management?
 
     Ok(())
