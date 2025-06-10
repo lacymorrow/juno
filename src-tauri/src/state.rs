@@ -103,6 +103,7 @@ pub struct AppState {
     pub dictation_active: Arc<Mutex<bool>>, // Track if Dictation Mode is active
     pub dictation_clipboard_enabled: Arc<Mutex<bool>>, // Track if Dictation Mode should save to clipboard
     pub sound_enabled: Arc<Mutex<bool>>, // Track if sound effects are enabled
+    pub performance_monitoring_enabled: Arc<Mutex<bool>>, // Track if performance monitoring is enabled
     pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
     // Permissions state tracking
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
@@ -156,6 +157,7 @@ impl AppState {
             dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
             dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
             sound_enabled: Arc::new(Mutex::new(true)), // Initialize sound effects as enabled by default
+            performance_monitoring_enabled: Arc::new(Mutex::new(true)), // Initialize performance monitoring as enabled by default
             timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
             // Initialize permissions state
             permissions_state: Arc::new(TokioMutex::new(None)),
@@ -549,6 +551,23 @@ impl AppState {
         }
 
         Ok(())
+    }
+
+    // Performance monitoring methods
+
+    /// Check if performance monitoring is enabled
+    pub fn is_performance_monitoring_enabled(&self) -> bool {
+        self.performance_monitoring_enabled.lock()
+            .map(|enabled| *enabled)
+            .unwrap_or(false)
+    }
+
+    /// Set performance monitoring enabled state
+    pub fn set_performance_monitoring_enabled(&self, enabled: bool) {
+        if let Ok(mut monitoring_guard) = self.performance_monitoring_enabled.lock() {
+            *monitoring_guard = enabled;
+            log::info!("Performance monitoring {}", if enabled { "enabled" } else { "disabled" });
+        }
     }
 
     // Production cloud connector methods

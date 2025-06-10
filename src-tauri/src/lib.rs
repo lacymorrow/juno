@@ -704,6 +704,7 @@ pub fn run() {
             dev_list_files,
             dev_get_file_content,
             dev_set_file_content,
+            save_agent_response,
             // Text Editor Commands
             dev_text_editor_view,
             dev_text_editor_create,
@@ -869,6 +870,11 @@ pub fn run() {
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,
+            list_ai_providers,
+            set_ai_provider,
+            // Performance Monitoring Commands
+            set_performance_monitoring,
+            get_performance_monitoring,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

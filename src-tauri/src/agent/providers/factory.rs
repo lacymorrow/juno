@@ -149,15 +149,15 @@ impl Provider {
         match self {
             Provider::Anthropic => &[
                 ModelDefinition {
-                    id: model_ids::CLAUDE_4_OPUS,
-                    name: "Claude 4 Opus",
+                    id: model_ids::CLAUDE_4_SONNET,
+                    name: "Claude 4 Sonnet",
                     category: ModelCategory::ComputerUse,
                     supports_computer_use: true,
                     is_recommended: true,
                 },
                 ModelDefinition {
-                    id: model_ids::CLAUDE_4_SONNET,
-                    name: "Claude 4 Sonnet",
+                    id: model_ids::CLAUDE_4_OPUS,
+                    name: "Claude 4 Opus",
                     category: ModelCategory::ComputerUse,
                     supports_computer_use: true,
                     is_recommended: true,

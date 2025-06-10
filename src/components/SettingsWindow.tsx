@@ -1237,7 +1237,7 @@ function NetworkSettings({
         max_retries: parsedServer.max_retries || 3,
       };
 
-      await invoke("add_mcp_server", { server: newServer });
+      await invoke("add_mcp_server", { config: newServer });
       toast.success("MCP server added successfully");
       setNewServerJson("");
       await settings.loadMcpServers();
@@ -2226,18 +2226,8 @@ function AdvancedSettings({
                 </div>
               </div>
               <Switch
-                onCheckedChange={async (enabled) => {
-                  try {
-                    await invoke("set_performance_monitoring", { enabled });
-                    toast.success(
-                      `Performance monitoring ${
-                        enabled ? "enabled" : "disabled"
-                      }`
-                    );
-                  } catch (error) {
-                    toast.error("Failed to toggle performance monitoring");
-                  }
-                }}
+                checked={settings.performanceMonitoringEnabled}
+                onCheckedChange={settings.handlePerformanceMonitoringChange}
               />
             </div>
           </CardContent>

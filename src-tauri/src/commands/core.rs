@@ -224,6 +224,26 @@ pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Set performance monitoring enabled state
+#[tauri::command]
+pub async fn set_performance_monitoring(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    info!("Setting performance monitoring to: {}", enabled);
+    
+    // Update the state
+    state.set_performance_monitoring_enabled(enabled);
+    
+    // TODO: In the future, this could persist the setting to a config file
+    // For now, it's stored in memory for the session
+    
+    Ok(())
+}
+
+/// Get performance monitoring enabled state
+#[tauri::command]
+pub async fn get_performance_monitoring(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.is_performance_monitoring_enabled())
+}
+
 /// Agent execution progress information
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentExecutionProgress {
