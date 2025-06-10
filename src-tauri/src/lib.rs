@@ -867,6 +867,9 @@ pub fn run() {
             // Onboarding Commands
             commands::core::store_first_prompt,
             commands::core::get_first_onboarding_prompt,
+            // Debug Mode Commands
+            commands::core::set_debug_mode,
+            commands::core::get_debug_mode,
             list_ai_providers,
             set_ai_provider,
             // Performance Monitoring Commands

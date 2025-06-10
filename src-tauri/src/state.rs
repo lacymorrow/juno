@@ -134,6 +134,8 @@ pub struct AppState {
     pub agent_max_steps: Arc<Mutex<Option<u32>>>, // Track the maximum iterations/steps allowed
     // First onboarding prompt storage
     pub first_onboarding_prompt: Arc<Mutex<Option<String>>>, // Store the first prompt selected during onboarding
+    // Debug mode tracking
+    pub debug_mode: Arc<Mutex<bool>>, // Track if debug mode is enabled
 }
 
 impl AppState {
@@ -188,6 +190,8 @@ impl AppState {
             agent_max_steps: Arc::new(Mutex::new(None)),
             // Initialize first onboarding prompt storage
             first_onboarding_prompt: Arc::new(Mutex::new(None)),
+            // Initialize debug mode tracking
+            debug_mode: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -724,6 +728,17 @@ impl AppState {
     pub fn get_first_onboarding_prompt(&self) -> Option<String> {
         let prompt_guard = self.first_onboarding_prompt.lock().unwrap();
         prompt_guard.clone()
+    }
+
+    // Debug mode methods
+    pub fn set_debug_mode(&self, enabled: bool) {
+        let mut debug_guard = self.debug_mode.lock().unwrap();
+        *debug_guard = enabled;
+    }
+
+    pub fn is_debug_mode(&self) -> bool {
+        let debug_guard = self.debug_mode.lock().unwrap();
+        *debug_guard
     }
 }
 
