@@ -417,11 +417,11 @@ export function useSettings() {
     }
   };
 
-  const handleAlwaysListeningToggle = async (enabled: boolean) => {
+  const handleAlwaysListeningToggle = async () => {
     try {
-      await invoke("toggle_always_listening", { enabled });
-      setAlwaysListeningActive(enabled);
-      toast.success(`Always listening ${enabled ? "enabled" : "disabled"}`);
+      const newState = await invoke<boolean>("toggle_always_listening_mode");
+      setAlwaysListeningActive(newState);
+      toast.success(`Always listening ${newState ? "enabled" : "disabled"}`);
     } catch (error) {
       console.error("Failed to toggle always listening:", error);
       toast.error("Failed to toggle always listening");
