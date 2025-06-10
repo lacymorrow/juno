@@ -26,17 +26,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  DogIcon,
-  Server,
-  Send,
-  Plus,
-  Trash2,
   ArrowLeft,
+  Code,
+  Copy,
+  DogIcon,
+  FileText,
   PanelLeftClose,
   PanelLeftOpen,
-  Copy,
-  FileText,
-  Code
+  Plus,
+  Send,
+  Server,
+  Trash2,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
@@ -276,6 +276,10 @@ function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+
+  // Copy and save operation state
+  const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
 
   // Onboarding state
   const [_showOnboarding, setShowOnboarding] = useState(false);
@@ -1930,31 +1934,83 @@ function App() {
     );
   };
 
-  // Copy and Save handlers for agent responses
-  const handleCopyResponse = useCallback(async (content: string) => {
-    try {
-      await navigator.clipboard.writeText(content);
-      // Show notification or toast (you could enhance this with a toast system)
-      console.log("Copied to clipboard");
-      // Optional: Add visual feedback like a toast notification
-    } catch (error) {
-      console.error("Failed to copy to clipboard:", error);
-    }
-  }, []);
+  // Copy and Save handlers for agent responses with enhanced feedback
+  const handleCopyResponse = useCallback(
+    async (content: string, messageIndex: number) => {
+      const messageId = `copy-${messageIndex}`;
+      setCopyingMessageId(messageId);
 
-  const handleSaveResponse = useCallback(async (content: string, format: "html" | "markdown") => {
-    try {
-      const filePath = await invoke("save_agent_response", {
-        content,
-        format,
-        suggested_filename: `agent_response_${Date.now()}`
-      });
-      console.log(`Response saved to: ${filePath}`);
-      // Optional: Add visual feedback like a toast notification
-    } catch (error) {
-      console.error(`Failed to save response as ${format}:`, error);
-    }
-  }, []);
+      try {
+        await navigator.clipboard.writeText(content);
+        console.log("✅ Copied to clipboard successfully");
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: "✅ Response copied to clipboard",
+            timestamp: Date.now(),
+          },
+        ]);
+      } catch (error) {
+        console.error("❌ Failed to copy to clipboard:", error);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `❌ Failed to copy to clipboard: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } finally {
+        // Clear loading state after a brief delay for visual feedback
+        setTimeout(() => setCopyingMessageId(null), 1000);
+      }
+    },
+    []
+  );
+
+  const handleSaveResponse = useCallback(
+    async (
+      content: string,
+      format: "html" | "markdown",
+      messageIndex: number
+    ) => {
+      const messageId = `save-${format}-${messageIndex}`;
+      setSavingMessageId(messageId);
+
+      try {
+        console.log(`💾 Saving response as ${format.toUpperCase()}...`);
+        const filePath = await invoke("save_agent_response", {
+          content,
+          format,
+          suggested_filename: `agent_response_${Date.now()}`,
+        });
+        console.log(`✅ Response saved to: ${filePath}`);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `✅ Response saved as ${format.toUpperCase()} to: ${filePath}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } catch (error) {
+        console.error(`❌ Failed to save response as ${format}:`, error);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `❌ Failed to save response as ${format.toUpperCase()}: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } finally {
+        // Clear loading state after a brief delay for visual feedback
+        setTimeout(() => setSavingMessageId(null), 1000);
+      }
+    },
+    []
+  );
 
   return (
     <main className="h-screen flex flex-col">
@@ -2232,7 +2288,8 @@ function App() {
                                       <div
                                         className={cn(
                                           "mt-2",
-                                          msg.role !== "system" && "border-t pt-2"
+                                          msg.role !== "system" &&
+                                            "border-t pt-2"
                                         )}
                                       >
                                         <div className="text-xs text-muted-foreground mb-1">
@@ -2257,42 +2314,121 @@ function App() {
                                       </span>
                                     )}
                                   </span>
-                                  
-                                  {/* Action buttons for assistant messages with content */}
-                                  {msg.role === "assistant" && 
-                                   msg.content && 
-                                   msg.content.trim() !== "" && 
-                                   !msg.isStreaming && (
-                                    <div className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 bg-background border shadow-md hover:bg-muted"
-                                        onClick={() => handleCopyResponse(msg.content)}
-                                        title="Copy response"
-                                      >
-                                        <Copy size={12} />
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 bg-background border shadow-md hover:bg-muted"
-                                        onClick={() => handleSaveResponse(msg.content, "html")}
-                                        title="Save as HTML"
-                                      >
-                                        <Code size={12} />
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 bg-background border shadow-md hover:bg-muted"
-                                        onClick={() => handleSaveResponse(msg.content, "markdown")}
-                                        title="Save as Markdown"
-                                      >
-                                        <FileText size={12} />
-                                      </Button>
-                                    </div>
-                                  )}
+
+                                  {/* Action buttons for assistant messages with content - positioned at bottom */}
+                                  {msg.role === "assistant" &&
+                                    msg.content &&
+                                    msg.content.trim() !== "" &&
+                                    !msg.isStreaming && (
+                                      <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
+                                        <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                              "h-7 w-7 p-0 transition-all duration-150 relative",
+                                              copyingMessageId ===
+                                                `copy-${index}`
+                                                ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
+                                                : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
+                                            )}
+                                            onClick={() =>
+                                              handleCopyResponse(
+                                                msg.content,
+                                                index
+                                              )
+                                            }
+                                            disabled={
+                                              copyingMessageId ===
+                                              `copy-${index}`
+                                            }
+                                            title={
+                                              copyingMessageId ===
+                                              `copy-${index}`
+                                                ? "Copying..."
+                                                : "Copy response to clipboard"
+                                            }
+                                          >
+                                            {copyingMessageId ===
+                                            `copy-${index}` ? (
+                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                              <Copy size={14} />
+                                            )}
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                              "h-7 w-7 p-0 transition-all duration-150 relative",
+                                              savingMessageId ===
+                                                `save-html-${index}`
+                                                ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
+                                                : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
+                                            )}
+                                            onClick={() =>
+                                              handleSaveResponse(
+                                                msg.content,
+                                                "html",
+                                                index
+                                              )
+                                            }
+                                            disabled={
+                                              savingMessageId ===
+                                              `save-html-${index}`
+                                            }
+                                            title={
+                                              savingMessageId ===
+                                              `save-html-${index}`
+                                                ? "Saving HTML..."
+                                                : "Save as HTML file with professional styling"
+                                            }
+                                          >
+                                            {savingMessageId ===
+                                            `save-html-${index}` ? (
+                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                              <Code size={14} />
+                                            )}
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className={cn(
+                                              "h-7 w-7 p-0 transition-all duration-150 relative",
+                                              savingMessageId ===
+                                                `save-markdown-${index}`
+                                                ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
+                                                : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
+                                            )}
+                                            onClick={() =>
+                                              handleSaveResponse(
+                                                msg.content,
+                                                "markdown",
+                                                index
+                                              )
+                                            }
+                                            disabled={
+                                              savingMessageId ===
+                                              `save-markdown-${index}`
+                                            }
+                                            title={
+                                              savingMessageId ===
+                                              `save-markdown-${index}`
+                                                ? "Saving Markdown..."
+                                                : "Save as Markdown file for documentation"
+                                            }
+                                          >
+                                            {savingMessageId ===
+                                            `save-markdown-${index}` ? (
+                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                            ) : (
+                                              <FileText size={14} />
+                                            )}
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    )}
                                 </div>
                               </div>
                             )}
