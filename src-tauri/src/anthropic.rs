@@ -451,6 +451,23 @@ pub async fn submit_query(
         ).await;
     });
 
+    // --- Emit agent error event for main chat interface ---
+    if final_response.agent_state == "Failed" || final_response.agent_state == "Cancelled" {
+        let error_event_handle = app_handle.clone();
+        let error_state = final_response.agent_state.clone();
+        let error_text = final_response.text.clone();
+        tauri::async_runtime::spawn(async move {
+            let event_data = serde_json::json!({
+                "agent_state": error_state,
+                "error_message": error_text,
+                "original_query": query
+            });
+            if let Err(e) = error_event_handle.emit("agent-error", event_data) {
+                warn!("Failed to emit agent-error event: {}", e);
+            }
+        });
+    }
+
     // Final response is now fully handled by streaming events
     // The frontend will reconstruct the complete response from stream events
     info!("Final response text: \"{}\"", final_response.text);
