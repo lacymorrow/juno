@@ -94,6 +94,10 @@ pub enum AgentAction {
     ExecuteTool(Vec<ToolCall>),
     RespondToUser(String),
     Finish(String), // Finish with a final message
+    FinishWithDualContent { 
+        typed_content: String,   // Content to display in chat/UI
+        spoken_content: String,  // Concise content for TTS speech
+    },
     Error(AgentError),
     Think,         // Continue the thinking loop if more work needed
 }
@@ -273,6 +277,18 @@ mod tests {
         match action {
             AgentAction::Finish(msg) => assert_eq!(msg, "Done"),
             _ => panic!("Expected Finish action"),
+        }
+
+        let action = AgentAction::FinishWithDualContent {
+            typed_content: "Detailed response with lots of information".to_string(),
+            spoken_content: "Task completed".to_string(),
+        };
+        match action {
+            AgentAction::FinishWithDualContent { typed_content, spoken_content } => {
+                assert_eq!(typed_content, "Detailed response with lots of information");
+                assert_eq!(spoken_content, "Task completed");
+            }
+            _ => panic!("Expected FinishWithDualContent action"),
         }
 
         let error = AgentError::MaxStepsReached;
