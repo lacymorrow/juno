@@ -5,6 +5,7 @@
 use crate::agent::structs::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
+use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use serde_json::{json, Value};
 use tauri::Manager;
 use tracing::{info, warn};
@@ -213,6 +214,36 @@ pub async fn register_anthropic_computer_use_tools(
             let action = input["action"]
                 .as_str()
                 .ok_or_else(|| "Missing or invalid 'action' parameter".to_string())?;
+
+            // Validate permissions based on the action type
+            match action {
+                "screenshot" => {
+                    // Screenshot requires screen recording permissions
+                    if let Err(e) = validate_permission(&app, RequiredPermission::ScreenRecording, "computer/screenshot").await {
+                        return Err(e.to_string());
+                    }
+                }
+                "key" | "hold_key" | "type" | "left_click" | "right_click" | "middle_click" | 
+                "double_click" | "triple_click" | "left_click_drag" | "mouse_move" | 
+                "left_mouse_down" | "left_mouse_up" | "scroll" => {
+                    // Mouse and keyboard actions require accessibility permissions
+                    if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, &format!("computer/{}", action)).await {
+                        return Err(e.to_string());
+                    }
+                }
+                "cursor_position" => {
+                    // Cursor position requires accessibility permissions
+                    if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "computer/cursor_position").await {
+                        return Err(e.to_string());
+                    }
+                }
+                "wait" => {
+                    // Wait doesn't require special permissions
+                }
+                _ => {
+                    return Err(format!("Unknown computer action: {}", action));
+                }
+            }
 
             match action {
                 "screenshot" => {
