@@ -866,6 +866,9 @@ pub fn run() {
             // Onboarding Commands
             commands::core::store_first_prompt,
             commands::core::get_first_onboarding_prompt,
+            // Debug Mode Commands
+            commands::core::set_debug_mode,
+            commands::core::get_debug_mode,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
