@@ -8,6 +8,8 @@ pub enum AgentError {
     LlmError(String),
     #[error("Tool execution error: {0}")]
     ToolError(String),
+    #[error("Tool execution error: {0}")]
+    ToolExecutionError(String),
     #[error("Memory error: {0}")]
     MemoryError(String),
     #[error("Configuration error: {0}")]
@@ -65,8 +67,8 @@ pub struct ToolCall {
 pub struct ToolResult {
     pub call_id: String, // Reference back to the ToolCall id
     pub output: Value,   // The result from the tool (JSON value)
-    // Consider adding success/failure status
-    // pub success: bool,
+                         // Consider adding success/failure status
+                         // pub success: bool,
 }
 
 // Basic definition for a tool known by the agent
@@ -79,13 +81,13 @@ pub struct ToolDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentState {
-    Idle,      // Waiting to start
-    Thinking,  // Processing, deciding next step (e.g., calling LLM)
-    Executing, // Running a tool
-    Responding, // Preparing final response
-    Finished,  // Completed successfully
+    Idle,           // Waiting to start
+    Thinking,       // Processing, deciding next step (e.g., calling LLM)
+    Executing,      // Running a tool
+    Responding,     // Preparing final response
+    Finished,       // Completed successfully
     Failed(String), // Encountered an error
-    Paused,    // Temporarily stopped, can be resumed
+    Paused,         // Temporarily stopped, can be resumed
 }
 
 // Represents the action the agent decided to take next
@@ -95,7 +97,78 @@ pub enum AgentAction {
     RespondToUser(String),
     Finish(String), // Finish with a final message
     Error(AgentError),
-    Think,         // Continue the thinking loop if more work needed
+    Think, // Continue the thinking loop if more work needed
+}
+
+// Response structure for agent operations
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentResponse {
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_time_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_used: Option<u32>,
+}
+
+impl AgentResponse {
+    pub fn success(content: String) -> Self {
+        Self {
+            content,
+            tool_calls: Vec::new(),
+            conversation_id: None,
+            message_id: None,
+            success: true,
+            error_message: None,
+            execution_time_ms: None,
+            tokens_used: None,
+        }
+    }
+
+    pub fn success_with_tools(content: String, tool_calls: Vec<ToolCall>) -> Self {
+        Self {
+            content,
+            tool_calls,
+            conversation_id: None,
+            message_id: None,
+            success: true,
+            error_message: None,
+            execution_time_ms: None,
+            tokens_used: None,
+        }
+    }
+
+    pub fn error(content: String, error_message: String) -> Self {
+        Self {
+            content,
+            tool_calls: Vec::new(),
+            conversation_id: None,
+            message_id: None,
+            success: false,
+            error_message: Some(error_message),
+            execution_time_ms: None,
+            tokens_used: None,
+        }
+    }
+
+    pub fn with_timing(mut self, execution_time_ms: u64, tokens_used: u32) -> Self {
+        self.execution_time_ms = Some(execution_time_ms);
+        self.tokens_used = Some(tokens_used);
+        self
+    }
+
+    pub fn with_ids(mut self, conversation_id: String, message_id: String) -> Self {
+        self.conversation_id = Some(conversation_id);
+        self.message_id = Some(message_id);
+        self
+    }
 }
 
 #[cfg(test)]
@@ -106,7 +179,10 @@ mod tests {
     #[test]
     fn test_agent_error_display() {
         let error = AgentError::LlmError("Connection failed".to_string());
-        assert_eq!(error.to_string(), "LLM communication error: Connection failed");
+        assert_eq!(
+            error.to_string(),
+            "LLM communication error: Connection failed"
+        );
 
         let error = AgentError::MaxStepsReached;
         assert_eq!(error.to_string(), "Maximum steps reached");

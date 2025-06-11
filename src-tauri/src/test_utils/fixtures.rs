@@ -1,17 +1,21 @@
+use serde_json::{json, Value};
 /// Test fixtures for Juno AI Computer Use Agent
-/// 
+///
 /// This module provides pre-configured test data and common test setups:
 /// - Common agent responses and tool calls
 /// - System state fixtures
 /// - Error scenarios
 /// - Performance test data
 /// - Security test vectors
-
 use std::collections::HashMap;
-use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::agent::structs::{AgentResponse, ToolCall};
+
+/// Helper function to generate a short ID from UUID
+fn short_id() -> String {
+    Uuid::new_v4().to_string().chars().take(8).collect()
+}
 
 /// Common agent response fixtures
 pub struct AgentResponseFixtures;
@@ -40,17 +44,16 @@ impl AgentResponseFixtures {
     /// File operation response
     pub fn file_operation_success() -> AgentResponse {
         AgentResponse {
-            content: "I've successfully created the file 'notes.txt' with your content.".to_string(),
-            tool_calls: vec![
-                ToolCall {
-                    id: "call_write_file_001".to_string(),
-                    name: "write_file".to_string(),
-                    input: json!({
-                        "path": "notes.txt",
-                        "content": "Meeting notes from today's discussion"
-                    }),
-                }
-            ],
+            content: "I've successfully created the file 'notes.txt' with your content."
+                .to_string(),
+            tool_calls: vec![ToolCall {
+                id: "call_write_file_001".to_string(),
+                name: "write_file".to_string(),
+                input: json!({
+                    "path": "notes.txt",
+                    "content": "Meeting notes from today's discussion"
+                }),
+            }],
             conversation_id: Some("conv_file_test".to_string()),
             message_id: Some("msg_file_001".to_string()),
             success: true,
@@ -93,12 +96,17 @@ impl AgentResponseFixtures {
     /// Permission denied error
     pub fn permission_denied_error() -> AgentResponse {
         AgentResponse {
-            content: "I'm unable to complete this action because I don't have the necessary permissions.".to_string(),
+            content:
+                "I'm unable to complete this action because I don't have the necessary permissions."
+                    .to_string(),
             tool_calls: Vec::new(),
             conversation_id: Some("conv_permission_test".to_string()),
             message_id: Some("msg_permission_001".to_string()),
             success: false,
-            error_message: Some("Permission denied: Accessibility access is required for desktop automation".to_string()),
+            error_message: Some(
+                "Permission denied: Accessibility access is required for desktop automation"
+                    .to_string(),
+            ),
             execution_time_ms: Some(50),
             tokens_used: Some(30),
         }
@@ -107,14 +115,13 @@ impl AgentResponseFixtures {
     /// Tool execution timeout error
     pub fn timeout_error() -> AgentResponse {
         AgentResponse {
-            content: "The operation timed out and couldn't be completed within the expected time.".to_string(),
-            tool_calls: vec![
-                ToolCall {
-                    id: "call_timeout_001".to_string(),
-                    name: "slow_operation".to_string(),
-                    input: json!({"timeout_ms": 30000}),
-                }
-            ],
+            content: "The operation timed out and couldn't be completed within the expected time."
+                .to_string(),
+            tool_calls: vec![ToolCall {
+                id: "call_timeout_001".to_string(),
+                name: "slow_operation".to_string(),
+                input: json!({"timeout_ms": 30000}),
+            }],
             conversation_id: Some("conv_timeout_test".to_string()),
             message_id: Some("msg_timeout_001".to_string()),
             success: false,
@@ -146,7 +153,7 @@ impl ToolCallFixtures {
     /// Basic click tool call
     pub fn click_action(x: i32, y: i32) -> ToolCall {
         ToolCall {
-            id: format!("call_click_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_click_{}", short_id()),
             name: "click".to_string(),
             input: json!({
                 "x": x,
@@ -159,7 +166,7 @@ impl ToolCallFixtures {
     /// Type text tool call
     pub fn type_text(text: &str) -> ToolCall {
         ToolCall {
-            id: format!("call_type_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_type_{}", short_id()),
             name: "type".to_string(),
             input: json!({
                 "text": text
@@ -170,7 +177,7 @@ impl ToolCallFixtures {
     /// Screenshot tool call
     pub fn screenshot() -> ToolCall {
         ToolCall {
-            id: format!("call_screenshot_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_screenshot_{}", short_id()),
             name: "screenshot".to_string(),
             input: json!({
                 "display": 1
@@ -181,7 +188,7 @@ impl ToolCallFixtures {
     /// File read tool call
     pub fn read_file(path: &str) -> ToolCall {
         ToolCall {
-            id: format!("call_read_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_read_{}", short_id()),
             name: "read_file".to_string(),
             input: json!({
                 "path": path
@@ -192,7 +199,7 @@ impl ToolCallFixtures {
     /// File write tool call
     pub fn write_file(path: &str, content: &str) -> ToolCall {
         ToolCall {
-            id: format!("call_write_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_write_{}", short_id()),
             name: "write_file".to_string(),
             input: json!({
                 "path": path,
@@ -204,7 +211,7 @@ impl ToolCallFixtures {
     /// Browser navigation tool call
     pub fn navigate(url: &str) -> ToolCall {
         ToolCall {
-            id: format!("call_navigate_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_navigate_{}", short_id()),
             name: "navigate".to_string(),
             input: json!({
                 "url": url
@@ -215,7 +222,7 @@ impl ToolCallFixtures {
     /// Open application tool call
     pub fn open_app(app_name: &str) -> ToolCall {
         ToolCall {
-            id: format!("call_open_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_open_{}", short_id()),
             name: "open_app".to_string(),
             input: json!({
                 "name": app_name
@@ -226,7 +233,7 @@ impl ToolCallFixtures {
     /// Scroll action tool call
     pub fn scroll(direction: &str, amount: i32) -> ToolCall {
         ToolCall {
-            id: format!("call_scroll_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_scroll_{}", short_id()),
             name: "scroll".to_string(),
             input: json!({
                 "direction": direction,
@@ -238,7 +245,7 @@ impl ToolCallFixtures {
     /// Search tool call
     pub fn search(query: &str) -> ToolCall {
         ToolCall {
-            id: format!("call_search_{}", Uuid::new_v4().to_string()[..8]),
+            id: format!("call_search_{}", short_id()),
             name: "search".to_string(),
             input: json!({
                 "query": query,
@@ -270,17 +277,27 @@ impl SystemStateFixtures {
         let mut state = HashMap::new();
         state.insert("screen_resolution".to_string(), json!([1920, 1080]));
         state.insert("focused_app".to_string(), json!("Chrome"));
-        state.insert("running_apps".to_string(), json!([
-            "Finder", "Chrome", "Terminal", "Visual Studio Code", "Slack"
-        ]));
+        state.insert(
+            "running_apps".to_string(),
+            json!([
+                "Finder",
+                "Chrome",
+                "Terminal",
+                "Visual Studio Code",
+                "Slack"
+            ]),
+        );
         state.insert("cpu_usage".to_string(), json!(25.5));
         state.insert("memory_usage".to_string(), json!(65.2));
         state.insert("network_connected".to_string(), json!(true));
-        state.insert("permissions".to_string(), json!({
-            "accessibility": true,
-            "screen_recording": true,
-            "microphone": false
-        }));
+        state.insert(
+            "permissions".to_string(),
+            json!({
+                "accessibility": true,
+                "screen_recording": true,
+                "microphone": false
+            }),
+        );
         state
     }
 
@@ -289,17 +306,28 @@ impl SystemStateFixtures {
         let mut state = HashMap::new();
         state.insert("screen_resolution".to_string(), json!([2560, 1440]));
         state.insert("focused_app".to_string(), json!("Photoshop"));
-        state.insert("running_apps".to_string(), json!([
-            "Finder", "Photoshop", "Chrome", "Final Cut Pro", "Xcode", "Docker Desktop"
-        ]));
+        state.insert(
+            "running_apps".to_string(),
+            json!([
+                "Finder",
+                "Photoshop",
+                "Chrome",
+                "Final Cut Pro",
+                "Xcode",
+                "Docker Desktop"
+            ]),
+        );
         state.insert("cpu_usage".to_string(), json!(89.3));
         state.insert("memory_usage".to_string(), json!(92.1));
         state.insert("network_connected".to_string(), json!(true));
-        state.insert("permissions".to_string(), json!({
-            "accessibility": true,
-            "screen_recording": true,
-            "microphone": true
-        }));
+        state.insert(
+            "permissions".to_string(),
+            json!({
+                "accessibility": true,
+                "screen_recording": true,
+                "microphone": true
+            }),
+        );
         state
     }
 
@@ -308,17 +336,21 @@ impl SystemStateFixtures {
         let mut state = HashMap::new();
         state.insert("screen_resolution".to_string(), json!([1440, 900]));
         state.insert("focused_app".to_string(), json!("System Preferences"));
-        state.insert("running_apps".to_string(), json!([
-            "Finder", "System Preferences", "Safari"
-        ]));
+        state.insert(
+            "running_apps".to_string(),
+            json!(["Finder", "System Preferences", "Safari"]),
+        );
         state.insert("cpu_usage".to_string(), json!(15.2));
         state.insert("memory_usage".to_string(), json!(45.8));
         state.insert("network_connected".to_string(), json!(true));
-        state.insert("permissions".to_string(), json!({
-            "accessibility": false,
-            "screen_recording": false,
-            "microphone": false
-        }));
+        state.insert(
+            "permissions".to_string(),
+            json!({
+                "accessibility": false,
+                "screen_recording": false,
+                "microphone": false
+            }),
+        );
         state
     }
 
@@ -327,17 +359,21 @@ impl SystemStateFixtures {
         let mut state = HashMap::new();
         state.insert("screen_resolution".to_string(), json!([1920, 1080]));
         state.insert("focused_app".to_string(), json!("TextEdit"));
-        state.insert("running_apps".to_string(), json!([
-            "Finder", "TextEdit", "Calculator"
-        ]));
+        state.insert(
+            "running_apps".to_string(),
+            json!(["Finder", "TextEdit", "Calculator"]),
+        );
         state.insert("cpu_usage".to_string(), json!(8.5));
         state.insert("memory_usage".to_string(), json!(32.1));
         state.insert("network_connected".to_string(), json!(false));
-        state.insert("permissions".to_string(), json!({
-            "accessibility": true,
-            "screen_recording": true,
-            "microphone": false
-        }));
+        state.insert(
+            "permissions".to_string(),
+            json!({
+                "accessibility": true,
+                "screen_recording": true,
+                "microphone": false
+            }),
+        );
         state
     }
 }
@@ -389,12 +425,12 @@ impl QueryFixtures {
     /// Queries that should fail (for error testing)
     pub fn invalid_queries() -> Vec<String> {
         vec![
-            "Delete all files on my computer".to_string(),  // Dangerous operation
-            "Install malicious software".to_string(),       // Security threat
+            "Delete all files on my computer".to_string(), // Dangerous operation
+            "Install malicious software".to_string(),      // Security threat
             "Access someone else's private files".to_string(), // Privacy violation
-            "Execute arbitrary code: rm -rf /".to_string(),  // Command injection attempt
-            "".to_string(),                                  // Empty query
-            "a".repeat(10000),                              // Extremely long query
+            "Execute arbitrary code: rm -rf /".to_string(), // Command injection attempt
+            "".to_string(),                                // Empty query
+            "a".repeat(10000),                             // Extremely long query
         ]
     }
 }
@@ -406,40 +442,88 @@ impl ErrorFixtures {
     /// Permission denied scenarios
     pub fn permission_scenarios() -> Vec<(String, String)> {
         vec![
-            ("Take a screenshot".to_string(), "Screen recording permission required".to_string()),
-            ("Click at coordinates 100, 200".to_string(), "Accessibility permission required".to_string()),
-            ("Record audio".to_string(), "Microphone permission required".to_string()),
-            ("Monitor system events".to_string(), "Input monitoring permission required".to_string()),
+            (
+                "Take a screenshot".to_string(),
+                "Screen recording permission required".to_string(),
+            ),
+            (
+                "Click at coordinates 100, 200".to_string(),
+                "Accessibility permission required".to_string(),
+            ),
+            (
+                "Record audio".to_string(),
+                "Microphone permission required".to_string(),
+            ),
+            (
+                "Monitor system events".to_string(),
+                "Input monitoring permission required".to_string(),
+            ),
         ]
     }
 
     /// Network error scenarios
     pub fn network_scenarios() -> Vec<(String, String)> {
         vec![
-            ("Search online for information".to_string(), "Network connection unavailable".to_string()),
-            ("Download file from URL".to_string(), "Unable to connect to server".to_string()),
-            ("Send email notification".to_string(), "SMTP server unreachable".to_string()),
-            ("Sync data to cloud".to_string(), "Cloud service temporarily unavailable".to_string()),
+            (
+                "Search online for information".to_string(),
+                "Network connection unavailable".to_string(),
+            ),
+            (
+                "Download file from URL".to_string(),
+                "Unable to connect to server".to_string(),
+            ),
+            (
+                "Send email notification".to_string(),
+                "SMTP server unreachable".to_string(),
+            ),
+            (
+                "Sync data to cloud".to_string(),
+                "Cloud service temporarily unavailable".to_string(),
+            ),
         ]
     }
 
     /// Resource constraint scenarios
     pub fn resource_scenarios() -> Vec<(String, String)> {
         vec![
-            ("Process large video file".to_string(), "Insufficient memory available".to_string()),
-            ("Run intensive analysis".to_string(), "CPU usage limit exceeded".to_string()),
-            ("Save large document".to_string(), "Disk space full".to_string()),
-            ("Open multiple applications".to_string(), "System resource limit reached".to_string()),
+            (
+                "Process large video file".to_string(),
+                "Insufficient memory available".to_string(),
+            ),
+            (
+                "Run intensive analysis".to_string(),
+                "CPU usage limit exceeded".to_string(),
+            ),
+            (
+                "Save large document".to_string(),
+                "Disk space full".to_string(),
+            ),
+            (
+                "Open multiple applications".to_string(),
+                "System resource limit reached".to_string(),
+            ),
         ]
     }
 
     /// Input validation scenarios
     pub fn validation_scenarios() -> Vec<(String, String)> {
         vec![
-            ("Click at coordinates -100, 200".to_string(), "Invalid coordinates: negative values not allowed".to_string()),
-            ("Type text with null bytes".to_string(), "Invalid characters in input text".to_string()),
-            ("Open file with path ../../../etc/passwd".to_string(), "Invalid file path: directory traversal detected".to_string()),
-            ("Execute command with | rm -rf /".to_string(), "Dangerous command pattern detected".to_string()),
+            (
+                "Click at coordinates -100, 200".to_string(),
+                "Invalid coordinates: negative values not allowed".to_string(),
+            ),
+            (
+                "Type text with null bytes".to_string(),
+                "Invalid characters in input text".to_string(),
+            ),
+            (
+                "Open file with path ../../../etc/passwd".to_string(),
+                "Invalid file path: directory traversal detected".to_string(),
+            ),
+            (
+                "Execute command with | rm -rf /".to_string(),
+                "Dangerous command pattern detected".to_string(),
+            ),
         ]
     }
 }
@@ -451,37 +535,37 @@ impl PerformanceFixtures {
     /// Fast operations (should complete quickly)
     pub fn fast_operations() -> Vec<(String, u64)> {
         vec![
-            ("Get current time".to_string(), 50),           // 50ms max
-            ("Get focused window".to_string(), 100),        // 100ms max
-            ("Check permissions".to_string(), 75),          // 75ms max
-            ("Get system info".to_string(), 150),          // 150ms max
+            ("Get current time".to_string(), 50),    // 50ms max
+            ("Get focused window".to_string(), 100), // 100ms max
+            ("Check permissions".to_string(), 75),   // 75ms max
+            ("Get system info".to_string(), 150),    // 150ms max
         ]
     }
 
     /// Medium operations
     pub fn medium_operations() -> Vec<(String, u64)> {
         vec![
-            ("Take screenshot".to_string(), 500),          // 500ms max
-            ("Open application".to_string(), 2000),        // 2s max
-            ("Read small file".to_string(), 200),          // 200ms max
-            ("Simple web search".to_string(), 1500),       // 1.5s max
+            ("Take screenshot".to_string(), 500),    // 500ms max
+            ("Open application".to_string(), 2000),  // 2s max
+            ("Read small file".to_string(), 200),    // 200ms max
+            ("Simple web search".to_string(), 1500), // 1.5s max
         ]
     }
 
     /// Slow operations (acceptable longer duration)
     pub fn slow_operations() -> Vec<(String, u64)> {
         vec![
-            ("Complex web scraping".to_string(), 10000),   // 10s max
-            ("Large file processing".to_string(), 15000),  // 15s max
-            ("System analysis".to_string(), 8000),         // 8s max
-            ("Multi-step workflow".to_string(), 12000),    // 12s max
+            ("Complex web scraping".to_string(), 10000),  // 10s max
+            ("Large file processing".to_string(), 15000), // 15s max
+            ("System analysis".to_string(), 8000),        // 8s max
+            ("Multi-step workflow".to_string(), 12000),   // 12s max
         ]
     }
 
     /// Memory usage expectations (in MB)
     pub fn memory_limits() -> HashMap<String, usize> {
         let mut limits = HashMap::new();
-        limits.insert("baseline".to_string(), 100);        // 100MB baseline
+        limits.insert("baseline".to_string(), 100); // 100MB baseline
         limits.insert("simple_operation".to_string(), 150); // 150MB for simple ops
         limits.insert("medium_operation".to_string(), 300); // 300MB for medium ops
         limits.insert("complex_operation".to_string(), 500); // 500MB for complex ops
@@ -580,7 +664,7 @@ mod tests {
     fn test_error_fixtures() {
         let permission_errors = ErrorFixtures::permission_scenarios();
         assert!(!permission_errors.is_empty());
-        
+
         for (query, expected_error) in &permission_errors {
             assert!(!query.is_empty());
             assert!(!expected_error.is_empty());
@@ -600,7 +684,7 @@ mod tests {
     fn test_conversation_fixtures() {
         let simple_conv = ConversationFixtures::simple_conversation();
         assert!(simple_conv.len() >= 2); // At least user and assistant messages
-        
+
         // Check conversation flow
         assert_eq!(simple_conv[0].0, "user");
         assert_eq!(simple_conv[1].0, "assistant");
