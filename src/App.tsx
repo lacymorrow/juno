@@ -45,7 +45,7 @@ import { FloatingBar } from "./components/FloatingBar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import CommandOverlay from "./components/CommandOverlay";
-import Settings from "./components/Settings";
+import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import "./styles/globals.css";
 
 // Type for conversation messages
@@ -2537,11 +2537,7 @@ function App() {
           {currentView === "settings" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
               <ScrollArea className="h-full w-full">
-                <Settings
-                  onNavigateToDevTools={() => setCurrentView("devtools")}
-                  onNavigateToChat={() => setCurrentView("chat")}
-                  onNavigateToPermissions={() => setCurrentView("permissions")}
-                />
+                <ModularSettingsWindow />
               </ScrollArea>
             </div>
           ) : currentView === "devtools" ? (
