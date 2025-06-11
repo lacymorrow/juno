@@ -882,6 +882,8 @@ pub fn run() {
             // Performance Monitoring Commands
             set_performance_monitoring,
             get_performance_monitoring,
+            // Reset All Settings Command
+            reset_all_settings,
             // Notification Commands
             commands::notifications::get_notification_settings,
             commands::notifications::set_notification_type,
@@ -894,6 +896,19 @@ pub fn run() {
             commands::notifications::request_notification_permission,
             commands::notifications::send_notification,
             commands::notifications::test_notification,
+            // Core Commands  
+            cancel_agent_execution,
+            list_ai_providers,
+            set_ai_provider,
+            get_system_context,
+            set_performance_monitoring,
+            get_performance_monitoring,
+            get_agent_execution_progress,
+            set_agent_execution_progress,
+            get_first_onboarding_prompt,
+            set_debug_mode,
+            get_debug_mode,
+            reset_all_settings,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
