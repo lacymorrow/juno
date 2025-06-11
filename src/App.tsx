@@ -41,10 +41,10 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
-import { FloatingBar } from "./components/FloatingBar";
 import ClickVisualizer from "./components/ClickVisualizer";
-import KeyPressOverlay from "./components/KeyPressOverlay";
 import CommandOverlay from "./components/CommandOverlay";
+import { FloatingBar } from "./components/FloatingBar";
+import KeyPressOverlay from "./components/KeyPressOverlay";
 import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import "./styles/globals.css";
 
@@ -319,7 +319,9 @@ function App() {
 
         if (agentProgress.is_executing) {
           // Agent is running - skip onboarding and go directly to chat
-          console.log("Agent execution detected - skipping onboarding and going to chat");
+          console.log(
+            "Agent execution detected - skipping onboarding and going to chat"
+          );
           setOnboardingChecked(true);
           setPermissionsChecked(true);
           setCurrentView("chat");
@@ -585,7 +587,10 @@ function App() {
           return;
         }
       } catch (error) {
-        console.debug("Error checking agent execution state during onboarding completion:", error);
+        console.debug(
+          "Error checking agent execution state during onboarding completion:",
+          error
+        );
       }
 
       // Get the stored first prompt if any
@@ -641,7 +646,9 @@ function App() {
 
         // If agent starts executing while in onboarding, switch to chat
         if (agentProgress.is_executing && currentView === "onboarding") {
-          console.log("Agent execution detected during onboarding - switching to chat");
+          console.log(
+            "Agent execution detected during onboarding - switching to chat"
+          );
           // Mark onboarding as completed to prevent showing it again
           localStorage.setItem("juno-onboarding-completed", "true");
           setShowOnboarding(false);

@@ -84,7 +84,9 @@ export function FloatingBar() {
   const [isDictationMode, setIsDictationMode] = useState(false);
   const [isAlwaysListening, setIsAlwaysListening] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [voiceMode, setVoiceMode] = useState<"dictation" | "agent" | "idle">("idle");
+  const [voiceMode, setVoiceMode] = useState<"dictation" | "agent" | "idle">(
+    "idle"
+  );
 
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
@@ -105,7 +107,9 @@ export function FloatingBar() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const savedConfig = await invoke<FloatingBarConfig>("get_floating_bar_config");
+        const savedConfig = await invoke<FloatingBarConfig>(
+          "get_floating_bar_config"
+        );
         setConfig(savedConfig);
       } catch (error) {
         console.error("Failed to load floating bar config:", error);
@@ -119,20 +123,15 @@ export function FloatingBar() {
     const resizeWindow = async () => {
       try {
         const appWindow = await Window.getByLabel("floating-bar");
-        const isExpanded = ![
-          "default",
-          "shrinking",
-          "finishing",
-          "dictation_ready",
-        ].includes(barState);
+        const isCompact = ["default", "finishing"].includes(barState);
 
-        if (isExpanded) {
+        if (isCompact) {
           await appWindow?.setSize(
-            new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
+            new LogicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
           );
         } else {
           await appWindow?.setSize(
-            new LogicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
+            new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
           );
         }
       } catch (err) {
@@ -383,6 +382,7 @@ export function FloatingBar() {
       [will-change:width,height,transform]
       [backface-visibility:hidden]
       [transform-origin:center]
+			cursor-move
     `;
 
     // Enhanced background based on voice mode and state
@@ -443,14 +443,25 @@ export function FloatingBar() {
 
   // Audio level visualization component
   const AudioLevelIndicator = () => {
-    if (!["dictation_active", "dictating", "agent_listening", "listening"].includes(barState))
+    if (
+      ![
+        "dictation_active",
+        "dictating",
+        "agent_listening",
+        "listening",
+      ].includes(barState)
+    )
       return null;
 
     return (
-      <div className="flex items-center gap-1 ml-2">
+      <div
+        className="flex items-center gap-1 ml-2 cursor-move"
+        data-tauri-drag-region
+      >
         {[...Array(5)].map((_, i) => (
           <div
             key={i}
+            data-tauri-drag-region
             className={cn(
               "w-1 rounded-full transition-all duration-150",
               audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
@@ -462,21 +473,28 @@ export function FloatingBar() {
   };
 
   return (
-    <div 
+    <div
       data-tauri-drag-region
       className="w-screen h-screen flex items-start justify-start relative"
     >
       {/* Tooltip */}
       {showTooltip && barState === "default" && (
-        <div className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none">
-          <div className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs">
+        <div
+          className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none cursor-move"
+          data-tauri-drag-region
+        >
+          <div
+            className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs cursor-move"
+            data-tauri-drag-region
+          >
             {getStatusText()}
           </div>
         </div>
       )}
 
-      <div className="relative z-50 p-3 bg-transparent">
+      <div className="relative z-50 p-3 bg-transparent" data-tauri-drag-region>
         <div
+          data-tauri-drag-region
           className={getContainerStyles()}
           style={{ opacity: config.opacity }}
           onClick={
@@ -486,14 +504,20 @@ export function FloatingBar() {
           }
         >
           {/* Default State */}
-          {(barState === "default" || barState === "dictation_ready" || barState === "finishing") && (
-            <div className="flex items-center gap-2">
+          {(barState === "default" ||
+            barState === "dictation_ready" ||
+            barState === "finishing") && (
+            <div className="flex items-center gap-2" data-tauri-drag-region>
               {getMainIcon()}
-              {config.showVoiceIndicator && (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
-                <VoiceStatusIndicator variant="compact" className="ml-1" />
-              )}
+              {config.showVoiceIndicator &&
+                (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
+                  <VoiceStatusIndicator variant="compact" className="ml-1" />
+                )}
               {isAlwaysListening && (
-                <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"></div>
+                <div
+                  className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
+                  data-tauri-drag-region
+                ></div>
               )}
             </div>
           )}
@@ -501,6 +525,7 @@ export function FloatingBar() {
           {/* Expanding/Input State */}
           {(barState === "expanding" || barState === "input") && (
             <form
+              data-tauri-drag-region
               onSubmit={handleSubmit}
               className={cn(
                 "flex items-center justify-between w-full h-full gap-3",
@@ -508,7 +533,10 @@ export function FloatingBar() {
                 barState === "input" ? "opacity-100" : "opacity-0"
               )}
             >
-              <div className="flex items-center gap-2 flex-1">
+              <div
+                className="flex items-center gap-2 flex-1"
+                data-tauri-drag-region
+              >
                 {getMainIcon()}
                 <input
                   ref={inputRef}
@@ -522,6 +550,7 @@ export function FloatingBar() {
                 />
               </div>
               <button
+                data-tauri-drag-region
                 type="submit"
                 className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
                 disabled={barState !== "input"}
@@ -542,15 +571,27 @@ export function FloatingBar() {
             "agent_responding",
             "listening",
           ].includes(barState) && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 {getMainIcon()}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
+                <div className="flex-1 min-w-0" data-tauri-drag-region>
+                  <div
+                    className="text-sm font-medium truncate"
+                    data-tauri-drag-region
+                  >
                     {getStatusText()}
                   </div>
                   {transcriptionText && (
-                    <div className="text-xs text-white/70 truncate">
+                    <div
+                      className="text-xs text-white/70 truncate"
+                      data-tauri-drag-region
+                    >
                       "{transcriptionText}"
                     </div>
                   )}
@@ -562,22 +603,39 @@ export function FloatingBar() {
 
           {/* Always Listening State */}
           {barState === "always-listening" && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 <Mic className="h-4 w-4 text-blue-400 animate-pulse" />
-                <span className="text-sm text-blue-200 truncate font-medium">
+                <span
+                  className="text-sm text-blue-200 truncate font-medium"
+                  data-tauri-drag-region
+                >
                   Always listening for wake words...
                 </span>
               </div>
-              <div className="flex items-center gap-1 ml-2">
-                <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse" />
+              <div
+                className="flex items-center gap-1 ml-2"
+                data-tauri-drag-region
+              >
+                <div
+                  className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
+                  data-tauri-drag-region
+                />
                 <div
                   className="w-1 h-2 bg-blue-300 rounded-full animate-pulse"
                   style={{ animationDelay: "0.1s" }}
+                  data-tauri-drag-region
                 />
                 <div
                   className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
                   style={{ animationDelay: "0.2s" }}
+                  data-tauri-drag-region
                 />
               </div>
             </div>
@@ -585,10 +643,19 @@ export function FloatingBar() {
 
           {/* Speaking State */}
           {barState === "speaking" && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 <Volume2 className="h-4 w-4 text-purple-300 animate-pulse" />
-                <span className="text-sm text-white/90 truncate">
+                <span
+                  className="text-sm text-white/90 truncate"
+                  data-tauri-drag-region
+                >
                   {spokenText || "Playing response..."}
                 </span>
               </div>
@@ -597,13 +664,21 @@ export function FloatingBar() {
 
           {/* Loading State */}
           {barState === "loading" && (
-            <div className="flex flex-col items-center justify-center w-full h-full gap-2">
-              <div className="flex items-center gap-2">
+            <div
+              className="flex flex-col items-center justify-center w-full h-full gap-2"
+              data-tauri-drag-region
+            >
+              <div className="flex items-center gap-2" data-tauri-drag-region>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm font-medium">Processing</span>
+                <span className="text-sm font-medium" data-tauri-drag-region>
+                  Processing
+                </span>
               </div>
               {lastSubmittedValue && (
-                <div className="text-xs text-white/70 truncate w-full text-center">
+                <div
+                  className="text-xs text-white/70 truncate w-full text-center"
+                  data-tauri-drag-region
+                >
                   {lastSubmittedValue}
                 </div>
               )}
@@ -612,14 +687,26 @@ export function FloatingBar() {
 
           {/* Success State */}
           {barState === "success" && (
-            <div className="flex items-center justify-between w-full h-full animate-success-fade">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full animate-success-fade"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 <Check className="h-4 w-4 text-emerald-300" />
-                <span className="text-sm font-medium text-emerald-100 truncate">
+                <span
+                  className="text-sm font-medium text-emerald-100 truncate"
+                  data-tauri-drag-region
+                >
                   {lastSubmittedValue}
                 </span>
               </div>
-              <div className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-400">
+              <div
+                className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-400"
+                data-tauri-drag-region
+              >
                 <Check size={12} className="text-emerald-900" />
               </div>
             </div>
@@ -627,14 +714,26 @@ export function FloatingBar() {
 
           {/* Error State */}
           {barState === "error" && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 <AlertCircle className="h-4 w-4 text-red-300" />
-                <span className="text-sm font-medium text-red-100 truncate">
+                <span
+                  className="text-sm font-medium text-red-100 truncate"
+                  data-tauri-drag-region
+                >
                   {currentError || "Error occurred"}
                 </span>
               </div>
-              <div className="flex items-center justify-center h-6 w-6 rounded-full bg-red-400">
+              <div
+                className="flex items-center justify-center h-6 w-6 rounded-full bg-red-400"
+                data-tauri-drag-region
+              >
                 <X size={12} className="text-red-900" />
               </div>
             </div>
@@ -642,7 +741,10 @@ export function FloatingBar() {
 
           {/* Shrinking State */}
           {barState === "shrinking" && (
-            <div className="opacity-0 w-full h-full transition-opacity duration-300" />
+            <div
+              className="opacity-0 w-full h-full transition-opacity duration-300"
+              data-tauri-drag-region
+            />
           )}
         </div>
       </div>
