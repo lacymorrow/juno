@@ -1270,7 +1270,7 @@ pub fn run() {
                 // Create enhanced tray menu with state-aware items
                 let tray_menu = create_state_aware_tray_menu(&tray_app_handle).await;
 
-                let mut tray_builder = TrayIconBuilder::new()
+                let mut tray_builder = TrayIconBuilder::with_id("main_tray")
                     .on_menu_event(move |app_handle, event| {
                         match event.id().as_ref() {
                             constants::tray_menu_ids::QUIT => {
@@ -2734,8 +2734,19 @@ async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tau
 }
 
 /// Update the tray menu to reflect current window states
-async fn update_tray_menu(_app_handle: &AppHandle) {
-    // TODO: Implement dynamic tray menu updates when the Tauri API supports it
-    // For now, we keep the tray menu static
-    tracing::debug!("Tray menu update requested but not implemented yet");
+async fn update_tray_menu(app_handle: &AppHandle) {
+    if let Some(new_menu) = create_state_aware_tray_menu(app_handle).await {
+        // Access the tray by the ID we set in the builder
+        if let Some(tray) = app_handle.tray_by_id("main_tray") {
+            if let Err(e) = tray.set_menu(Some(new_menu)) {
+                tracing::warn!("[Tray Menu] Failed to update tray menu: {}", e);
+            } else {
+                tracing::debug!("[Tray Menu] Tray menu updated successfully");
+            }
+        } else {
+            tracing::warn!("[Tray Menu] Tray with ID 'main_tray' not found");
+        }
+    } else {
+        tracing::warn!("[Tray Menu] Failed to create updated tray menu");
+    }
 }
