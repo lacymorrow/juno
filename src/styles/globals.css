@@ -221,15 +221,6 @@
   }
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-}
-
 /* Dynamic Tool Notification Styles */
 .tool-notification {
   font-family: system-ui, -apple-system, sans-serif;

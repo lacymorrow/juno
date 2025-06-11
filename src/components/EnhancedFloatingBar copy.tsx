@@ -367,10 +367,11 @@ export function EnhancedFloatingBar() {
       return null;
 
     return (
-      <div className="flex items-center gap-1 ml-2">
+      <div className="flex items-center gap-1 ml-2" data-tauri-drag-region>
         {[...Array(5)].map((_, i) => (
           <div
             key={i}
+            data-tauri-drag-region
             className={cn(
               "w-1 rounded-full transition-all duration-150",
               audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
@@ -382,21 +383,28 @@ export function EnhancedFloatingBar() {
   };
 
   return (
-    <div 
+    <div
       data-tauri-drag-region
       className="w-screen h-screen flex items-start justify-start relative"
     >
       {/* Tooltip */}
       {showTooltip && barState === "idle" && (
-        <div className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none">
-          <div className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs">
+        <div
+          className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none"
+          data-tauri-drag-region
+        >
+          <div
+            className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs"
+            data-tauri-drag-region
+          >
             {getStatusText()}
           </div>
         </div>
       )}
 
-      <div className="relative z-50 p-3">
+      <div className="relative z-50 p-3" data-tauri-drag-region>
         <div
+          data-tauri-drag-region
           className={getContainerStyles()}
           style={{ opacity: config.opacity }}
           onClick={
@@ -407,7 +415,7 @@ export function EnhancedFloatingBar() {
         >
           {/* Idle State */}
           {(barState === "idle" || barState === "dictation_ready") && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" data-tauri-drag-region>
               {getMainIcon()}
               {config.showVoiceIndicator && voiceMode !== "idle" && (
                 <VoiceStatusIndicator variant="compact" className="ml-1" />
@@ -418,6 +426,7 @@ export function EnhancedFloatingBar() {
           {/* Expanding/Input State */}
           {(barState === "expanding" || barState === "input") && (
             <form
+              data-tauri-drag-region
               onSubmit={handleSubmit}
               className={cn(
                 "flex items-center justify-between w-full h-full gap-3",
@@ -425,7 +434,10 @@ export function EnhancedFloatingBar() {
                 barState === "input" ? "opacity-100" : "opacity-0"
               )}
             >
-              <div className="flex items-center gap-2 flex-1">
+              <div
+                className="flex items-center gap-2 flex-1"
+                data-tauri-drag-region
+              >
                 {getMainIcon()}
                 <input
                   ref={inputRef}
@@ -438,6 +450,7 @@ export function EnhancedFloatingBar() {
                 />
               </div>
               <button
+                data-tauri-drag-region
                 type="submit"
                 className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
                 disabled={barState !== "input"}
@@ -455,15 +468,27 @@ export function EnhancedFloatingBar() {
             "agent_thinking",
             "agent_responding",
           ].includes(barState) && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 {getMainIcon()}
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">
+                <div className="flex-1 min-w-0" data-tauri-drag-region>
+                  <div
+                    className="text-sm font-medium truncate"
+                    data-tauri-drag-region
+                  >
                     {getStatusText()}
                   </div>
                   {transcriptionText && (
-                    <div className="text-xs text-white/70 truncate">
+                    <div
+                      className="text-xs text-white/70 truncate"
+                      data-tauri-drag-region
+                    >
                       "{transcriptionText}"
                     </div>
                   )}
@@ -475,10 +500,19 @@ export function EnhancedFloatingBar() {
 
           {/* Speaking State */}
           {barState === "speaking" && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 <Volume2 className="h-4 w-4 text-purple-300 animate-pulse" />
-                <span className="text-sm text-white/90 truncate">
+                <span
+                  className="text-sm text-white/90 truncate"
+                  data-tauri-drag-region
+                >
                   {spokenText || "Playing response..."}
                 </span>
               </div>
@@ -487,13 +521,21 @@ export function EnhancedFloatingBar() {
 
           {/* Loading State */}
           {barState === "loading" && (
-            <div className="flex flex-col items-center justify-center w-full h-full gap-2">
-              <div className="flex items-center gap-2">
+            <div
+              className="flex flex-col items-center justify-center w-full h-full gap-2"
+              data-tauri-drag-region
+            >
+              <div className="flex items-center gap-2" data-tauri-drag-region>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm font-medium">Processing</span>
+                <span className="text-sm font-medium" data-tauri-drag-region>
+                  Processing
+                </span>
               </div>
               {lastSubmittedValue && (
-                <div className="text-xs text-white/70 truncate w-full text-center">
+                <div
+                  className="text-xs text-white/70 truncate w-full text-center"
+                  data-tauri-drag-region
+                >
                   {lastSubmittedValue}
                 </div>
               )}
@@ -502,14 +544,26 @@ export function EnhancedFloatingBar() {
 
           {/* Success State */}
           {barState === "success" && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 <Check className="h-4 w-4 text-emerald-300" />
-                <span className="text-sm font-medium text-emerald-100 truncate">
+                <span
+                  className="text-sm font-medium text-emerald-100 truncate"
+                  data-tauri-drag-region
+                >
                   {lastSubmittedValue}
                 </span>
               </div>
-              <div className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-400">
+              <div
+                className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-400"
+                data-tauri-drag-region
+              >
                 <Check size={12} className="text-emerald-900" />
               </div>
             </div>
@@ -517,14 +571,26 @@ export function EnhancedFloatingBar() {
 
           {/* Error State */}
           {barState === "error" && (
-            <div className="flex items-center justify-between w-full h-full">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div
+              className="flex items-center justify-between w-full h-full"
+              data-tauri-drag-region
+            >
+              <div
+                className="flex items-center gap-3 flex-1 min-w-0"
+                data-tauri-drag-region
+              >
                 <AlertCircle className="h-4 w-4 text-red-300" />
-                <span className="text-sm font-medium text-red-100 truncate">
+                <span
+                  className="text-sm font-medium text-red-100 truncate"
+                  data-tauri-drag-region
+                >
                   {currentError || "Error occurred"}
                 </span>
               </div>
-              <div className="flex items-center justify-center h-6 w-6 rounded-full bg-red-400">
+              <div
+                className="flex items-center justify-center h-6 w-6 rounded-full bg-red-400"
+                data-tauri-drag-region
+              >
                 <X size={12} className="text-red-900" />
               </div>
             </div>
@@ -532,7 +598,10 @@ export function EnhancedFloatingBar() {
 
           {/* Shrinking/Finishing States */}
           {(barState === "shrinking" || barState === "finishing") && (
-            <div className="opacity-0 w-full h-full transition-opacity duration-300" />
+            <div
+              className="opacity-0 w-full h-full transition-opacity duration-300"
+              data-tauri-drag-region
+            />
           )}
         </div>
       </div>
