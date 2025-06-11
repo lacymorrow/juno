@@ -18,7 +18,6 @@ import {
 } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
-import { setCurrentAudioElement } from "@/lib/ttsService";
 import { cn } from "@/lib/utils";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -33,7 +32,7 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Toaster } from "sonner";
 import ClickVisualizer from "./components/ClickVisualizer";
 import CommandOverlay from "./components/CommandOverlay";
@@ -41,10 +40,10 @@ import KeyPressOverlay from "./components/KeyPressOverlay";
 import Settings from "./components/Settings";
 import "./styles/globals.css";
 
-// CRITICAL FIX: Add memory management constants
-const MAX_CONVERSATION_LENGTH = 100; // Max messages to keep in memory
-const MEMORY_CLEANUP_INTERVAL = 30000; // 30 seconds
-const MEMORY_PRESSURE_THRESHOLD = 1000; // MB
+// CRITICAL FIX: Add memory management constants (currently unused)
+// const MAX_CONVERSATION_LENGTH = 100; // Max messages to keep in memory
+// const MEMORY_CLEANUP_INTERVAL = 30000; // 30 seconds
+// const MEMORY_PRESSURE_THRESHOLD = 1000; // MB
 
 // Type for conversation messages
 type ChatMessage = {
@@ -67,66 +66,66 @@ type ChatMessage = {
   messageId?: string; // Unique identifier for streaming messages
 };
 
-// Type for the result from submit_query
-type SubmitQueryResult = {
-  text: string;
-  spoken_text?: string; // Optional separate content for TTS speech
-  audio_base64?: string; // Optional base64 audio data
-  agent_state: string;
-  screenshot_base64?: string; // Optional base64 screenshot data
-};
+// Type for the result from submit_query (currently unused)
+// type SubmitQueryResult = {
+//   text: string;
+//   spoken_text?: string; // Optional separate content for TTS speech
+//   audio_base64?: string; // Optional base64 audio data
+//   agent_state: string;
+//   screenshot_base64?: string; // Optional base64 screenshot data
+// };
 
-// Type for the backend response event payload
-type BackendResponsePayload = {
-  query: string;
-  response: SubmitQueryResult;
-};
+// Type for the backend response event payload (currently unused)
+// type BackendResponsePayload = {
+//   query: string;
+//   response: SubmitQueryResult;
+// };
 
-// Streaming event types
-type StreamingTextEvent = {
-  chunk: string;
-  message_id?: string;
-};
+// Streaming event types (currently unused)
+// type StreamingTextEvent = {
+//   chunk: string;
+//   message_id?: string;
+// };
 
-type StreamStartEvent = {
-  message_id: string;
-};
+// type StreamStartEvent = {
+//   message_id: string;
+// };
 
-type StreamEndEvent = {
-  message_id: string;
-  complete_text: string;
-};
+// type StreamEndEvent = {
+//   message_id: string;
+//   complete_text: string;
+// };
 
 // --- Tool Usage Event Type ---
 // Note: ToolUsageEntry is defined in DevToolsPanel.tsx where it's actually used
 
-// --- Agent Event Types (mirroring tool_logger.rs) ---
-interface ThinkingPayload {
-  content: string;
-}
+// --- Agent Event Types (mirroring tool_logger.rs) - currently unused ---
+// interface ThinkingPayload {
+//   content: string;
+// }
 
-interface ToolCallRequestPayload {
-  tool_name: string;
-  tool_args: any; // Corresponds to serde_json::Value
-  content?: string;
-}
+// interface ToolCallRequestPayload {
+//   tool_name: string;
+//   tool_args: any; // Corresponds to serde_json::Value
+//   content?: string;
+// }
 
-interface ToolCallResultPayload {
-  tool_name: string;
-  tool_output: any; // Corresponds to serde_json::Value
-  success: boolean;
-  content?: string;
-  screenshot_base64?: string;
-}
+// interface ToolCallResultPayload {
+//   tool_name: string;
+//   tool_output: any; // Corresponds to serde_json::Value
+//   success: boolean;
+//   content?: string;
+//   screenshot_base64?: string;
+// }
 
-interface ScreenshotPayload {
-  screenshot_base64: string;
-  content?: string;
-}
+// interface ScreenshotPayload {
+//   screenshot_base64: string;
+//   content?: string;
+// }
 
-interface GenericContentPayload {
-  content: string;
-}
+// interface GenericContentPayload {
+//   content: string;
+// }
 
 // Note: AgentEventPayload union type removed as it's not used - individual payload types are used directly
 
@@ -138,62 +137,62 @@ interface GenericContentPayload {
 // Let's assume the event payload from `listen<AgentEventPayloadTauri>` will be an object
 // with `type` and `payload` properties, matching the conceptual structure of Rust's AgentEvent.
 
-interface AgentEventTauri {
-  type: string; // "thinking", "tool_call_request", "tool_call_result", "screenshot", "generic_content"
-  payload: // This will be one of the specific payload types based on `type`
-  | ThinkingPayload
-    | ToolCallRequestPayload
-    | ToolCallResultPayload
-    | ScreenshotPayload
-    | GenericContentPayload;
-}
+// interface AgentEventTauri {
+//   type: string; // "thinking", "tool_call_request", "tool_call_result", "screenshot", "generic_content"
+//   payload: // This will be one of the specific payload types based on `type`
+//   | ThinkingPayload
+//     | ToolCallRequestPayload
+//     | ToolCallResultPayload
+//     | ScreenshotPayload
+//     | GenericContentPayload;
+// }
 // --- End Agent Event Types ---
 
-// Type for view state
-type AppView = "chat" | "settings" | "devtools" | "permissions" | "onboarding";
+// Type for view state (currently unused)
+// type AppView = "chat" | "settings" | "devtools" | "permissions" | "onboarding";
 
-// New modal types for enhanced functionality
-type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
+// New modal types for enhanced functionality (currently unused)
+// type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
 
-// Enhanced feedback form data
-interface FeedbackData {
-  type: "issue" | "feature" | "general";
-  title: string;
-  description: string;
-  email?: string;
-  priority: "low" | "medium" | "high";
-}
+// Enhanced feedback form data (currently unused)
+// interface FeedbackData {
+//   type: "issue" | "feature" | "general";
+//   title: string;
+//   description: string;
+//   email?: string;
+//   priority: "low" | "medium" | "high";
+// }
 
-// Update check result
-interface UpdateInfo {
-  available: boolean;
-  version?: string;
-  notes?: string;
-  date?: string;
-}
+// Update check result (currently unused)
+// interface UpdateInfo {
+//   available: boolean;
+//   version?: string;
+//   notes?: string;
+//   date?: string;
+// }
 
-// Chat export format
-interface ChatExport {
-  version: string;
-  exported_at: string;
-  conversation: ChatMessage[];
-  metadata: {
-    total_messages: number;
-    export_type: "full" | "filtered";
-  };
-}
+// Chat export format (currently unused)
+// interface ChatExport {
+//   version: string;
+//   exported_at: string;
+//   conversation: ChatMessage[];
+//   metadata: {
+//     total_messages: number;
+//     export_type: "full" | "filtered";
+//   };
+// }
 
-// Simple debounce function
-function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+// Simple debounce function (commented out as it's currently unused)
+// function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+//   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  return (...args: Parameters<F>): void => {
-    if (timeoutId !== null) {
-      clearTimeout(timeoutId);
-    }
-    timeoutId = setTimeout(() => func(...args), waitFor);
-  };
-}
+//   return (...args: Parameters<F>): void => {
+//     if (timeoutId !== null) {
+//       clearTimeout(timeoutId);
+//     }
+//     timeoutId = setTimeout(() => func(...args), waitFor);
+//   };
+// }
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
 function shouldShowTimestamp(
@@ -241,193 +240,242 @@ function formatFullTimestamp(timestamp: number): string {
   });
 }
 
-// CRITICAL FIX: Add memory management constants at the top
-const MAX_CONVERSATION_LENGTH = 100; // Max messages to keep in memory
-const MEMORY_CLEANUP_INTERVAL = 30000; // 30 seconds
-const MEMORY_PRESSURE_THRESHOLD = 1000; // MB
+// CRITICAL FIX: Add memory monitoring (currently unused)
+// const useMemoryMonitoring = () => {
+//   const [memoryPressure, setMemoryPressure] = useState(false);
 
-// CRITICAL FIX: Add memory monitoring
-const useMemoryMonitoring = () => {
-  const [memoryPressure, setMemoryPressure] = useState(false);
+//   useEffect(() => {
+//     const checkMemory = () => {
+//       // @ts-ignore - performance.memory is available in Chrome/Edge
+//       if (performance.memory) {
+//         const usedJSHeapSize =
+//           performance.memory.usedJSHeapSize / (1024 * 1024); // MB
+//         if (usedJSHeapSize > MEMORY_PRESSURE_THRESHOLD) {
+//           setMemoryPressure(true);
+//           console.warn(
+//             `Memory pressure detected: ${usedJSHeapSize.toFixed(2)}MB`
+//           );
+//         } else {
+//           setMemoryPressure(false);
+//         }
+//       }
+//     };
 
-  useEffect(() => {
-    const checkMemory = () => {
-      // @ts-ignore - performance.memory is available in Chrome/Edge
-      if (performance.memory) {
-        const usedJSHeapSize =
-          performance.memory.usedJSHeapSize / (1024 * 1024); // MB
-        if (usedJSHeapSize > MEMORY_PRESSURE_THRESHOLD) {
-          setMemoryPressure(true);
-          console.warn(
-            `Memory pressure detected: ${usedJSHeapSize.toFixed(2)}MB`
-          );
-        } else {
-          setMemoryPressure(false);
-        }
-      }
-    };
+//     const interval = setInterval(checkMemory, MEMORY_CLEANUP_INTERVAL);
+//     return () => clearInterval(interval);
+//   }, []);
 
-    const interval = setInterval(checkMemory, MEMORY_CLEANUP_INTERVAL);
-    return () => clearInterval(interval);
-  }, []);
+//   return memoryPressure;
+// };
 
-  return memoryPressure;
-};
+// CRITICAL FIX: Extract audio handling to separate hook (currently unused)
+// const useAudioManagement = () => {
+//   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
+//     null
+//   );
 
-// CRITICAL FIX: Extract audio handling to separate hook
-const useAudioManagement = () => {
-  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
-    null
-  );
+//   const playAudioFromBase64 = useCallback(
+//     (base64Audio: string) => {
+//       try {
+//         // Stop any currently playing audio
+//         if (currentAudio) {
+//           currentAudio.pause();
+//           currentAudio.currentTime = 0;
+//         }
 
-  const playAudioFromBase64 = useCallback(
-    (base64Audio: string) => {
-      try {
-        // Stop any currently playing audio
-        if (currentAudio) {
-          currentAudio.pause();
-          currentAudio.currentTime = 0;
-        }
+//         const blob = base64ToBlob(base64Audio);
+//         const audioUrl = URL.createObjectURL(blob);
+//         const audioElement = new Audio(audioUrl);
 
-        const blob = base64ToBlob(base64Audio);
-        const audioUrl = URL.createObjectURL(blob);
-        const audioElement = new Audio(audioUrl);
+//         setCurrentAudioElement(audioElement);
+//         setCurrentAudio(audioElement);
 
-        setCurrentAudioElement(audioElement);
-        setCurrentAudio(audioElement);
+//         audioElement.addEventListener("ended", () => {
+//           URL.revokeObjectURL(audioUrl);
+//           setCurrentAudio(null);
+//           setCurrentAudioElement(null);
+//         });
 
-        audioElement.addEventListener("ended", () => {
-          URL.revokeObjectURL(audioUrl);
-          setCurrentAudio(null);
-          setCurrentAudioElement(null);
-        });
+//         audioElement.addEventListener("error", (e) => {
+//           console.error("Audio playback error:", e);
+//           URL.revokeObjectURL(audioUrl);
+//           setCurrentAudio(null);
+//           setCurrentAudioElement(null);
+//         });
 
-        audioElement.addEventListener("error", (e) => {
-          console.error("Audio playback error:", e);
-          URL.revokeObjectURL(audioUrl);
-          setCurrentAudio(null);
-          setCurrentAudioElement(null);
-        });
+//         audioElement.play().catch((error) => {
+//           console.error("Failed to play audio:", error);
+//           URL.revokeObjectURL(audioUrl);
+//           setCurrentAudio(null);
+//           setCurrentAudioElement(null);
+//         });
+//       } catch (error) {
+//         console.error("Error processing audio:", error);
+//       }
+//     },
+//     [currentAudio]
+//   );
 
-        audioElement.play().catch((error) => {
-          console.error("Failed to play audio:", error);
-          URL.revokeObjectURL(audioUrl);
-          setCurrentAudio(null);
-          setCurrentAudioElement(null);
-        });
-      } catch (error) {
-        console.error("Error processing audio:", error);
-      }
-    },
-    [currentAudio]
-  );
+//   return { currentAudio, playAudioFromBase64 };
+// };
 
-  return { currentAudio, playAudioFromBase64 };
-};
+// CRITICAL FIX: Extract conversation management to separate hook (currently unused)
+// const useConversationManagement = () => {
+//   const [conversation, setConversation] = useState<ChatMessage[]>([]);
 
-// CRITICAL FIX: Extract conversation management to separate hook
-const useConversationManagement = () => {
-  const [conversation, setConversation] = useState<ChatMessage[]>([]);
+//   // CRITICAL FIX: Add memory-aware conversation management
+//   const addMessage = useCallback((message: ChatMessage) => {
+//     setConversation((prev) => {
+//       const newConversation = [...prev, message];
+//       // CRITICAL FIX: Trim conversation if too long
+//       if (newConversation.length > MAX_CONVERSATION_LENGTH) {
+//         console.warn(
+//           `Conversation length exceeded ${MAX_CONVERSATION_LENGTH}, trimming older messages`
+//         );
+//         return newConversation.slice(-MAX_CONVERSATION_LENGTH);
+//       }
+//       return newConversation;
+//     });
+//   }, []);
 
-  // CRITICAL FIX: Add memory-aware conversation management
-  const addMessage = useCallback((message: ChatMessage) => {
-    setConversation((prev) => {
-      const newConversation = [...prev, message];
-      // CRITICAL FIX: Trim conversation if too long
-      if (newConversation.length > MAX_CONVERSATION_LENGTH) {
-        console.warn(
-          `Conversation length exceeded ${MAX_CONVERSATION_LENGTH}, trimming older messages`
-        );
-        return newConversation.slice(-MAX_CONVERSATION_LENGTH);
-      }
-      return newConversation;
-    });
-  }, []);
+//   const updateMessage = useCallback(
+//     (messageId: string, updates: Partial<ChatMessage>) => {
+//       setConversation((prev) =>
+//         prev.map((msg) =>
+//           msg.messageId === messageId ? { ...msg, ...updates } : msg
+//         )
+//       );
+//     },
+//     []
+//   );
 
-  const updateMessage = useCallback(
-    (messageId: string, updates: Partial<ChatMessage>) => {
-      setConversation((prev) =>
-        prev.map((msg) =>
-          msg.messageId === messageId ? { ...msg, ...updates } : msg
-        )
-      );
-    },
-    []
-  );
+//   const clearConversation = useCallback(() => {
+//     setConversation([]);
+//   }, []);
 
-  const clearConversation = useCallback(() => {
-    setConversation([]);
-  }, []);
-
-  return {
-    conversation,
-    addMessage,
-    updateMessage,
-    clearConversation,
-    setConversation,
-  };
-};
+//   return {
+//     conversation,
+//     addMessage,
+//     updateMessage,
+//     clearConversation,
+//     setConversation,
+//   };
+// };
 
 function App() {
   const [query, setQuery] = useState("");
+  const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  // Helper function to determine notification duration based on level and estimated duration
-  const getNotificationDuration = (
-    notificationLevel: string,
-    estimatedDuration?: string
-  ): number => {
-    // Base duration by notification level
-    const baseDurations = {
-      minimal: 1500,
-      standard: 3000,
-      detailed: 5000,
-    };
+  const [serverStatus] = useState<"connected" | "error" | "disconnected">(
+    "connected"
+  ); // Default to connected for now
+  const [currentView, setCurrentView] = useState<
+    "chat" | "settings" | "devtools" | "permissions" | "onboarding"
+  >("chat");
+  const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
+  // const [showPermissionsFlow] = useState(false); // Not used currently
+  const [permissionsGranted] = useState(false);
+  const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
+  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
+  const [isCheckingUpdate] = useState(false);
+  const [appVersion] = useState<string | null>("1.0.0");
 
-    const baseDuration =
-      baseDurations[notificationLevel as keyof typeof baseDurations] || 3000;
+  // Ref for scrolling to bottom
+  const conversationEndRef = useRef<HTMLDivElement>(null);
 
-    // Adjust based on estimated duration
-    if (estimatedDuration) {
-      const durationMultipliers = {
-        instant: 0.5,
-        short: 0.8,
-        medium: 1.0,
-        long: 1.5,
-      };
-      const multiplier =
-        durationMultipliers[
-          estimatedDuration as keyof typeof durationMultipliers
-        ] || 1.0;
-      return Math.round(baseDuration * multiplier);
-    }
-
-    return baseDuration;
+  // Handler functions
+  const handleOnboardingComplete = () => {
+    setCurrentView("chat");
   };
 
-  // Helper function to get notification styling based on tool category
-  const getNotificationClassName = (
-    toolCategory?: string,
-    eventType?: string,
-    success?: boolean
-  ): string => {
-    let className = "tool-notification";
+  const handleOnboardingSkip = () => {
+    setCurrentView("chat");
+  };
 
-    // Add category-specific styling
-    if (toolCategory) {
-      className += ` ${toolCategory.toLowerCase()}-category`;
+  const handleExamplePromptSelect = (prompt: string) => {
+    setQuery(prompt);
+  };
+
+  const handleCopyResponse = async (messageId: string, content: string) => {
+    setCopyingMessageId(messageId);
+    try {
+      await navigator.clipboard.writeText(content);
+      // Copy successful - clear copying state after a brief delay
+      setTimeout(() => setCopyingMessageId(null), 1000);
+    } catch (error) {
+      console.error("Failed to copy text:", error);
+      setCopyingMessageId(null);
     }
+  };
 
-    // Add event type styling
-    if (eventType) {
-      className += ` ${eventType}-event`;
+  const handleSaveResponse = async (messageId: string, content: string) => {
+    setSavingMessageId(messageId);
+    try {
+      // Create a blob with the content
+      const blob = new Blob([content], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+
+      // Create a temporary download link
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `juno-response-${Date.now()}.txt`;
+      document.body.appendChild(link);
+      link.click();
+
+      // Clean up
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      // Clear saving state after a brief delay
+      setTimeout(() => setSavingMessageId(null), 1000);
+    } catch (error) {
+      console.error("Failed to save response:", error);
+      setSavingMessageId(null);
     }
+  };
 
-    // Add success/failure styling for results
-    if (eventType === "result" && success !== undefined) {
-      className += success ? " success-result" : " failure-result";
-    }
+  // Form submission handler
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim() || isProcessing) return;
 
-    return className;
+    // Add user message to conversation
+    const userMessage: ChatMessage = {
+      role: "user",
+      content: query.trim(),
+      timestamp: Date.now(),
+    };
+    setConversation((prev) => [...prev, userMessage]);
+    setQuery("");
+    setIsProcessing(true);
+
+    // TODO: Implement actual API call
+    setTimeout(() => {
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content:
+          "This is a placeholder response. The actual implementation would call the Tauri backend.",
+        timestamp: Date.now(),
+      };
+      setConversation((prev) => [...prev, assistantMessage]);
+      setIsProcessing(false);
+    }, 1000);
+  };
+
+  // Clear conversation
+  const clearConversation = () => {
+    setConversation([]);
+  };
+
+  // Start new chat
+  const startNewChat = () => {
+    clearConversation();
+    setQuery("");
+  };
+
+  // Modal rendering function (placeholder)
+  const renderModal = () => {
+    return null; // No modals implemented yet
   };
 
   // Listen for agent error events to restore input for retry
@@ -578,11 +626,9 @@ function App() {
               <ScrollArea className="h-full w-full p-2">
                 <PermissionsFlow
                   onComplete={() => {
-                    setShowPermissionsFlow(false);
                     setCurrentView("chat");
                   }}
                   onSkip={() => {
-                    setShowPermissionsFlow(false);
                     setCurrentView("chat");
                   }}
                   showSkipOption={true}
@@ -774,8 +820,8 @@ function App() {
                                             )}
                                             onClick={() =>
                                               handleCopyResponse(
-                                                msg.content,
-                                                index
+                                                `copy-${index}`,
+                                                msg.content
                                               )
                                             }
                                             disabled={
@@ -808,9 +854,8 @@ function App() {
                                             )}
                                             onClick={() =>
                                               handleSaveResponse(
-                                                msg.content,
-                                                "html",
-                                                index
+                                                `save-html-${index}`,
+                                                msg.content
                                               )
                                             }
                                             disabled={
@@ -843,9 +888,8 @@ function App() {
                                             )}
                                             onClick={() =>
                                               handleSaveResponse(
-                                                msg.content,
-                                                "markdown",
-                                                index
+                                                `save-markdown-${index}`,
+                                                msg.content
                                               )
                                             }
                                             disabled={
