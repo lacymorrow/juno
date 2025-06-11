@@ -478,7 +478,7 @@ export function FloatingBar() {
       className="w-screen h-screen flex items-start justify-start relative"
     >
       {/* Tooltip */}
-      {showTooltip && barState === "default" && (
+      {/* {showTooltip && barState === "default" && (
         <div
           className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none cursor-move"
           data-tauri-drag-region
@@ -490,7 +490,7 @@ export function FloatingBar() {
             {getStatusText()}
           </div>
         </div>
-      )}
+      )} */}
 
       <div className="relative z-50 p-3 bg-transparent" data-tauri-drag-region>
         <div
