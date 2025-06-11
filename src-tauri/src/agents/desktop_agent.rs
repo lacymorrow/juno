@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use tauri::Manager;
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolMappingService, ToolCategory};
 use crate::state::AppState;
 use crate::commands;
 use super::base_agent::{
@@ -39,23 +40,6 @@ impl DesktopAgent {
             }),
             app_handle,
         })
-    }
-
-    /// Check if a tool name is related to desktop operations
-    fn is_desktop_tool(tool_name: &str) -> bool {
-        tool_name.starts_with("desktop_") ||
-        tool_name.starts_with("dev_") ||
-        tool_name.contains("click") ||
-        tool_name.contains("type") ||
-        tool_name.contains("key") ||
-        tool_name.contains("mouse") ||
-        tool_name.contains("window") ||
-        tool_name.contains("app") ||
-        tool_name.contains("scroll") ||
-        tool_name.contains("screenshot") ||
-        tool_name.contains("element") ||
-        tool_name.contains("focus") ||
-        tool_name.contains("clipboard")
     }
 
     /// Execute a desktop-related tool call
@@ -354,24 +338,17 @@ impl SpecializedAgent for DesktopAgent {
     }
 
     async fn can_handle_task(&self, task: &Task) -> bool {
-        // Check if any tool calls are desktop-related
+        // Use ToolMappingService instead of string matching
         for tool_call in &task.tool_calls {
-            if Self::is_desktop_tool(&tool_call.name) {
+            if ToolMappingService::is_tool_in_category(&tool_call.name, &ToolCategory::Desktop) ||
+               ToolMappingService::is_tool_in_category(&tool_call.name, &ToolCategory::AnthropicComputerUse) {
                 return true;
             }
         }
 
-        // Check if task description mentions desktop operations
-        let description_lower = task.description.to_lowercase();
-        description_lower.contains("desktop") ||
-        description_lower.contains("application") ||
-        description_lower.contains("window") ||
-        description_lower.contains("click") ||
-        description_lower.contains("type") ||
-        description_lower.contains("mouse") ||
-        description_lower.contains("keyboard") ||
-        description_lower.contains("screenshot") ||
-        description_lower.contains("clipboard")
+        // Use ToolMappingService for task description analysis
+        let mapping_agent_type = ToolMappingService::analyze_user_intent(&task.description);
+        matches!(mapping_agent_type, crate::agent::tools::tool_mapping::AgentType::DesktopExpert)
     }
 
     async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {

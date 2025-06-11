@@ -15,6 +15,7 @@ use crate::agent::providers::anthropic::AnthropicBrain;
 use crate::agent::providers::openai::OpenAIBrain;
 use crate::state::CancelReceiver;
 use crate::agent::prompts::PromptManager;
+use crate::agent::tools::ToolMappingService;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AgentType {
@@ -43,16 +44,6 @@ impl AgentType {
             AgentType::CodingExpert => "Enhanced coding and development expert",
             AgentType::DesktopExpert => "Desktop automation and system interaction specialist",
             AgentType::GeneralExpert => "General purpose assistant for research and analysis",
-        }
-    }
-
-    pub fn get_tools_pattern(&self) -> Vec<&'static str> {
-        match self {
-            AgentType::Orchestrator => vec!["route_to_expert"],
-            AgentType::BrowserExpert => vec!["browser_", "navigate", "web", "screenshot"],
-            AgentType::CodingExpert => vec!["file", "read", "write", "command", "terminal", "code", "edit", "analyze_project", "plan_multi_file", "generate_code_review", "communicate_with_cursor"],
-            AgentType::DesktopExpert => vec!["desktop_", "click", "type", "screenshot", "key", "mouse"],
-            AgentType::GeneralExpert => vec!["search", "analyze", "text", "summary"],
         }
     }
 }
@@ -161,96 +152,52 @@ impl MultiAgentOrchestrator {
             Err(_) => return vec![],
         };
 
-        // Filter tools based on agent type
-        let tool_patterns = agent_type.get_tools_pattern();
+        // Use ToolMappingService to filter tools instead of string matching
+        let tool_names: Vec<String> = all_tools.iter().map(|t| t.name.clone()).collect();
+        let matching_tool_names = ToolMappingService::get_tools_for_agent(&tool_names, &Self::convert_agent_type(agent_type));
 
         all_tools.into_iter()
-            .filter(|tool| {
-                tool_patterns.iter().any(|pattern| {
-                    tool.name.contains(pattern) ||
-                    tool.description.to_lowercase().contains(&pattern.to_lowercase()) ||
-                    Self::matches_agent_category(agent_type, &tool.name)
-                })
-            })
+            .filter(|tool| matching_tool_names.contains(&tool.name))
             .collect()
     }
 
-    fn matches_agent_category(agent_type: &AgentType, tool_name: &str) -> bool {
+    // Helper to convert between AgentType enums
+    fn convert_agent_type(agent_type: &AgentType) -> crate::agent::tools::tool_mapping::AgentType {
         match agent_type {
-            AgentType::BrowserExpert => {
-                tool_name.starts_with("browser_") ||
-                tool_name.contains("navigate") ||
-                tool_name.contains("web") ||
-                tool_name.contains("url")
-            }
-            AgentType::CodingExpert => {
-                tool_name.contains("file") ||
-                tool_name.contains("read") ||
-                tool_name.contains("write") ||
-                tool_name.contains("command") ||
-                tool_name.contains("terminal") ||
-                tool_name.contains("code") ||
-                tool_name.contains("edit") ||
-                // Enhanced coding tools
-                tool_name.starts_with("analyze_project") ||
-                tool_name.starts_with("plan_multi_file") ||
-                tool_name.starts_with("generate_code_review") ||
-                tool_name.starts_with("communicate_with_cursor")
-            }
-            AgentType::DesktopExpert => {
-                tool_name.starts_with("desktop_") ||
-                tool_name.contains("click") ||
-                tool_name.contains("type") ||
-                tool_name.contains("key") ||
-                tool_name.contains("mouse") ||
-                tool_name.contains("screenshot")
-            }
-            AgentType::GeneralExpert => {
-                // General expert gets tools that don't fit other categories
-                !Self::matches_agent_category(&AgentType::BrowserExpert, tool_name) &&
-                !Self::matches_agent_category(&AgentType::CodingExpert, tool_name) &&
-                !Self::matches_agent_category(&AgentType::DesktopExpert, tool_name)
-            }
-            AgentType::Orchestrator => false, // Orchestrator doesn't get action tools directly
+            AgentType::Orchestrator => crate::agent::tools::tool_mapping::AgentType::Orchestrator,
+            AgentType::BrowserExpert => crate::agent::tools::tool_mapping::AgentType::BrowserExpert,
+            AgentType::CodingExpert => crate::agent::tools::tool_mapping::AgentType::CodingExpert,
+            AgentType::DesktopExpert => crate::agent::tools::tool_mapping::AgentType::DesktopExpert,
+            AgentType::GeneralExpert => crate::agent::tools::tool_mapping::AgentType::GeneralExpert,
+        }
+    }
+
+    // Helper to convert from mapping service AgentType
+    fn convert_from_mapping_agent_type(agent_type: crate::agent::tools::tool_mapping::AgentType) -> AgentType {
+        match agent_type {
+            crate::agent::tools::tool_mapping::AgentType::Orchestrator => AgentType::Orchestrator,
+            crate::agent::tools::tool_mapping::AgentType::BrowserExpert => AgentType::BrowserExpert,
+            crate::agent::tools::tool_mapping::AgentType::CodingExpert => AgentType::CodingExpert,
+            crate::agent::tools::tool_mapping::AgentType::DesktopExpert => AgentType::DesktopExpert,
+            crate::agent::tools::tool_mapping::AgentType::GeneralExpert => AgentType::GeneralExpert,
         }
     }
 
     pub async fn decide_expert(&self, messages: &[Message]) -> Result<AgentType, AgentError> {
         debug!("Multi-agent orchestrator deciding which expert to use");
 
-        // For now, use a simple heuristic-based approach
-        // In the future, we can use the orchestrator brain for more sophisticated routing
+        // Use ToolMappingService for intelligent routing instead of heuristics
         self.analyze_request_for_routing(messages).await
     }
 
     async fn analyze_request_for_routing(&self, messages: &[Message]) -> Result<AgentType, AgentError> {
         if let Some(last_message) = messages.last() {
-            let content = last_message.content.to_lowercase();
-
-            // Browser-related keywords
-            if content.contains("browse") || content.contains("website") || content.contains("url") ||
-               content.contains("navigate") || content.contains("web") || content.contains("click") ||
-               content.contains("form") || content.contains("search online") {
-                return Ok(AgentType::BrowserExpert);
-            }
-
-            // Coding-related keywords
-            if content.contains("code") || content.contains("file") || content.contains("program") ||
-               content.contains("script") || content.contains("terminal") || content.contains("command") ||
-               content.contains("debug") || content.contains("compile") || content.contains("git") ||
-               content.contains("repository") || content.contains("function") || content.contains("variable") {
-                return Ok(AgentType::CodingExpert);
-            }
-
-            // Desktop automation keywords
-            if content.contains("open app") || content.contains("application") || content.contains("desktop") ||
-               content.contains("window") || content.contains("screenshot") || content.contains("click on") ||
-               content.contains("type in") || content.contains("shortcut") {
-                return Ok(AgentType::DesktopExpert);
-            }
+            // Use ToolMappingService to analyze user intent instead of keyword matching
+            let mapping_agent = ToolMappingService::analyze_user_intent(&last_message.content);
+            return Ok(Self::convert_from_mapping_agent_type(mapping_agent));
         }
 
-        // Default to general expert for questions, research, etc.
+        // Default to general expert
         Ok(AgentType::GeneralExpert)
     }
 
@@ -322,15 +269,12 @@ impl MultiAgentOrchestrator {
         expert_type: &AgentType,
         available_tools: &[ToolDefinition],
     ) -> Vec<ToolDefinition> {
-        let patterns = expert_type.get_tools_pattern();
+        // Use ToolMappingService instead of pattern matching
+        let tool_names: Vec<String> = available_tools.iter().map(|t| t.name.clone()).collect();
+        let matching_tool_names = ToolMappingService::get_tools_for_agent(&tool_names, &Self::convert_agent_type(expert_type));
 
         available_tools.iter()
-            .filter(|tool| {
-                patterns.iter().any(|pattern| {
-                    tool.name.contains(pattern) ||
-                    tool.description.to_lowercase().contains(&pattern.to_lowercase())
-                }) || Self::matches_agent_category(expert_type, &tool.name)
-            })
+            .filter(|tool| matching_tool_names.contains(&tool.name))
             .cloned()
             .collect()
     }
