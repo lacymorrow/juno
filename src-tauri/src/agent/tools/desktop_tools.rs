@@ -27,9 +27,12 @@ use crate::commands;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use tauri::{State, Manager};
 use serde_json::{Value, json};
-use tracing::info;
+use tracing::{info, warn};
 use crate::commands::window; // Add window for scroll command
 use std::sync::Arc;
+use std::time::Duration;
+use tokio;
+use tokio::sync::Mutex as TokioMutex;
 
 // Removed unused imports: capture_screenshot_command, dev_get_clipboard, dev_set_clipboard
 // use crate::{
@@ -1113,6 +1116,315 @@ pub async fn register_desktop_tools(
     };
     provider.register_async_tool(window_info_def, window_info_exec).await;
     info!("Registered tool: get_window_info");
+
+    // === COMPOUND TOOLS ===
+    // These tools combine multiple basic operations for common workflows
+
+    /// Compound tool for executing shell commands and capturing output.
+    /// Used by: Development workflows, system administration, automated testing
+    #[derive(serde::Deserialize)]
+    struct ExecuteCommandArgs {
+        command: String,
+        timeout_seconds: Option<u64>,
+        working_directory: Option<String>,
+    }
+
+    let execute_command_def = ToolDefinition {
+        name: "execute_command".to_string(),
+        description: "Execute a shell command and return the output, error, and exit code. Combines command execution with result capture.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string", 
+                    "description": "The shell command to execute"
+                },
+                "timeout_seconds": {
+                    "type": "number",
+                    "description": "Maximum time to wait for command completion (default: 30 seconds)"
+                },
+                "working_directory": {
+                    "type": "string",
+                    "description": "Directory to execute the command in (optional)"
+                }
+            },
+            "required": ["command"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let execute_command_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<ExecuteCommandArgs>(input)
+                .map_err(|e| format!("Failed to parse execute_command input: {}", e))?;
+
+            // Use existing dev_bash_command implementation
+            let result = commands::shell::dev_bash_command(
+                app.clone(),
+                state_manager,
+                args.command.clone(),
+                args.timeout_seconds,
+                None, // restart parameter
+            ).await;
+
+            match result {
+                Ok(output) => {
+                    info!("Command executed successfully: {}", args.command);
+                    Ok(json!({
+                        "success": true,
+                        "command": args.command,
+                        "output": output,
+                        "exit_code": 0
+                    }))
+                }
+                Err(e) => {
+                    warn!("Command execution failed: {}", e);
+                    Ok(json!({
+                        "success": false,
+                        "command": args.command,
+                        "error": e.to_string(),
+                        "exit_code": 1
+                    }))
+                }
+            }
+        }
+    };
+    provider.register_async_tool(execute_command_def, execute_command_exec).await;
+    info!("Registered compound tool: execute_command");
+
+    /// Compound tool for opening a file and typing content into it.
+    /// Used by: File editing workflows, content creation, automated document generation
+    #[derive(serde::Deserialize)]
+    struct OpenFileAndTypeArgs {
+        file_path: String,
+        content: String,
+        append: Option<bool>,
+    }
+
+    let open_file_and_type_def = ToolDefinition {
+        name: "open_file_and_type".to_string(),
+        description: "Open a file in the default editor and type content into it. Combines file opening with text input.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to open and edit"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Text content to type into the file"
+                },
+                "append": {
+                    "type": "boolean",
+                    "description": "Whether to append to the file (true) or overwrite (false, default)"
+                }
+            },
+            "required": ["file_path", "content"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let open_file_and_type_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<OpenFileAndTypeArgs>(input)
+                .map_err(|e| format!("Failed to parse open_file_and_type input: {}", e))?;
+
+            // Step 1: Open file with default application
+            let open_command = format!("open '{}'", args.file_path);
+            let open_result = commands::shell::dev_bash_command(
+                app.clone(),
+                state_manager,
+                open_command,
+                Some(10), // 10 second timeout for opening
+                None,
+            ).await;
+
+            if let Err(e) = open_result {
+                return Err(format!("Failed to open file '{}': {}", args.file_path, e));
+            }
+
+            // Step 2: Wait a moment for the application to launch
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
+            // Step 3: Type the content (get fresh state reference)
+            let state_manager = app.state::<AppState>();
+            match commands::keyboard::type_text(args.content.clone(), app.clone(), state_manager).await {
+                Ok(_) => {
+                    info!("Successfully opened file and typed content: {}", args.file_path);
+                    Ok(json!({
+                        "success": true,
+                        "file_path": args.file_path,
+                        "content_length": args.content.len(),
+                        "operation": if args.append.unwrap_or(false) { "append" } else { "write" }
+                    }))
+                }
+                Err(e) => {
+                    Err(format!("Failed to type content into file '{}': {}", args.file_path, e))
+                }
+            }
+        }
+    };
+    provider.register_async_tool(open_file_and_type_def, open_file_and_type_exec).await;
+    info!("Registered compound tool: open_file_and_type");
+
+    /// Compound tool for saving and closing the current file.
+    /// Used by: File editing workflows, automated saving, document completion
+    let save_and_close_file_def = ToolDefinition {
+        name: "save_and_close_file".to_string(),
+        description: "Save the current file and close the editor. Uses keyboard shortcuts Cmd+S and Cmd+W.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let save_and_close_file_exec = move |_input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            // Validate accessibility permission before keyboard operations
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "save_and_close_file").await {
+                return Err(e.to_string());
+            }
+
+            let state_manager = app.state::<AppState>();
+
+            // Step 1: Save file with Cmd+S
+            let save_result = crate::commands::dev::keyboard::dev_press_key(
+                "s".to_string(),
+                Some("cmd".to_string()),
+                app.clone(),
+                state_manager,
+            ).await;
+
+            if let Err(e) = save_result {
+                return Err(format!("Failed to save file: {}", e));
+            }
+
+            // Step 2: Wait a moment for save to complete
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            // Step 3: Close file with Cmd+W
+            let state_manager = app.state::<AppState>();
+            let close_result = crate::commands::dev::keyboard::dev_press_key(
+                "w".to_string(),
+                Some("cmd".to_string()),
+                app.clone(),
+                state_manager,
+            ).await;
+
+            if let Err(e) = close_result {
+                warn!("Failed to close file: {}", e);
+                return Err(format!("Failed to close file: {}", e));
+            }
+
+            Ok(json!({
+                "success": true,
+                "message": "File saved and closed successfully"
+            }))
+        }
+    };
+    provider.register_async_tool(save_and_close_file_def, save_and_close_file_exec).await;
+    info!("Registered compound tool: save_and_close_file");
+
+    /// Compound tool for copying text to clipboard and pasting at cursor.
+    /// Used by: Text manipulation workflows, content transfer, automated copy-paste operations
+    #[derive(serde::Deserialize)]
+    struct CopyAndPasteArgs {
+        text: String,
+        clear_selection: Option<bool>,
+    }
+
+    let copy_to_clipboard_and_paste_def = ToolDefinition {
+        name: "copy_to_clipboard_and_paste".to_string(),
+        description: "Copy text to the clipboard and immediately paste it at the current cursor position.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Text to copy to clipboard and paste"
+                },
+                "clear_selection": {
+                    "type": "boolean",
+                    "description": "Whether to clear current selection before pasting (default: false)"
+                }
+            },
+            "required": ["text"]
+        }),
+    };
+
+    let app_handle_clone = app_handle.clone();
+    let copy_to_clipboard_and_paste_exec = move |input: Value| {
+        let app = app_handle_clone.clone();
+        async move {
+            // Validate accessibility permission before keyboard operations
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "copy_to_clipboard_and_paste").await {
+                return Err(e.to_string());
+            }
+
+            let state_manager = app.state::<AppState>();
+            let args = serde_json::from_value::<CopyAndPasteArgs>(input)
+                .map_err(|e| format!("Failed to parse copy_and_paste input: {}", e))?;
+
+            // Step 1: Set clipboard content
+            let state_manager = app.state::<AppState>();
+            let clipboard_result = commands::core::dev_set_clipboard(args.text.clone(), state_manager).await;
+            
+            if let Err(e) = clipboard_result {
+                return Err(format!("Failed to set clipboard: {}", e));
+            }
+
+            // Step 2: Clear selection if requested
+            if args.clear_selection.unwrap_or(false) {
+                // Press Escape to clear selection
+                let state_manager = app.state::<AppState>();
+                let _ = crate::commands::dev::keyboard::dev_press_key(
+                    "Escape".to_string(),
+                    None,
+                    app.clone(),
+                    state_manager,
+                ).await;
+                
+                // Brief pause
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+
+            // Step 3: Paste with Cmd+V
+            let state_manager = app.state::<AppState>();
+            let paste_result = crate::commands::dev::keyboard::dev_press_key(
+                "v".to_string(),
+                Some("cmd".to_string()),
+                app.clone(),
+                state_manager,
+            ).await;
+
+            match paste_result {
+                Ok(_) => {
+                    info!("Successfully copied to clipboard and pasted text ({} chars)", args.text.len());
+                    Ok(json!({
+                        "success": true,
+                        "text_length": args.text.len(),
+                        "operations": ["copy_to_clipboard", "paste"],
+                        "cleared_selection": args.clear_selection.unwrap_or(false)
+                    }))
+                }
+                Err(e) => {
+                    Err(format!("Failed to paste from clipboard: {}", e))
+                }
+            }
+        }
+    };
+    provider.register_async_tool(copy_to_clipboard_and_paste_def, copy_to_clipboard_and_paste_exec).await;
+    info!("Registered compound tool: copy_to_clipboard_and_paste");
+
+    info!("All compound tools registered successfully.");
 
     info!("Desktop tool registration completed.");
 }
