@@ -146,6 +146,7 @@ macro_rules! generate_invoke_handler {
             request_screen_recording_permission,
             request_microphone_permission,
             request_input_monitoring_permission,
+            test_microphone_functionality,
             open_system_preferences,
             request_accessibility_permission_with_auto_redirect,
             open_system_settings_enhanced,

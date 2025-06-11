@@ -737,6 +737,7 @@ pub fn run() {
             request_microphone_permission,
             request_screen_recording_permission,
             request_input_monitoring_permission,
+            test_microphone_functionality,
             open_system_preferences,
             start_permissions_monitoring,
             stop_permissions_monitoring,
