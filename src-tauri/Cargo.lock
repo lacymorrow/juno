@@ -3040,7 +3040,7 @@ dependencies = [
 
 [[package]]
 name = "juno"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
