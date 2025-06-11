@@ -140,6 +140,8 @@ impl From<OrchestratorConfigDTO> for OrchestratorConfig {
             enable_task_splitting: dto.enable_task_splitting,
             enable_fallback_agents: dto.enable_fallback_agents,
             min_confidence_threshold: dto.min_confidence_threshold,
+            max_queue_size: dto.task_queue_size,
+            queue_processing_interval: std::time::Duration::from_millis(500), // Default 500ms
         }
     }
 }
@@ -342,7 +344,7 @@ pub async fn get_orchestrator_status() -> Result<OrchestratorStatusReport, Strin
         },
         agent_statuses,
         active_task_count: active_tasks.len(),
-        queued_task_count: 0, // TODO: Implement task queue
+        queued_task_count: orchestrator_guard.get_queued_task_count().await,
         failed_task_count: failed_tasks,
         mcp_servers_connected,
         mcp_tools_available,
@@ -442,9 +444,33 @@ pub async fn get_agent_capabilities() -> Result<std::collections::HashMap<String
 /// Cancel a specific active task
 #[tauri::command]
 pub async fn cancel_task(task_id: String) -> Result<bool, String> {
-    // TODO: Implement task cancellation in orchestrator
-    tracing::warn!("Task cancellation not yet implemented for task: {}", task_id);
-    Ok(false)
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    match orchestrator_guard.cancel_task(&task_id, "User requested cancellation").await {
+        Ok(cancelled) => {
+            if cancelled {
+                tracing::info!("Successfully cancelled task: {}", task_id);
+                Ok(true)
+            } else {
+                tracing::warn!("Task {} was not found in queue or active tasks", task_id);
+                Ok(false)
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to cancel task {}: {}", task_id, e);
+            Err(format!("Failed to cancel task: {}", e))
+        }
+    }
+}
+
+/// Get detailed queue status information
+#[tauri::command]
+pub async fn get_queue_status() -> Result<serde_json::Value, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    Ok(orchestrator_guard.get_queue_status().await)
 }
 
 // MCP integration commands are handled by commands/mcp.rs
