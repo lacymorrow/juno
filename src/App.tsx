@@ -311,6 +311,21 @@ function App() {
         await notificationService.initialize();
         console.log("Notification service initialized");
 
+        // Check if an agent is currently executing first (highest priority)
+        const agentProgress = await invoke<{
+          is_executing: boolean;
+          execution_id?: string;
+        }>("get_agent_execution_progress");
+
+        if (agentProgress.is_executing) {
+          // Agent is running - skip onboarding and go directly to chat
+          console.log("Agent execution detected - skipping onboarding and going to chat");
+          setOnboardingChecked(true);
+          setPermissionsChecked(true);
+          setCurrentView("chat");
+          return;
+        }
+
         // First check permissions
         const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
@@ -556,6 +571,23 @@ function App() {
       localStorage.setItem("juno-onboarding-completed", "true");
       setShowOnboarding(false);
 
+      // Check if an agent is already executing
+      try {
+        const agentProgress = await invoke<{
+          is_executing: boolean;
+          execution_id?: string;
+        }>("get_agent_execution_progress");
+
+        if (agentProgress.is_executing) {
+          // Agent is already running - just switch to chat view
+          console.log("Agent already executing - switching to chat view");
+          setCurrentView("chat");
+          return;
+        }
+      } catch (error) {
+        console.debug("Error checking agent execution state during onboarding completion:", error);
+      }
+
       // Get the stored first prompt if any
       try {
         const firstPrompt = await invoke<string>("get_first_onboarding_prompt");
@@ -595,6 +627,46 @@ function App() {
       unlisten.then((unlistenFn) => unlistenFn());
     };
   }, []);
+
+  // Monitor agent execution state and automatically skip onboarding if agent starts
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    const checkAgentExecution = async () => {
+      try {
+        const agentProgress = await invoke<{
+          is_executing: boolean;
+          execution_id?: string;
+        }>("get_agent_execution_progress");
+
+        // If agent starts executing while in onboarding, switch to chat
+        if (agentProgress.is_executing && currentView === "onboarding") {
+          console.log("Agent execution detected during onboarding - switching to chat");
+          // Mark onboarding as completed to prevent showing it again
+          localStorage.setItem("juno-onboarding-completed", "true");
+          setShowOnboarding(false);
+          setCurrentView("chat");
+        }
+      } catch (error) {
+        // Silently handle errors - this is just a monitoring function
+        console.debug("Error checking agent execution state:", error);
+      }
+    };
+
+    // Only monitor when in onboarding view
+    if (currentView === "onboarding") {
+      // Check immediately
+      checkAgentExecution();
+      // Then check every 500ms for responsive detection
+      intervalId = setInterval(checkAgentExecution, 500);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [currentView]);
 
   // Listen for devtools menu requests from tray menu
   useEffect(() => {
