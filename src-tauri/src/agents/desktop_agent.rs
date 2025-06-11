@@ -93,6 +93,7 @@ impl DesktopAgent {
 
                 let result = commands::dev::dev_type_text(
                     text.to_string(),
+                    self.app_handle.clone(),
                     state
                 ).await;
 
@@ -112,6 +113,7 @@ impl DesktopAgent {
                 let result = commands::dev::dev_press_key(
                     key.to_string(),
                     modifier,
+                    self.app_handle.clone(),
                     state
                 ).await;
 

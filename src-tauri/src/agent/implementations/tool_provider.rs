@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Emitter};
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -369,8 +369,24 @@ impl ToolProvider for LocalToolProvider {
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         let tool_name = &tool_call.name;
 
-        // Emit tool call request event if app handle is available
+        // Generate unique command ID for tracking
+        let command_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Record start time for duration calculation
+        let start_time = std::time::Instant::now();
+
+        // Emit command execution start event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
+            if let Err(e) = app_handle.emit("command-execution-start", serde_json::json!({
+                "command": tool_name,
+                "id": command_id
+            })) {
+                error!("Failed to emit command-execution-start event: {}", e);
+            }
+
             tool_logger::log_tool_call_request(
                 app_handle,
                 tool_name,
@@ -423,6 +439,9 @@ impl ToolProvider for LocalToolProvider {
         })
         .await;
 
+        // Calculate execution duration
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
         let result = match execution_result {
             Ok(result) => result,
             Err(_) => {
@@ -437,8 +456,22 @@ impl ToolProvider for LocalToolProvider {
             }
         };
 
-        // Emit tool call response event if app handle is available
+        // Emit command execution end event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
+            let (success, error_msg) = match &result {
+                Ok(_) => (true, None),
+                Err(e) => (false, Some(e.to_string())),
+            };
+
+            if let Err(e) = app_handle.emit("command-execution-end", serde_json::json!({
+                "id": command_id,
+                "success": success,
+                "duration": duration_ms,
+                "error": error_msg
+            })) {
+                error!("Failed to emit command-execution-end event: {}", e);
+            }
+
             match &result {
                 Ok(tool_result) => {
                     tool_logger::log_tool_call_result(
