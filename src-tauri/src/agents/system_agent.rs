@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use tauri::Manager;
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolCategory};
 use crate::state::AppState;
 use crate::commands;
 use super::base_agent::{
@@ -41,21 +42,22 @@ impl SystemAgent {
         })
     }
 
-    /// Check if a tool name is related to system operations
-    fn is_system_tool(tool_name: &str) -> bool {
-        tool_name.starts_with("system_") ||
-        tool_name.starts_with("dev_bash") ||
-        tool_name.starts_with("dev_list") ||
-        tool_name.starts_with("dev_get_file") ||
-        tool_name.starts_with("dev_set_file") ||
-        tool_name.contains("bash") ||
-        tool_name.contains("shell") ||
-        tool_name.contains("command") ||
-        tool_name.contains("file") ||
-        tool_name.contains("directory") ||
-        tool_name.contains("process") ||
-        tool_name.contains("exec") ||
-        tool_name.contains("run")
+    /// Check if a tool belongs to system-relevant categories using proper tool configuration
+    async fn is_system_tool(&self, tool_name: &str) -> bool {
+        let state = self.app_handle.state::<AppState>();
+        let config_manager = state.get_tool_config_manager().await;
+        let config_guard = config_manager.lock().await;
+        
+        if let Some(tool_config) = config_guard.get_tool_config(tool_name) {
+            matches!(
+                tool_config.category, 
+                ToolCategory::Basic | 
+                ToolCategory::AnthropicComputerUse |
+                ToolCategory::Desktop
+            )
+        } else {
+            false
+        }
     }
 
     /// Execute a system-related tool call
@@ -279,7 +281,7 @@ impl SpecializedAgent for SystemAgent {
     async fn can_handle_task(&self, task: &Task) -> bool {
         // Check if any tool calls are system-related
         for tool_call in &task.tool_calls {
-            if Self::is_system_tool(&tool_call.name) {
+            if self.is_system_tool(&tool_call.name).await {
                 return true;
             }
         }
