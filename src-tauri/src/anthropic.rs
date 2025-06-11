@@ -248,7 +248,7 @@ pub async fn submit_query(
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
                     crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
-                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id);
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
             };
@@ -289,7 +289,7 @@ pub async fn submit_query(
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
                     crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
-                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id);
+                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
             };
