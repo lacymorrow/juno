@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use tauri::Manager;
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolMappingService, ToolCategory};
 use crate::state::AppState;
 use crate::commands;
 use super::base_agent::{
@@ -39,23 +40,6 @@ impl SystemAgent {
             }),
             app_handle,
         })
-    }
-
-    /// Check if a tool name is related to system operations
-    fn is_system_tool(tool_name: &str) -> bool {
-        tool_name.starts_with("system_") ||
-        tool_name.starts_with("dev_bash") ||
-        tool_name.starts_with("dev_list") ||
-        tool_name.starts_with("dev_get_file") ||
-        tool_name.starts_with("dev_set_file") ||
-        tool_name.contains("bash") ||
-        tool_name.contains("shell") ||
-        tool_name.contains("command") ||
-        tool_name.contains("file") ||
-        tool_name.contains("directory") ||
-        tool_name.contains("process") ||
-        tool_name.contains("exec") ||
-        tool_name.contains("run")
     }
 
     /// Execute a system-related tool call
@@ -277,25 +261,16 @@ impl SpecializedAgent for SystemAgent {
     }
 
     async fn can_handle_task(&self, task: &Task) -> bool {
-        // Check if any tool calls are system-related
+        // Use ToolMappingService instead of string matching
         for tool_call in &task.tool_calls {
-            if Self::is_system_tool(&tool_call.name) {
+            if ToolMappingService::is_tool_in_category(&tool_call.name, &ToolCategory::Basic) {
                 return true;
             }
         }
 
-        // Check if task description mentions system operations
-        let description_lower = task.description.to_lowercase();
-        description_lower.contains("system") ||
-        description_lower.contains("file") ||
-        description_lower.contains("command") ||
-        description_lower.contains("shell") ||
-        description_lower.contains("bash") ||
-        description_lower.contains("directory") ||
-        description_lower.contains("process") ||
-        description_lower.contains("execute") ||
-        description_lower.contains("run") ||
-        description_lower.contains("script")
+        // Use ToolMappingService for task description analysis
+        let mapping_agent_type = ToolMappingService::analyze_user_intent(&task.description);
+        matches!(mapping_agent_type, crate::agent::tools::tool_mapping::AgentType::CodingExpert)
     }
 
     async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {

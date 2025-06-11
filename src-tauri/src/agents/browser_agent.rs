@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use tauri::Manager;
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolMappingService, ToolCategory};
 use crate::state::AppState;
 use super::base_agent::{
     SpecializedAgent, AgentType, Task, TaskResult, AgentCapability, AgentStatus
@@ -40,21 +41,7 @@ impl BrowserAgent {
         })
     }
 
-    /// Check if a tool name is related to browser operations
-    fn is_browser_tool(tool_name: &str) -> bool {
-        tool_name.starts_with("browser_") ||
-        tool_name.contains("navigate") ||
-        tool_name.contains("web") ||
-        tool_name.contains("url") ||
-        tool_name.contains("page") ||
-        tool_name.contains("element") ||
-        tool_name.contains("click") ||
-        tool_name.contains("type") ||
-        tool_name.contains("scroll") ||
-        tool_name.contains("screenshot")
-    }
-
-        /// Convert structs::ToolResult to core::ToolResult
+    /// Convert structs::ToolResult to core::ToolResult
     fn convert_tool_result(&self, structs_result: crate::agent::structs::ToolResult) -> ToolResult {
         ToolResult {
             call_id: structs_result.call_id,
@@ -172,21 +159,16 @@ impl SpecializedAgent for BrowserAgent {
     }
 
     async fn can_handle_task(&self, task: &Task) -> bool {
-        // Check if any tool calls are browser-related
+        // Use ToolMappingService instead of string matching
         for tool_call in &task.tool_calls {
-            if Self::is_browser_tool(&tool_call.name) {
+            if ToolMappingService::is_tool_in_category(&tool_call.name, &ToolCategory::Browser) {
                 return true;
             }
         }
 
-        // Check if task description mentions browser operations
-        let description_lower = task.description.to_lowercase();
-        description_lower.contains("browser") ||
-        description_lower.contains("web") ||
-        description_lower.contains("navigate") ||
-        description_lower.contains("website") ||
-        description_lower.contains("page") ||
-        description_lower.contains("url")
+        // Use ToolMappingService for task description analysis
+        let mapping_agent_type = ToolMappingService::analyze_user_intent(&task.description);
+        matches!(mapping_agent_type, crate::agent::tools::tool_mapping::AgentType::BrowserExpert)
     }
 
     async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {
