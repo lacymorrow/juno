@@ -625,32 +625,32 @@ impl ToolMetadata {
             ToolCategory::AnthropicComputerUse => {
                 match config.name.as_str() {
                     "screenshot" => ("📸", "Taking screenshot", "standard", Some("instant")),
-                    "click" => ("👆", "Clicking", "minimal", Some("instant")),
+                    "click" => ("👆", "Clicking", "silent", Some("instant")),
                     "type" => ("⌨️", "Typing", "minimal", Some("short")),
-                    "key" => ("🔤", "Pressing keys", "standard", Some("instant")), // Changed to standard for key details
-                    "scroll" => ("📜", "Scrolling", "minimal", Some("instant")),
+                    "key" => ("🔤", "Pressing keys", "minimal", Some("instant")),
+                    "scroll" => ("📜", "Scrolling", "silent", Some("instant")),
                     "drag" => ("🖱️", "Dragging", "minimal", Some("short")),
                     "move" => ("↗️", "Moving cursor", "silent", Some("instant")),
-                    _ => ("🖥️", "Interacting with screen", "standard", Some("short")),
+                    _ => ("🖥️", "Interacting with screen", "minimal", Some("short")),
                 }
             }
-            ToolCategory::Desktop => ("🖥️", "Controlling desktop", "standard", Some("short")),
-            ToolCategory::Browser => ("🌐", "Browser action", "standard", Some("medium")),
+            ToolCategory::Desktop => ("🖥️", "Controlling desktop", "minimal", Some("short")),
+            ToolCategory::Browser => ("🌐", "Browser action", "minimal", Some("medium")),
             ToolCategory::Timer => ("⏰", "Managing timer", "standard", Some("instant")),
             ToolCategory::Basic => {
                 if config.name.contains("file") {
-                    ("📁", "File operation", "standard", Some("short"))
+                    ("📁", "File operation", "minimal", Some("short"))
                 } else if config.name.contains("command")
                     || config.name.contains("shell")
                     || config.name.contains("bash")
                     || config.name.contains("terminal")
                 {
-                    ("⚡", "Running command", "detailed", Some("medium")) // Changed to detailed for command details
+                    ("⚡", "Running command", "standard", Some("medium"))
                 } else {
-                    ("🔧", "Basic operation", "standard", Some("short"))
+                    ("🔧", "Basic operation", "minimal", Some("short"))
                 }
             }
-            ToolCategory::MCP => ("🔌", "External tool", "standard", Some("medium")),
+            ToolCategory::MCP => ("🔌", "External tool", "minimal", Some("medium")),
         };
 
         Self {
@@ -682,20 +682,20 @@ impl ToolMetadata {
                             Some("instant"),
                         ),
                         name if name.contains("click") => {
-                            ("👆", "Clicking", "Mouse", "minimal", Some("instant"))
+                            ("👆", "Clicking", "Mouse", "silent", Some("instant"))
                         }
                         name if name.contains("type") => {
-                            ("⌨️", "Typing", "Keyboard", "standard", Some("short"))
+                            ("⌨️", "Typing", "Keyboard", "minimal", Some("short"))
                         }
                         name if name.contains("key") => (
                             "🔤",
                             "Pressing keys",
                             "Keyboard",
-                            "standard",
+                            "minimal",
                             Some("instant"),
                         ),
                         name if name.contains("scroll") => {
-                            ("📜", "Scrolling", "Mouse", "minimal", Some("instant"))
+                            ("📜", "Scrolling", "Mouse", "silent", Some("instant"))
                         }
                         name if name.contains("drag") => {
                             ("🖱️", "Dragging", "Mouse", "minimal", Some("short"))
@@ -707,7 +707,7 @@ impl ToolMetadata {
                             "🖥️",
                             "Screen interaction",
                             "Computer Use",
-                            "standard",
+                            "minimal",
                             Some("short"),
                         ),
                     },
@@ -715,34 +715,34 @@ impl ToolMetadata {
                         "🌐",
                         "Browser action",
                         "Browser",
-                        "standard",
+                        "minimal",
                         Some("medium"),
                     ),
                     ToolCategory::Desktop => match tool_name {
                         name if name.contains("click") => {
-                            ("👆", "Clicking", "Mouse", "minimal", Some("instant"))
+                            ("👆", "Clicking", "Mouse", "silent", Some("instant"))
                         }
                         name if name.contains("type") => {
-                            ("⌨️", "Typing", "Keyboard", "standard", Some("short"))
+                            ("⌨️", "Typing", "Keyboard", "minimal", Some("short"))
                         }
                         name if name.contains("application") => {
-                            ("🖥️", "App control", "Desktop", "standard", Some("short"))
+                            ("🖥️", "App control", "Desktop", "minimal", Some("short"))
                         }
                         name if name.contains("window") => {
-                            ("🪟", "Window control", "Desktop", "standard", Some("short"))
+                            ("🪟", "Window control", "Desktop", "minimal", Some("short"))
                         }
                         name if name.contains("clipboard") => (
                             "📋",
                             "Clipboard operation",
                             "Desktop",
-                            "standard",
+                            "minimal",
                             Some("instant"),
                         ),
-                        _ => ("🖥️", "Desktop action", "Desktop", "standard", Some("short")),
+                        _ => ("🖥️", "Desktop action", "Desktop", "minimal", Some("short")),
                     },
                     ToolCategory::Basic => match tool_name {
                         name if name.contains("file") => {
-                            ("📁", "File operation", "File", "standard", Some("short"))
+                            ("📁", "File operation", "File", "minimal", Some("short"))
                         }
                         name if name.contains("command")
                             || name.contains("shell")
@@ -753,16 +753,16 @@ impl ToolMetadata {
                                 "⚡",
                                 "Running command",
                                 "Command",
-                                "detailed",
+                                "standard",
                                 Some("medium"),
                             )
                         }
-                        _ => ("🔧", "Basic operation", "Basic", "standard", Some("short")),
+                        _ => ("🔧", "Basic operation", "Basic", "minimal", Some("short")),
                     },
                     ToolCategory::Timer => {
                         ("⏰", "Timer action", "Timer", "standard", Some("instant"))
                     }
-                    ToolCategory::MCP => ("🔌", "External tool", "MCP", "standard", Some("medium")),
+                    ToolCategory::MCP => ("🔌", "External tool", "MCP", "minimal", Some("medium")),
                 };
 
             return Self {
@@ -790,7 +790,7 @@ impl ToolMetadata {
 
             // Mouse and click actions - minimal notifications
             name if name.contains("click") => {
-                ("👆", "Clicking", "Mouse", "minimal", Some("instant"))
+                ("👆", "Clicking", "Mouse", "silent", Some("instant"))
             }
             name if name.contains("drag") => ("🖱️", "Dragging", "Mouse", "minimal", Some("short")),
             name if name.contains("move") && name.contains("mouse") => {
@@ -799,25 +799,25 @@ impl ToolMetadata {
 
             // Keyboard actions - standard notifications for better visibility of key details
             name if name.contains("type") => {
-                ("⌨️", "Typing", "Keyboard", "standard", Some("short"))
-            } // Changed to standard
+                ("⌨️", "Typing", "Keyboard", "minimal", Some("short"))
+            }
             name if name.contains("key") || name.contains("press") => (
                 "🔤",
                 "Pressing keys",
                 "Keyboard",
-                "standard",
+                "minimal",
                 Some("instant"),
-            ), // Changed to standard
+            ),
 
             // File operations - standard notifications
             name if name.contains("file") && name.contains("read") => {
-                ("📖", "Reading file", "File", "standard", Some("short"))
+                ("📖", "Reading file", "File", "minimal", Some("short"))
             }
             name if name.contains("file") && (name.contains("write") || name.contains("save")) => {
-                ("💾", "Writing file", "File", "standard", Some("short"))
+                ("💾", "Writing file", "File", "minimal", Some("short"))
             }
             name if name.contains("file") => {
-                ("📁", "File operation", "File", "standard", Some("short"))
+                ("📁", "File operation", "File", "minimal", Some("short"))
             }
 
             // Command execution - detailed notifications to show full commands
@@ -832,7 +832,7 @@ impl ToolMetadata {
                     "⚡",
                     "Running command",
                     "Command",
-                    "detailed",
+                    "standard",
                     Some("medium"),
                 )
             }
@@ -842,13 +842,13 @@ impl ToolMetadata {
                 "🌐",
                 "Browser action",
                 "Browser",
-                "standard",
+                "minimal",
                 Some("medium"),
             ),
 
             // Desktop automation
             name if name.contains("desktop") || name.contains("application") => {
-                ("🖥️", "Desktop action", "Desktop", "standard", Some("short"))
+                ("🖥️", "Desktop action", "Desktop", "minimal", Some("short"))
             }
 
             // Timer and scheduling
@@ -858,11 +858,11 @@ impl ToolMetadata {
 
             // MCP tools
             name if name.contains("mcp") => {
-                ("🔌", "External tool", "MCP", "standard", Some("medium"))
+                ("🔌", "External tool", "MCP", "minimal", Some("medium"))
             }
 
             // Default fallback
-            _ => ("🔧", "Tool execution", "General", "standard", Some("short")),
+            _ => ("🔧", "Tool execution", "General", "minimal", Some("short")),
         };
 
         Self {
