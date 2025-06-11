@@ -7,6 +7,7 @@ use tracing::{info, warn, error, debug};
 use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
 use serde_json;
+use uuid;
 
 use super::types::{
     CloudError, CloudCommand, CloudCommandType, DeviceResponse, ResponseStatus, ResponseData,
@@ -228,14 +229,106 @@ impl CloudCommandProcessor {
         let audio_base64 = command.payload.audio_base64.as_ref()
             .ok_or_else(|| CloudError::ValidationFailed("Missing audio data".to_string()))?;
 
-        info!("Executing voice query");
+        info!("Executing voice query with {} bytes of audio data", audio_base64.len());
 
         // Decode audio and process
         let audio_data = general_purpose::STANDARD.decode(audio_base64)
             .map_err(|e| CloudError::ValidationFailed(format!("Invalid audio data: {}", e)))?;
 
-        // TODO: Implement voice transcription and processing
-        Ok("Voice query processed".to_string())
+        // Validate audio data size (prevent extremely large audio files)
+        if audio_data.len() > 50 * 1024 * 1024 { // 50MB limit
+            return Err(CloudError::ValidationFailed("Audio data too large".to_string()));
+        }
+
+        info!("Decoded {} bytes of audio data for transcription", audio_data.len());
+
+        // Create temporary file for audio processing
+        let temp_dir = std::env::temp_dir();
+        let temp_file_name = format!("cloud_voice_query_{}.wav", uuid::Uuid::new_v4());
+        let temp_audio_path = temp_dir.join(temp_file_name);
+
+        // Write raw audio data to temporary WAV file
+        // Note: We assume the audio data is already in WAV format
+        // In production, you might want to add format detection and conversion
+        std::fs::write(&temp_audio_path, &audio_data)
+            .map_err(|e| CloudError::ExecutionFailed(format!("Failed to write temp audio file: {}", e)))?;
+
+        let temp_audio_path_str = temp_audio_path.to_string_lossy().to_string();
+        info!("Created temporary audio file: {}", temp_audio_path_str);
+
+        // Attempt transcription using the voice transcription plugin
+        let transcription_result = match self.transcribe_audio_file(&temp_audio_path_str).await {
+            Ok(text) => {
+                info!("Voice transcription successful: '{}'", text);
+                text
+            }
+            Err(e) => {
+                error!("Voice transcription failed: {}", e);
+                // Clean up temp file
+                let _ = std::fs::remove_file(&temp_audio_path);
+                return Err(CloudError::ExecutionFailed(format!("Voice transcription failed: {}", e)));
+            }
+        };
+
+        // Clean up temporary file
+        if let Err(e) = std::fs::remove_file(&temp_audio_path) {
+            warn!("Failed to clean up temporary audio file: {}", e);
+        }
+
+        // If transcription is empty or just whitespace, return an error
+        let trimmed_transcription = transcription_result.trim();
+        if trimmed_transcription.is_empty() {
+            return Err(CloudError::ExecutionFailed("No speech detected in audio".to_string()));
+        }
+
+        info!("Submitting transcribed query to orchestrator: '{}'", trimmed_transcription);
+
+        // Submit the transcribed text to the orchestrator as a text query
+        let orchestrator_response = self.submit_query_to_orchestrator(trimmed_transcription, "cloud_voice").await?;
+
+        Ok(format!("Voice query transcribed: '{}' -> {}", trimmed_transcription, orchestrator_response))
+    }
+
+    /// Transcribe audio file using the voice transcription infrastructure
+    async fn transcribe_audio_file(&self, audio_path: &str) -> Result<String, CloudError> {
+        info!("Attempting to transcribe audio file: {}", audio_path);
+
+        // Check if the voice transcription plugin is available
+        if let Some(voice_controller_state) = self.app_handle.try_state::<
+            std::sync::Arc<tokio::sync::Mutex<tauri_plugin_voice_transcription::VoiceController>>
+        >() {
+            let voice_controller = voice_controller_state.lock().await;
+            
+            match voice_controller.transcribe_audio_file(audio_path) {
+                Ok(transcription) => {
+                    info!("Audio file transcription successful: '{}'", transcription);
+                    Ok(transcription)
+                }
+                Err(e) => {
+                    error!("Audio file transcription failed: {}", e);
+                    Err(CloudError::ExecutionFailed(format!("Transcription error: {}", e)))
+                }
+            }
+        } else {
+            // Fallback: Try to use the voice transcription plugin commands directly
+            info!("Voice controller not available in app state, trying plugin command");
+            
+            match tauri_plugin_voice_transcription::commands::transcribe_file(
+                audio_path.to_string(),
+                self.app_handle.clone(),
+                // We need to get the controller state from the plugin
+                self.app_handle.state::<std::sync::Arc<std::sync::Mutex<tauri_plugin_voice_transcription::VoiceController>>>()
+            ).await {
+                Ok(transcription) => {
+                    info!("Plugin transcription successful: '{}'", transcription);
+                    Ok(transcription)
+                }
+                Err(e) => {
+                    error!("Plugin transcription failed: {}", e);
+                    Err(CloudError::ExecutionFailed(format!("Plugin transcription error: {}", e.to_string())))
+                }
+            }
+        }
     }
 
     /// Execute system command
