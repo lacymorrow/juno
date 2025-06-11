@@ -2060,6 +2060,7 @@ pub fn run() {
                                             // Then type the transcribed text immediately using the computer use tools
                                             match crate::commands::keyboard::global_type_text(
                                                 trimmed_text.to_string(),
+                                                app_handle_clone.clone(),
                                                 app_state.clone()
                                             ).await {
                                                 Ok(()) => {
