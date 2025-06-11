@@ -135,9 +135,26 @@ impl FloatingBarManager {
         }
 
         if is_focused {
-            // Don't automatically expand on focus - this can interfere with mouse clicks
-            // The user should explicitly click the bar to expand it
-            debug!("FloatingBarManager: Window gained focus, but not auto-expanding to prevent click interference");
+            // Automatically expand to input state when window gains focus (like clicking)
+            // Only allow expansion from default state when agent is not working
+            if self.current_state == BarState::Default && !self.is_agent_working {
+                debug!("FloatingBarManager: Window gained focus, expanding to input state");
+                
+                // Start expansion
+                self.set_state(BarState::Expanding).await;
+
+                // After animation, transition to input
+                let app_handle = self.app_handle.clone();
+                tokio::spawn(async move {
+                    sleep(Duration::from_millis(300)).await;
+                    if let Some(manager) = get_bar_manager(&app_handle).await {
+                        let mut manager = manager.lock().await;
+                        manager.set_state(BarState::Input).await;
+                    }
+                });
+            } else {
+                debug!("FloatingBarManager: Window gained focus, but not in default state or agent is working");
+            }
         } else {
             // When window loses focus, shrink if input is empty and agent is idle
             if self.current_state == BarState::Input && self.input_value.trim().is_empty() {
