@@ -1,14 +1,14 @@
 use crate::cli::Cli;
+use crate::state::AppState;
+use crate::tts;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use computer_use_ai_sdk::Desktop; // Import Desktop
+use std::fs;
 use std::io::Write;
 use std::process::Command;
-use std::fs;
-use tempfile::Builder as TempFileBuilder;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use tracing::{info, error, warn}; // Import tracing macros
-use crate::state::AppState;
 use tauri::{AppHandle, Manager};
-use crate::tts; // Add the TTS import
+use tempfile::Builder as TempFileBuilder;
+use tracing::{error, info, warn}; // Import tracing macros // Add the TTS import
 
 /// Configuration file name
 const CONFIG_FILE: &str = "config.json";
@@ -22,8 +22,14 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
 
     // --- TTS Test Handling ---
     if let Some(provider) = &cli.tts_provider {
-        let text = cli.tts_text.clone().unwrap_or_else(|| "This is a test of the text to speech system.".to_string());
-        println!("[CLI] Requesting TTS test for provider '{}' with text: '{}'", provider, text);
+        let text = cli
+            .tts_text
+            .clone()
+            .unwrap_or_else(|| "This is a test of the text to speech system.".to_string());
+        println!(
+            "[CLI] Requesting TTS test for provider '{}' with text: '{}'",
+            provider, text
+        );
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -60,7 +66,9 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
 
                                     match afplay_status {
                                         Ok(status) if status.success() => {
-                                            println!("[CLI Playback] Playback finished successfully.");
+                                            println!(
+                                                "[CLI Playback] Playback finished successfully."
+                                            );
                                         }
                                         Ok(status) => {
                                             error!("[CLI Playback Error] afplay exited with status: {}", status);
@@ -96,22 +104,33 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
     let mut test_result: Result<(), String> = Ok(());
 
     if cli.test_focused_element_ns {
-        #[cfg(target_os = "macos")] { 
+        #[cfg(target_os = "macos")]
+        {
             // utils::run_test_focused_element_ns() was removed - this CLI flag is no longer functional
-            warn!("test_focused_element_ns CLI flag is no longer functional"); 
-            test_result = Err("Function not available".to_string()); 
-            ran_test = true; 
+            warn!("test_focused_element_ns CLI flag is no longer functional");
+            test_result = Err("Function not available".to_string());
+            ran_test = true;
         }
-        #[cfg(not(target_os = "macos"))] { eprintln!("Error: --test-focused-element-ns is only supported on macOS."); test_result = Err("Unsupported platform".to_string()); ran_test = true; }
+        #[cfg(not(target_os = "macos"))]
+        {
+            eprintln!("Error: --test-focused-element-ns is only supported on macOS.");
+            test_result = Err("Unsupported platform".to_string());
+            ran_test = true;
+        }
     }
     if cli.check_accessibility {
-        #[cfg(target_os = "macos")] { 
+        #[cfg(target_os = "macos")]
+        {
             // utils::run_check_accessibility() was removed - this CLI flag is no longer functional
-            warn!("check_accessibility CLI flag is no longer functional"); 
-            test_result = Err("Function not available".to_string()); 
-            ran_test = true; 
+            warn!("check_accessibility CLI flag is no longer functional");
+            test_result = Err("Function not available".to_string());
+            ran_test = true;
         }
-        #[cfg(not(target_os = "macos"))] { println!("Warning: --check-accessibility is macOS-specific. Skipping check."); ran_test = true; /* Treat as success on other platforms for now */ }
+        #[cfg(not(target_os = "macos"))]
+        {
+            println!("Warning: --check-accessibility is macOS-specific. Skipping check.");
+            ran_test = true; /* Treat as success on other platforms for now */
+        }
     }
 
     if ran_test {
@@ -121,13 +140,12 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
                 std::process::exit(0);
             }
             Err(e) => {
-                 error!("[CLI Test Error] {}", e);
+                error!("[CLI Test Error] {}", e);
                 std::process::exit(1);
             }
         }
         // return true; // Exit handled by process::exit above
     }
-
 
     // No CLI-specific commands were handled that require exiting
     false
@@ -154,7 +172,10 @@ pub(crate) fn handle_non_desktop_cli_commands(cli: &crate::cli::Cli) -> bool {
 }
 
 /// Runs CLI commands and returns the result without exiting the process
-pub async fn run_cli_command(app_handle: AppHandle, matches: &clap::ArgMatches) -> Result<(), String> {
+pub async fn run_cli_command(
+    app_handle: AppHandle,
+    matches: &clap::ArgMatches,
+) -> Result<(), String> {
     info!("CLI command execution started");
 
     // Handle test command
@@ -172,13 +193,17 @@ pub async fn run_cli_command(app_handle: AppHandle, matches: &clap::ArgMatches) 
 }
 
 /// Handle test command variations with TTS test
-async fn run_test_command(app_handle: AppHandle, test_matches: &clap::ArgMatches) -> Result<(), String> {
+async fn run_test_command(
+    app_handle: AppHandle,
+    test_matches: &clap::ArgMatches,
+) -> Result<(), String> {
     if test_matches.get_flag("tts") || test_matches.subcommand_matches("tts").is_some() {
         let text = "Testing TTS functionality";
         let provider = "system";
 
         // Create a runtime for blocking on async function
-        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create runtime: {}", e))?;
 
         // Use the system TTS test instead of full TTS
         match rt.block_on(test_tts(app_handle)) {
@@ -199,7 +224,7 @@ async fn run_test_command(app_handle: AppHandle, test_matches: &clap::ArgMatches
 
 /// Handle config command variations
 async fn run_config_command(config_matches: &clap::ArgMatches) -> Result<(), String> {
-    if let Some(show_matches) = config_matches.subcommand_matches("show") {
+    if let Some(_show_matches) = config_matches.subcommand_matches("show") {
         match show_config_file() {
             Ok(()) => {
                 info!("✅ Config file displayed successfully");
@@ -258,8 +283,14 @@ async fn test_accessibility(_app_handle: AppHandle) -> Result<(), String> {
             Ok(())
         }
         Err(e) => {
-            error!("❌ Desktop instance not available - accessibility permissions may be missing: {}", e);
-            Err(format!("Desktop instance not available - check accessibility permissions: {}", e))
+            error!(
+                "❌ Desktop instance not available - accessibility permissions may be missing: {}",
+                e
+            );
+            Err(format!(
+                "Desktop instance not available - check accessibility permissions: {}",
+                e
+            ))
         }
     }
 }
