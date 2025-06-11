@@ -896,19 +896,14 @@ pub fn run() {
             commands::notifications::request_notification_permission,
             commands::notifications::send_notification,
             commands::notifications::test_notification,
-            // Core Commands  
+            // Core Commands
             cancel_agent_execution,
-            list_ai_providers,
-            set_ai_provider,
             get_system_context,
-            set_performance_monitoring,
-            get_performance_monitoring,
             get_agent_execution_progress,
             set_agent_execution_progress,
             get_first_onboarding_prompt,
             set_debug_mode,
             get_debug_mode,
-            reset_all_settings,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

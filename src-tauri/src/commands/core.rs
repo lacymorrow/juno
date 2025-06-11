@@ -228,13 +228,13 @@ pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn set_performance_monitoring(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting performance monitoring to: {}", enabled);
-    
+
     // Update the state
     state.set_performance_monitoring_enabled(enabled);
-    
+
     // TODO: In the future, this could persist the setting to a config file
     // For now, it's stored in memory for the session
-    
+
     Ok(())
 }
 
@@ -288,13 +288,13 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
 #[tauri::command]
 pub async fn store_first_prompt(prompt: String, state: State<'_, AppState>) -> Result<(), String> {
     info!("Storing first prompt from onboarding: {}", prompt);
-    
+
     // Store the prompt in AppState for potential use after onboarding
     state.set_first_onboarding_prompt(prompt.clone());
-    
+
     // Optionally, you could also persist this to a file or database
     // For now, we'll just store it in memory for the session
-    
+
     Ok(())
 }
 
@@ -302,7 +302,7 @@ pub async fn store_first_prompt(prompt: String, state: State<'_, AppState>) -> R
 #[tauri::command]
 pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<Option<String>, String> {
     info!("Retrieving first prompt from onboarding");
-    
+
     let prompt = state.get_first_onboarding_prompt();
     Ok(prompt)
 }
@@ -311,9 +311,9 @@ pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<O
 #[tauri::command]
 pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting debug mode to: {}", enabled);
-    
+
     state.set_debug_mode(enabled);
-    
+
     info!("Debug mode successfully set to: {}", enabled);
     Ok(())
 }
@@ -341,7 +341,11 @@ pub async fn reset_all_settings(
     }
 
     // Reset sound settings
-    state.set_sound_enabled(true);
+    {
+        let mut sound_enabled = state.sound_enabled.lock()
+            .map_err(|e| format!("Failed to lock sound enabled: {}", e))?;
+        *sound_enabled = true;
+    }
 
     // Reset performance monitoring
     state.set_performance_monitoring_enabled(true);
@@ -350,18 +354,23 @@ pub async fn reset_all_settings(
     state.set_debug_mode(false);
 
     // Reset dictation settings
-    state.set_dictation_clipboard_enabled(true);
+    {
+        let mut dictation_clipboard = state.dictation_clipboard_enabled.lock()
+            .map_err(|e| format!("Failed to lock dictation clipboard: {}", e))?;
+        *dictation_clipboard = true;
+    }
 
     // Reset always listening settings
-    if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(app.clone()).await {
+    if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(app.clone(), state.clone()).await {
         warn!("Failed to stop always listening: {}", e);
     }
-    if let Err(e) = crate::commands::always_listening::set_always_listening_sensitivity(0.5, app.clone()).await {
+    if let Err(e) = crate::commands::always_listening::set_always_listening_sensitivity(0.5, app.clone(), state.clone()).await {
         warn!("Failed to reset sensitivity: {}", e);
     }
     if let Err(e) = crate::commands::always_listening::set_always_listening_wake_words(
-        vec!["hey juno".to_string(), "computer".to_string()], 
-        app.clone()
+        vec!["hey juno".to_string(), "computer".to_string()],
+        app.clone(),
+        state.clone()
     ).await {
         warn!("Failed to reset wake words: {}", e);
     }
