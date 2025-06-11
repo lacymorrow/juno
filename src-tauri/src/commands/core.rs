@@ -396,3 +396,69 @@ pub async fn reset_all_settings(
     info!("All settings have been reset to defaults");
     Ok(())
 }
+
+/// Cancel currently executing agent
+#[tauri::command]
+pub async fn cancel_agent_execution(state: State<'_, AppState>) -> Result<(), String> {
+    info!("Cancelling agent execution");
+
+    // Use the proper method to mark agent execution as finished
+    state.mark_agent_execution_finished();
+
+    info!("Agent execution cancelled successfully");
+    Ok(())
+}
+
+/// Get system context information
+#[tauri::command]
+pub async fn get_system_context(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    info!("Getting system context");
+
+    let context = serde_json::json!({
+        "agent_executing": state.is_agent_executing(),
+        "execution_id": state.get_current_agent_execution_id(),
+        "debug_mode": state.is_debug_mode(),
+        "desktop_available": state.is_desktop_available(),
+        "performance_monitoring": state.is_performance_monitoring_enabled(),
+        "sound_enabled": state.sound_enabled.lock()
+            .map_err(|e| format!("Failed to lock sound enabled: {}", e))?
+            .clone(),
+        "tts_provider": state.tts_provider.lock()
+            .map_err(|e| format!("Failed to lock TTS provider: {}", e))?
+            .clone(),
+        "dictation_clipboard_enabled": state.dictation_clipboard_enabled.lock()
+            .map_err(|e| format!("Failed to lock dictation clipboard: {}", e))?
+            .clone(),
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Failed to get timestamp: {}", e))?
+            .as_secs(),
+    });
+
+    Ok(context)
+}
+
+/// Set agent execution progress
+#[tauri::command]
+pub async fn set_agent_execution_progress(
+    current_step: Option<u32>,
+    max_steps: Option<u32>,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    info!("Setting agent execution progress: step {}/{}",
+        current_step.map_or("None".to_string(), |s| s.to_string()),
+        max_steps.map_or("None".to_string(), |s| s.to_string())
+    );
+
+    // Update current step if provided
+    if let Some(step) = current_step {
+        state.update_agent_current_step(step);
+    }
+
+    // Note: AppState doesn't have a direct method to set max_steps independently,
+    // but max_steps is typically set during agent execution start via mark_agent_execution_started_with_steps
+    // For now, we'll just update the current step as that's the main use case
+
+    info!("Agent execution progress updated successfully");
+    Ok(())
+}
