@@ -681,7 +681,7 @@ src-tauri/src/agent/
 - **Configuration**: Tauri store for persistent settings
 
 ### Frontend Integration
-- **Floating Bar**: `src/components/EnhancedFloatingBar.tsx`
+- **Floating Bar**: `src/components/FloatingBar.tsx`
 - **Settings Window**: Native settings with comprehensive configuration
 - **Agent Communication**: Event-based system with `bar-state-update` events
 - **Streaming Integration**: Real-time text updates in `src/App.tsx`

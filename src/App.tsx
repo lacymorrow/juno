@@ -41,7 +41,7 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
-import { FloatingBar } from "./Bar";
+import { FloatingBar } from "./components/FloatingBar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import CommandOverlay from "./components/CommandOverlay";

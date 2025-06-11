@@ -15,9 +15,18 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import tauriConfig from "../../src-tauri/tauri.conf.json";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
 
-// Use the existing BarState type from the backend
+// Get default window dimensions from tauri.conf.json
+const floatingBarConfig = tauriConfig.app.windows.find(
+  (window) => window.label === "floating-bar"
+);
+const DEFAULT_WIDTH = floatingBarConfig?.width || 110;
+const DEFAULT_HEIGHT = floatingBarConfig?.height || 60;
+const EXPANDED_WIDTH = 320;
+const EXPANDED_HEIGHT = 80;
+
 type BarState =
   | "default"
   | "expanding"
@@ -33,7 +42,6 @@ type BarState =
   | "dictating"
   | "always-listening";
 
-// Use the existing BarStateData interface from the backend
 interface BarStateData {
   barState: BarState;
   inputValue: string;
@@ -54,8 +62,8 @@ interface FloatingBarConfig {
   opacity: number;
 }
 
-export function EnhancedFloatingBar() {
-  // State management - using the existing backend state structure
+export function FloatingBar() {
+  // State management - mirrors backend state exactly
   const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
@@ -79,15 +87,6 @@ export function EnhancedFloatingBar() {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout>();
-
-  // Window dimensions
-  const DEFAULT_WIDTH = 110;
-  const DEFAULT_HEIGHT = 60;
-  const EXPANDED_WIDTH = 320;
-  const EXPANDED_HEIGHT = 80;
-
-  // Load configuration - removed non-existent backend call
-  // Using default config values for now
 
   // Update window size based on bar state
   useEffect(() => {
@@ -114,14 +113,13 @@ export function EnhancedFloatingBar() {
     resizeWindow();
   }, [barState]);
 
-  // Listen for backend state updates - using the existing event name
+  // Listen for backend state updates
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
     const setupListener = async () => {
-      unlisten = await listen<BarStateData>(
-        "bar-state-update", // Using existing event name
-        (event) => {
+      try {
+        unlisten = await listen<BarStateData>("bar-state-update", (event) => {
           console.log("Received bar-state-update:", event.payload);
           const data = event.payload;
 
@@ -136,18 +134,26 @@ export function EnhancedFloatingBar() {
           setIsDictationMode(data.isDictationMode);
           setIsAlwaysListening(data.isAlwaysListening);
 
-          // Auto-focus input when in input state
+          // Handle input focus for input state
           if (data.barState === "input" && inputRef.current) {
             requestAnimationFrame(() => {
-              inputRef.current?.focus();
+              if (inputRef.current) {
+                inputRef.current.focus();
+              }
             });
           }
-        }
-      );
+        });
+      } catch (error) {
+        console.error("Failed to setup bar state listener:", error);
+      }
     };
 
     setupListener();
-    return () => unlisten?.();
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
   }, []);
 
   // Listen for window hover events
@@ -221,10 +227,10 @@ export function EnhancedFloatingBar() {
     };
   }, [barState]);
 
-  // Handler functions - using existing backend function names
+  // Handler functions that call backend commands
   const handleBarClick = async () => {
     try {
-      await invoke("floating_bar_click"); // Using existing function name
+      await invoke("floating_bar_click");
     } catch (err) {
       console.error("Failed to handle bar click:", err);
     }
@@ -240,7 +246,7 @@ export function EnhancedFloatingBar() {
 
   const handleInputChange = async (value: string) => {
     try {
-      await invoke("floating_bar_input_change", { value }); // Using existing function name
+      await invoke("floating_bar_input_change", { value });
     } catch (err) {
       console.error("Failed to handle input change:", err);
     }
@@ -252,13 +258,13 @@ export function EnhancedFloatingBar() {
     if (!query) return;
 
     try {
-      await invoke("floating_bar_submit", { query }); // Using existing function name
+      await invoke("floating_bar_submit", { query });
     } catch (err) {
       console.error("Failed to handle submit:", err);
     }
   };
 
-  // Get main icon based on state - enhanced with better state mapping
+  // Get main icon based on state
   const getMainIcon = () => {
     switch (barState) {
       case "default":
@@ -288,25 +294,28 @@ export function EnhancedFloatingBar() {
   const getStatusText = () => {
     switch (barState) {
       case "default":
-        return "Click to interact • Option+D for AI • Hold Space to dictate";
-      case "dictating":
-        return "Dictating... Release key to finish";
-      case "transcribing":
-        return "Processing dictation...";
+        if (isAlwaysListening) return "Always listening for wake words";
+        if (isDictationMode) return "Dictation mode active";
+        if (isAgentWorking) return "Agent working...";
+        return "Click to start or say 'Hey Juno'";
       case "listening":
-        return "Listening for voice command...";
-      case "always-listening":
-        return "Always listening for wake words...";
+        return "Listening for voice input...";
+      case "dictating":
+        return "Dictation mode - voice typing";
+      case "transcribing":
+        return "Converting speech to text...";
       case "speaking":
         return "Playing AI response";
       case "loading":
-        return "Processing request...";
+        return "AI is thinking...";
       case "success":
         return "Task completed successfully";
       case "error":
         return currentError || "An error occurred";
+      case "always-listening":
+        return "Always listening for wake words";
       default:
-        return "Voice assistant ready";
+        return "";
     }
   };
 
