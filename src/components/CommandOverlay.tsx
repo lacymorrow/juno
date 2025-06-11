@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 
-type CommandStatus = 'executing' | 'completed' | 'failed';
+type CommandStatus = "executing" | "completed" | "failed";
 
 type CommandInfo = {
   command: string;
@@ -15,13 +15,14 @@ type CommandInfo = {
 const CommandOverlay = () => {
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [isEnabled, setIsEnabled] = useState(
-    localStorage.getItem('juno-show-command-overlay') === 'true'
+    localStorage.getItem("juno-show-command-overlay") === "true"
   );
 
   // Check localStorage periodically for setting changes
   useEffect(() => {
     const checkSettings = () => {
-      const enabled = localStorage.getItem('juno-show-command-overlay') === 'true';
+      const enabled =
+        localStorage.getItem("juno-show-command-overlay") === "true";
       setIsEnabled(enabled);
     };
 
@@ -43,7 +44,7 @@ const CommandOverlay = () => {
         const { command, id } = event.payload;
         const newCommand: CommandInfo = {
           command,
-          status: 'executing',
+          status: "executing",
           id,
           timestamp: Date.now(),
         };
@@ -53,32 +54,36 @@ const CommandOverlay = () => {
     );
 
     // Listen for command execution end events
-    const unlistenEnd = listen<{ id: number; success: boolean; duration?: number; error?: string }>(
-      "command-execution-end",
-      (event) => {
-        const { id, success, duration, error } = event.payload;
-        
-        setCommands((prevCommands) =>
-          prevCommands.map((cmd) =>
-            cmd.id === id
-              ? {
-                  ...cmd,
-                  status: success ? 'completed' : 'failed',
-                  duration,
-                  error,
-                }
-              : cmd
-          )
-        );
-      }
-    );
+    const unlistenEnd = listen<{
+      id: number;
+      success: boolean;
+      duration?: number;
+      error?: string;
+    }>("command-execution-end", (event) => {
+      const { id, success, duration, error } = event.payload;
+
+      setCommands((prevCommands) =>
+        prevCommands.map((cmd) =>
+          cmd.id === id
+            ? {
+                ...cmd,
+                status: success ? "completed" : "failed",
+                duration,
+                error,
+              }
+            : cmd
+        )
+      );
+    });
 
     return () => {
       // Cleanup listeners when component unmounts or is disabled
-      Promise.all([unlistenStart, unlistenEnd]).then(([unlistenStartFn, unlistenEndFn]) => {
-        unlistenStartFn();
-        unlistenEndFn();
-      });
+      Promise.all([unlistenStart, unlistenEnd]).then(
+        ([unlistenStartFn, unlistenEndFn]) => {
+          unlistenStartFn();
+          unlistenEndFn();
+        }
+      );
     };
   }, [isEnabled]);
 
@@ -91,7 +96,7 @@ const CommandOverlay = () => {
       setCommands((prevCommands) =>
         prevCommands.filter((cmd) => {
           // Keep executing commands
-          if (cmd.status === 'executing') return true;
+          if (cmd.status === "executing") return true;
           // Remove completed/failed commands older than 3 seconds
           return now - cmd.timestamp < 3000;
         })
@@ -109,12 +114,24 @@ const CommandOverlay = () => {
   // Get status icon and color
   const getStatusDisplay = (status: CommandStatus) => {
     switch (status) {
-      case 'executing':
-        return { icon: '⏳', color: '#3b82f6', bgColor: 'rgba(59, 130, 246, 0.1)' };
-      case 'completed':
-        return { icon: '✅', color: '#10b981', bgColor: 'rgba(16, 185, 129, 0.1)' };
-      case 'failed':
-        return { icon: '❌', color: '#ef4444', bgColor: 'rgba(239, 68, 68, 0.1)' };
+      case "executing":
+        return {
+          icon: "⏳",
+          color: "#3b82f6",
+          bgColor: "rgba(59, 130, 246, 0.1)",
+        };
+      case "completed":
+        return {
+          icon: "✅",
+          color: "#10b981",
+          bgColor: "rgba(16, 185, 129, 0.1)",
+        };
+      case "failed":
+        return {
+          icon: "❌",
+          color: "#ef4444",
+          bgColor: "rgba(239, 68, 68, 0.1)",
+        };
     }
   };
 
@@ -122,9 +139,9 @@ const CommandOverlay = () => {
   const formatCommandName = (command: string) => {
     // Remove common prefixes and make more readable
     return command
-      .replace(/^(dev_|qa_|test_)/, '')
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, l => l.toUpperCase());
+      .replace(/^(dev_|qa_|test_)/, "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
   return (
@@ -143,7 +160,7 @@ const CommandOverlay = () => {
       }}
     >
       {commands.map((command, index) => {
-        const { icon, color, bgColor } = getStatusDisplay(command.status);
+        const { icon, color } = getStatusDisplay(command.status);
         return (
           <div
             key={command.id}
@@ -156,43 +173,50 @@ const CommandOverlay = () => {
               fontSize: "13px",
               fontFamily: "ui-sans-serif, system-ui, sans-serif",
               border: `1px solid ${color}`,
-              animation: command.status === 'executing' 
-                ? 'command-pulse 2s infinite ease-in-out'
-                : `command-fade-out 3s ease-out forwards`,
+              animation:
+                command.status === "executing"
+                  ? "command-pulse 2s infinite ease-in-out"
+                  : `command-fade-out 3s ease-out forwards`,
               animationDelay: `${index * 100}ms`,
               backdropFilter: "blur(6px)",
               boxShadow: `0 2px 8px ${color}20`,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '16px' }}>{icon}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontSize: "16px" }}>{icon}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ 
-                  fontWeight: '500',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}>
+                <div
+                  style={{
+                    fontWeight: "500",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
                   {formatCommandName(command.command)}
                 </div>
                 {command.duration && (
-                  <div style={{ 
-                    fontSize: '11px', 
-                    opacity: 0.7,
-                    marginTop: '2px'
-                  }}>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      opacity: 0.7,
+                      marginTop: "2px",
+                    }}
+                  >
                     {command.duration}ms
                   </div>
                 )}
                 {command.error && (
-                  <div style={{ 
-                    fontSize: '11px', 
-                    color: '#fca5a5',
-                    marginTop: '2px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "#fca5a5",
+                      marginTop: "2px",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {command.error}
                   </div>
                 )}
@@ -216,7 +240,7 @@ const CommandOverlay = () => {
             transform: scale(1);
           }
         }
-        
+
         @keyframes command-fade-out {
           0% {
             opacity: 1;
