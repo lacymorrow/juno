@@ -2,16 +2,16 @@ use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
 
 pub mod desktop_wrapper;
-pub use desktop_wrapper::DesktopWrapper;
-use std::path::PathBuf;
-use std::collections::HashMap;
-use std::any::{Any, TypeId};
 use crate::commands::shell::ShellSessions;
-use tokio::sync::{watch, Mutex as TokioMutex};
+pub use desktop_wrapper::DesktopWrapper;
 use log;
 use playwright::Playwright; // Import Playwright
+use serde::{Deserialize, Serialize};
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex; // Added for tts_provider
-use serde::{Serialize, Deserialize}; // Added for keyboard shortcuts
+use tokio::sync::{watch, Mutex as TokioMutex}; // Added for keyboard shortcuts
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
@@ -33,19 +33,31 @@ use crate::constants::permission_types;
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyboardShortcuts {
-    pub agent_mode_toggle: String,      // Default: Alt+D (Option+D on macOS)
-    pub dictation_input: String,        // Default: Alt+Space (Option+Space on macOS)
-    pub stop_current_task: String,      // Default: Escape
-    pub open_settings: String,          // Default: Cmd+, (Ctrl+, on non-macOS)
+    pub agent_mode_toggle: String, // Default: Alt+D (Option+D on macOS)
+    pub dictation_input: String,   // Default: Alt+Space (Option+Space on macOS)
+    pub stop_current_task: String, // Default: Escape
+    pub open_settings: String,     // Default: Cmd+, (Ctrl+, on non-macOS)
 }
 
 impl Default for KeyboardShortcuts {
     fn default() -> Self {
         Self {
-            agent_mode_toggle: if cfg!(target_os = "macos") { "Option+D".to_string() } else { "Alt+D".to_string() },
-            dictation_input: if cfg!(target_os = "macos") { "Option+Space".to_string() } else { "Alt+Space".to_string() },
+            agent_mode_toggle: if cfg!(target_os = "macos") {
+                "Option+D".to_string()
+            } else {
+                "Alt+D".to_string()
+            },
+            dictation_input: if cfg!(target_os = "macos") {
+                "Option+Space".to_string()
+            } else {
+                "Alt+Space".to_string()
+            },
             stop_current_task: "Escape".to_string(),
-            open_settings: if cfg!(target_os = "macos") { "Cmd+,".to_string() } else { "Ctrl+,".to_string() },
+            open_settings: if cfg!(target_os = "macos") {
+                "Cmd+,".to_string()
+            } else {
+                "Ctrl+,".to_string()
+            },
         }
     }
 }
@@ -85,7 +97,7 @@ pub type CancelReceiver = watch::Receiver<bool>;
 pub struct AppState {
     pub desktop: DesktopWrapper,
     pub shell_sessions: ShellSessions,
-    cancel_tx: Arc<CancelSender>, // Store Sender to signal cancellation
+    cancel_tx: Arc<CancelSender>,  // Store Sender to signal cancellation
     pub cancel_rx: CancelReceiver, // Store Receiver to check for cancellation
     // State for text_editor_undo_edit - Wrapped in Arc
     pub last_edited_file: Arc<std::sync::Mutex<Option<PathBuf>>>,
@@ -102,9 +114,9 @@ pub struct AppState {
     pub bar_ui_state: Arc<Mutex<String>>, // Added to store the current UI state of the floating bar
     pub dictation_active: Arc<Mutex<bool>>, // Track if Dictation Mode is active
     pub dictation_clipboard_enabled: Arc<Mutex<bool>>, // Track if Dictation Mode should save to clipboard
-    pub sound_enabled: Arc<Mutex<bool>>, // Track if sound effects are enabled
+    pub sound_enabled: Arc<Mutex<bool>>,               // Track if sound effects are enabled
     pub performance_monitoring_enabled: Arc<Mutex<bool>>, // Track if performance monitoring is enabled
-    pub timestamp_tracker: Arc<Mutex<TimestampTracker>>, // Track timestamps for log grouping
+    pub timestamp_tracker: Arc<Mutex<TimestampTracker>>,  // Track timestamps for log grouping
     // Permissions state tracking
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
     pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
@@ -112,8 +124,8 @@ pub struct AppState {
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
     // Cloud connectivity
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
-    pub cloud_config: Arc<TokioMutex<CloudConfig>>, // Cloud configuration
-    pub cloud_enabled: Arc<Mutex<bool>>, // Track if cloud is enabled
+    pub cloud_config: Arc<TokioMutex<CloudConfig>>,         // Cloud configuration
+    pub cloud_enabled: Arc<Mutex<bool>>,                    // Track if cloud is enabled
     // Production cloud connector
     pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
     // Keyboard shortcuts configuration
@@ -138,7 +150,7 @@ pub struct AppState {
     pub agent_execution_id: Arc<Mutex<Option<String>>>, // Track the current agent execution ID
     // Agent iteration tracking
     pub agent_current_step: Arc<Mutex<Option<u32>>>, // Track the current iteration/step number
-    pub agent_max_steps: Arc<Mutex<Option<u32>>>, // Track the maximum iterations/steps allowed
+    pub agent_max_steps: Arc<Mutex<Option<u32>>>,    // Track the maximum iterations/steps allowed
     // First onboarding prompt storage
     pub first_onboarding_prompt: Arc<Mutex<Option<String>>>, // Store the first prompt selected during onboarding
 
@@ -146,7 +158,6 @@ pub struct AppState {
     pub last_spoken_content: Arc<Mutex<Option<String>>>, // Store spoken content separate from displayed text
     // Debug mode tracking
     pub debug_mode: Arc<Mutex<bool>>, // Track if debug mode is enabled
-
 }
 
 impl AppState {
@@ -191,7 +202,10 @@ impl AppState {
             always_listening_active: Arc::new(Mutex::new(false)),
             always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
             always_listening_wake_words: Arc::new(Mutex::new(
-                app_identity::DEFAULT_WAKE_WORDS.iter().map(|s| s.to_string()).collect()
+                app_identity::DEFAULT_WAKE_WORDS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             )),
             // Initialize notification settings
             notification_type: Arc::new(Mutex::new("system".to_string())),
@@ -227,10 +241,16 @@ impl AppState {
         // Send `false` to indicate cancellation is no longer requested.
         // Check if the current value is true before sending false to avoid unnecessary updates.
         let is_currently_cancelled = *self.cancel_rx.borrow();
-        log::info!("[AppState] Attempting reset_cancel. Current state (is_cancelled): {}", is_currently_cancelled);
+        log::info!(
+            "[AppState] Attempting reset_cancel. Current state (is_cancelled): {}",
+            is_currently_cancelled
+        );
         if is_currently_cancelled {
             let send_result = self.cancel_tx.send(false);
-            log::info!("[AppState] reset_cancel: Sent 'false'. Result: {:?}", send_result.is_ok());
+            log::info!(
+                "[AppState] reset_cancel: Sent 'false'. Result: {:?}",
+                send_result.is_ok()
+            );
         } else {
             log::info!("[AppState] reset_cancel: No reset needed (already false).");
         }
@@ -246,7 +266,10 @@ impl AppState {
             let mut id_guard = self.agent_execution_id.lock().unwrap();
             *id_guard = Some(execution_id.clone());
         }
-        log::info!("[AppState] Agent execution started with ID: {}", execution_id);
+        log::info!(
+            "[AppState] Agent execution started with ID: {}",
+            execution_id
+        );
     }
 
     // Method to mark agent execution as started with iteration info
@@ -267,7 +290,11 @@ impl AppState {
             let mut current_step_guard = self.agent_current_step.lock().unwrap();
             *current_step_guard = Some(0); // Start at step 0
         }
-        log::info!("[AppState] Agent execution started with ID: {} (max steps: {})", execution_id, max_steps);
+        log::info!(
+            "[AppState] Agent execution started with ID: {} (max steps: {})",
+            execution_id,
+            max_steps
+        );
     }
 
     // Method to mark agent execution as finished
@@ -279,7 +306,10 @@ impl AppState {
         {
             let mut id_guard = self.agent_execution_id.lock().unwrap();
             let execution_id = id_guard.take();
-            log::info!("[AppState] Agent execution finished for ID: {:?}", execution_id);
+            log::info!(
+                "[AppState] Agent execution finished for ID: {:?}",
+                execution_id
+            );
         }
         {
             let mut current_step_guard = self.agent_current_step.lock().unwrap();
@@ -370,15 +400,19 @@ impl AppState {
         if controller_guard.is_none() {
             log::info!("Initializing persistent browser controller (was None in AppState)");
             // Get or initialize the Playwright driver first
-            let playwright_arc = self.get_or_init_playwright_driver().await
-                .map_err(|e| format!("Cannot init BrowserController without Playwright driver: {}", e))?;
+            let playwright_arc = self.get_or_init_playwright_driver().await.map_err(|e| {
+                format!(
+                    "Cannot init BrowserController without Playwright driver: {}",
+                    e
+                )
+            })?;
 
             match BrowserController::new(playwright_arc).await {
                 Ok(controller) => {
                     *controller_guard = Some(controller.clone());
                     log::info!("BrowserController initialized and stored in AppState.");
                     Ok(controller)
-                },
+                }
                 Err(e) => {
                     let err_msg = format!("Failed to initialize browser controller: {}", e);
                     log::error!("{}", err_msg);
@@ -502,7 +536,8 @@ impl AppState {
 
         // Create cloud client if enabled
         if config.enabled {
-            let client = CloudClient::new(app_handle.clone()).await
+            let client = CloudClient::new(app_handle.clone())
+                .await
                 .map_err(|e| format!("Failed to create cloud client: {}", e))?;
 
             let mut client_guard = self.cloud_client.lock().await;
@@ -516,7 +551,9 @@ impl AppState {
     pub async fn start_cloud_client(&self) -> Result<(), String> {
         let mut client_guard = self.cloud_client.lock().await;
         if let Some(client) = client_guard.as_mut() {
-            client.start().await
+            client
+                .start()
+                .await
                 .map_err(|e| format!("Failed to start cloud client: {}", e))?;
         }
         Ok(())
@@ -530,7 +567,8 @@ impl AppState {
 
     /// Check if cloud is enabled
     pub fn is_cloud_enabled(&self) -> bool {
-        self.cloud_enabled.lock()
+        self.cloud_enabled
+            .lock()
             .map(|enabled| *enabled)
             .unwrap_or(false)
     }
@@ -542,9 +580,14 @@ impl AppState {
     }
 
     /// Update cloud configuration
-    pub async fn update_cloud_config(&self, config: CloudConfig, app_handle: &tauri::AppHandle) -> Result<(), String> {
+    pub async fn update_cloud_config(
+        &self,
+        config: CloudConfig,
+        app_handle: &tauri::AppHandle,
+    ) -> Result<(), String> {
         // Save to file
-        config.save_to_file(app_handle)
+        config
+            .save_to_file(app_handle)
             .map_err(|e| format!("Failed to save cloud config: {}", e))?;
 
         // Update stored config
@@ -577,7 +620,8 @@ impl AppState {
 
     /// Check if performance monitoring is enabled
     pub fn is_performance_monitoring_enabled(&self) -> bool {
-        self.performance_monitoring_enabled.lock()
+        self.performance_monitoring_enabled
+            .lock()
             .map(|enabled| *enabled)
             .unwrap_or(false)
     }
@@ -586,7 +630,10 @@ impl AppState {
     pub fn set_performance_monitoring_enabled(&self, enabled: bool) {
         if let Ok(mut monitoring_guard) = self.performance_monitoring_enabled.lock() {
             *monitoring_guard = enabled;
-            log::info!("Performance monitoring {}", if enabled { "enabled" } else { "disabled" });
+            log::info!(
+                "Performance monitoring {}",
+                if enabled { "enabled" } else { "disabled" }
+            );
         }
     }
 
@@ -670,7 +717,8 @@ impl AppState {
         // Group tools by server
         let mut tools_by_server: HashMap<String, Vec<_>> = HashMap::new();
         for tool_info in all_tools {
-            tools_by_server.entry(tool_info.server_id.clone())
+            tools_by_server
+                .entry(tool_info.server_id.clone())
                 .or_insert_with(Vec::new)
                 .push(tool_info);
         }
@@ -721,7 +769,10 @@ impl AppState {
             }
         };
 
-        log::info!("Refreshing {} registered tool providers with updated MCP tools", registry.len());
+        log::info!(
+            "Refreshing {} registered tool providers with updated MCP tools",
+            registry.len()
+        );
 
         for provider_arc in registry.iter() {
             if let Ok(mut provider) = provider_arc.try_lock() {
@@ -768,6 +819,7 @@ impl AppState {
     pub fn clear_last_spoken_content(&self) {
         let mut spoken_guard = self.last_spoken_content.lock().unwrap();
         *spoken_guard = None;
+    }
 
     // Debug mode methods
     pub fn set_debug_mode(&self, enabled: bool) {
@@ -783,14 +835,18 @@ impl AppState {
 
 // Helper function to update undo state
 #[allow(dead_code)] // Keep allowing dead code as it might be conditionally used
-pub(crate) fn update_undo_state(state: &AppState, file_path: PathBuf, previous_content: Option<String>) {
+pub(crate) fn update_undo_state(
+    state: &AppState,
+    file_path: PathBuf,
+    previous_content: Option<String>,
+) {
     // Safely handle potential lock poisoning
     if let Ok(mut last_edited) = state.last_edited_file.lock() {
         *last_edited = Some(file_path);
     } else {
         log::error!("Failed to acquire lock for last_edited_file - lock may be poisoned");
     }
-    
+
     if let Ok(mut previous) = state.previous_content.lock() {
         *previous = Some(previous_content);
     } else {
@@ -994,7 +1050,7 @@ mod tests {
         assert!(state.get_permissions_state().await.is_none());
 
         // Create a mock permissions state with correct structure
-        use crate::commands::permissions::{PermissionsState, PermissionStatus};
+        use crate::commands::permissions::{PermissionStatus, PermissionsState};
         let mock_permissions = vec![
             PermissionStatus {
                 permission_type: permission_types::ACCESSIBILITY.to_string(),
@@ -1025,7 +1081,7 @@ mod tests {
                 instructions: "No action needed".to_string(),
             },
         ];
-        
+
         let permissions_state = PermissionsState {
             accessibility: mock_permissions[0].clone(),
             screen_recording: mock_permissions[1].clone(),
@@ -1036,7 +1092,9 @@ mod tests {
         };
 
         // Update permissions state
-        state.update_permissions_state(permissions_state.clone()).await;
+        state
+            .update_permissions_state(permissions_state.clone())
+            .await;
 
         // Should now have the permissions state
         let retrieved_state = state.get_permissions_state().await;
@@ -1213,7 +1271,10 @@ mod tests {
         // Both should track the same agent execution state
         state1.mark_agent_execution_started("test-123".to_string());
         assert!(state2.is_agent_executing());
-        assert_eq!(state2.get_current_agent_execution_id(), Some("test-123".to_string()));
+        assert_eq!(
+            state2.get_current_agent_execution_id(),
+            Some("test-123".to_string())
+        );
 
         // Both should respond to cancellation signals
         state1.signal_cancel();
