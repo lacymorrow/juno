@@ -8,6 +8,7 @@ import {
   Check,
   Loader2,
   Mic,
+  MicOff,
   Send,
   Sparkles,
   Type,
@@ -27,6 +28,7 @@ const DEFAULT_HEIGHT = floatingBarConfig?.height || 60;
 const EXPANDED_WIDTH = 320;
 const EXPANDED_HEIGHT = 80;
 
+// Enhanced bar state with more granular feedback
 type BarState =
   | "default"
   | "expanding"
@@ -35,10 +37,16 @@ type BarState =
   | "loading"
   | "finishing"
   | "success"
-  | "listening"
   | "error"
-  | "transcribing"
+  | "dictation_ready"
+  | "dictation_active"
+  | "dictation_processing"
+  | "agent_listening"
+  | "agent_thinking"
+  | "agent_responding"
   | "speaking"
+  | "listening"
+  | "transcribing"
   | "dictating"
   | "always-listening";
 
@@ -52,6 +60,8 @@ interface BarStateData {
   isAgentWorking: boolean;
   isDictationMode: boolean;
   isAlwaysListening: boolean;
+  audioLevel: number;
+  voiceMode: "dictation" | "agent" | "idle";
 }
 
 interface FloatingBarConfig {
@@ -63,7 +73,7 @@ interface FloatingBarConfig {
 }
 
 export function FloatingBar() {
-  // State management - mirrors backend state exactly
+  // Enhanced state management - mirrors backend state exactly
   const [barState, setBarState] = useState<BarState>("default");
   const [inputValue, setInputValue] = useState("");
   const [lastSubmittedValue, setLastSubmittedValue] = useState("");
@@ -73,29 +83,48 @@ export function FloatingBar() {
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [isDictationMode, setIsDictationMode] = useState(false);
   const [isAlwaysListening, setIsAlwaysListening] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [voiceMode, setVoiceMode] = useState<"dictation" | "agent" | "idle">("idle");
 
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
+  const [isAnimatingSize, setIsAnimatingSize] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [config] = useState<FloatingBarConfig>({
+  const [config, setConfig] = useState<FloatingBarConfig>({
     showVoiceIndicator: true,
     enableAnimations: true,
     autoHide: false,
     autoHideDelay: 3000,
-    opacity: 1.0,
+    opacity: 0.95,
   });
 
   const inputRef = useRef<HTMLInputElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout>();
+
+  // Load configuration from backend
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const savedConfig = await invoke<FloatingBarConfig>("get_floating_bar_config");
+        setConfig(savedConfig);
+      } catch (error) {
+        console.error("Failed to load floating bar config:", error);
+      }
+    };
+    loadConfig();
+  }, []);
 
   // Update window size based on bar state
   useEffect(() => {
     const resizeWindow = async () => {
       try {
         const appWindow = await Window.getByLabel("floating-bar");
-        const isExpanded = !["default", "shrinking", "finishing"].includes(
-          barState
-        );
+        const isExpanded = ![
+          "default",
+          "shrinking",
+          "finishing",
+          "dictation_ready",
+        ].includes(barState);
 
         if (isExpanded) {
           await appWindow?.setSize(
@@ -113,7 +142,14 @@ export function FloatingBar() {
     resizeWindow();
   }, [barState]);
 
-  // Listen for backend state updates
+  // Handle animation state tracking
+  useEffect(() => {
+    if (config.enableAnimations) {
+      setIsAnimatingSize(["expanding", "shrinking"].includes(barState));
+    }
+  }, [barState, config.enableAnimations]);
+
+  // Listen for enhanced backend state updates
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
@@ -133,13 +169,13 @@ export function FloatingBar() {
           setIsAgentWorking(data.isAgentWorking);
           setIsDictationMode(data.isDictationMode);
           setIsAlwaysListening(data.isAlwaysListening);
+          setAudioLevel(data.audioLevel || 0);
+          setVoiceMode(data.voiceMode || "idle");
 
-          // Handle input focus for input state
+          // Auto-focus input when in input state
           if (data.barState === "input" && inputRef.current) {
             requestAnimationFrame(() => {
-              if (inputRef.current) {
-                inputRef.current.focus();
-              }
+              inputRef.current?.focus();
             });
           }
         });
@@ -246,6 +282,7 @@ export function FloatingBar() {
 
   const handleInputChange = async (value: string) => {
     try {
+      setInputValue(value);
       await invoke("floating_bar_input_change", { value });
     } catch (err) {
       console.error("Failed to handle input change:", err);
@@ -264,19 +301,28 @@ export function FloatingBar() {
     }
   };
 
-  // Get main icon based on state
+  // Get main icon based on enhanced state
   const getMainIcon = () => {
     switch (barState) {
       case "default":
         return <Sparkles className="h-4 w-4 text-emerald-400" />;
+      case "dictation_ready":
+        return <MicOff className="h-4 w-4 text-muted-foreground" />;
+      case "dictation_active":
       case "dictating":
         return <Type className="h-4 w-4 text-orange-500" />;
-      case "listening":
-        return <Brain className="h-4 w-4 text-blue-500" />;
-      case "always-listening":
-        return <Mic className="h-4 w-4 text-blue-400" />;
+      case "dictation_processing":
       case "transcribing":
         return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
+      case "agent_listening":
+      case "listening":
+        return <Brain className="h-4 w-4 text-blue-500" />;
+      case "agent_thinking":
+        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+      case "agent_responding":
+        return <Brain className="h-4 w-4 text-blue-500 animate-pulse" />;
+      case "always-listening":
+        return <Mic className="h-4 w-4 text-blue-400" />;
       case "speaking":
         return <Volume2 className="h-4 w-4 text-purple-500" />;
       case "loading":
@@ -290,24 +336,33 @@ export function FloatingBar() {
     }
   };
 
-  // Get status text for tooltip
+  // Get enhanced status text for tooltip
   const getStatusText = () => {
     switch (barState) {
       case "default":
         if (isAlwaysListening) return "Always listening for wake words";
         if (isDictationMode) return "Dictation mode active";
         if (isAgentWorking) return "Agent working...";
-        return "Click to start or say 'Hey Juno'";
-      case "listening":
-        return "Listening for voice input...";
+        return "Click to interact • Alt+D for AI • Option+Space to dictate";
+      case "dictation_ready":
+        return "Hold Option+Space to start dictating";
+      case "dictation_active":
       case "dictating":
-        return "Dictation mode - voice typing";
+        return "Dictating... Release key to finish";
+      case "dictation_processing":
       case "transcribing":
-        return "Converting speech to text...";
+        return "Processing dictation...";
+      case "agent_listening":
+      case "listening":
+        return "Listening for voice command...";
+      case "agent_thinking":
+        return "AI is thinking...";
+      case "agent_responding":
+        return "AI is responding...";
       case "speaking":
         return "Playing AI response";
       case "loading":
-        return "AI is thinking...";
+        return "Processing request...";
       case "success":
         return "Task completed successfully";
       case "error":
@@ -315,45 +370,55 @@ export function FloatingBar() {
       case "always-listening":
         return "Always listening for wake words";
       default:
-        return "";
+        return "Voice assistant ready";
     }
   };
 
-  // Get container styles with enhanced visual feedback
+  // Get enhanced container styles with voice mode awareness
   const getContainerStyles = () => {
     const baseStyles = `
       relative flex items-center justify-center
-      text-white rounded-full shadow-lg border border-white/40
+      text-white rounded-full shadow-lg border border-white/20
       transition-all duration-300 ease-in-out
       [will-change:width,height,transform]
       [backface-visibility:hidden]
       [transform-origin:center]
-      backdrop-blur-lg
     `;
 
-    // Background based on state with proper transparency for pill effect
-    let bgColor = "bg-black/95";
+    // Enhanced background based on voice mode and state
+    let bgColor = "bg-black/90";
 
-    if (isDictationMode) {
-      bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
-    } else if (isAgentWorking) {
-      bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
+    switch (voiceMode) {
+      case "dictation":
+        bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
+        break;
+      case "agent":
+        bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
+        break;
+      default:
+        if (isDictationMode) {
+          bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
+        } else if (isAgentWorking) {
+          bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
+        }
+        break;
     }
 
     // Override for specific states
     if (barState === "error") {
-      bgColor = "bg-gradient-to-r from-red-600/98 to-red-700/98";
+      bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
     } else if (barState === "success") {
-      bgColor = "bg-gradient-to-r from-emerald-600/98 to-emerald-700/98";
-    } else if (barState === "dictating") {
-      bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
-    } else if (barState === "listening") {
-      bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
+      bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
     } else if (barState === "always-listening") {
       bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
     }
 
-    const sizeStyles = ["default", "shrinking", "finishing"].includes(barState)
+    const sizeStyles = [
+      "default",
+      "dictation_ready",
+      "shrinking",
+      "finishing",
+    ].includes(barState)
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
@@ -362,9 +427,38 @@ export function FloatingBar() {
         ? "[transform:scale3d(1.05,1.05,1)]"
         : "";
 
-    const clickable = ["default"].includes(barState) ? "cursor-pointer" : "";
+    const clickable = ["default", "dictation_ready"].includes(barState)
+      ? "cursor-pointer"
+      : "";
 
-    return cn(baseStyles, bgColor, sizeStyles, hoverEffect, clickable);
+    return cn(
+      baseStyles,
+      bgColor,
+      sizeStyles,
+      hoverEffect,
+      clickable,
+      !isAnimatingSize && "backdrop-blur-md"
+    );
+  };
+
+  // Audio level visualization component
+  const AudioLevelIndicator = () => {
+    if (!["dictation_active", "dictating", "agent_listening", "listening"].includes(barState))
+      return null;
+
+    return (
+      <div className="flex items-center gap-1 ml-2">
+        {[...Array(5)].map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              "w-1 rounded-full transition-all duration-150",
+              audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
+            )}
+          />
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -383,16 +477,19 @@ export function FloatingBar() {
           data-tauri-drag-region
           className={getContainerStyles()}
           style={{ opacity: config.opacity }}
-          onClick={barState === "default" ? handleBarClick : undefined}
+          onClick={
+            ["default", "dictation_ready"].includes(barState)
+              ? handleBarClick
+              : undefined
+          }
         >
           {/* Default State */}
-          {(barState === "default" || barState === "finishing") && (
+          {(barState === "default" || barState === "dictation_ready" || barState === "finishing") && (
             <div className="flex items-center gap-2">
               {getMainIcon()}
-              {config.showVoiceIndicator &&
-                (isDictationMode || isAgentWorking) && (
-                  <VoiceStatusIndicator variant="compact" className="ml-1" />
-                )}
+              {config.showVoiceIndicator && (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
+                <VoiceStatusIndicator variant="compact" className="ml-1" />
+              )}
               {isAlwaysListening && (
                 <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"></div>
               )}
@@ -432,8 +529,17 @@ export function FloatingBar() {
             </form>
           )}
 
-          {/* Voice States - Enhanced with better visual feedback */}
-          {["dictating", "transcribing", "listening"].includes(barState) && (
+          {/* Enhanced Voice States */}
+          {[
+            "dictation_active",
+            "dictation_processing",
+            "dictating",
+            "transcribing",
+            "agent_listening",
+            "agent_thinking",
+            "agent_responding",
+            "listening",
+          ].includes(barState) && (
             <div className="flex items-center justify-between w-full h-full">
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {getMainIcon()}
@@ -448,19 +554,7 @@ export function FloatingBar() {
                   )}
                 </div>
               </div>
-              {(barState === "dictating" || barState === "listening") && (
-                <div className="flex items-center gap-1 ml-2">
-                  <div className="w-1 h-2 bg-white/60 rounded-full animate-pulse" />
-                  <div
-                    className="w-1 h-3 bg-white/80 rounded-full animate-pulse"
-                    style={{ animationDelay: "0.1s" }}
-                  />
-                  <div
-                    className="w-1 h-2 bg-white/60 rounded-full animate-pulse"
-                    style={{ animationDelay: "0.2s" }}
-                  />
-                </div>
-              )}
+              <AudioLevelIndicator />
             </div>
           )}
 
@@ -501,11 +595,16 @@ export function FloatingBar() {
 
           {/* Loading State */}
           {barState === "loading" && (
-            <div className="w-full h-full flex flex-col items-center justify-center overflow-hidden px-2">
-              <span className="text-xs text-white/70 truncate w-full text-center pb-1">
-                {lastSubmittedValue}
-              </span>
-              <div className="loading-bar-thin"></div>
+            <div className="flex flex-col items-center justify-center w-full h-full gap-2">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="text-sm font-medium">Processing</span>
+              </div>
+              {lastSubmittedValue && (
+                <div className="text-xs text-white/70 truncate w-full text-center">
+                  {lastSubmittedValue}
+                </div>
+              )}
             </div>
           )}
 
