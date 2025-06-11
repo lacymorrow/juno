@@ -3,3 +3,185 @@ description:
 globs:
 alwaysApply: false
 ---
+# Version Bumping Workflow
+
+## Overview
+This document describes the standardized workflow for bumping versions across the entire Juno project, including both Rust (Tauri) and Node.js components.
+
+## Single Source of Truth Architecture
+
+### Primary Version Source
+- **`src-tauri/Cargo.toml`** is the single source of truth for application versions
+- Tauri automatically inherits version from `CARGO_PKG_VERSION` when no explicit version is set in `tauri.conf.json`
+- All other components synchronize to this primary version
+
+### Eliminated Duplication
+- Removed explicit `"version"` field from `src-tauri/tauri.conf.json`
+- Tauri now inherits version directly from Cargo workspace
+
+## Automated Version Bumping
+
+### Single Command Usage
+```bash
+./scripts/bump-version.sh <new-version>
+```
+
+Examples:
+```bash
+./scripts/bump-version.sh 0.2.4
+./scripts/bump-version.sh 1.0.0-beta.1
+./scripts/bump-version.sh 2.1.3
+```
+
+### What the Script Does
+
+1. **Rust Workspace Updates**
+   - Ensures `cargo-edit` (≥ 0.12.3) is installed
+   - Changes to `src-tauri/` directory
+   - Runs `cargo set-version --workspace <new-version>`
+   - Updates all `Cargo.toml` files in the workspace
+
+2. **Node.js Package Updates**
+   - Returns to repository root
+   - Uses Changesets CLI to bump `package.json` versions
+   - Fallback to `jq` if Changesets unavailable
+   - Updates all Node.js packages consistently
+
+3. **Verification Steps**
+   - Provides commands to verify version updates
+   - Shows git commit suggestions
+
+## Dependencies and Setup
+
+### Required Tools
+- **cargo-edit**: Provides `cargo set-version` command
+- **Changesets**: For Node.js version management (`@changesets/cli`)
+- **bun**: Package manager for Node.js operations
+
+### Initial Setup
+The script automatically installs missing dependencies:
+```bash
+# Cargo-edit installation (if missing)
+cargo install cargo-edit@0.12.3
+
+# Changesets initialization (if needed)
+bunx --yes @changesets/cli init
+```
+
+## Verification Workflow
+
+After running the bump script, verify changes:
+
+```bash
+# Check Rust versions
+grep -R "version = \"<new-version>\"" src-tauri | head
+
+# Check Node.js versions
+grep -n "\"version\": \"<new-version>\"" package.json
+
+# Check all version references
+grep -R "<new-version>" . --exclude-dir=node_modules --exclude-dir=target
+```
+
+## Git Workflow Integration
+
+### Recommended Commit Process
+```bash
+# After version bump
+git add .
+git commit -m "chore: bump version to <new-version>"
+git tag "v<new-version>"
+git push origin main --tags
+```
+
+### Pre-release Versions
+The script supports semantic versioning including:
+- Pre-release: `1.0.0-alpha.1`, `1.0.0-beta.2`, `1.0.0-rc.1`
+- Build metadata: `1.0.0+build.123`
+
+## Troubleshooting
+
+### Common Issues
+
+**Script Permission Error**
+```bash
+chmod +x scripts/bump-version.sh
+```
+
+**Cargo Workspace Not Found**
+- Ensure script runs from repository root
+- Script automatically changes to `src-tauri/` for Rust operations
+
+**Node.js Version Not Updated**
+- Check Changesets configuration in `.changeset/config.json`
+- Fallback `jq` method should handle most cases
+
+**Cargo-edit Installation Fails**
+- Version pinned to 0.12.3 for toolchain compatibility
+- May need to update Rust toolchain if issues persist
+
+## File Locations
+
+### Script Location
+- `scripts/bump-version.sh` - Main version bumping script
+
+### Configuration Files
+- `src-tauri/Cargo.toml` - Primary version source
+- `package.json` - Node.js package versions
+- `.changeset/config.json` - Changesets configuration
+- `src-tauri/tauri.conf.json` - No longer contains version field
+
+### Generated Files
+- `CHANGELOG.md` - May be updated by Changesets
+- Various `Cargo.lock` files - Updated automatically
+
+## Integration with CI/CD
+
+### Build Process Impact
+- Built applications inherit version from Cargo automatically
+- No manual version synchronization needed
+- Tauri bundle uses `CARGO_PKG_VERSION` for app metadata
+
+### Release Automation
+Script can be integrated into release workflows:
+```bash
+# Example release pipeline step
+./scripts/bump-version.sh $RELEASE_VERSION
+git add .
+git commit -m "chore: release $RELEASE_VERSION"
+git tag "v$RELEASE_VERSION"
+```
+
+## Best Practices
+
+### Version Selection
+- Follow semantic versioning (semver.org)
+- Use pre-release versions for testing
+- Coordinate major version bumps across team
+
+### Testing After Version Bump
+- Run build process to ensure no issues
+- Test application functionality
+- Verify version displays correctly in UI
+
+### Documentation Updates
+- Update README.md if version mentioned
+- Update any hardcoded version references
+- Consider updating CHANGELOG.md manually if needed
+
+## Architecture Benefits
+
+### Maintainability
+- Single command for all version updates
+- No risk of version mismatches
+- Automated dependency management
+
+### Reliability
+- Workspace-aware version management
+- Fallback mechanisms for different environments
+- Comprehensive error handling
+
+### Developer Experience
+- Simple one-liner for version bumps
+- Clear verification commands
+- Integrated with existing toolchain
