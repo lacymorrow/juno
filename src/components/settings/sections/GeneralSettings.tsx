@@ -1,4 +1,3 @@
-import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -15,8 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { SettingsSectionProps } from "../types";
 import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import { SettingsSectionProps } from "../types";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
@@ -26,10 +26,10 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
   useEffect(() => {
     const loadAutoLaunchStatus = async () => {
       try {
-        const enabled = await invoke<boolean>('is_autostart_enabled');
+        const enabled = await invoke<boolean>("is_autostart_enabled");
         setAutoLaunchEnabled(enabled);
       } catch (error) {
-        console.error('Failed to load auto-launch status:', error);
+        console.error("Failed to load auto-launch status:", error);
         // Default to false if unable to determine status
         setAutoLaunchEnabled(false);
       }
@@ -42,21 +42,23 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
     if (autoLaunchLoading) return;
 
     setAutoLaunchLoading(true);
-    
+
     try {
       if (enabled) {
-        await invoke<boolean>('enable_autostart');
+        await invoke<boolean>("enable_autostart");
         setAutoLaunchEnabled(true);
-        console.log('Auto-launch enabled - Juno will start when you log in');
+        console.log("Auto-launch enabled - Juno will start when you log in");
       } else {
-        await invoke<boolean>('disable_autostart');
+        await invoke<boolean>("disable_autostart");
         setAutoLaunchEnabled(false);
-        console.log('Auto-launch disabled');
+        console.log("Auto-launch disabled");
       }
     } catch (error) {
-      console.error('Failed to update auto-launch setting:', error);
+      console.error("Failed to update auto-launch setting:", error);
       // Revert the state if the operation failed
-      const currentStatus = await invoke<boolean>('is_autostart_enabled').catch(() => false);
+      const currentStatus = await invoke<boolean>("is_autostart_enabled").catch(
+        () => false
+      );
       setAutoLaunchEnabled(currentStatus);
     } finally {
       setAutoLaunchLoading(false);

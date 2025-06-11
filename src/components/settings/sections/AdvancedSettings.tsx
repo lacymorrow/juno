@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -5,23 +7,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { SettingsSectionProps } from "../types";
+import { Switch } from "@/components/ui/switch";
+import { invoke } from "@tauri-apps/api/core";
 import {
   AlertCircle,
   CheckCircle,
   MonitorSpeaker,
   RefreshCw,
+  RotateCcw,
   Shield,
   Terminal,
-  Square,
-  RotateCcw,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { Switch } from "@/components/ui/switch";
+import { SettingsSectionProps } from "../types";
 
 interface PermissionState {
   granted: boolean;
@@ -45,9 +44,10 @@ export default function AdvancedSettings({
   settings,
   onNavigateToDevTools,
   onNavigateToChat,
-  onNavigateToPermissions
+  onNavigateToPermissions,
 }: AdvancedSettingsProps) {
-  const [permissionsState, setPermissionsState] = useState<PermissionsState | null>(null);
+  const [permissionsState, setPermissionsState] =
+    useState<PermissionsState | null>(null);
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
 
@@ -196,8 +196,8 @@ export default function AdvancedSettings({
             </div>
 
             <p className="text-sm text-muted-foreground">
-              You can also access Developer Tools from the system tray menu or use
-              the toggle button in the main interface.
+              You can also access Developer Tools from the system tray menu or
+              use the toggle button in the main interface.
             </p>
           </CardContent>
         </Card>
@@ -306,7 +306,9 @@ export default function AdvancedSettings({
                   <Button
                     onClick={onNavigateToPermissions}
                     size="sm"
-                    variant={permissionsState.allGranted ? "outline" : "default"}
+                    variant={
+                      permissionsState.allGranted ? "outline" : "default"
+                    }
                   >
                     <Shield className="h-4 w-4 mr-1" />
                     {permissionsState.allGranted
