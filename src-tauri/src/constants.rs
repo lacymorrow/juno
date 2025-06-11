@@ -54,8 +54,11 @@ pub mod window_labels {
 pub mod tray_menu_ids {
     pub const QUIT: &str = "quit";
     pub const TOGGLE_FLOATING_BAR: &str = "toggle-floating-bar";
+    pub const SHOW_FLOATING_BAR: &str = "show-floating-bar";
+    pub const HIDE_FLOATING_BAR: &str = "hide-floating-bar";
     pub const SHOW_DEVTOOLS: &str = "show-devtools";
     pub const SHOW_MAIN_WINDOW: &str = "show-main-window";
+    pub const HIDE_MAIN_WINDOW: &str = "hide-main-window";
     pub const NEW_CHAT: &str = "new-chat";
     pub const SETTINGS: &str = "tray-settings";
 }
@@ -301,14 +304,20 @@ mod tests {
     fn test_tray_menu_ids() {
         assert_eq!(tray_menu_ids::QUIT, "quit");
         assert_eq!(tray_menu_ids::TOGGLE_FLOATING_BAR, "toggle-floating-bar");
+        assert_eq!(tray_menu_ids::SHOW_FLOATING_BAR, "show-floating-bar");
+        assert_eq!(tray_menu_ids::HIDE_FLOATING_BAR, "hide-floating-bar");
         assert_eq!(tray_menu_ids::SHOW_DEVTOOLS, "show-devtools");
         assert_eq!(tray_menu_ids::SHOW_MAIN_WINDOW, "show-main-window");
+        assert_eq!(tray_menu_ids::HIDE_MAIN_WINDOW, "hide-main-window");
         assert_eq!(tray_menu_ids::NEW_CHAT, "new-chat");
         assert_eq!(tray_menu_ids::SETTINGS, "tray-settings");
 
         // Ensure all IDs are non-empty
         assert!(!tray_menu_ids::QUIT.is_empty());
         assert!(!tray_menu_ids::SETTINGS.is_empty());
+        assert!(!tray_menu_ids::SHOW_FLOATING_BAR.is_empty());
+        assert!(!tray_menu_ids::HIDE_FLOATING_BAR.is_empty());
+        assert!(!tray_menu_ids::HIDE_MAIN_WINDOW.is_empty());
     }
 
     #[test]
@@ -440,8 +449,11 @@ mod tests {
         let tray_ids = vec![
             tray_menu_ids::QUIT,
             tray_menu_ids::TOGGLE_FLOATING_BAR,
+            tray_menu_ids::SHOW_FLOATING_BAR,
+            tray_menu_ids::HIDE_FLOATING_BAR,
             tray_menu_ids::SHOW_DEVTOOLS,
             tray_menu_ids::SHOW_MAIN_WINDOW,
+            tray_menu_ids::HIDE_MAIN_WINDOW,
             tray_menu_ids::NEW_CHAT,
             tray_menu_ids::SETTINGS,
         ];
