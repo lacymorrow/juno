@@ -306,7 +306,7 @@ export function EnhancedFloatingBar() {
   const getContainerStyles = () => {
     const baseStyles = `
       relative flex items-center justify-center
-      text-white rounded-full shadow-lg border border-white/20
+      text-white rounded-full shadow-lg border border-white/40
       transition-all duration-300 ease-in-out
       [will-change:width,height,transform]
       [backface-visibility:hidden]
