@@ -1339,69 +1339,8 @@ function App() {
       const { type, payload } = event.payload;
       const currentTime = Date.now();
 
-      // Show transparent notifications for tool calls
-      if (type === "tool_call_request" && "tool_name" in payload) {
-        const requestPayload = payload as ToolCallRequestPayload;
-        const toolName = requestPayload.tool_name;
-
-        // Get user-friendly tool name
-        const friendlyToolName = getFriendlyToolName(toolName);
-
-        // Show notification based on tool type
-        if (isScreenshotTool(toolName)) {
-          toast.info(`📸 Taking screenshot...`, {
-            description: "AI is capturing the current screen",
-            duration: 3000,
-          });
-        } else if (isFileOperationTool(toolName)) {
-          toast.info(`📁 ${friendlyToolName}`, {
-            description: "AI is working with files",
-            duration: 2000,
-          });
-        } else if (isBrowserTool(toolName)) {
-          toast.info(`🌐 ${friendlyToolName}`, {
-            description: "AI is using the browser",
-            duration: 2000,
-          });
-        } else if (isSystemTool(toolName)) {
-          toast.info(`⚙️ ${friendlyToolName}`, {
-            description: "AI is using system controls",
-            duration: 2000,
-          });
-        } else {
-          // Generic tool notification
-          toast.info(`🔧 ${friendlyToolName}`, {
-            description: "AI is using a tool",
-            duration: 2000,
-          });
-        }
-      } else if (type === "tool_call_result" && "tool_name" in payload) {
-        const resultPayload = payload as ToolCallResultPayload;
-        const toolName = resultPayload.tool_name;
-        const success = resultPayload.success;
-
-        // Show completion notification for important tools
-        if (isScreenshotTool(toolName)) {
-          if (success) {
-            toast.success(`📸 Screenshot captured`, {
-              description: "AI has successfully captured the screen",
-              duration: 2000,
-            });
-          } else {
-            toast.error(`📸 Screenshot failed`, {
-              description: "AI could not capture the screen",
-              duration: 3000,
-            });
-          }
-        } else if (!success && isImportantTool(toolName)) {
-          // Show error notifications for failed important tools
-          const friendlyToolName = getFriendlyToolName(toolName);
-          toast.error(`❌ ${friendlyToolName} failed`, {
-            description: "The AI tool encountered an error",
-            duration: 3000,
-          });
-        }
-      }
+      // NOTE: Toast notifications are now handled by the enhanced listener below
+      // This listener only manages conversation state
 
       setConversation((prev) => {
         let newMessage: ChatMessage | null = null;
@@ -1615,7 +1554,7 @@ function App() {
       streamTextListener.then((unlistenFn) => unlistenFn());
       streamEndListener.then((unlistenFn) => unlistenFn());
     };
-  }, []);
+  }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
