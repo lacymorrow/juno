@@ -418,11 +418,237 @@ impl CloudClient {
 
     /// Get hardware information
     async fn get_hardware_info(&self) -> HardwareInfo {
+        // Use the same comprehensive hardware monitoring as the connector
+        log::info!("🔍 Collecting real-time hardware information...");
+        let start_time = std::time::Instant::now();
+
+        let hardware_info = self.get_comprehensive_hardware_info().await;
+        let collection_time = start_time.elapsed();
+
+        log::info!(
+            "✅ Hardware information collected in {:?} - CPU: {:?}%, Memory: {:?}%, Disk: {:?}%",
+            collection_time,
+            hardware_info.cpu_usage,
+            hardware_info.memory_usage,
+            hardware_info.disk_usage
+        );
+
+        hardware_info
+    }
+
+    /// Get comprehensive hardware information with real system monitoring
+    async fn get_comprehensive_hardware_info(&self) -> HardwareInfo {
+        log::debug!("🔍 Gathering comprehensive hardware information...");
+
+        let (cpu_usage, memory_usage, disk_usage, screen_resolution) = tokio::join!(
+            Self::get_cpu_usage(),
+            Self::get_memory_usage(),
+            Self::get_disk_usage(),
+            Self::get_screen_resolution()
+        );
+
+        log::debug!(
+            "📊 Hardware metrics - CPU: {:?}%, Memory: {:?}%, Disk: {:?}%, Screen: {:?}",
+            cpu_usage, memory_usage, disk_usage, screen_resolution
+        );
+
         HardwareInfo {
-            cpu_usage: None, // TODO: Implement CPU usage monitoring
-            memory_usage: None, // TODO: Implement memory usage monitoring
-            disk_usage: None, // TODO: Implement disk usage monitoring
-            screen_resolution: None, // TODO: Get screen resolution
+            cpu_usage,
+            memory_usage,
+            disk_usage,
+            screen_resolution,
+        }
+    }
+
+    /// Get current CPU usage percentage
+    async fn get_cpu_usage() -> Option<f32> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+
+            match Command::new("top")
+                .args(&["-l", "1", "-n", "0"])
+                .output()
+            {
+                Ok(output) => {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    Self::parse_cpu_usage(&output_str)
+                },
+                Err(e) => {
+                    log::warn!("Failed to get CPU usage: {}", e);
+                    None
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            log::debug!("CPU monitoring not implemented for this platform");
+            None
+        }
+    }
+
+    /// Parse CPU usage from top command output
+    #[cfg(target_os = "macos")]
+    fn parse_cpu_usage(output: &str) -> Option<f32> {
+        use regex::Regex;
+
+        // Example: "CPU usage: 15.38% user, 8.46% sys, 76.15% idle"
+        let cpu_regex = Regex::new(r"CPU usage:\s*(\d+\.?\d*)%\s*user,\s*(\d+\.?\d*)%\s*sys").ok()?;
+
+        for line in output.lines() {
+            if let Some(captures) = cpu_regex.captures(line) {
+                let user_cpu = captures.get(1)?.as_str().parse::<f32>().ok()?;
+                let sys_cpu = captures.get(2)?.as_str().parse::<f32>().ok()?;
+
+                let total_cpu = user_cpu + sys_cpu;
+                log::debug!("Parsed CPU usage: {}% user + {}% sys = {}% total", user_cpu, sys_cpu, total_cpu);
+
+                return Some(total_cpu);
+            }
+        }
+
+        log::warn!("Could not parse CPU usage from top output");
+        None
+    }
+
+    /// Get current memory usage percentage
+    async fn get_memory_usage() -> Option<f32> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+
+            match Command::new("vm_stat").output() {
+                Ok(output) => {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    let mut free_pages = 0u64;
+                    let mut active_pages = 0u64;
+                    let mut inactive_pages = 0u64;
+                    let mut speculative_pages = 0u64;
+                    let mut wired_pages = 0u64;
+
+                    for line in output_str.lines() {
+                        if line.contains("Pages free:") {
+                            if let Some(num_str) = line.split(':').nth(1) {
+                                free_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                            }
+                        } else if line.contains("Pages active:") {
+                            if let Some(num_str) = line.split(':').nth(1) {
+                                active_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                            }
+                        } else if line.contains("Pages inactive:") {
+                            if let Some(num_str) = line.split(':').nth(1) {
+                                inactive_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                            }
+                        } else if line.contains("Pages speculative:") {
+                            if let Some(num_str) = line.split(':').nth(1) {
+                                speculative_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                            }
+                        } else if line.contains("Pages wired down:") {
+                            if let Some(num_str) = line.split(':').nth(1) {
+                                wired_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                            }
+                        }
+                    }
+
+                    let total_pages = free_pages + active_pages + inactive_pages + speculative_pages + wired_pages;
+                    let used_pages = total_pages - free_pages;
+
+                    if total_pages > 0 {
+                        let usage_percentage = (used_pages as f32 / total_pages as f32) * 100.0;
+                        Some(usage_percentage)
+                    } else {
+                        None
+                    }
+                },
+                Err(e) => {
+                    log::warn!("Failed to get memory usage: {}", e);
+                    None
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            log::debug!("Memory monitoring not implemented for this platform");
+            None
+        }
+    }
+
+    /// Get current disk usage percentage for the main drive
+    async fn get_disk_usage() -> Option<f32> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+
+            match Command::new("df")
+                .args(&["-h", "/"])
+                .output()
+            {
+                Ok(output) => {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    for line in output_str.lines().skip(1) { // Skip header
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 5 {
+                            // Format: Filesystem Size Used Avail Capacity Mounted
+                            if let Some(capacity_str) = parts.get(4) {
+                                if let Some(percentage_str) = capacity_str.strip_suffix('%') {
+                                    if let Ok(percentage) = percentage_str.parse::<f32>() {
+                                        return Some(percentage);
+                                    }
+                                }
+                            }
+                        }
+                        break; // Only process first (root) filesystem
+                    }
+                    None
+                },
+                Err(e) => {
+                    log::warn!("Failed to get disk usage: {}", e);
+                    None
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            log::debug!("Disk monitoring not implemented for this platform");
+            None
+        }
+    }
+
+    /// Get screen resolution as a formatted string
+    async fn get_screen_resolution() -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::Command;
+
+            match Command::new("system_profiler")
+                .args(&["SPDisplaysDataType"])
+                .output()
+            {
+                Ok(output) => {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    for line in output_str.lines() {
+                        if line.trim().starts_with("Resolution:") {
+                            if let Some(resolution) = line.split(':').nth(1) {
+                                return Some(resolution.trim().to_string());
+                            }
+                        }
+                    }
+                    None
+                },
+                Err(e) => {
+                    log::warn!("Failed to get screen resolution: {}", e);
+                    None
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            log::debug!("Screen resolution monitoring not implemented for this platform");
+            None
         }
     }
 

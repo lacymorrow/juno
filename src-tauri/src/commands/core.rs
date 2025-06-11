@@ -228,13 +228,13 @@ pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn set_performance_monitoring(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting performance monitoring to: {}", enabled);
-    
+
     // Update the state
     state.set_performance_monitoring_enabled(enabled);
-    
+
     // TODO: In the future, this could persist the setting to a config file
     // For now, it's stored in memory for the session
-    
+
     Ok(())
 }
 
@@ -288,13 +288,13 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
 #[tauri::command]
 pub async fn store_first_prompt(prompt: String, state: State<'_, AppState>) -> Result<(), String> {
     info!("Storing first prompt from onboarding: {}", prompt);
-    
+
     // Store the prompt in AppState for potential use after onboarding
     state.set_first_onboarding_prompt(prompt.clone());
-    
+
     // Optionally, you could also persist this to a file or database
     // For now, we'll just store it in memory for the session
-    
+
     Ok(())
 }
 
@@ -302,7 +302,7 @@ pub async fn store_first_prompt(prompt: String, state: State<'_, AppState>) -> R
 #[tauri::command]
 pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<Option<String>, String> {
     info!("Retrieving first prompt from onboarding");
-    
+
     let prompt = state.get_first_onboarding_prompt();
     Ok(prompt)
 }
@@ -311,9 +311,9 @@ pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<O
 #[tauri::command]
 pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting debug mode to: {}", enabled);
-    
+
     state.set_debug_mode(enabled);
-    
+
     info!("Debug mode successfully set to: {}", enabled);
     Ok(())
 }
@@ -323,4 +323,142 @@ pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result
 pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let debug_mode = state.is_debug_mode();
     Ok(debug_mode)
+}
+
+/// Reset all application settings to their default values
+#[tauri::command]
+pub async fn reset_all_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Resetting all settings to defaults");
+
+    // Reset TTS provider
+    {
+        let mut tts_provider = state.tts_provider.lock()
+            .map_err(|e| format!("Failed to lock TTS provider: {}", e))?;
+        *tts_provider = "system".to_string();
+    }
+
+    // Reset sound settings
+    {
+        let mut sound_enabled = state.sound_enabled.lock()
+            .map_err(|e| format!("Failed to lock sound enabled: {}", e))?;
+        *sound_enabled = true;
+    }
+
+    // Reset performance monitoring
+    state.set_performance_monitoring_enabled(true);
+
+    // Reset debug mode
+    state.set_debug_mode(false);
+
+    // Reset dictation settings
+    {
+        let mut dictation_clipboard = state.dictation_clipboard_enabled.lock()
+            .map_err(|e| format!("Failed to lock dictation clipboard: {}", e))?;
+        *dictation_clipboard = true;
+    }
+
+    // Reset always listening settings
+    if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(app.clone(), state.clone()).await {
+        warn!("Failed to stop always listening: {}", e);
+    }
+    if let Err(e) = crate::commands::always_listening::set_always_listening_sensitivity(0.5, app.clone(), state.clone()).await {
+        warn!("Failed to reset sensitivity: {}", e);
+    }
+    if let Err(e) = crate::commands::always_listening::set_always_listening_wake_words(
+        vec!["hey juno".to_string(), "computer".to_string()],
+        app.clone(),
+        state.clone()
+    ).await {
+        warn!("Failed to reset wake words: {}", e);
+    }
+
+    // Reset keyboard shortcuts
+    if let Err(e) = crate::commands::shortcuts::reset_keyboard_shortcuts(app.clone(), state.clone()).await {
+        warn!("Failed to reset keyboard shortcuts: {}", e);
+    }
+
+    // Reset tool configuration
+    if let Err(e) = crate::commands::tools::reset_tool_configuration(app.clone(), state.clone()).await {
+        warn!("Failed to reset tool configuration: {}", e);
+    }
+
+    // Reset provider settings to defaults (this would require expanding provider commands)
+    // Note: This would need additional implementation in provider commands
+
+    // Reset cloud settings
+    if let Err(e) = crate::commands::cloud::disable_cloud(app.clone(), state.clone()).await {
+        warn!("Failed to disable cloud: {}", e);
+    }
+
+    info!("All settings have been reset to defaults");
+    Ok(())
+}
+
+/// Cancel currently executing agent
+#[tauri::command]
+pub async fn cancel_agent_execution(state: State<'_, AppState>) -> Result<(), String> {
+    info!("Cancelling agent execution");
+
+    // Use the proper method to mark agent execution as finished
+    state.mark_agent_execution_finished();
+
+    info!("Agent execution cancelled successfully");
+    Ok(())
+}
+
+/// Get system context information
+#[tauri::command]
+pub async fn get_system_context(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    info!("Getting system context");
+
+    let context = serde_json::json!({
+        "agent_executing": state.is_agent_executing(),
+        "execution_id": state.get_current_agent_execution_id(),
+        "debug_mode": state.is_debug_mode(),
+        "desktop_available": state.is_desktop_available(),
+        "performance_monitoring": state.is_performance_monitoring_enabled(),
+        "sound_enabled": state.sound_enabled.lock()
+            .map_err(|e| format!("Failed to lock sound enabled: {}", e))?
+            .clone(),
+        "tts_provider": state.tts_provider.lock()
+            .map_err(|e| format!("Failed to lock TTS provider: {}", e))?
+            .clone(),
+        "dictation_clipboard_enabled": state.dictation_clipboard_enabled.lock()
+            .map_err(|e| format!("Failed to lock dictation clipboard: {}", e))?
+            .clone(),
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Failed to get timestamp: {}", e))?
+            .as_secs(),
+    });
+
+    Ok(context)
+}
+
+/// Set agent execution progress
+#[tauri::command]
+pub async fn set_agent_execution_progress(
+    current_step: Option<u32>,
+    max_steps: Option<u32>,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    info!("Setting agent execution progress: step {}/{}",
+        current_step.map_or("None".to_string(), |s| s.to_string()),
+        max_steps.map_or("None".to_string(), |s| s.to_string())
+    );
+
+    // Update current step if provided
+    if let Some(step) = current_step {
+        state.update_agent_current_step(step);
+    }
+
+    // Note: AppState doesn't have a direct method to set max_steps independently,
+    // but max_steps is typically set during agent execution start via mark_agent_execution_started_with_steps
+    // For now, we'll just update the current step as that's the main use case
+
+    info!("Agent execution progress updated successfully");
+    Ok(())
 }

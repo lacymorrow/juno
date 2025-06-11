@@ -13,7 +13,7 @@ pub enum AgentType {
 }
 
 /// Priority levels for task execution
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TaskPriority {
     Low,
     Normal,

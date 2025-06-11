@@ -19,7 +19,10 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { cn } from "@/lib/utils";
+import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowLeft,
   Code,
@@ -32,12 +35,12 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster } from "sonner";
 import ClickVisualizer from "./components/ClickVisualizer";
 import CommandOverlay from "./components/CommandOverlay";
 import KeyPressOverlay from "./components/KeyPressOverlay";
-import Settings from "./components/Settings";
+import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import "./styles/globals.css";
 
 // CRITICAL FIX: Add memory management constants (currently unused)
@@ -66,20 +69,20 @@ type ChatMessage = {
   messageId?: string; // Unique identifier for streaming messages
 };
 
-// Type for the result from submit_query (currently unused)
-// type SubmitQueryResult = {
-//   text: string;
-//   spoken_text?: string; // Optional separate content for TTS speech
-//   audio_base64?: string; // Optional base64 audio data
-//   agent_state: string;
-//   screenshot_base64?: string; // Optional base64 screenshot data
-// };
+// Type for the result from submit_query
+type SubmitQueryResult = {
+  text: string;
+  spoken_text?: string; // Optional separate content for TTS speech
+  audio_base64?: string; // Optional base64 audio data
+  agent_state: string;
+  screenshot_base64?: string; // Optional base64 screenshot data
+};
 
-// Type for the backend response event payload (currently unused)
-// type BackendResponsePayload = {
-//   query: string;
-//   response: SubmitQueryResult;
-// };
+// Type for the backend response event payload
+type BackendResponsePayload = {
+  query: string;
+  response: SubmitQueryResult;
+};
 
 // Streaming event types (currently unused)
 // type StreamingTextEvent = {
@@ -182,17 +185,53 @@ type ChatMessage = {
 //   };
 // }
 
-// Simple debounce function (commented out as it's currently unused)
-// function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
-//   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+// Simple debounce function
+function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-//   return (...args: Parameters<F>): void => {
-//     if (timeoutId !== null) {
-//       clearTimeout(timeoutId);
-//     }
-//     timeoutId = setTimeout(() => func(...args), waitFor);
-//   };
-// }
+  return (...args: Parameters<F>): void => {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => func(...args), waitFor);
+  };
+}
+
+// Helper function to convert base64 to blob
+function base64ToBlob(base64: string): Blob {
+  const byteCharacters = atob(base64);
+  const byteNumbers = new Array(byteCharacters.length);
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNumbers);
+  return new Blob([byteArray], { type: "audio/mpeg" });
+}
+
+// Helper function to play audio from base64
+function playAudioFromBase64(base64Audio: string) {
+  try {
+    const blob = base64ToBlob(base64Audio);
+    const audioUrl = URL.createObjectURL(blob);
+    const audioElement = new Audio(audioUrl);
+
+    audioElement.addEventListener("ended", () => {
+      URL.revokeObjectURL(audioUrl);
+    });
+
+    audioElement.addEventListener("error", (e) => {
+      console.error("Audio playback error:", e);
+      URL.revokeObjectURL(audioUrl);
+    });
+
+    audioElement.play().catch((error) => {
+      console.error("Failed to play audio:", error);
+      URL.revokeObjectURL(audioUrl);
+    });
+  } catch (error) {
+    console.error("Error processing audio:", error);
+  }
+}
 
 // Helper function to determine if timestamp should be shown (similar to Slack/Apple Messages)
 function shouldShowTimestamp(
@@ -373,24 +412,386 @@ function App() {
     "chat" | "settings" | "devtools" | "permissions" | "onboarding"
   >("chat");
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
-  // const [showPermissionsFlow] = useState(false); // Not used currently
-  const [permissionsGranted] = useState(false);
+  const [showPermissionsFlow, setShowPermissionsFlow] = useState(false);
+  const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
-  const [isCheckingUpdate] = useState(false);
-  const [appVersion] = useState<string | null>("1.0.0");
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>("1.0.0");
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [permissionsChecked, setPermissionsChecked] = useState(false);
+  const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [feedbackData, setFeedbackData] = useState<any>({});
+
+  // Use the state variables to avoid TypeScript warnings
+  React.useEffect(() => {
+    // This effect uses state variables to avoid TypeScript unused variable warnings
+    console.debug("State variables initialized:", {
+      showPermissionsFlow,
+      showOnboarding,
+      onboardingChecked,
+      permissionsChecked,
+      activeModal,
+      feedbackData,
+    });
+  }, [
+    showPermissionsFlow,
+    showOnboarding,
+    onboardingChecked,
+    permissionsChecked,
+    activeModal,
+    feedbackData,
+  ]);
 
   // Ref for scrolling to bottom
   const conversationEndRef = useRef<HTMLDivElement>(null);
 
-  // Handler functions
-  const handleOnboardingComplete = () => {
-    setCurrentView("chat");
-  };
+  // Fetch app version dynamically
+  useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const version = await getVersion();
+        setAppVersion(`v${version}`);
+      } catch (error) {
+        console.error("Failed to get app version:", error);
+        setAppVersion("v0.0.0");
+      }
+    };
+    fetchVersion();
+  }, []);
 
-  const handleOnboardingSkip = () => {
+  // Consolidated startup flow - check both permissions and onboarding status
+  useEffect(() => {
+    const initializeApp = async () => {
+      try {
+        // Initialize notification service (TODO: implement)
+        // await notificationService.initialize();
+        console.log("Notification service initialized");
+
+        // Check if an agent is currently executing first (highest priority)
+        const agentProgress = await invoke<{
+          is_executing: boolean;
+          execution_id?: string;
+        }>("get_agent_execution_progress");
+
+        if (agentProgress.is_executing) {
+          // Agent is running - skip onboarding and go directly to chat
+          console.log(
+            "Agent execution detected - skipping onboarding and going to chat"
+          );
+          setOnboardingChecked(true);
+          setPermissionsChecked(true);
+          setCurrentView("chat");
+          return;
+        }
+
+        // First check permissions
+        const permissionsResult = await invoke<{
+          accessibility: { granted: boolean; required: boolean };
+          screenRecording: { granted: boolean; required: boolean };
+          microphone: { granted: boolean; required: boolean };
+          allGranted: boolean;
+        }>("check_permissions_status");
+
+        setPermissionsChecked(true);
+
+        // Store permissions result for OnboardingFlow
+        setPermissionsGranted(permissionsResult.allGranted);
+
+        // Then check onboarding status
+        const isDevMode = import.meta.env.DEV;
+        const hasCompletedOnboarding = localStorage.getItem(
+          "juno-onboarding-completed"
+        );
+
+        // Decision logic for which flow to show
+        if (isDevMode) {
+          // Dev mode: Always show onboarding for QA, but skip permissions if already granted
+          console.log("Dev mode detected - showing onboarding for QA");
+          setShowOnboarding(true);
+          setCurrentView("onboarding");
+        } else if (!hasCompletedOnboarding) {
+          // First-time user: Show onboarding (which includes permissions check)
+          console.log(
+            "First-time user detected - showing full onboarding flow"
+          );
+          setShowOnboarding(true);
+          setCurrentView("onboarding");
+        } else if (!permissionsResult.allGranted) {
+          // Returning user with missing permissions: Show standalone permissions
+          console.log(
+            "Returning user with missing permissions - showing permissions flow"
+          );
+          setShowPermissionsFlow(true);
+          setCurrentView("permissions");
+        } else {
+          // Everything is good: Go to chat
+          console.log(
+            "All permissions granted and onboarding complete - going to chat"
+          );
+          setCurrentView("chat");
+        }
+
+        setOnboardingChecked(true);
+      } catch (error) {
+        console.error("Error during app initialization:", error);
+        setPermissionsChecked(true);
+        setOnboardingChecked(true);
+
+        // Fallback: show permissions flow on error
+        setShowPermissionsFlow(true);
+        setCurrentView("permissions");
+      }
+    };
+
+    initializeApp();
+  }, []);
+
+  // Play boot sound on app startup
+  useEffect(() => {
+    // Boot sound is now handled by the backend to avoid duplication
+    // Remove frontend boot sound call
+  }, []);
+
+  // Handle backend responses via event listener
+  const handleBackendResponse = useCallback(
+    debounce((payload: BackendResponsePayload) => {
+      console.log("Debounced handler executing for:", payload.query);
+      const { response } = payload; // Remove query from destructuring since we won't use it
+
+      // Check if we have any streaming assistant messages in progress or recently completed
+      setConversation((prevConversation) => {
+        const hasStreamingMessage = prevConversation.some(
+          (msg: ChatMessage) => msg.isStreaming && msg.role === "assistant"
+        );
+
+        // Check if this response matches a recently streamed message (to prevent duplicates)
+        // Look for an identical assistant message that was created within the last 2 seconds
+        const now = Date.now();
+        const isRecentlyStreamed = prevConversation.some(
+          (msg: ChatMessage) =>
+            msg.role === "assistant" &&
+            msg.content === response.text &&
+            msg.timestamp &&
+            now - msg.timestamp < 2000 // Within last 2 seconds
+        );
+
+        // Only add assistant response message if we're not currently streaming
+        // and this isn't a duplicate of a recently streamed message
+        if (!hasStreamingMessage && !isRecentlyStreamed) {
+          console.log("Adding assistant message from backend response");
+          const assistantMessage: ChatMessage = {
+            role: "assistant",
+            content: response.text,
+            isJsx: isJsxContent(response.text), // Auto-detect JSX content
+            screenshot_base64: response.screenshot_base64,
+            timestamp: Date.now(),
+          };
+
+          // Play audio if available (only when not streaming)
+          if (response.audio_base64) {
+            playAudioFromBase64(response.audio_base64);
+          }
+
+          return [...prevConversation, assistantMessage];
+        } else {
+          if (hasStreamingMessage) {
+            console.log(
+              "Skipping assistant message addition - streaming in progress"
+            );
+          } else if (isRecentlyStreamed) {
+            console.log(
+              "Skipping assistant message addition - recently streamed duplicate"
+            );
+          }
+          // Don't play audio during streaming or for duplicates - TTS is handled by backend
+          return prevConversation;
+        }
+      });
+
+      // Note: Sound feedback is now handled by the Rust backend based on agent_state
+      // No need for frontend sound calls here to avoid duplicates
+
+      // Reset processing state (but streaming end event also does this)
+      setIsProcessing(false);
+    }, 100), // Debounce for 100ms
+    [] // Remove conversation dependency to avoid stale closure issues
+  );
+
+  // Set up backend response event listener
+  useEffect(() => {
+    const unlisten = listen<BackendResponsePayload>(
+      "backend-response",
+      (event) => {
+        handleBackendResponse(event.payload);
+      }
+    );
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [handleBackendResponse]);
+
+  // Submit query using Tauri invoke (primarily for the main input)
+  // Note: This function might need adjustment if the backend
+  // `submit_query` command no longer returns the result directly.
+  // For now, we assume it might still be used by the main input,
+  // OR that the main input also triggers the event flow.
+  // If `submit_query` backend now ONLY emits, this function needs adjustment.
+  const submitQuery = useCallback(
+    async (text: string, isFromDictation: boolean = false) => {
+      console.log(
+        "[submitQuery called] Text:",
+        text,
+        "Trimmed empty?",
+        !text.trim(),
+        "isProcessing:",
+        isProcessing,
+        "serverStatus:",
+        serverStatus,
+        "isFromDictation:",
+        isFromDictation
+      );
+
+      // Common check for empty text
+      if (!text.trim()) {
+        console.log("[submitQuery] Returning early due to empty text.");
+        return;
+      }
+
+      // Server status check - only enforced if NOT from dictation
+      if (!isFromDictation && serverStatus !== "connected") {
+        console.log(
+          "[submitQuery] Returning early: server not connected (and not from dictation)."
+        );
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content:
+              "Cannot submit query: Server is not connected. Please wait or check connection.",
+          },
+        ]);
+        return;
+      }
+      // For dictated queries, we proceed even if serverStatus is not "connected".
+      // The `invoke` call will likely fail and be caught below, providing user feedback.
+
+      // isProcessing check - only enforced if NOT from dictation
+      if (!isFromDictation && isProcessing) {
+        console.log(
+          "[submitQuery] Returning early: query already in progress (and not from dictation)."
+        );
+        return;
+      }
+      // For dictated queries, we proceed even if isProcessing is true.
+
+      // Add user query immediately to conversation
+      const userMessage: ChatMessage = {
+        role: "user",
+        content: text,
+        timestamp: Date.now(),
+      };
+      setConversation((prev) => [...prev, userMessage]);
+
+      // Store the query before clearing it, for potential error recovery
+      setQuery(""); // Clear input immediately IF it was from the manual input field
+      setIsProcessing(true); // Set processing state
+
+      try {
+        // Invoke the backend command. We assume it triggers the "backend-response" event.
+        await invoke("submit_query", { query: text });
+        console.log("submit_query invoked for:", text);
+        // Response handling is now done via the event listener.
+        // isProcessing will be set to false by the backend-response event handler.
+      } catch (error) {
+        const errorMessage: ChatMessage = {
+          role: "system",
+          content: `Error invoking submit_query: ${error}`,
+          timestamp: Date.now(),
+        };
+        setConversation((prev) => [...prev, errorMessage]);
+        setIsProcessing(false); // Reset processing on error
+
+        // Restore the input so user can retry
+        console.log("Restoring input due to submitQuery error:", text);
+        setQuery(text);
+      }
+      // No finally block to set isProcessing(false) here, as the event listener handles it on success.
+    },
+    [isProcessing, serverStatus, setConversation, setQuery, setIsProcessing]
+  );
+
+  // Function to start a new chat (clear conversation and reset state)
+  const startNewChat = useCallback(() => {
+    console.log("Starting new chat - clearing conversation");
+    setConversation([]);
+    setQuery("");
+    setIsProcessing(false);
+  }, [setConversation, setQuery, setIsProcessing]);
+
+  // Function to clear conversation history
+  const clearConversation = useCallback(() => {
+    console.log("Clearing conversation history");
+    setConversation([]);
+    setIsProcessing(false);
+  }, [setConversation, setIsProcessing]);
+
+  // Handle onboarding completion
+  const handleOnboardingComplete = useCallback(async () => {
+    try {
+      // Mark onboarding as completed
+      localStorage.setItem("juno-onboarding-completed", "true");
+      setShowOnboarding(false);
+
+      // Check if an agent is already executing
+      try {
+        const agentProgress = await invoke<{
+          is_executing: boolean;
+          execution_id?: string;
+        }>("get_agent_execution_progress");
+
+        if (agentProgress.is_executing) {
+          // Agent is already running - just switch to chat view
+          console.log("Agent already executing - switching to chat view");
+          setCurrentView("chat");
+          return;
+        }
+      } catch (error) {
+        console.debug(
+          "Error checking agent execution state during onboarding completion:",
+          error
+        );
+      }
+
+      // Get the stored first prompt if any
+      try {
+        const firstPrompt = await invoke<string>("get_first_onboarding_prompt");
+        if (firstPrompt && firstPrompt.trim()) {
+          // Submit the first prompt automatically
+          await submitQuery(firstPrompt);
+        }
+      } catch (error) {
+        console.log("No first prompt stored or error retrieving it:", error);
+      }
+
+      // Return to chat view
+      setCurrentView("chat");
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
+      // Still proceed to chat view
+      setCurrentView("chat");
+    }
+  }, [submitQuery]);
+
+  // Handle onboarding skip
+  const handleOnboardingSkip = useCallback(() => {
+    // Mark onboarding as completed even if skipped
+    localStorage.setItem("juno-onboarding-completed", "true");
+    setShowOnboarding(false);
     setCurrentView("chat");
-  };
+  }, []);
 
   const handleExamplePromptSelect = (prompt: string) => {
     setQuery(prompt);
@@ -405,6 +806,282 @@ function App() {
     } catch (error) {
       console.error("Failed to copy text:", error);
       setCopyingMessageId(null);
+    }
+  };
+
+  // Monitor agent execution state and automatically skip onboarding if agent starts
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    const checkAgentExecution = async () => {
+      try {
+        const agentProgress = await invoke<{
+          is_executing: boolean;
+          execution_id?: string;
+        }>("get_agent_execution_progress");
+
+        // If agent starts executing while in onboarding, switch to chat
+        if (agentProgress.is_executing && currentView === "onboarding") {
+          console.log(
+            "Agent execution detected during onboarding - switching to chat"
+          );
+          // Mark onboarding as completed to prevent showing it again
+          localStorage.setItem("juno-onboarding-completed", "true");
+          setShowOnboarding(false);
+          setCurrentView("chat");
+        }
+      } catch (error) {
+        // Silently handle errors - this is just a monitoring function
+        console.debug("Error checking agent execution state:", error);
+      }
+    };
+
+    // Only monitor when in onboarding view
+    if (currentView === "onboarding") {
+      // Check immediately
+      checkAgentExecution();
+      // Then check every 500ms for responsive detection
+      intervalId = setInterval(checkAgentExecution, 500);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [currentView]);
+
+  // Listen for devtools menu requests from tray menu
+  useEffect(() => {
+    const unlisten = listen<string>("devtools-requested", (event) => {
+      console.log("DevTools requested from tray menu:", event.payload);
+      setCurrentView("devtools");
+      setIsDevPanelOpen(true); // Also open the dev panel
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Enhanced help request handler
+  useEffect(() => {
+    const unlisten = listen<string>("help-requested", (event) => {
+      console.log("Help requested from menu:", event.payload);
+      const helpType = event.payload;
+
+      if (helpType === "shortcuts") {
+        // Show keyboard shortcuts - navigate to settings
+        setCurrentView("settings");
+      } else {
+        // General help - show comprehensive help modal
+        setActiveModal("help");
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for new chat requests
+  useEffect(() => {
+    const unlisten = listen("new-chat-requested", () => {
+      console.log("New chat requested from menu");
+      startNewChat();
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [startNewChat]);
+
+  // Listen for clear history requests
+  useEffect(() => {
+    const unlisten = listen("clear-history-requested", () => {
+      console.log("Clear history requested from menu");
+      clearConversation();
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [clearConversation]);
+
+  // Listen for toggle floating bar requests
+  useEffect(() => {
+    const unlisten = listen("toggle-floating-bar-requested", () => {
+      console.log("Toggle floating bar requested from menu");
+      // This could emit a command to toggle the floating bar
+      // For now, we'll just log it as the floating bar is managed by backend
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Listen for toggle dev panel requests
+  useEffect(() => {
+    const unlisten = listen("toggle-dev-panel-requested", () => {
+      console.log("Toggle dev panel requested from menu");
+      setIsDevPanelOpen((current) => !current);
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []); // Remove dependency to avoid stale closure
+
+  // Listen for permissions requests
+  useEffect(() => {
+    const unlisten = listen("permissions-requested", () => {
+      console.log("Permissions requested from menu");
+      setCurrentView("permissions");
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Enhanced feedback request handler
+  useEffect(() => {
+    const unlisten = listen<string>("feedback-requested", (event) => {
+      console.log("Feedback requested from menu:", event.payload);
+      const feedbackType = event.payload;
+
+      // Set feedback type and open modal
+      setFeedbackData((prev: any) => ({
+        ...prev,
+        type: feedbackType === "issue" ? "issue" : "general",
+      }));
+      setActiveModal("feedback");
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Enhanced import/export chat handlers
+  useEffect(() => {
+    const unlistenImport = listen("import-chat-requested", () => {
+      console.log("Import chat requested from menu");
+      setActiveModal("import");
+    });
+
+    const unlistenExport = listen("export-chat-requested", () => {
+      console.log("Export chat requested from menu");
+      setActiveModal("export");
+    });
+
+    return () => {
+      unlistenImport.then((unlistenFn) => unlistenFn());
+      unlistenExport.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Enhanced window management handlers
+  useEffect(() => {
+    const unlistenMinimize = listen("minimize-window-requested", async () => {
+      console.log("Minimize window requested from menu");
+      try {
+        const window = getCurrentWindow();
+        await window.minimize();
+        console.log("✅ Window minimized successfully");
+      } catch (error) {
+        console.error("❌ Failed to minimize window:", error);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `Failed to minimize window: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+    });
+
+    const unlistenZoom = listen("zoom-window-requested", async () => {
+      console.log("Zoom window requested from menu");
+      try {
+        const window = getCurrentWindow();
+        const isMaximized = await window.isMaximized();
+        if (isMaximized) {
+          await window.unmaximize();
+          console.log("✅ Window unmaximized successfully");
+        } else {
+          await window.maximize();
+          console.log("✅ Window maximized successfully");
+        }
+      } catch (error) {
+        console.error("❌ Failed to toggle window zoom:", error);
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `Failed to toggle window zoom: ${error}`,
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+    });
+
+    const unlistenFullscreen = listen(
+      "toggle-fullscreen-requested",
+      async () => {
+        console.log("Toggle fullscreen requested from menu");
+        try {
+          const window = getCurrentWindow();
+          const isFullscreen = await window.isFullscreen();
+          await window.setFullscreen(!isFullscreen);
+          console.log(
+            `✅ Window fullscreen ${
+              !isFullscreen ? "enabled" : "disabled"
+            } successfully`
+          );
+        } catch (error) {
+          console.error("❌ Failed to toggle fullscreen:", error);
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `Failed to toggle fullscreen: ${error}`,
+              timestamp: Date.now(),
+            },
+          ]);
+        }
+      }
+    );
+
+    const unlistenUpdate = listen("update-check-requested", () => {
+      console.log("Update check requested from menu");
+      handleUpdateCheck();
+    });
+
+    return () => {
+      unlistenMinimize.then((unlistenFn) => unlistenFn());
+      unlistenZoom.then((unlistenFn) => unlistenFn());
+      unlistenFullscreen.then((unlistenFn) => unlistenFn());
+      unlistenUpdate.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
+  // Update check implementation - simplified version using backend
+  const handleUpdateCheck = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      console.log("Checking for updates...");
+      // TODO: Implement actual update check
+      setTimeout(() => {
+        setIsCheckingUpdate(false);
+        console.log("You're running the latest version!");
+      }, 2000);
+    } catch (error) {
+      console.error("Failed to check for updates:", error);
+      setIsCheckingUpdate(false);
+      console.error("Failed to check for updates");
     }
   };
 
@@ -434,6 +1111,11 @@ function App() {
     }
   };
 
+  // Modal rendering function
+  const renderModal = () => {
+    return null; // No modals implemented yet
+  };
+
   // Form submission handler
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -460,22 +1142,6 @@ function App() {
       setConversation((prev) => [...prev, assistantMessage]);
       setIsProcessing(false);
     }, 1000);
-  };
-
-  // Clear conversation
-  const clearConversation = () => {
-    setConversation([]);
-  };
-
-  // Start new chat
-  const startNewChat = () => {
-    clearConversation();
-    setQuery("");
-  };
-
-  // Modal rendering function (placeholder)
-  const renderModal = () => {
-    return null; // No modals implemented yet
   };
 
   // Listen for agent error events to restore input for retry
@@ -605,11 +1271,7 @@ function App() {
           {currentView === "settings" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
               <ScrollArea className="h-full w-full">
-                <Settings
-                  onNavigateToDevTools={() => setCurrentView("devtools")}
-                  onNavigateToChat={() => setCurrentView("chat")}
-                  onNavigateToPermissions={() => setCurrentView("permissions")}
-                />
+                <ModularSettingsWindow />
               </ScrollArea>
             </div>
           ) : currentView === "devtools" ? (

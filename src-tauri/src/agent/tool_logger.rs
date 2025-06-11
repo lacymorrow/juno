@@ -1159,7 +1159,7 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
     let event_data = serde_json::json!({
         "message_id": message_id
     });
-    
+
     if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_START, event_data) {
         warn!("Failed to emit agent-stream-start event: {}", e);
     }
@@ -1170,7 +1170,7 @@ pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_i
         "chunk": text,
         "message_id": message_id
     });
-    
+
     if let Err(e) = app_handle.emit(crate::constants::events::AGENT_TEXT_STREAM, event_data) {
         warn!("Failed to emit agent-text-stream event: {}", e);
     }
@@ -1181,7 +1181,7 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
         "message_id": message_id,
         "complete_text": complete_text
     });
-    
+
     if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event_data) {
         warn!("Failed to emit agent-stream-end event: {}", e);
     }

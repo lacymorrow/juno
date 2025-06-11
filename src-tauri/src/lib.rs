@@ -740,6 +740,7 @@ pub fn run() {
             request_microphone_permission,
             request_screen_recording_permission,
             request_input_monitoring_permission,
+            test_microphone_functionality,
             open_system_preferences,
             start_permissions_monitoring,
             stop_permissions_monitoring,
@@ -884,6 +885,8 @@ pub fn run() {
             // Performance Monitoring Commands
             set_performance_monitoring,
             get_performance_monitoring,
+            // Reset All Settings Command
+            reset_all_settings,
             // Notification Commands
             commands::notifications::get_notification_settings,
             commands::notifications::set_notification_type,
@@ -896,6 +899,14 @@ pub fn run() {
             commands::notifications::request_notification_permission,
             commands::notifications::send_notification,
             commands::notifications::test_notification,
+            // Core Commands
+            cancel_agent_execution,
+            get_system_context,
+            get_agent_execution_progress,
+            set_agent_execution_progress,
+            get_first_onboarding_prompt,
+            set_debug_mode,
+            get_debug_mode,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
