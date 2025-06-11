@@ -527,14 +527,27 @@ pub fn run() {
     commands::shell::init_shell_state(&app_state);
 
     // --- Tauri Application Builder ---
-    let builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None)) // Add autostart plugin
-        .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
-        .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
+        .plugin(tauri_plugin_store::Builder::default().build()); // Add the store plugin for persistent data
+
+    // CRITICAL: Conditional voice plugin initialization - only on supported platforms
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        builder = builder.plugin(tauri_plugin_voice_transcription::init()); // Add the voice transcription plugin
+        info!("Voice transcription plugin initialized for supported platform");
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        info!("Voice transcription plugin skipped - not supported on this platform");
+    }
+
+    let builder = builder
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
             println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
 
@@ -570,6 +583,7 @@ pub fn run() {
                 }
 
                 // Check if dictation is active and stop it
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
                 if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
                     // Check if dictation is active and stop it synchronously if possible
                     if let Ok(voice_controller) = voice_controller_state.lock() {
@@ -582,6 +596,11 @@ pub fn run() {
                             let _ = app.emit("stop_dictation", serde_json::Value::Null);
                         }
                     }
+                }
+
+                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+                {
+                    info!("[GlobalShortcut] Voice features not available on this platform - skipping dictation check");
                 }
 
                 // Emit agent stopping event for any running AI agents
