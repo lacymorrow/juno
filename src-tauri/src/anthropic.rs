@@ -143,6 +143,11 @@ pub async fn submit_query(
     state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
     info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
 
+    // Register escape key for cancellation during agent execution
+    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
+        warn!("Failed to register escape key for agent execution: {} - continuing without escape key cancellation", e);
+    }
+
     // --- Gather System Context ---
     let system_context = match gather_system_context(Some(&*state)).await {
         Ok(context) => {
@@ -333,6 +338,11 @@ pub async fn submit_query(
     // Mark agent execution as finished
     state.mark_agent_execution_finished();
     info!("Agent execution marked as finished for ID: {}", execution_id);
+
+    // Unregister escape key as agent execution is complete
+    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
+        warn!("Failed to unregister escape key after agent execution: {} - continuing anyway", e);
+    }
 
     // --- Process Agent Result ---
     let mut final_response = match agent_result {
