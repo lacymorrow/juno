@@ -6,26 +6,31 @@
 ## 📋 Rules Overview
 
 ### 🎯 Core Development & Architecture
+
 | Rule File | Status | Purpose | Last Updated |
 |-----------|--------|---------|--------------|
 | **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** | ✅ Complete | Hierarchical agent system, state management, tool architecture | Current |
 | **[README.md](README.md)** | ✅ Complete | Main documentation hub with complete system overview | Just Updated |
 
 ### 🔒 Security & Stability (NEW PRIORITY)
+
 | Rule File | Status | Purpose | Last Updated |
 |-----------|--------|---------|--------------|
 | **[security-stability-fixes.mdc](security-stability-fixes.mdc)** | ✅ **NEW** | **Critical security hardening, stability fixes, development guidelines** | **Just Created** |
 | **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** | ✅ Complete | macOS permission handling, built app detection | Current |
 
 ### 🔧 System Integration
+
 | Rule File | Status | Purpose | Last Updated |
 |-----------|--------|---------|--------------|
 | **[mcp-integration-system.mdc](mcp-integration-system.mdc)** | ✅ Complete | MCP server integration, external tools | Current |
 | **[jsx-visual-response-system.mdc](jsx-visual-response-system.mdc)** | ✅ Complete | Rich React component responses | Current |
 | **[streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)** | ✅ Complete | Real-time AI response streaming | Current |
 | **[cloud-control-system.mdc](cloud-control-system.mdc)** | 🚀 **PRODUCTION COMPLETE** | **Full-stack cloud backend + client integration** | **Just Completed** |
+| **[version-bumping-workflow.mdc](version-bumping-workflow.mdc)** | ✅ **NEW** | **Automated version management across Rust and Node.js** | **Just Created** |
 
 ### 🎤 Voice System (Three-Mode Implementation)
+
 | Rule File | Status | Purpose | Last Updated |
 |-----------|--------|---------|--------------|
 | **[voice-modes-clarification.mdc](voice-modes-clarification.mdc)** | ✅ Complete | Complete three-mode voice system overview | Current |
@@ -33,6 +38,7 @@
 | **[07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)** | ✅ Complete | Production-ready Always Listening patterns | Current |
 
 ### 🐛 Testing & Debugging
+
 | Rule File | Status | Purpose | Last Updated |
 |-----------|--------|---------|--------------|
 | **[cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)** | ✅ Complete | WebSocket debugging and cloud test panels | Current |
@@ -41,6 +47,7 @@
 ## 🚀 Quick Reference Guide
 
 ### 🔒 **PRIORITY 1: Security Requirements (MANDATORY)**
+
 ```rust
 // All new code must follow security patterns
 validate_input(user_input)?;           // Always validate first
@@ -50,12 +57,14 @@ validate_command(command)?;            // Whitelist commands only
 ```
 
 ### 🎯 **Development Workflow**
+
 1. **Security First**: Review [security-stability-fixes.mdc](security-stability-fixes.mdc) for all input handling
 2. **Architecture**: Follow [core-architecture-patterns.mdc](core-architecture-patterns.mdc) for system design
 3. **Voice Integration**: Use [voice-modes-clarification.mdc](voice-modes-clarification.mdc) for voice features
 4. **Testing**: Include security testing for all new features
 
 ### 🛡️ **Critical Security Controls**
+
 - ✅ **Path Traversal Protection**: All file operations validated
 - ✅ **Command Injection Prevention**: Whitelist-based command validation
 - ✅ **Crash Prevention**: 50+ dangerous `.unwrap()` calls eliminated
@@ -64,7 +73,9 @@ validate_command(command)?;            // Whitelist commands only
 ## 📊 Implementation Matrix
 
 ### Core Features Status
+
 <<<<<<< HEAD
+
 | Feature Category | Implementation | Security | Testing | Documentation |
 |-----------------|----------------|----------|---------|---------------|
 | **AI Computer Use** | ✅ Complete | ✅ **Hardened** | ✅ Complete | ✅ Complete |
@@ -84,9 +95,11 @@ validate_command(command)?;            // Whitelist commands only
 | **Cloud Control** | 🚀 **PRODUCTION READY** | ✅ **Enterprise-grade** | ✅ **Full Integration** | ✅ **Complete** | 🚀 **Complete** |
 | **File Operations** | ✅ Complete | ✅ **Hardened** | 🏆 **Exemplary** | ✅ Complete | ✅ Complete |
 | **Command Execution** | ✅ Complete | ✅ **Hardened** | 🏆 **Exemplary** | ✅ Complete | ✅ Complete |
+
 >>>>>>> main
 
 ### Security Hardening Status
+
 | Security Area | Status | Protection Level | Verification |
 |---------------|--------|------------------|--------------|
 | **File System** | ✅ **Hardened** | Enterprise-grade | Path traversal tests pass |
@@ -99,6 +112,7 @@ validate_command(command)?;            // Whitelist commands only
 ## 🎯 Rule Usage Patterns
 
 ### For New Feature Development
+
 ```
 1. START → security-stability-fixes.mdc (Security requirements)
 2. → core-architecture-patterns.mdc (Architecture patterns)
@@ -108,6 +122,7 @@ validate_command(command)?;            // Whitelist commands only
 ```
 
 ### For Bug Fixes
+
 ```
 1. START → security-stability-fixes.mdc (Security implications)
 2. → [relevant debugging docs] (Problem-specific guidance)
@@ -116,6 +131,7 @@ validate_command(command)?;            // Whitelist commands only
 ```
 
 ### For Voice System Work
+
 ```
 1. START → voice-modes-clarification.mdc (Complete system overview)
 2. → [specific voice mode docs] (Technical implementation)
@@ -126,18 +142,21 @@ validate_command(command)?;            // Whitelist commands only
 ## 📈 Documentation Quality Metrics
 
 ### ✅ **Completeness Score: 100%**
+
 - All major system components documented
 - Security patterns comprehensively covered
 - Production patterns validated
 - Testing procedures complete
 
 ### ✅ **Security Coverage: 100%**
+
 - All attack vectors documented and protected
 - Security development patterns established
 - Code review checklists complete
 - Testing requirements defined
 
 ### ✅ **Maintenance Ready: 100%**
+
 - Clear update procedures established
 - Version control for documentation
 - Regular review schedules defined
@@ -146,21 +165,25 @@ validate_command(command)?;            // Whitelist commands only
 ## 🔄 Rule Maintenance Schedule
 
 ### **Monthly** (Next: Current)
+
 - [ ] Review dependency vulnerabilities
 - [x] Update security documentation
 - [x] Verify all rules current with codebase
 
 ### **Per Release** (Current Release: Security Hardened)
+
 - [x] Run comprehensive security test suite
 - [x] Update implementation status
 - [x] Verify all documentation accuracy
 
 ### **Quarterly** (Next: Q1 2024)
+
 - [ ] Complete architecture review
 - [ ] Update development patterns
 - [ ] Review rule effectiveness
 
 ### **Annual** (Next: 2024)
+
 - [ ] Complete security architecture review
 - [ ] Update all documentation standards
 - [ ] Review and update rule structure
@@ -168,6 +191,7 @@ validate_command(command)?;            // Whitelist commands only
 ## 🎯 Current Priority Actions
 
 ### ✅ **Completed**
+
 - **Security Hardening**: Complete file system and command execution protection
 - **Stability Improvements**: Eliminated all dangerous `.unwrap()` calls
 <<<<<<< HEAD
@@ -177,12 +201,15 @@ validate_command(command)?;            // Whitelist commands only
 - **Documentation Updates**: Added comprehensive security and macOS excellence documentation
 - **Testing Framework**: Security test suite and macOS built app validation established
 - 🚀 **Cloud Backend Implementation**: **PRODUCTION-READY Node.js WebSocket server with enterprise authentication**
+
 >>>>>>> main
 
 ### 🔄 **In Progress**
+
 - None - all critical items completed
 
 ### 📋 **Next Phase** (Future Enhancements)
+
 - **Cloud Deployment**: Unraid VPS deployment and SSL setup
 - **Premium Features**: Stripe integration for subscription management
 - **Multi-Platform Support**: Windows and Linux client implementations
@@ -191,6 +218,7 @@ validate_command(command)?;            // Whitelist commands only
 ## 💡 Best Practice Summary
 
 ### **Golden Rules**
+
 1. **Security First**: Always validate inputs and use security patterns
 2. **Fail Safely**: Implement graceful degradation, never crash
 3. **Defense in Depth**: Multiple layers of protection for critical operations
@@ -198,6 +226,7 @@ validate_command(command)?;            // Whitelist commands only
 5. **Test Comprehensively**: Include security and stability testing
 
 ### **Code Standards**
+
 - No `.unwrap()` calls in production code
 - All user inputs validated against whitelists
 - Path operations use security validation functions
@@ -205,6 +234,7 @@ validate_command(command)?;            // Whitelist commands only
 - Error handling provides context without information leakage
 
 ### **Development Workflow**
+
 - Design phase: Consider security implications
 - Implementation phase: Follow security patterns
 - Testing phase: Include security testing
@@ -218,17 +248,20 @@ validate_command(command)?;            // Whitelist commands only
 ## 🚀 Quick Reference
 
 ### Recently Added ✨
+
 - **JSX Visual Response System** - Enables agent to respond with rich React components instead of raw SVG/HTML
 - **Enhanced System Prompts** - Updated agent instructions for visual component usage
 - **Shape Components** - Circle, Rectangle, Triangle components solve raw code output problem
 
 ### Essential Files for Development
+
 1. **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** - Start here for architectural understanding
 2. **[jsx-visual-response-system.mdc](jsx-visual-response-system.mdc)** - For visual response development
 3. **[voice-modes-clarification.mdc](voice-modes-clarification.mdc)** - For voice system development
 4. **[mcp-integration-system.mdc](mcp-integration-system.mdc)** - For external tool integration
 
 ### Implementation Status ✅
+
 - **Core Agent System**: Complete with hierarchical architecture
 - **Computer Use API**: All 17 actions implemented
 - **Voice System**: Three-mode system (Agent, Dictation, Always Listening)
@@ -242,6 +275,7 @@ This documentation structure provides comprehensive guidance for maintaining and
 ## 🎯 Find Rules By Topic
 
 ### Architecture & Core Systems
+
 - **System Architecture** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#hierarchical-agent-system) ⭐
 - **Agent Hierarchy** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#agent-architecture-pattern)
 - **State Management** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#state-management-patterns)
@@ -250,43 +284,51 @@ This documentation structure provides comprehensive guidance for maintaining and
 - **AI Provider Management** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#ai-provider-system--model-management) ⭐ **NEW**
 
 ### Voice System
+
 - **All Voice Modes Overview** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc)
 - **Always Listening Technical Details** → [06-always-listening-mode.mdc](06-always-listening-mode.mdc)
 - **Always Listening Production Status** → [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)
 
 ### System Integration
+
 - **External Tools (MCP)** → [mcp-integration-system.mdc](mcp-integration-system.mdc)
 - **macOS Permissions** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)
 - **Cloud Connectivity** → [cloud-control-system.mcp](cloud-control-system.mdc)
 - **Streaming Responses** → [streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)
 
 ### Testing & Debugging
+
 - **WebSocket Debugging** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)
 - **Feature Integration** → [successful-merge-documentation.mdc](successful-merge-documentation.mdc)
 
 ## 🚀 Find Rules By Use Case
 
-### I need to...
+### I need to
 
 #### Add a new AI tool/feature
+
 1. **Architecture patterns** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc)
 2. **MCP integration** → [mcp-integration-system.mdc](mcp-integration-system.mdc)
 3. **State management** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc)
 
 #### Work with voice features
+
 1. **Voice mode overview** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc)
 2. **Always listening setup** → [06-always-listening-mode.mdc](06-always-listening-mode.mdc)
 3. **Production examples** → [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)
 
 #### Fix permission issues
+
 1. **macOS permission fixes** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)
 2. **Built app testing** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)
 
 #### Debug network/cloud issues
+
 1. **WebSocket debugging** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)
 2. **Cloud system docs** → [cloud-control-system.mdc](cloud-control-system.mdc)
 
 #### Understand implemented features
+
 1. **Overall documentation** → [README.md](README.md)
 2. **Merge documentation** → [successful-merge-documentation.mdc](successful-merge-documentation.mdc)
 
@@ -305,6 +347,7 @@ This documentation structure provides comprehensive guidance for maintaining and
 ## 🔍 Quick Implementation Checks
 
 ### Before Making Changes
+
 ```bash
 # MANDATORY compilation check
 cargo check --manifest-path src-tauri/Cargo.toml
@@ -314,26 +357,30 @@ echo $?
 ```
 
 ### Key Commands to Test
+
 - **Alt+D** - Agent Mode toggle
 - **Spacebar** - Dictation Mode (hold)
 - **"Hey Juno"** - Always Listening activation
 - **Escape** - Cancel agent operation
 
 ### Critical Files to Review
+
 - [src-tauri/src/anthropic.rs](../../src-tauri/src/anthropic.rs) - Main agent orchestrator
 - [src-tauri/src/state.rs](../../src-tauri/src/state.rs) - Centralized state management
 - [src/Bar.tsx](../../src/Bar.tsx) - Main UI component
 
 ### Essential Environment
+
 - **macOS**: Accessibility + Screen Recording + Microphone permissions
 - **Voice**: Whisper.cpp plugin working
 - **AI**: Anthropic/OpenAI/Gemini API keys configured
 
 ---
 
-💡 **Quick Start**: Read [README.md](README.md) for complete overview, then dive into specific rule files based on your implementation needs. 
+💡 **Quick Start**: Read [README.md](README.md) for complete overview, then dive into specific rule files based on your implementation needs.
 
 ### 🎤 **Voice System** (Complete Three-Mode Implementation)
+
 - **Voice Modes Overview** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc) ⭐
 - **Always Listening Mode** → [06-always-listening-mode.mdc](06-always-listening-mode.mdc) / [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)
 - **Dictation Mode** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#dictation-mode)
@@ -341,6 +388,7 @@ echo $?
 - **Mode Separation** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#mode-separation-and-integration)
 
 ### 🔧 **System Integration**
+
 - **MCP Integration** → [mcp-integration-system.mdc](mcp-integration-system.mdc) ⭐
 - **Tool Discovery** → [mcp-integration-system.mdc](mcp-integration-system.mdc#tool-discovery-and-registration)
 - **External Servers** → [mcp-integration-system.mdc](mcp-integration-system.mdc#mcp-server-management)
@@ -349,6 +397,7 @@ echo $?
 - **Cloud Control** → [cloud-control-system.mdc](cloud-control-system.mdc)
 
 ### 🐛 **Testing & Debugging**
+
 - **WebSocket Debugging** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)
 - **Permission Testing** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc#testing-and-validation)
 - **Voice System Testing** → [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc#testing-and-validation)
@@ -359,12 +408,14 @@ echo $?
 ### **I want to...**
 
 #### **Understand the System**
+
 - **Learn the architecture** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc) ⭐
 - **Understand AI providers** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#ai-provider-system--model-management) ⭐ **NEW**
 - **See what's implemented** → [README.md](README.md#implementation-status)
 - **Get quick overview** → [SUMMARY.md](SUMMARY.md)
 
 #### **Add New Features**
+
 - **Add new AI provider** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#provider-configuration-pattern) **NEW**
 - **Add new model** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#adding-new-models-scalable-pattern) **NEW**
 - **Add new tool** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#tool-system-patterns)
@@ -372,6 +423,7 @@ echo $?
 - **Add voice feature** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#implementation-patterns)
 
 #### **Fix Issues**
+
 - **Permission problems** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc) ⭐
 - **Security issues** → [security-stability-fixes.mdc](security-stability-fixes.mdc) ⭐
 - **Voice not working** → [voice-modes-clarification.mdc](voice-modes-clarification.mdc#troubleshooting)
@@ -379,6 +431,7 @@ echo $?
 - **Model switching issues** → [core-architecture-patterns.mdc](core-architecture-patterns.mdc#provider-configuration-pattern) **NEW**
 
 #### **Test & Validate**
+
 - **Test permissions** → [accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc#testing-and-validation)
 - **Test voice modes** → [07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc#testing-and-validation)
 - **Test WebSocket** → [cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc#testing-procedures)
@@ -388,6 +441,7 @@ echo $?
 ## 📋 **Implementation Checklists**
 
 ### **New AI Provider Checklist** ✅ NEW
+
 - [ ] Add model constants to `model_ids` module
 - [ ] Define `ModelDefinition` structs with capabilities
 - [ ] Implement `model_definitions()` method
@@ -397,6 +451,7 @@ echo $?
 - [ ] Validate computer use functionality
 
 ### **New Feature Checklist**
+
 - [ ] Review [core-architecture-patterns.mdc](core-architecture-patterns.mdc) for patterns
 - [ ] Check [security-stability-fixes.mdc](security-stability-fixes.mdc) for security requirements
 - [ ] Implement proper error handling with `AgentError`
@@ -405,6 +460,7 @@ echo $?
 - [ ] Update documentation
 
 ### **Security Review Checklist**
+
 - [ ] Input validation implemented
 - [ ] Path traversal protection added
 - [ ] Command injection prevention in place
