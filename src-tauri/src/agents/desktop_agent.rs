@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use tauri::Manager;
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolCategory};
 use crate::state::AppState;
 use crate::commands;
 use super::base_agent::{
@@ -41,21 +42,21 @@ impl DesktopAgent {
         })
     }
 
-    /// Check if a tool name is related to desktop operations
-    fn is_desktop_tool(tool_name: &str) -> bool {
-        tool_name.starts_with("desktop_") ||
-        tool_name.starts_with("dev_") ||
-        tool_name.contains("click") ||
-        tool_name.contains("type") ||
-        tool_name.contains("key") ||
-        tool_name.contains("mouse") ||
-        tool_name.contains("window") ||
-        tool_name.contains("app") ||
-        tool_name.contains("scroll") ||
-        tool_name.contains("screenshot") ||
-        tool_name.contains("element") ||
-        tool_name.contains("focus") ||
-        tool_name.contains("clipboard")
+    /// Check if a tool belongs to desktop-relevant categories using proper tool configuration
+    async fn is_desktop_tool(&self, tool_name: &str) -> bool {
+        let state = self.app_handle.state::<AppState>();
+        let config_manager = state.get_tool_config_manager().await;
+        let config_guard = config_manager.lock().await;
+        
+        if let Some(tool_config) = config_guard.get_tool_config(tool_name) {
+            matches!(
+                tool_config.category, 
+                ToolCategory::Desktop | 
+                ToolCategory::AnthropicComputerUse
+            )
+        } else {
+            false
+        }
     }
 
     /// Execute a desktop-related tool call
@@ -356,7 +357,7 @@ impl SpecializedAgent for DesktopAgent {
     async fn can_handle_task(&self, task: &Task) -> bool {
         // Check if any tool calls are desktop-related
         for tool_call in &task.tool_calls {
-            if Self::is_desktop_tool(&tool_call.name) {
+            if self.is_desktop_tool(&tool_call.name).await {
                 return true;
             }
         }
