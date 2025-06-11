@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Juno",
-  "version": "0.1.0",
   "identifier": "com.juno.app",
   "build": {
     "beforeDevCommand": "bun run dev",
