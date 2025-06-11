@@ -17,16 +17,20 @@ echo "\n🔄  Bumping repository version to $NEW_VERSION...\n"
 # 1. Rust crates
 # ----------------------
 
+# Ensure we have cargo-set-version
 if ! command -v cargo-set-version >/dev/null 2>&1; then
-  if ! command -v cargo-set-version >/dev/null 2>&1; then
-    # cargo-set-version is part of cargo-edit
-    echo "Installing cargo-edit (provides cargo set-version)…"
-    cargo install cargo-edit --version 0.12.3 --locked --quiet
-  fi
+  echo "Installing cargo-edit (provides cargo set-version)…"
+  cargo install cargo-edit --version 0.12.3 --locked --quiet
 fi
 
-# This will rewrite the version across all member crates and the workspace
-cargo set-version --workspace "$NEW_VERSION"
+# Move into the Rust workspace (src-tauri) if it exists
+if [ -d "src-tauri" ] && [ -f "src-tauri/Cargo.toml" ]; then
+  pushd src-tauri >/dev/null
+  cargo set-version --workspace "$NEW_VERSION"
+  popd >/dev/null
+else
+  echo "⚠️  No src-tauri workspace found; skipping Rust crate bump."
+fi
 
 echo "✓ Rust crate versions updated."
 
