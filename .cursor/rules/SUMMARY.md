@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+
 # Juno AI Computer Use Agent - Documentation Summary
 
 ## 🎯 Current Status: PRODUCTION READY with SECURITY HARDENED ✅
@@ -8,35 +9,46 @@ Juno is a **production-ready Tauri v2 desktop application** implementing Anthrop
 ## 📚 Core Documentation Structure
 
 ### 🏗️ **Architecture & Patterns**
+
 - **[core-architecture-patterns.mdc](core-architecture-patterns.mdc)** - Complete system architecture including hierarchical agents, **AI provider management**, state patterns, tool system, and development guidelines
 
 ### 🤖 **AI Provider & Model Management** ✅ NEW
+
 - **Scalable Provider System** - Data-driven model definitions with support for Anthropic Claude, OpenAI CUA, Rig AI, and Google Gemini
 - **Computer Use Detection** - Automatic categorization of models by capability (Computer Use vs General Chat)
 - **Model Switcher UI** - User-friendly interface with capability indicators and provider status
 - **Maintainable Architecture** - Centralized constants eliminate code duplication and ensure consistency
 
-### 🔒 **Security & Stability** 
+### 🔒 **Security & Stability**
+
 - **[security-stability-fixes.mdc](security-stability-fixes.mdc)** - Enterprise-grade security hardening with file system protection, command validation, and crash prevention
 - **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** - macOS permission handling and system settings automation
 
 ### 🎤 **Voice System** (Three Complete Modes)
+
 - **[voice-modes-clarification.mdc](voice-modes-clarification.mdc)** - Complete system overview with mode separation and terminology standards
-- **[06-always-listening-mode.mdc](06-always-listening-mode.mdc)** - Always Listening technical implementation 
+- **[06-always-listening-mode.mdc](06-always-listening-mode.mdc)** - Always Listening technical implementation
 - **[07-always-listening-implementation-complete.mdc](07-always-listening-implementation-complete.mdc)** - Production validation and testing patterns
 
+### 🪟 **Window Management System** (Enhanced)
+
+- **[window-management-enhancements.mdc](window-management-enhancements.mdc)** - Enhanced window ID resolution with dual-mode matching (exact + index fallback)
+
 ### 🔧 **System Integration**
+
 - **[mcp-integration-system.mdc](mcp-integration-system.mdc)** - Model Context Protocol integration with external tool servers
 - **[jsx-visual-response-system.mdc](jsx-visual-response-system.mdc)** - Rich React component responses
 - **[streaming-responses-implementation.mdc](streaming-responses-implementation.mdc)** - Real-time AI response streaming
 - **[cloud-control-system.mdc](cloud-control-system.mdc)** - Remote connectivity and control
 
 ### 🐛 **Testing & Debugging**
+
 - **[cloudtestpanel-websocket-debugging.mdc](cloudtestpanel-websocket-debugging.mdc)** - WebSocket debugging and cloud testing tools
 
 ## 🚀 **Key Achievements**
 
 ### ✅ **Complete Feature Set**
+
 - **All 17 Computer Use Actions** implemented and functional
 - **Multi-Provider AI Support** with automatic capability detection
 - **Three-Mode Voice System** (Dictation, Agent, Always Listening)
@@ -46,6 +58,7 @@ Juno is a **production-ready Tauri v2 desktop application** implementing Anthrop
 - **Cloud Connectivity** for remote control capabilities
 
 ### ✅ **Production Quality**
+
 - **Security Hardened** - Protection against file attacks, command injection, crash prevention
 - **Stability Tested** - Robust error handling with graceful degradation
 - **Permission Compliant** - Proper macOS system integration
@@ -53,6 +66,7 @@ Juno is a **production-ready Tauri v2 desktop application** implementing Anthrop
 - **User Experience** - Intuitive interface with clear status indicators
 
 ### ✅ **Developer Experience**
+
 - **Comprehensive Documentation** - All patterns and implementations documented
 - **Consistent Architecture** - Clear patterns for extending and maintaining
 - **Security Guidelines** - Mandatory security standards for all development
@@ -61,18 +75,21 @@ Juno is a **production-ready Tauri v2 desktop application** implementing Anthrop
 ## 🎯 **Quick Reference**
 
 ### **Essential Commands**
+
 ```bash
 # MANDATORY compilation check after Rust changes
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
 ### **Architecture Entry Points**
+
 - **Agent System**: [src-tauri/src/anthropic.rs](../src-tauri/src/anthropic.rs) - Main orchestrator
 - **AI Providers**: [src-tauri/src/agent/providers/factory.rs](../src-tauri/src/agent/providers/factory.rs) - Model management
 - **State Management**: [src-tauri/src/state.rs](../src-tauri/src/state.rs) - Application state
 - **Voice System**: [tauri-plugin-voice-transcription/](../tauri-plugin-voice-transcription/) - Voice processing
 
 ### **Development Patterns**
+
 - **Error Handling**: Use `AgentError` enum, never `std::process::exit()`
 - **State Access**: Arc-based thread safety with proper cloning
 - **Tool Registration**: Consistent `ToolDefinition` patterns
@@ -80,6 +97,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **Security Validation**: Input validation and command whitelisting
 
 ### **Voice System**
+
 | Mode | Trigger | Purpose | UI Indicator |
 |------|---------|---------|--------------|
 | **Dictation** | Hold key | Voice → Text | Orange mic |
@@ -89,18 +107,21 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ## 💡 **Usage Guidelines**
 
 ### **For New Development**
+
 1. Start with [core-architecture-patterns.mdc](core-architecture-patterns.mdc) for patterns
 2. Review security requirements in [security-stability-fixes.mdc](security-stability-fixes.mdc)
 3. Follow AI provider patterns for model management
 4. Implement comprehensive error handling and validation
 
 ### **For AI Provider Development**
+
 1. Use data-driven `ModelDefinition` structs
 2. Implement capability detection and categorization
 3. Follow centralized constant patterns
 4. Integrate with UI capability indicators
 
 ### **For Bug Fixes**
+
 1. Check security implications first
 2. Use established error handling patterns  
 3. Test on built applications, not just development
@@ -114,8 +135,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **Resource Management**: DoS prevention and proper cleanup
 - **Permission Handling**: Graceful degradation and user guidance
 
-This documentation provides complete coverage of the production-ready Juno AI Computer Use Agent with enterprise-grade security and scalable AI provider management.
+This documentation provides complete coverage of the production-ready Juno AI Computer Use Agent with enterprise-grade security and scalable AI provider management
 =======
+
 # Juno AI Computer Use Agent - Project Summary
 
 **Status**: 🚀 **PRODUCTION READY** with **COMPLETE CLOUD BACKEND** ✅  
@@ -126,7 +148,9 @@ This documentation provides complete coverage of the production-ready Juno AI Co
 The Juno AI Computer Use Agent is a **complete production-ready implementation** of Anthropic's Computer Use API, featuring a sophisticated hierarchical agent system, advanced voice transcription capabilities, **enterprise-grade security**, **🏆 exemplary macOS development**, and now a **complete full-stack cloud control system**.
 
 ### 🚀 Latest Major Achievement: Cloud Backend Implementation
+
 **Complete production-ready Node.js WebSocket backend server** providing:
+
 - **Enterprise Authentication**: HMAC + JWT security with device registration
 - **Real-time Communication**: WebSocket server with heartbeat and reconnection
 - **Command Processing**: Full Anthropic Computer Use command support
@@ -137,7 +161,9 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 ## 🏗️ Complete System Architecture
 
 ### Backend Server (NEW - Production Ready)
+
 **Location**: `backend-server/`
+
 - **Express + WebSocket Server**: Production HTTP/WS server on port 8080
 - **Authentication System**: HMAC device auth with JWT sessions
 - **Database Layer**: SQLite with complete user/device/session/audit schema
@@ -147,7 +173,9 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 - **Docker Deployment**: Complete containerization with Unraid guide
 
 ### Client Application (Enhanced)
+
 **Platform**: Tauri v2 desktop app with React/TypeScript frontend and Rust backend
+
 - **Hierarchical Agent Architecture**: Orchestrator with specialist agents and persistent memory
 - **Complete Voice System**: Three distinct modes (Dictation, Agent, Always Listening)
 - **Computer Use Integration**: All 17 Anthropic actions with real system interaction
@@ -159,6 +187,7 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 ## 🔐 Enterprise Security Implementation
 
 ### Authentication Architecture
+
 - **Device Registration**: Secure API key and HMAC secret generation
 - **HMAC Signatures**: All requests signed with SHA-256 authentication
 - **JWT Sessions**: Token-based sessions with 24-hour expiration
@@ -166,6 +195,7 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 - **Audit Logging**: Comprehensive security event tracking
 
 ### Client Security
+
 - **File System Protection**: Path traversal prevention and workspace sandboxing
 - **Command Injection Prevention**: Whitelist-based command validation
 - **Crash Prevention**: Eliminated 50+ dangerous `.unwrap()` calls
@@ -175,9 +205,11 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 ## 📡 Communication Protocol
 
 ### WebSocket API
+
 **Endpoint**: `ws://localhost:8080/ws`
 
 **Supported Commands**:
+
 - `voice_query` - Voice-to-text processing with AI responses
 - `text_query` - Direct text-based AI interactions
 - `system_command` - System automation and control
@@ -186,6 +218,7 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 - `config_update` - Dynamic configuration management
 
 ### REST API
+
 - `POST /api/register` - Device registration with credential generation
 - `POST /api/auth` - HMAC authentication with JWT token return
 - `GET /health` - Comprehensive system health monitoring
@@ -196,18 +229,21 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 **This project demonstrates EXEMPLARY macOS development standards:**
 
 ### Apple Platform Compliance
+
 - ✅ **100% Privacy Compliance** - Complete NSUsageDescription coverage
 - ✅ **Accessibility Integration** - Multi-layer permission detection with real functionality testing
 - ✅ **Security Model** - App Store distribution ready with proper entitlements
 - ✅ **Universal Binary** - Intel and Apple Silicon optimization
 
 ### Native System Integration
+
 - **Core Foundation APIs**: Proper memory management and native integration
 - **System Permissions**: Robust accessibility and screen recording detection
 - **Audio Processing**: Production-ready Whisper.cpp integration with stability controls
 - **Process Management**: Safe command execution with platform-specific patterns
 
 ### Key macOS Implementation Files
+
 - **Entitlements**: `src-tauri/juno.entitlements` - Complete permission coverage
 - **Info.plist**: `src-tauri/Info.plist` - Apple-compliant privacy descriptions
 - **Permission Logic**: `src-tauri/src/commands/permissions.rs` - Multi-layer detection
@@ -216,6 +252,7 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 ## 🎤 Voice System Architecture
 
 ### Three-Mode Implementation
+
 | Mode | Activation | Purpose | Processing | Memory |
 |------|------------|---------|------------|---------|
 | **Dictation** | Hold spacebar | Voice-to-text typing | Transcription only | None |
@@ -223,6 +260,7 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 | **Always Listening** | Background | Wake word detection | Intent monitoring | None |
 
 ### Technical Implementation
+
 - **Custom Voice Plugin**: `tauri-plugin-voice-transcription/` with Whisper.cpp integration
 - **Multi-device Support**: Automatic audio device selection and switching
 - **Stability Controls**: Robust error handling for audio processing edge cases
@@ -231,12 +269,15 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 ## 🔧 System Integration Features
 
 ### AI Computer Use Implementation
+
 **All 17 Anthropic actions supported**:
+
 - Screen capture, mouse control, keyboard input, scrolling
 - Application management, file operations, system commands
 - Text processing, click coordination, drag-and-drop
 
 ### External Tool Integration
+
 - **MCP Protocol**: Model Context Protocol support for external tool servers
 - **Cloud Control**: Remote command execution via WebSocket backend
 - **JSX Responses**: Rich React component rendering instead of raw HTML/SVG
@@ -245,9 +286,11 @@ The Juno AI Computer Use Agent is a **complete production-ready implementation**
 ## 🚀 Production Deployment
 
 ### Cloud Backend Deployment
+
 **Ready for immediate production deployment**:
 
 #### Docker Deployment
+
 ```bash
 # Complete containerization
 docker-compose up -d
@@ -258,12 +301,14 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 ```
 
 #### Unraid VPS
+
 - **Complete deployment guide**: `backend-server/UNRAID_DEPLOYMENT.md`
 - **Volume mapping**: Persistent data and log storage
 - **Environment configuration**: Production security settings
 - **Health monitoring**: Comprehensive system monitoring integration
 
 ### Client Application
+
 - **Universal macOS App**: Intel and Apple Silicon support
 - **Code Signing Ready**: Proper entitlements for App Store distribution
 - **Plugin Architecture**: Modular voice and integration systems
@@ -272,12 +317,14 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 ## 📊 Performance Metrics
 
 ### Backend Server
+
 - **Response Time**: Sub-millisecond health checks
 - **Concurrent Connections**: Scalable WebSocket architecture
 - **Database Performance**: Optimized SQLite with proper indexing
 - **Memory Efficiency**: Lightweight Node.js with resource monitoring
 
 ### Client Application
+
 - **Startup Time**: Fast initialization with lazy loading
 - **Memory Usage**: Efficient Rust backend with controlled heap
 - **CPU Efficiency**: Optimized agent processing with async patterns
@@ -286,18 +333,21 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 ## 🔍 Testing & Quality Assurance
 
 ### Security Testing
+
 - **HMAC Authentication**: Signature validation and replay protection
 - **Path Traversal**: File system boundary enforcement
 - **Command Injection**: Whitelist validation and pattern detection
 - **DoS Protection**: Rate limiting and resource consumption controls
 
 ### Platform Testing
+
 - **macOS Versions**: Tested on multiple macOS releases
 - **Permission Scenarios**: Various accessibility and screen recording states
 - **Universal Binary**: Both Intel and Apple Silicon architectures
 - **Built App Validation**: Production app testing vs development builds
 
 ### Integration Testing
+
 - **Voice Modes**: All three modes tested independently and in combination
 - **WebSocket Communication**: Connection, authentication, and command execution
 - **AI Computer Use**: Real system interaction with all 17 action types
@@ -306,6 +356,7 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 ## 🎯 Development Status
 
 ### ✅ **Complete Systems**
+
 - **🚀 Cloud Backend**: Production-ready Node.js WebSocket server with enterprise authentication
 - **🏆 macOS Platform**: Exemplary native integration exceeding industry standards
 - **🔒 Security Framework**: Enterprise-grade protections and audit systems
@@ -314,6 +365,7 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 - **🔧 System Integration**: MCP, streaming responses, JSX rendering, cloud control
 
 ### 📋 **Future Enhancements**
+
 - **Premium Features**: Stripe integration for subscription management
 - **Horizontal Scaling**: Redis-backed distributed systems
 - **Multi-Platform**: Windows and Linux client implementations
@@ -322,6 +374,7 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 ## 💡 Development Guidelines Summary
 
 ### 🔒 **Security First**
+
 - All input validation with whitelist patterns
 - Path operations use security validation functions
 - Command execution requires whitelist validation
@@ -329,6 +382,7 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 - Comprehensive audit logging for all operations
 
 ### 🏆 **macOS Excellence**
+
 - Multi-layer permission detection with real functionality testing
 - Core Foundation memory management patterns
 - Universal binary optimization for both architectures
@@ -336,6 +390,7 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 - Production app testing requirements
 
 ### 🏗️ **Architecture Patterns**
+
 - Hierarchical agent system with specialist delegation
 - Thread-safe state management with Arc-based patterns
 - Async processing with proper error propagation
@@ -345,6 +400,7 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 ## 🌟 Project Achievements
 
 ### Technical Excellence
+
 - **Complete Implementation**: Full Anthropic Computer Use API with real system interaction
 - **Production Security**: Enterprise-grade protections and audit systems
 - **Platform Leadership**: 🏆 Exemplary macOS development setting industry standards
@@ -352,6 +408,7 @@ docker run -p 8080:8080 -v $(pwd)/data:/app/data juno-cloud-backend
 - **Quality Standards**: Comprehensive testing, documentation, and deployment readiness
 
 ### Innovation Highlights
+
 - **Hierarchical AI Agents**: Sophisticated delegation and memory management
 - **Multi-Modal Voice**: Three distinct voice interaction paradigms
 - **Cloud Control**: Secure remote device management and command execution
