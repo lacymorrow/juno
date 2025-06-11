@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { ExamplePrompts } from "@/components/ExamplePrompts";
+import { PermissionsFlow } from "@/components/PermissionsFlow";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,34 +10,31 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { PermissionsFlow } from "@/components/PermissionsFlow";
-import { ExamplePrompts } from "@/components/ExamplePrompts";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
-import { FloatingBar } from "@/Bar";
+import { invoke } from "@tauri-apps/api/core";
 import {
-  ArrowRight,
   ArrowLeft,
-  CheckCircle,
-  Sparkles,
-  Zap,
+  ArrowRight,
   Brain,
-  Mic,
-  Globe,
+  CheckCircle,
   FileText,
-  Shield,
-  Volume2,
+  Globe,
+  Heart,
+  Info,
   Keyboard,
   MessageSquare,
-  Star,
-  Rocket,
+  Mic,
   Play,
+  Rocket,
   Settings,
-  Info,
-  Heart,
+  Shield,
+  Sparkles,
+  Star,
+  Volume2,
+  Zap,
 } from "lucide-react";
+import React, { useEffect, useState } from "react";
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -43,9 +42,9 @@ interface OnboardingFlowProps {
   permissionsAlreadyGranted?: boolean;
 }
 
-type OnboardingStep = 
+type OnboardingStep =
   | "welcome"
-  | "features" 
+  | "features"
   | "permissions"
   | "voice-setup"
   | "examples"
@@ -59,23 +58,36 @@ interface FeatureCard {
   color: string;
 }
 
-export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted = false }: OnboardingFlowProps) {
+export function OnboardingFlow({
+  onComplete,
+  onSkip,
+  permissionsAlreadyGranted = false,
+}: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("welcome");
-  const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(new Set());
+  const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(
+    new Set()
+  );
   const [isProcessing, setIsProcessing] = useState(false);
   const [demoBarExpanded, setDemoBarExpanded] = useState(false);
 
   // Dynamically determine steps based on permissions state
-  const steps: OnboardingStep[] = permissionsAlreadyGranted 
+  const steps: OnboardingStep[] = permissionsAlreadyGranted
     ? ["welcome", "features", "voice-setup", "examples", "completion"] // Skip permissions step
-    : ["welcome", "features", "permissions", "voice-setup", "examples", "completion"]; // Include permissions step
-    
+    : [
+        "welcome",
+        "features",
+        "permissions",
+        "voice-setup",
+        "examples",
+        "completion",
+      ]; // Include permissions step
+
   const currentStepIndex = steps.indexOf(currentStep);
   const progress = ((currentStepIndex + 1) / steps.length) * 100;
 
   // Mark current step as completed when moving forward
   const markStepCompleted = (step: OnboardingStep) => {
-    setCompletedSteps(prev => new Set([...prev, step]));
+    setCompletedSteps((prev) => new Set([...prev, step]));
   };
 
   const nextStep = () => {
@@ -104,7 +116,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
   // Auto-mark permissions as completed if already granted
   useEffect(() => {
     if (permissionsAlreadyGranted) {
-      setCompletedSteps(prev => new Set([...prev, "permissions"]));
+      setCompletedSteps((prev) => new Set([...prev, "permissions"]));
     }
   }, [permissionsAlreadyGranted]);
 
@@ -140,38 +152,41 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
     {
       icon: Brain,
       title: "AI Computer Control",
-      description: "Your AI agent can see your screen and control your computer like a human would",
+      description:
+        "Your AI agent can see your screen and control your computer like a human would",
       capabilities: [
         "Click buttons and navigate interfaces",
-        "Type text and fill forms", 
+        "Type text and fill forms",
         "Take and analyze screenshots",
-        "Control applications and windows"
+        "Control applications and windows",
       ],
-      color: "blue"
+      color: "blue",
     },
     {
       icon: Globe,
       title: "Web Automation",
-      description: "Browse the web, search for information, and interact with websites automatically",
+      description:
+        "Browse the web, search for information, and interact with websites automatically",
       capabilities: [
         "Open websites and search engines",
         "Extract information from pages",
         "Fill out web forms",
-        "Navigate complex web interfaces"
+        "Navigate complex web interfaces",
       ],
-      color: "green"
+      color: "green",
     },
     {
       icon: FileText,
       title: "File & Document Management",
-      description: "Create, edit, and organize files and documents across your system",
+      description:
+        "Create, edit, and organize files and documents across your system",
       capabilities: [
         "Create and edit text files",
         "Organize folders and files",
         "Open and work with documents",
-        "Search and manage content"
+        "Search and manage content",
       ],
-      color: "purple"
+      color: "purple",
     },
     {
       icon: Mic,
@@ -181,31 +196,37 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
         "Voice commands for any task",
         "Dictation mode for text input",
         "Natural conversation interface",
-        "Audio responses and feedback"
+        "Audio responses and feedback",
       ],
-      color: "orange"
-    }
+      color: "orange",
+    },
   ];
 
   // Helper function to get explicit color classes to prevent layout shifts
   const getFeatureCardClasses = (color: string) => {
     const colorClasses = {
       blue: "border-blue-200 hover:border-blue-300",
-      green: "border-green-200 hover:border-green-300", 
+      green: "border-green-200 hover:border-green-300",
       purple: "border-purple-200 hover:border-purple-300",
-      orange: "border-orange-200 hover:border-orange-300"
+      orange: "border-orange-200 hover:border-orange-300",
     };
-    return colorClasses[color as keyof typeof colorClasses] || "border-gray-200 hover:border-gray-300";
+    return (
+      colorClasses[color as keyof typeof colorClasses] ||
+      "border-gray-200 hover:border-gray-300"
+    );
   };
 
   const getIconClasses = (color: string) => {
     const iconClasses = {
       blue: "bg-blue-100 text-blue-600",
       green: "bg-green-100 text-green-600",
-      purple: "bg-purple-100 text-purple-600", 
-      orange: "bg-orange-100 text-orange-600"
+      purple: "bg-purple-100 text-purple-600",
+      orange: "bg-orange-100 text-orange-600",
     };
-    return iconClasses[color as keyof typeof iconClasses] || "bg-gray-100 text-gray-600";
+    return (
+      iconClasses[color as keyof typeof iconClasses] ||
+      "bg-gray-100 text-gray-600"
+    );
   };
 
   // Render individual steps
@@ -222,10 +243,13 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             </div>
           </div>
         </div>
-        
-        <h1 className="text-3xl font-bold text-foreground">Welcome to Juno AI</h1>
+
+        <h1 className="text-3xl font-bold text-foreground">
+          Welcome to Juno AI
+        </h1>
         <p className="text-lg text-muted-foreground max-w-xl mx-auto">
-          Your intelligent desktop companion that can see, understand, and control your computer like a human would.
+          Your intelligent desktop companion that can see, understand, and
+          control your computer like a human would.
         </p>
       </div>
 
@@ -233,18 +257,21 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
       <Card className="border-2 border-purple-200 bg-purple-50/50">
         <CardContent className="p-6">
           <div className="text-center space-y-4">
-            <h3 className="font-semibold text-purple-900 mb-3">Meet Your AI Assistant</h3>
+            <h3 className="font-semibold text-purple-900 mb-3">
+              Meet Your AI Assistant
+            </h3>
             <p className="text-sm text-purple-800 mb-4">
-              This is Juno's main interface - a simple bar that's always ready to help
+              This is Juno's main interface - a simple bar that's always ready
+              to help
             </p>
-            
+
             {/* Demo FloatingBar - Static Preview */}
             <div className="flex justify-center mb-4">
               <div className="relative bg-background rounded-lg border-2 border-dashed border-purple-300 p-8 w-80 h-20 flex items-center justify-center">
-                <div 
+                <div
                   className={`flex items-center justify-center bg-black/90 text-white rounded-full shadow-lg border border-white/20 backdrop-blur-md transition-all duration-300 hover:scale-105 cursor-pointer ${
-                    demoBarExpanded 
-                      ? "h-[40px] w-[240px] px-3" 
+                    demoBarExpanded
+                      ? "h-[40px] w-[240px] px-3"
                       : "h-[20px] w-[60px] px-2"
                   }`}
                   onClick={() => setDemoBarExpanded(!demoBarExpanded)}
@@ -258,9 +285,18 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
                         readOnly
                       />
                       <button className="text-muted-foreground hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m22 2-7 20-4-9-9-4Z"/>
-                          <path d="M22 2 11 13"/>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="m22 2-7 20-4-9-9-4Z" />
+                          <path d="M22 2 11 13" />
                         </svg>
                       </button>
                     </div>
@@ -273,7 +309,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
                 </div>
               </div>
             </div>
-            
+
             <div className="text-left space-y-2 max-w-sm mx-auto">
               <div className="flex items-center gap-2 text-sm text-purple-800">
                 <div className="w-2 h-2 bg-purple-500 rounded-full flex-shrink-0"></div>
@@ -299,9 +335,13 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
               <Zap className="w-6 h-6 text-blue-600" />
             </div>
             <div className="text-left">
-              <h3 className="font-semibold text-blue-900 mb-2">What makes Juno special?</h3>
+              <h3 className="font-semibold text-blue-900 mb-2">
+                What makes Juno special?
+              </h3>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Uses Computer Vision to see and understand your screen</li>
+                <li>
+                  • Uses Computer Vision to see and understand your screen
+                </li>
                 <li>• Performs tasks exactly like a human would</li>
                 <li>• Works with any application or website</li>
                 <li>• Responds to natural voice commands</li>
@@ -329,7 +369,8 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
       <div className="text-center space-y-4">
         <h2 className="text-2xl font-bold text-foreground">What Juno Can Do</h2>
         <p className="text-muted-foreground">
-          Explore the powerful capabilities that make Juno your ultimate AI assistant
+          Explore the powerful capabilities that make Juno your ultimate AI
+          assistant
         </p>
       </div>
 
@@ -338,17 +379,25 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
         <Alert className="border-green-200 bg-green-50/50">
           <CheckCircle className="h-4 w-4 text-green-600" />
           <AlertDescription>
-            <strong>Great news!</strong> Permissions are already configured. We'll skip the permissions setup and go straight to voice features.
+            <strong>Great news!</strong> Permissions are already configured.
+            We'll skip the permissions setup and go straight to voice features.
           </AlertDescription>
         </Alert>
       )}
 
       <div className="grid md:grid-cols-2 gap-6">
         {featureCards.map((feature, index) => (
-          <Card key={index} className={`border-2 transition-colors duration-200 hover:shadow-lg ${getFeatureCardClasses(feature.color)}`}>
+          <Card
+            key={index}
+            className={`border-2 transition-colors duration-200 hover:shadow-lg ${getFeatureCardClasses(
+              feature.color
+            )}`}
+          >
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-lg ${getIconClasses(feature.color)}`}>
+                <div
+                  className={`p-3 rounded-lg ${getIconClasses(feature.color)}`}
+                >
                   <feature.icon className="w-6 h-6" />
                 </div>
                 <CardTitle className="text-lg">{feature.title}</CardTitle>
@@ -360,7 +409,9 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
                 {feature.capabilities.map((capability, capIndex) => (
                   <div key={capIndex} className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
-                    <span className="text-sm text-muted-foreground">{capability}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {capability}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -388,21 +439,25 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             <Shield className="w-8 h-8 text-red-600" />
           </div>
         </div>
-        <h2 className="text-2xl font-bold text-foreground">Security Permissions</h2>
+        <h2 className="text-2xl font-bold text-foreground">
+          Security Permissions
+        </h2>
         <p className="text-muted-foreground">
-          Juno needs these permissions to control your computer safely and securely
+          Juno needs these permissions to control your computer safely and
+          securely
         </p>
       </div>
 
       <Alert>
         <Info className="h-4 w-4" />
         <AlertDescription>
-          <strong>Your privacy matters:</strong> All processing happens locally on your device. 
-          Juno only requests the minimum permissions needed to function.
+          <strong>Your privacy matters:</strong> All processing happens locally
+          on your device. Juno only requests the minimum permissions needed to
+          function.
         </AlertDescription>
       </Alert>
 
-      <PermissionsFlow 
+      <PermissionsFlow
         onComplete={() => {
           markStepCompleted("permissions");
           setTimeout(() => {
@@ -447,7 +502,8 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
               <CardTitle>Voice Commands</CardTitle>
             </div>
             <CardDescription>
-              Speak naturally to Juno and watch it perform tasks on your computer
+              Speak naturally to Juno and watch it perform tasks on your
+              computer
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -516,9 +572,12 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             <Play className="w-8 h-8 text-green-600" />
           </div>
         </div>
-        <h2 className="text-2xl font-bold text-foreground">Try Your First Task</h2>
+        <h2 className="text-2xl font-bold text-foreground">
+          Try Your First Task
+        </h2>
         <p className="text-muted-foreground">
-          Select an example below to see Juno in action, or type your own request
+          Select an example below to see Juno in action, or type your own
+          request
         </p>
       </div>
 
@@ -537,10 +596,13 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
         <Button variant="outline" onClick={prevStep}>
           <ArrowLeft className="w-4 h-4 mr-2" /> Back
         </Button>
-        <Button variant="secondary" onClick={() => {
-          markStepCompleted("examples");
-          setCurrentStep("completion");
-        }}>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            markStepCompleted("examples");
+            setCurrentStep("completion");
+          }}
+        >
           Skip Examples
         </Button>
       </div>
@@ -560,7 +622,7 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
             </div>
           </div>
         </div>
-        
+
         <h1 className="text-3xl font-bold text-foreground">You're All Set!</h1>
         <p className="text-lg text-muted-foreground">
           Juno AI is ready to help you accomplish anything on your computer
@@ -570,19 +632,27 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
       <div className="grid gap-4">
         <Card className="border-2 border-green-200 bg-green-50/50">
           <CardContent className="p-6">
-            <h3 className="font-semibold text-green-900 mb-3">Quick Tips to Get Started:</h3>
+            <h3 className="font-semibold text-green-900 mb-3">
+              Quick Tips to Get Started:
+            </h3>
             <div className="text-left space-y-2">
               <div className="flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">Start chatting once setup is complete</span>
+                <span className="text-sm text-green-800">
+                  Start chatting once setup is complete
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <Mic className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">Hold Fn key to dictate instead of typing</span>
+                <span className="text-sm text-green-800">
+                  Hold Fn key to dictate instead of typing
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <Settings className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">Access Settings anytime from the menu</span>
+                <span className="text-sm text-green-800">
+                  Access Settings anytime from the menu
+                </span>
               </div>
             </div>
           </CardContent>
@@ -591,13 +661,18 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
         <Alert>
           <Sparkles className="h-4 w-4" />
           <AlertDescription>
-            Remember: Juno works best when you're specific about what you want to accomplish. 
-            Don't hesitate to describe exactly what you're trying to do!
+            Remember: Juno works best when you're specific about what you want
+            to accomplish. Don't hesitate to describe exactly what you're trying
+            to do!
           </AlertDescription>
         </Alert>
       </div>
 
-      <Button onClick={onComplete} size="lg" className="px-8 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+      <Button
+        onClick={onComplete}
+        size="lg"
+        className="px-8 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+      >
         Start Using Juno <Sparkles className="w-4 h-4 ml-2" />
       </Button>
     </div>
@@ -610,7 +685,9 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
         {/* Progress header */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-xl font-semibold text-foreground">Setup Juno AI</h1>
+            <h1 className="text-xl font-semibold text-foreground">
+              Setup Juno AI
+            </h1>
             <Badge variant="outline">
               Step {currentStepIndex + 1} of {steps.length}
             </Badge>
@@ -633,11 +710,14 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
           {steps.map((step, index) => (
             <button
               key={step}
-              onClick={() => index <= currentStepIndex ? skipToStep(step) : undefined}
+              onClick={() =>
+                index <= currentStepIndex ? skipToStep(step) : undefined
+              }
               className={`w-3 h-3 rounded-full transition-colors duration-200 ${
                 index === currentStepIndex
                   ? "bg-primary ring-2 ring-primary/20"
-                  : completedSteps.has(step) || (step === "permissions" && permissionsAlreadyGranted)
+                  : completedSteps.has(step) ||
+                    (step === "permissions" && permissionsAlreadyGranted)
                   ? "bg-green-500"
                   : index < currentStepIndex
                   ? "bg-muted-foreground/30 hover:bg-muted-foreground/50 cursor-pointer"
@@ -647,7 +727,8 @@ export function OnboardingFlow({ onComplete, onSkip, permissionsAlreadyGranted =
               title={
                 step === "permissions" && permissionsAlreadyGranted
                   ? "Permissions (already granted - skipped)"
-                  : step.charAt(0).toUpperCase() + step.slice(1).replace("-", " ")
+                  : step.charAt(0).toUpperCase() +
+                    step.slice(1).replace("-", " ")
               }
             />
           ))}
