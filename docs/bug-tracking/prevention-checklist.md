@@ -28,6 +28,7 @@ This checklist should be completed before any release or major feature deploymen
 
 ### Core Functionality Testing
 
+- [ ] **Chat Interface State**: Test enable/disable cycle during agent execution
 - [ ] **Streaming Responses**: Test agent streaming with various content types
 - [ ] **JSX Rendering**: Verify React components render in completed messages
 - [ ] **Voice Integration**: Test both dictation mode (spacebar) and agent mode (Option+D)
@@ -39,7 +40,10 @@ This checklist should be completed before any release or major feature deploymen
 
 ### Message Rendering & Streaming
 
-- [ ] Text streams progressively during agent responses
+- [ ] Interface disables when agent starts (`agent-stream-start` event)
+- [ ] Text streams progressively during agent responses (`agent-text-stream` events)
+- [ ] Interface re-enables when agent completes (`agent-stream-end` event)
+- [ ] Interface re-enables even when agent errors occur
 - [ ] JSX detection only runs on completed messages (`!msg.isStreaming &&` condition)
 - [ ] Markdown rendering works with streaming
 - [ ] No console errors during streaming
@@ -92,6 +96,8 @@ This checklist should be completed before any release or major feature deploymen
 
 Based on documented regressions, specifically test:
 
+- [ ] **Chat Interface Disable Bug**: Verify interface re-enables after agent execution
+- [ ] **Streaming Event Names**: Ensure backend emits correct event names (`agent-stream-start`, `agent-text-stream`, `agent-stream-end`)
 - [ ] **Streaming/JSX Conflict**: Verify `isJsxContent()` not called during streaming
 - [ ] **Permission Detection**: Test both `computer_use_ai_sdk` and fallback mechanisms
 - [ ] **Event Handler Cleanup**: Ensure proper listener cleanup on component unmount
