@@ -21,14 +21,23 @@ fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Opt
     let desktop = &state.desktop;
     match desktop.list_windows() {
         Ok(windows) => {
-            for window in windows {
+            // 1) Try exact ID match first
+            for window in &windows {
                 if let Some(id) = window.id() {
                     if id == window_id {
-                        return Ok(Some(window));
+                        return Ok(Some(window.clone()));
                     }
                 }
             }
-            Ok(None) // Not found
+
+            // 2) Fallback: if the provided "window_id" is numeric, treat it as the index within the window list
+            if let Ok(index) = window_id.parse::<usize>() {
+                if index < windows.len() {
+                    return Ok(Some(windows[index].clone()));
+                }
+            }
+
+            Ok(None) // Not found by ID or index
         }
         Err(e) => Err(format!("Failed to list windows: {}", e)),
     }
@@ -164,53 +173,45 @@ pub(crate) async fn dev_get_window_info(
     state: State<'_, AppState>,
     window_id: String,
 ) -> Result<String, String> {
-    println!("[DEV_TOOL] Getting info for window ID: {}", window_id);
+    println!("[DEV_TOOL] Getting info for window ID/index: {}", window_id);
 
-    let desktop = &state.desktop;
-    match desktop.list_windows() {
-        Ok(windows) => {
-            println!("[DEV_TOOL] Found {} windows to search.", windows.len());
-            for window in windows {
-                if let Some(id) = window.id() {
-                    if id == window_id {
-                        println!("[DEV_TOOL] Found matching window.");
-                        // Attempt to get potentially more detailed attributes
-                        let attrs_result = window.get_all_attributes(); // Check if this provides more info
+    match find_window_by_id(&state, &window_id) {
+        Ok(Some(window)) => {
+            println!("[DEV_TOOL] Found target window.");
 
-                        let attrs_to_serialize = match attrs_result {
-                             Ok(all_attrs) => {
-                                println!("[DEV_TOOL] Using get_all_attributes result.");
-                                all_attrs // Use detailed attributes if successful
-                             },
-                             Err(e) => {
-                                println!("[DEV_TOOL] get_all_attributes failed ({}), falling back to basic attributes.", e);
-                                window.attributes() // Fallback to basic attributes
-                             }
-                        };
+            // Attempt to get detailed attributes first
+            let attrs_result = window.get_all_attributes();
+            let attrs_to_serialize = match attrs_result {
+                Ok(all_attrs) => {
+                    println!("[DEV_TOOL] Using get_all_attributes result.");
+                    all_attrs
+                }
+                Err(e) => {
+                    println!("[DEV_TOOL] get_all_attributes failed ({}), falling back to basic attributes.", e);
+                    window.attributes()
+                }
+            };
 
-                        match serde_json::to_string_pretty(&attrs_to_serialize) {
-                            Ok(json_string) => {
-                                send_dev_tool_notification(&app, "Window Info", "Retrieved window info.")?;
-                                return Ok(json_string);
-                            }
-                            Err(e) => {
-                                let err_msg = format!("Failed to serialize window attributes: {}", e);
-                                println!("[DEV_TOOL] Error: {}", err_msg);
-                                return Err(err_msg);
-                            }
-                        }
-                    }
+            match serde_json::to_string_pretty(&attrs_to_serialize) {
+                Ok(json_string) => {
+                    send_dev_tool_notification(&app, "Window Info", "Retrieved window info.")?;
+                    Ok(json_string)
+                }
+                Err(e) => {
+                    let err_msg = format!("Failed to serialize window attributes: {}", e);
+                    println!("[DEV_TOOL] Error: {}", err_msg);
+                    Err(err_msg)
                 }
             }
-            // If loop finishes without finding the window
-            let err_msg = format!("Window with ID '{}' not found.", window_id);
+        }
+        Ok(None) => {
+            let err_msg = format!("Window with ID or index '{}' not found.", window_id);
             println!("[DEV_TOOL] Info: {}", err_msg);
             Err(err_msg)
         }
         Err(e) => {
-            let err_msg = format!("Failed to list windows while getting info: {}", e);
-            println!("[DEV_TOOL] Error: {}", err_msg);
-            Err(err_msg)
+            println!("[DEV_TOOL] Error while searching for window: {}", e);
+            Err(e)
         }
     }
 }

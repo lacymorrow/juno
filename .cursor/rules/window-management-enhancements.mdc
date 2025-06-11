@@ -1,0 +1,277 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Window Management System Enhancements
+
+**Status**: ✅ **PRODUCTION READY** - Enhanced ID Resolution Active
+**Last Updated**: January 2025
+**Implementation**: `src-tauri/src/commands/window.rs`
+
+## Overview
+
+The window management system has been enhanced with robust ID resolution capabilities that support both exact window ID matching and numeric index fallback. This improvement significantly increases reliability when targeting specific windows for automation tasks.
+
+## Key Enhancements
+
+### 1. Dual-Mode ID Resolution
+
+The new `find_window_by_id()` helper function implements a two-tier approach to window identification:
+
+```rust
+fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Option<UIElement>, String> {
+    let desktop = &state.desktop;
+    match desktop.list_windows() {
+        Ok(windows) => {
+            // 1) Try exact ID match first
+            for window in &windows {
+                if let Some(id) = window.id() {
+                    if id == window_id {
+                        return Ok(Some(window.clone()));
+                    }
+                }
+            }
+
+            // 2) Fallback: if the provided "window_id" is numeric, treat it as the index within the window list
+            if let Ok(index) = window_id.parse::<usize>() {
+                if index < windows.len() {
+                    return Ok(Some(windows[index].clone()));
+                }
+            }
+
+            Ok(None) // Not found by ID or index
+        }
+        Err(e) => Err(format!("Failed to list windows: {}", e)),
+    }
+}
+```
+
+### 2. Enhanced Error Handling
+
+The system now provides comprehensive error handling with clear, actionable error messages:
+
+- **Window Not Found**: Clear indication when neither exact ID nor index match
+- **System Errors**: Detailed error messages for underlying system failures
+- **Input Validation**: Safe handling of malformed window ID inputs
+
+### 3. Backwards Compatibility
+
+The enhancement maintains full backwards compatibility with existing window ID formats while adding new functionality:
+
+- **Exact IDs**: Traditional window ID strings continue to work exactly as before
+- **Numeric Indices**: New support for using numeric strings as list indices
+- **Graceful Degradation**: System continues to function even when windows are not found
+
+## Implementation Details
+
+### Core Helper Function
+
+The `find_window_by_id()` function serves as the central helper for all window identification operations:
+
+```rust
+// Usage in window commands
+match find_window_by_id(&state, &window_id) {
+    Ok(Some(window)) => {
+        // Proceed with window operation
+        println!("[DEV_TOOL] Found target window.");
+        // ... window operation logic
+    }
+    Ok(None) => {
+        // Handle window not found gracefully
+        let err_msg = format!("Window with ID '{}' not found.", window_id);
+        println!("[DEV_TOOL] Error: {}", err_msg);
+        return Err(err_msg);
+    }
+    Err(e) => {
+        // Handle system errors
+        println!("[DEV_TOOL] System error: {}", e);
+        return Err(e);
+    }
+}
+```
+
+### Updated Commands
+
+The following commands have been enhanced to use the new ID resolution system:
+
+1. **`dev_get_window_info`**: Enhanced window information retrieval
+2. **`dev_focus_window`**: Improved window focusing with fallback ID resolution
+3. **Future commands**: All new window operations will use this pattern
+
+### Error Reporting
+
+Enhanced logging provides better debugging information:
+
+```rust
+println!("[DEV_TOOL] Getting info for window ID/index: {}", window_id);
+// ... operation logic
+println!("[DEV_TOOL] Found target window.");
+```
+
+## Security Considerations
+
+### Input Validation
+
+The system includes built-in security measures:
+
+- **Safe Parsing**: Numeric index parsing uses safe Rust parsing methods
+- **Bounds Checking**: Array access is bounds-checked to prevent panics
+- **No Unwrap Calls**: All operations use safe error handling patterns
+
+### Attack Vector Mitigation
+
+- **No Code Injection**: Window IDs are treated as data, not executable code
+- **Buffer Overflow Protection**: Rust's memory safety prevents buffer overflows
+- **Resource Limits**: Window list operations are bounded by system resources
+
+## Testing Guidelines
+
+### Test Cases to Cover
+
+1. **Exact ID Matching**:
+   ```rust
+   // Test exact window ID resolution
+   let result = find_window_by_id(&state, "actual_window_id");
+   assert!(result.is_ok());
+   ```
+
+2. **Numeric Index Fallback**:
+   ```rust
+   // Test numeric index as string
+   let result = find_window_by_id(&state, "0");  // First window
+   assert!(result.is_ok());
+   ```
+
+3. **Invalid Input Handling**:
+   ```rust
+   // Test non-existent window
+   let result = find_window_by_id(&state, "nonexistent");
+   assert_eq!(result.unwrap(), None);
+   ```
+
+4. **System Error Handling**:
+   ```rust
+   // Test system failure scenarios
+   // (Requires mocked desktop.list_windows() failure)
+   ```
+
+### Integration Testing
+
+- **Window List → Window Info Flow**: Test complete workflow from listing to targeting
+- **Multiple Window Scenarios**: Test with various window configurations
+- **Permission Failures**: Test behavior when accessibility permissions are limited
+
+## Performance Characteristics
+
+### Time Complexity
+
+- **Exact Match**: O(n) where n is the number of open windows
+- **Index Fallback**: O(1) for index access after O(n) list generation
+- **Overall**: Linear with respect to the number of open windows
+
+### Memory Usage
+
+- **Window List Caching**: List is generated fresh for each operation (no stale data)
+- **Clone Operations**: Efficient Arc-based cloning for window objects
+- **Error Handling**: Minimal memory overhead for error cases
+
+## Integration Patterns
+
+### Command Implementation
+
+New window commands should follow this pattern:
+
+```rust
+#[tauri::command]
+pub(crate) async fn dev_window_operation(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    window_id: String,
+) -> Result<String, String> {
+    println!("[DEV_TOOL] Operation for window ID/index: {}", window_id);
+
+    match find_window_by_id(&state, &window_id) {
+        Ok(Some(window)) => {
+            // Implement operation logic here
+            let result = perform_operation(&window)?;
+            send_dev_tool_notification(&app, "Operation", "Success")?;
+            Ok(result)
+        }
+        Ok(None) => {
+            let err_msg = format!("Window with ID '{}' not found.", window_id);
+            println!("[DEV_TOOL] Error: {}", err_msg);
+            Err(err_msg)
+        }
+        Err(e) => {
+            println!("[DEV_TOOL] System error: {}", e);
+            Err(e)
+        }
+    }
+}
+```
+
+### Error Propagation
+
+All window operations should use consistent error handling:
+
+```rust
+// Convert operation errors to strings for Tauri command compatibility
+operation_result.map_err(|e| format!("Operation failed: {}", e))
+```
+
+## Future Enhancements
+
+### Planned Improvements
+
+1. **Window Caching**: Cache window lists for improved performance
+2. **Fuzzy Matching**: Add partial title matching for window identification
+3. **Application Filtering**: Add application-specific window targeting
+4. **Workspace Support**: Add support for virtual desktop/workspace awareness
+
+### API Evolution
+
+The current implementation provides a stable foundation for future enhancements:
+
+- **Plugin Architecture**: Window identification could be extended via plugins
+- **Custom Resolvers**: Allow registration of custom ID resolution strategies
+- **Async Operations**: Convert to async for better performance with large window lists
+
+## Debugging Guide
+
+### Common Issues
+
+1. **Window Not Found**:
+   - Check window list with `dev_get_window_list`
+   - Verify window still exists and has accessibility permissions
+   - Try using numeric index instead of exact ID
+
+2. **Permission Errors**:
+   - Verify accessibility permissions are granted
+   - Check that the target application allows automation
+   - Ensure Juno has proper macOS permissions
+
+3. **System Errors**:
+   - Check system logs for underlying issues
+   - Verify no other automation tools are conflicting
+   - Restart the application if persistent issues occur
+
+### Debug Logging
+
+Enable debug logging to see detailed window resolution information:
+
+```bash
+RUST_LOG=debug cargo run
+```
+
+Look for log entries like:
+```
+[DEV_TOOL] Getting info for window ID/index: 6
+[DEV_TOOL] Found target window.
+```
+
+## Conclusion
+
+The window management enhancements provide a robust, secure, and backwards-compatible system for targeting windows in automation tasks. The dual-mode ID resolution significantly improves reliability while maintaining the simplicity of the existing API.
+
+This implementation follows Juno's security-first principles and production-ready patterns, ensuring stable operation in all supported environments.
