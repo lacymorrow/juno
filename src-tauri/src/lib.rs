@@ -531,7 +531,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None)) // Add autostart plugin
-        .plugin(tauri_plugin_voice_transcription::init()) // Add the voice transcription plugin
+        // CRITICAL FIX: Voice plugin will be conditionally added later based on feature flags
         .plugin(tauri_plugin_process::init()) // Add the process plugin for app restart
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
         .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
@@ -570,16 +570,19 @@ pub fn run() {
                 }
 
                 // Check if dictation is active and stop it
-                if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                    // Check if dictation is active and stop it synchronously if possible
-                    if let Ok(voice_controller) = voice_controller_state.lock() {
-                        if voice_controller.is_dictating() {
-                            info!("[GlobalShortcut] Dictation active - will attempt to stop it");
-                            drop(voice_controller); // Release the lock before the async operation
+                #[cfg(feature = "voice-features")]
+                {
+                    if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        // Check if dictation is active and stop it synchronously if possible
+                        if let Ok(voice_controller) = voice_controller_state.lock() {
+                            if voice_controller.is_dictating() {
+                                info!("[GlobalShortcut] Dictation active - will attempt to stop it");
+                                drop(voice_controller); // Release the lock before the async operation
 
-                            // Instead of spawning, try to stop dictation directly using the app handle
-                            // This is a simpler approach that avoids lifetime issues
-                            let _ = app.emit("stop_dictation", serde_json::Value::Null);
+                                // Instead of spawning, try to stop dictation directly using the app handle
+                                // This is a simpler approach that avoids lifetime issues
+                                let _ = app.emit("stop_dictation", serde_json::Value::Null);
+                            }
                         }
                     }
                 }
@@ -1716,29 +1719,31 @@ pub fn run() {
                 });
             });
 
-            // Listen for dictation transcription start events (immediate)
-            let app_handle_for_dictation_start = app.handle().clone();
-            app.listen("dictation-transcription-start", move |_event| {
-                info!("[Event] Received dictation-transcription-start event - starting immediate transcription");
+            #[cfg(feature = "voice-features")]
+            {
+                // Listen for dictation transcription start events (immediate)
+                let app_handle_for_dictation_start = app.handle().clone();
+                app.listen("dictation-transcription-start", move |_event| {
+                    info!("[Event] Received dictation-transcription-start event - starting immediate transcription");
 
-                // Start dictation using the voice transcription plugin command
-                let app_handle_clone = app_handle_for_dictation_start.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Mark this as Dictation Mode in AppState BEFORE starting transcription
-                    // This prevents race condition where voice controller emits events before we set the flag
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = true;
-                    }
-
-                    // Update floating bar manager to set dictation mode
-                    let app_handle_for_bar = app_handle_clone.clone();
+                    // Start dictation using the voice transcription plugin command
+                    let app_handle_clone = app_handle_for_dictation_start.clone();
                     tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
-                    });
+                        // Mark this as Dictation Mode in AppState BEFORE starting transcription
+                        // This prevents race condition where voice controller emits events before we set the flag
+                        let app_state = app_handle_clone.state::<state::AppState>();
+                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                            *dictation_active = true;
+                        }
 
-                    // Use the plugin command to start dictation only if controller exists
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        // Update floating bar manager to set dictation mode
+                        let app_handle_for_bar = app_handle_clone.clone();
+                        tauri::async_runtime::spawn(async move {
+                            commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
+                        });
+
+                        // Use the plugin command to start dictation only if controller exists
+                        match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
                         Some(controller_state) => {
                             match tauri_plugin_voice_transcription::commands::start_dictation(
                                 app_handle_clone.clone(),
@@ -1802,19 +1807,22 @@ pub fn run() {
                     }
                 });
             });
+            }
 
-            // Listen for Dictation Mode commitment events (threshold reached)
-            let _app_handle_for_dictation_committed = app.handle().clone();
-            app.listen("dictation-committed", move |_event| {
-                info!("[Event] Received dictation-committed event - threshold reached");
-                // This event indicates the user has held dictation input long enough to commit to dictation
-                // We can use this for additional UI feedback if needed
-                // The transcription is already running, so we just acknowledge the commitment
-            });
+            #[cfg(feature = "voice-features")]
+            {
+                // Listen for Dictation Mode commitment events (threshold reached)
+                let _app_handle_for_dictation_committed = app.handle().clone();
+                app.listen("dictation-committed", move |_event| {
+                    info!("[Event] Received dictation-committed event - threshold reached");
+                    // This event indicates the user has held dictation input long enough to commit to dictation
+                    // We can use this for additional UI feedback if needed
+                    // The transcription is already running, so we just acknowledge the commitment
+                });
 
-            // Listen for dictation transcription cancellation events (released before threshold)
-            let app_handle_for_dictation_cancel = app.handle().clone();
-            app.listen("dictation-transcription-cancel", move |_event| {
+                // Listen for dictation transcription cancellation events (released before threshold)
+                let app_handle_for_dictation_cancel = app.handle().clone();
+                app.listen("dictation-transcription-cancel", move |_event| {
                 info!("[Event] Received dictation-transcription-cancel event - cancelling transcription");
 
                 // Stop dictation and discard results
@@ -2183,6 +2191,18 @@ pub fn run() {
                 commands::autostart::init_autostart(&app_handle_for_autostart);
                 tracing::info!("[Setup] Autostart configuration initialized successfully");
             });
+            }
+
+            // CRITICAL FIX: Conditional voice plugin registration
+            #[cfg(feature = "voice-features")]
+            {
+                setup_voice_features(app)?;
+            }
+
+            #[cfg(not(feature = "voice-features"))]
+            {
+                info!("Voice features disabled in this build");
+            }
 
             Ok(())
         });
@@ -2598,4 +2618,96 @@ mod macos_tracking {
              info!("NSTrackingArea added to view.");
         }
     }
+}
+
+// CRITICAL FIX: Conditional voice plugin initialization
+#[cfg(feature = "voice-features")]
+fn setup_voice_features(app: &mut tauri::App) -> tauri::Result<()> {
+    use tauri_plugin_voice_transcription::{
+        controller::VoiceController,
+        always_listening::AlwaysListeningController,
+    };
+
+    // Voice transcription setup with enhanced error handling
+    let model_path = app.path().app_local_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("models")
+        .join("ggml-tiny.en.bin");
+
+    let model_path_str = model_path.to_string_lossy().to_string();
+
+    // CRITICAL FIX: Initialize with lazy loading to reduce startup impact
+    let voice_controller = match VoiceController::new(&model_path_str) {
+        Ok(controller) => {
+            info!("Voice controller initialized successfully with lazy loading");
+            controller
+        }
+        Err(e) => {
+            warn!("Voice controller failed to initialize: {}. Creating uninitialized controller.", e);
+            VoiceController::new_uninitialized(&model_path_str, e.to_string())
+        }
+    };
+
+    app.manage(std::sync::Arc::new(std::sync::Mutex::new(voice_controller)));
+
+    // Always listening controller with error recovery (optional for now)
+    if let Ok(always_listening_controller) = AlwaysListeningController::new(&model_path_str) {
+        info!("Always listening controller initialized successfully");
+        app.manage(std::sync::Arc::new(std::sync::Mutex::new(always_listening_controller)));
+    } else {
+        warn!("Always listening controller failed to initialize, skipping (voice transcription will still work)");
+    }
+
+    // CRITICAL FIX: Setup voice event handlers with error recovery
+    setup_voice_event_handlers(app)?;
+
+    Ok(())
+}
+
+#[cfg(not(feature = "voice-features"))]
+fn setup_voice_features(_app: &mut tauri::App) -> tauri::Result<()> {
+    info!("Voice features disabled in this build");
+    Ok(())
+}
+
+#[cfg(feature = "voice-features")]
+fn setup_voice_event_handlers(app: &mut tauri::App) -> tauri::Result<()> {
+    use std::sync::{Arc, Mutex};
+    use tauri_plugin_voice_transcription::controller::VoiceController;
+
+    // CRITICAL FIX: Voice transcription error event with retry mechanism
+    let app_handle_clone = app.handle().clone();
+    app.listen("voice-transcription:error", move |event| {
+        error!("Voice transcription error received: {:?}", event.payload());
+
+        // Emit error to frontend with recovery options
+        if let Err(e) = app_handle_clone.emit("voice-error", serde_json::json!({
+            "error": event.payload(),
+            "recovery_available": true,
+            "suggested_action": "retry_or_reset"
+        })) {
+            error!("Failed to emit voice error to frontend: {}", e);
+        }
+    });
+
+    // CRITICAL FIX: Audio device change handler
+    let app_handle_clone = app.handle().clone();
+    app.listen("audio-device-changed", move |_event| {
+        warn!("Audio device changed - may need to restart voice features");
+
+        // Try emergency reset
+        if let Some(voice_controller_state) = app_handle_clone.try_state::<Arc<Mutex<VoiceController>>>() {
+            if let Ok(mut controller) = voice_controller_state.try_lock() {
+                let _ = controller.stop_dictation(); // Ignore errors during device change
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[cfg(not(feature = "voice-features"))]
+fn setup_voice_event_handlers(_app: &mut tauri::App) -> tauri::Result<()> {
+    // No voice event handlers needed
+    Ok(())
 }

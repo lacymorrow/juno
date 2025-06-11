@@ -1235,6 +1235,7 @@ dependencies = [
  "core-foundation-sys",
  "coreaudio-rs",
  "dasp_sample",
+ "jack",
  "jni",
  "js-sys",
  "libc",
@@ -2944,6 +2945,33 @@ name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
+
+[[package]]
+name = "jack"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e5a18a3c2aefb354fb77111ade228b20267bdc779de84e7a4ccf7ea96b9a6cd"
+dependencies = [
+ "bitflags 1.3.2",
+ "jack-sys",
+ "lazy_static",
+ "libc",
+ "log",
+]
+
+[[package]]
+name = "jack-sys"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6013b7619b95a22b576dfb43296faa4ecbe40abbdb97dfd22ead520775fc86ab"
+dependencies = [
+ "bitflags 1.3.2",
+ "lazy_static",
+ "libc",
+ "libloading 0.7.4",
+ "log",
+ "pkg-config",
+]
 
 [[package]]
 name = "javascriptcore-rs"
@@ -5918,19 +5946,18 @@ dependencies = [
 name = "tauri-plugin-voice-transcription"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "chrono",
+ "cocoa 0.25.0",
  "cpal",
- "crossbeam-channel",
  "hound",
- "once_cell",
+ "log",
+ "objc",
  "rubato",
  "serde",
  "serde_json",
  "tauri",
  "tauri-plugin",
  "thiserror 1.0.69",
- "tokio",
  "tracing",
  "whisper-rs",
 ]

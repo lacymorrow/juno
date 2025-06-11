@@ -1,15 +1,18 @@
-use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
-use std::path::Path;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
+use hound;
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
+use std::path::Path;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
-use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
-use hound;
 use tauri::{AppHandle, Emitter, Runtime};
-use tracing::info;
+use tracing::{info, warn};
+use whisper_rs::{FullParams, WhisperContext, WhisperContextParameters};
 
 use crate::error::{Error, Result};
 
@@ -19,8 +22,103 @@ enum AudioThreadMessage {
     Stop,
 }
 
+// CRITICAL FIX: Lazy loading for Whisper model
+static WHISPER_MODEL_CACHE: OnceLock<Arc<Mutex<Option<Arc<WhisperContext>>>>> = OnceLock::new();
+
+/// CRITICAL FIX: Lazy model loader to reduce memory pressure
+pub struct LazyWhisperModel {
+    model_path: String,
+    is_loading: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl LazyWhisperModel {
+    pub fn new(model_path: String) -> Self {
+        Self {
+            model_path,
+            is_loading: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    /// Load model on demand with thread safety
+    pub fn get_or_load(&self) -> Result<Arc<WhisperContext>> {
+        let cache = WHISPER_MODEL_CACHE.get_or_init(|| {
+            Arc::new(Mutex::new(None))
+        });
+
+        // Try to get existing model first
+        if let Ok(cache_guard) = cache.try_lock() {
+            if let Some(ref model) = *cache_guard {
+                return Ok(Arc::clone(model));
+            }
+        }
+
+        // Check if another thread is already loading
+        if self.is_loading.load(std::sync::atomic::Ordering::Acquire) {
+            // Wait for loading to complete
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            return self.get_or_load(); // Retry
+        }
+
+        // Set loading flag
+        self.is_loading.store(true, std::sync::atomic::Ordering::Release);
+
+        // Load the model
+        let result = self.load_model();
+
+        // Clear loading flag
+        self.is_loading.store(false, std::sync::atomic::Ordering::Release);
+
+        result
+    }
+
+    fn load_model(&self) -> Result<Arc<WhisperContext>> {
+        info!("[LazyWhisperModel] Loading Whisper model from: {}", self.model_path);
+
+        let model_path = Path::new(&self.model_path);
+        if !model_path.exists() {
+            return Err(Error::ModelNotFound(self.model_path.clone()));
+        }
+
+        // CRITICAL FIX: Monitor memory usage during model loading
+        let start_time = std::time::Instant::now();
+
+        let context = WhisperContext::new_with_params(
+            &self.model_path,
+            WhisperContextParameters::default()
+        ).map_err(|e| Error::ModelError(format!("Failed to load Whisper model: {:?}", e)))?;
+
+        let load_time = start_time.elapsed();
+        info!("[LazyWhisperModel] Model loaded in {}ms", load_time.as_millis());
+
+        let context_arc = Arc::new(context);
+
+        // Cache the model
+        let cache = WHISPER_MODEL_CACHE.get_or_init(|| {
+            Arc::new(Mutex::new(None))
+        });
+
+        if let Ok(mut cache_guard) = cache.try_lock() {
+            *cache_guard = Some(context_arc.clone());
+        }
+
+        Ok(context_arc)
+    }
+
+    /// Unload model to free memory
+    pub fn unload(&self) {
+        if let Some(cache) = WHISPER_MODEL_CACHE.get() {
+            if let Ok(mut cache_guard) = cache.try_lock() {
+                if cache_guard.is_some() {
+                    info!("[LazyWhisperModel] Unloading Whisper model to free memory");
+                    *cache_guard = None;
+                }
+            }
+        }
+    }
+}
+
 pub struct VoiceController {
-    ctx: Option<WhisperContext>,
+    lazy_model: LazyWhisperModel,
     pub model_path: String,
     is_dictating: bool,
     audio_thread: Option<(thread::JoinHandle<()>, Sender<AudioThreadMessage>)>,
@@ -42,7 +140,7 @@ impl VoiceController {
             .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
 
         Ok(Self {
-            ctx: Some(ctx),
+            lazy_model: LazyWhisperModel::new(model_path_str.to_string()),
             model_path: model_path_str.to_string(),
             is_dictating: false,
             audio_thread: None,
@@ -56,7 +154,7 @@ impl VoiceController {
     /// Create an uninitialized controller that can be managed by Tauri but will return errors for operations
     pub fn new_uninitialized(model_path_str: &str, error_message: String) -> Self {
         Self {
-            ctx: None,
+            lazy_model: LazyWhisperModel::new(model_path_str.to_string()),
             model_path: model_path_str.to_string(),
             is_dictating: false,
             audio_thread: None,
@@ -78,18 +176,22 @@ impl VoiceController {
     }
 
     /// Helper method to check initialization before performing operations
-    fn ensure_initialized(&self) -> Result<&WhisperContext> {
+    fn ensure_initialized(&self) -> Result<Arc<WhisperContext>> {
         if !self.is_initialized {
-            let error_msg = self.initialization_error
+            let error_msg = self
+                .initialization_error
                 .as_ref()
                 .map(|e| format!("Voice controller not initialized: {}", e))
                 .unwrap_or_else(|| "Voice controller not initialized".to_string());
             return Err(Error::NotInitialized);
         }
-        self.ctx.as_ref().ok_or(Error::NotInitialized)
+        self.lazy_model.get_or_load()
     }
 
-    pub fn transcribe_audio_file(&self, audio_path_str: &str) -> std::result::Result<String, String> {
+    pub fn transcribe_audio_file(
+        &self,
+        audio_path_str: &str,
+    ) -> std::result::Result<String, String> {
         let ctx = match self.ensure_initialized() {
             Ok(ctx) => ctx,
             Err(e) => return Err(e.to_string()),
@@ -100,7 +202,8 @@ impl VoiceController {
             return Err(format!("Audio file not found: {}", audio_path_str));
         }
 
-        let mut state = ctx.create_state()
+        let mut state = ctx
+            .create_state()
             .map_err(|e| format!("Failed to create WhisperState: {:?}", e))?;
 
         let params = FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 0 });
@@ -155,39 +258,49 @@ impl VoiceController {
                 params,
                 processed_audio.len(),
                 1,
-            ).map_err(|e| format!("Failed to create resampler: {:?}", e))?;
+            )
+            .map_err(|e| format!("Failed to create resampler: {:?}", e))?;
 
             let waves_in = vec![processed_audio];
-            let waves_out = resampler.process(&waves_in, None)
+            let waves_out = resampler
+                .process(&waves_in, None)
                 .map_err(|e| format!("Resampling failed: {:?}", e))?;
 
             if waves_out.is_empty() || waves_out[0].is_empty() {
                 return Err("Resampling produced empty audio".to_string());
             }
 
-            processed_audio = waves_out.into_iter().next()
+            processed_audio = waves_out
+                .into_iter()
+                .next()
                 .ok_or_else(|| "Resampling failed to produce audio data".to_string())?;
         }
 
-        state.full(params, &processed_audio[..])
+        state
+            .full(params, &processed_audio[..])
             .map_err(|e| format!("Failed to run full transcription: {:?}", e))?;
 
-        let num_segments = state.full_n_segments()
+        let num_segments = state
+            .full_n_segments()
             .map_err(|e| format!("Failed to get number of segments: {:?}", e))?;
 
         let mut full_text = String::new();
         for i in 0..num_segments {
-            let segment = state.full_get_segment_text(i)
+            let segment = state
+                .full_get_segment_text(i)
                 .map_err(|e| format!("Failed to get segment text: {:?}", e))?;
             full_text.push_str(&segment);
         }
         Ok(full_text)
     }
 
-    pub fn start_dictation<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
+    pub fn start_dictation<R: Runtime + 'static>(
+        &mut self,
+        app_handle: &AppHandle<R>,
+    ) -> Result<()> {
         // Check if controller is initialized before starting dictation
         self.ensure_initialized()?;
-        
+
         if self.is_dictating {
             return Err(Error::AlreadyDictating);
         }
@@ -195,35 +308,53 @@ impl VoiceController {
         info!("[VoiceController] Starting dictation...");
 
         // Emit dictation started event
-        app_handle.emit("voice-transcription:dictation-started", ())
+        app_handle
+            .emit("voice-transcription:dictation-started", ())
             .map_err(|e| Error::Tauri(e.to_string()))?;
 
-        // Clear the last processed audio buffer
-        if let Ok(mut buffer_guard) = self.last_processed_audio_buffer.lock() {
-            *buffer_guard = None;
+        // CRITICAL FIX: Use try_lock to prevent deadlock
+        match self.last_processed_audio_buffer.try_lock() {
+            Ok(mut buffer_guard) => {
+                *buffer_guard = None;
+            }
+            Err(_) => {
+                warn!("[VoiceController] Could not acquire buffer lock for clearing, continuing anyway");
+            }
         }
 
         let host = cpal::default_host();
-        let device = host.default_input_device()
-            .ok_or_else(|| Error::AudioDevice("Failed to find a default input device.".to_string()))?;
+        let device = host.default_input_device().ok_or_else(|| {
+            Error::AudioDevice("Failed to find a default input device.".to_string())
+        })?;
 
-        let supported_configs_iter = device.supported_input_configs()
+        let supported_configs_iter = device
+            .supported_input_configs()
             .map_err(|e| Error::AudioDevice(format!("Failed to get device configs: {:?}", e)))?;
 
-        let selected_config_range = supported_configs_iter
-            .filter(|c| c.channels() == 1)
-            .find(|c| {
-                (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000) &&
-                (c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16)
-            });
+        let selected_config_range =
+            supported_configs_iter
+                .filter(|c| c.channels() == 1)
+                .find(|c| {
+                    (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000)
+                        && (c.sample_format() == SampleFormat::F32
+                            || c.sample_format() == SampleFormat::I16)
+                });
 
         let supported_config = if let Some(conf_range) = selected_config_range {
             conf_range.with_sample_rate(cpal::SampleRate(16000))
         } else {
-            device.supported_input_configs()
-                .map_err(|e| Error::AudioDevice(format!("Failed to get device configs for fallback: {:?}", e)))?
+            device
+                .supported_input_configs()
+                .map_err(|e| {
+                    Error::AudioDevice(format!(
+                        "Failed to get device configs for fallback: {:?}",
+                        e
+                    ))
+                })?
                 .filter(|c| c.channels() == 1)
-                .find(|c| c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16)
+                .find(|c| {
+                    c.sample_format() == SampleFormat::F32 || c.sample_format() == SampleFormat::I16
+                })
                 .map(|c| {
                     if (c.min_sample_rate().0..=c.max_sample_rate().0).contains(&16000) {
                         c.with_sample_rate(cpal::SampleRate(16000))
@@ -238,11 +369,14 @@ impl VoiceController {
         let sample_format = supported_config.sample_format();
         let actual_rate = config.sample_rate.0;
 
-        // Store the actual sample rate safely
-        if let Ok(mut rate_guard) = self.actual_recording_sample_rate.lock() {
-            *rate_guard = Some(actual_rate);
-        } else {
-            tracing::error!("Failed to acquire lock for actual_recording_sample_rate - lock may be poisoned");
+        // CRITICAL FIX: Use try_lock to prevent deadlock
+        match self.actual_recording_sample_rate.try_lock() {
+            Ok(mut rate_guard) => {
+                *rate_guard = Some(actual_rate);
+            }
+            Err(_) => {
+                warn!("[VoiceController] Could not acquire sample rate lock, continuing anyway");
+            }
         }
 
         let (control_tx, control_rx) = channel::<AudioThreadMessage>();
@@ -289,13 +423,15 @@ impl VoiceController {
     ) {
         info!("[AudioThread] Thread started. Initializing Whisper context and state.");
 
-        let whisper_context = match WhisperContext::new_with_params(&model_path, WhisperContextParameters::default()) {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                tracing::error!("Failed to create WhisperContext in audio thread: {:?}", e);
-                return;
-            }
-        };
+        let whisper_context =
+            match WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
+            {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    tracing::error!("Failed to create WhisperContext in audio thread: {:?}", e);
+                    return;
+                }
+            };
 
         let mut whisper_state = match whisper_context.create_state() {
             Ok(state) => state,
@@ -317,7 +453,7 @@ impl VoiceController {
                     move |err| {
                         tracing::error!("An error occurred on the input stream: {}", err);
                     },
-                    None
+                    None,
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -325,13 +461,15 @@ impl VoiceController {
                         return;
                     }
                 }
-            },
+            }
             SampleFormat::I16 => {
                 match device.build_input_stream(
                     &config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         let mut audio_f32: Vec<f32> = vec![0.0f32; data.len()];
-                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32) {
+                        if let Err(e) =
+                            whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32)
+                        {
                             tracing::error!("Failed to convert i16 to f32: {:?}", e);
                             return;
                         }
@@ -342,7 +480,7 @@ impl VoiceController {
                     move |err| {
                         tracing::error!("An error occurred on the input stream: {}", err);
                     },
-                    None
+                    None,
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
@@ -350,7 +488,7 @@ impl VoiceController {
                         return;
                     }
                 }
-            },
+            }
             _ => {
                 tracing::error!("Unsupported sample format {:?}", sample_format);
                 return;
@@ -363,7 +501,10 @@ impl VoiceController {
         }
 
         info!("[AudioThread] Audio stream started.");
-        info!("[AudioThread] Recording at {} Hz, will resample to {} Hz for Whisper.", actual_rate, WHISPER_SAMPLE_RATE);
+        info!(
+            "[AudioThread] Recording at {} Hz, will resample to {} Hz for Whisper.",
+            actual_rate, WHISPER_SAMPLE_RATE
+        );
 
         // Resampler setup
         let mut chunk_resampler: Option<SincFixedIn<f32>> = None;
@@ -381,27 +522,35 @@ impl VoiceController {
                 params,
                 1024,
                 1,
-            ).ok();
+            )
+            .ok();
         }
 
         let mut audio_buffer_for_whisper_chunks: Vec<f32> = Vec::new();
         let partial_buffer_capacity_samples = (actual_rate as u64 * 1500 / 1000) as usize;
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
 
-        info!("[AudioThread] Partial transcription threshold: {} samples ({:.2} seconds at {}Hz)",
-              partial_buffer_capacity_samples,
-              partial_buffer_capacity_samples as f32 / actual_rate as f32,
-              actual_rate);
+        info!(
+            "[AudioThread] Partial transcription threshold: {} samples ({:.2} seconds at {}Hz)",
+            partial_buffer_capacity_samples,
+            partial_buffer_capacity_samples as f32 / actual_rate as f32,
+            actual_rate
+        );
 
         loop {
             // Check for control messages
             match control_rx.try_recv() {
                 Ok(AudioThreadMessage::Stop) => {
                     info!("[AudioThread] Stop message received.");
-                    info!("[AudioThread] Final audio buffer size: {} samples", audio_buffer_for_whisper_chunks.len());
-                    info!("[AudioThread] Raw session audio size: {} samples ({:.2} seconds)",
-                          raw_full_session_audio.len(),
-                          raw_full_session_audio.len() as f32 / actual_rate as f32);
+                    info!(
+                        "[AudioThread] Final audio buffer size: {} samples",
+                        audio_buffer_for_whisper_chunks.len()
+                    );
+                    info!(
+                        "[AudioThread] Raw session audio size: {} samples ({:.2} seconds)",
+                        raw_full_session_audio.len(),
+                        raw_full_session_audio.len() as f32 / actual_rate as f32
+                    );
 
                     // Process final audio
                     Self::process_final_audio(
@@ -489,8 +638,10 @@ impl VoiceController {
                     }
                 }
                 if !partial_text.is_empty() {
-                    let _ = app_handle.emit("voice-transcription:partial-result",
-                        serde_json::json!({ "text": partial_text }));
+                    let _ = app_handle.emit(
+                        "voice-transcription:partial-result",
+                        serde_json::json!({ "text": partial_text }),
+                    );
                 }
             }
             Err(e) => tracing::error!("[AudioThread] Error transcribing partial chunk: {:?}", e),
@@ -517,9 +668,14 @@ impl VoiceController {
             );
         }
 
-        // Store raw audio for potential playback
-        if let Ok(mut buffer_guard) = last_buffer_arc.lock() {
-            *buffer_guard = Some(raw_full_session_audio.to_vec());
+        // CRITICAL FIX: Use try_lock to prevent deadlock
+        match last_buffer_arc.try_lock() {
+            Ok(mut buffer_guard) => {
+                *buffer_guard = Some(raw_full_session_audio.to_vec());
+            }
+            Err(_) => {
+                warn!("[AudioThread] Could not acquire buffer lock for final audio storage");
+            }
         }
 
         // Prepare audio for final transcription
@@ -574,13 +730,19 @@ impl VoiceController {
                   audio_for_transcription.len(),
                   audio_for_transcription.len() as f32 / WHISPER_SAMPLE_RATE as f32);
 
-            let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch { beam_size: 5, patience: 1.0 });
+            let mut params = FullParams::new(whisper_rs::SamplingStrategy::BeamSearch {
+                beam_size: 5,
+                patience: 1.0,
+            });
             params.set_temperature(0.0);
 
             match whisper_state.full(params, &audio_for_transcription[..]) {
                 Ok(_) => {
                     let num_segments = whisper_state.full_n_segments().unwrap_or(0);
-                    info!("[AudioThread] Transcription completed. Number of segments: {}", num_segments);
+                    info!(
+                        "[AudioThread] Transcription completed. Number of segments: {}",
+                        num_segments
+                    );
 
                     let mut transcription_text = String::new();
                     for i in 0..num_segments {
@@ -590,18 +752,26 @@ impl VoiceController {
                         }
                     }
 
-                    info!("[AudioThread] Final transcription result: '{}'", transcription_text);
-                    let _ = app_handle.emit("voice-transcription:final-result",
-                        serde_json::json!({ "text": transcription_text }));
+                    info!(
+                        "[AudioThread] Final transcription result: '{}'",
+                        transcription_text
+                    );
+                    let _ = app_handle.emit(
+                        "voice-transcription:final-result",
+                        serde_json::json!({ "text": transcription_text }),
+                    );
                     let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
                 }
                 Err(e) => {
                     tracing::error!("Final transcription failed: {:?}", e);
                     // Emit transcription error event for backend to handle
-                    let _ = app_handle.emit("voice-transcription:error", serde_json::json!({
-                        "type": "transcription_failed",
-                        "message": format!("Final transcription failed: {:?}", e)
-                    }));
+                    let _ = app_handle.emit(
+                        "voice-transcription:error",
+                        serde_json::json!({
+                            "type": "transcription_failed",
+                            "message": format!("Final transcription failed: {:?}", e)
+                        }),
+                    );
                     let _ = app_handle.emit("voice-transcription:dictation-stopped", ());
                 }
             }
@@ -636,7 +806,10 @@ impl VoiceController {
         }
     }
 
-    pub fn toggle_dictation<R: Runtime + 'static>(&mut self, app_handle: AppHandle<R>) -> Result<bool> {
+    pub fn toggle_dictation<R: Runtime + 'static>(
+        &mut self,
+        app_handle: AppHandle<R>,
+    ) -> Result<bool> {
         if self.is_dictating {
             self.stop_dictation()?;
             Ok(false)
@@ -651,8 +824,9 @@ impl VoiceController {
     }
 
     pub fn get_last_processed_audio_buffer(&self) -> Option<(Vec<f32>, u32)> {
-        let buffer = self.last_processed_audio_buffer.lock().ok()?.clone()?;
-        let rate = self.actual_recording_sample_rate.lock().ok()?.clone()?;
+        // CRITICAL FIX: Use try_lock to prevent deadlock
+        let buffer = self.last_processed_audio_buffer.try_lock().ok()?.clone()?;
+        let rate = self.actual_recording_sample_rate.try_lock().ok()?.clone()?;
         Some((buffer, rate))
     }
 }

@@ -16,14 +16,6 @@
     "core:window:allow-set-title",
     "core:window:allow-start-dragging",
     "opener:default",
-    "notification:default",
-    "voice-transcription:default",
-    "voice-transcription:allow-toggle-dictation",
-    "voice-transcription:allow-start-dictation",
-    "voice-transcription:allow-stop-dictation",
-    "voice-transcription:allow-get-dictation-status",
-    "voice-transcription:allow-transcribe-file",
-    "voice-transcription:allow-set-model-path",
-    "voice-transcription:allow-get-model-path"
+    "notification:default"
   ]
 }

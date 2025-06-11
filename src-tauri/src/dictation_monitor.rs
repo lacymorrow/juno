@@ -244,6 +244,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
 }
 
 // Helper function to force stop the voice controller
+#[cfg(feature = "voice-features")]
 async fn force_stop_voice_controller(app_handle: &AppHandle) {
     warn!("[DictationMonitor] Attempting to force stop voice controller");
 
@@ -266,6 +267,11 @@ async fn force_stop_voice_controller(app_handle: &AppHandle) {
             warn!("[DictationMonitor] Voice controller not available - cannot force stop");
         }
     }
+}
+
+#[cfg(not(feature = "voice-features"))]
+async fn force_stop_voice_controller(_app_handle: &AppHandle) {
+    warn!("[DictationMonitor] Voice features disabled - no voice controller to stop");
 }
 
 // Called when dictation input key is pressed down
@@ -325,32 +331,40 @@ pub async fn emergency_cleanup_dictation_state(app_handle: &AppHandle) -> Result
     force_reset_dictation_input_state().await;
 
     // Force stop the voice controller if it exists
-    match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-        Some(controller_state) => {
-            // Use aggressive timeout for emergency cleanup
-            let stop_result = tokio::time::timeout(
-                std::time::Duration::from_millis(1000), // Very short timeout for emergency
-                tauri_plugin_voice_transcription::commands::stop_dictation(
-                    app_handle.clone(),
-                    controller_state
-                )
-            ).await;
+    #[cfg(feature = "voice-features")]
+    {
+        match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+            Some(controller_state) => {
+                // Use aggressive timeout for emergency cleanup
+                let stop_result = tokio::time::timeout(
+                    std::time::Duration::from_millis(1000), // Very short timeout for emergency
+                    tauri_plugin_voice_transcription::commands::stop_dictation(
+                        app_handle.clone(),
+                        controller_state
+                    )
+                ).await;
 
-            match stop_result {
-                Ok(Ok(_)) => {
-                    info!("[DictationMonitor] Voice controller stopped successfully during emergency cleanup");
-                }
-                Ok(Err(e)) => {
-                    error!("[DictationMonitor] Voice controller stop failed during emergency cleanup: {}", e);
-                }
-                Err(_) => {
-                    error!("[DictationMonitor] Voice controller stop timed out during emergency cleanup - controller may be stuck");
+                match stop_result {
+                    Ok(Ok(_)) => {
+                        info!("[DictationMonitor] Voice controller stopped successfully during emergency cleanup");
+                    }
+                    Ok(Err(e)) => {
+                        error!("[DictationMonitor] Voice controller stop failed during emergency cleanup: {}", e);
+                    }
+                    Err(_) => {
+                        error!("[DictationMonitor] Voice controller stop timed out during emergency cleanup - controller may be stuck");
+                    }
                 }
             }
+            None => {
+                info!("[DictationMonitor] Voice controller not available - skipping voice controller cleanup");
+            }
         }
-        None => {
-            info!("[DictationMonitor] Voice controller not available - skipping voice controller cleanup");
-        }
+    }
+
+    #[cfg(not(feature = "voice-features"))]
+    {
+        info!("[DictationMonitor] Voice features disabled - skipping voice controller cleanup");
     }
 
     // Force clean up app state

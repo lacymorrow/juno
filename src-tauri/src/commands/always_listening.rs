@@ -1,9 +1,14 @@
+#[cfg(feature = "voice-features")]
 use crate::state::AppState;
+#[cfg(feature = "voice-features")]
 use tauri::{State, AppHandle, Manager, Emitter};
+#[cfg(feature = "voice-features")]
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "voice-features")]
 use tracing::{info, error, warn};
 
 /// Start always listening mode
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn start_always_listening_mode(
     app: AppHandle,
@@ -67,6 +72,7 @@ pub async fn start_always_listening_mode(
 }
 
 /// Stop always listening mode
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn stop_always_listening_mode(
     app: AppHandle,
@@ -120,6 +126,7 @@ pub async fn stop_always_listening_mode(
 }
 
 /// Toggle always listening mode
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn toggle_always_listening_mode(
     app: AppHandle,
@@ -141,6 +148,7 @@ pub async fn toggle_always_listening_mode(
 }
 
 /// Get always listening mode status
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn get_always_listening_status(
     state: State<'_, AppState>,
@@ -153,6 +161,7 @@ pub async fn get_always_listening_status(
 }
 
 /// Set always listening sensitivity
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn set_always_listening_sensitivity(
     sensitivity: f32,
@@ -194,25 +203,27 @@ pub async fn set_always_listening_sensitivity(
 }
 
 /// Get always listening sensitivity
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn get_always_listening_sensitivity(
     state: State<'_, AppState>,
 ) -> Result<f32, String> {
     let sensitivity = state.always_listening_sensitivity.lock()
         .map(|s| *s)
-        .unwrap_or(0.5);
+        .unwrap_or(0.5); // Default sensitivity
 
     Ok(sensitivity)
 }
 
 /// Set always listening wake words
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn set_always_listening_wake_words(
     wake_words: Vec<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    info!("[Command] set_always_listening_wake_words called with wake words: {:?}", wake_words);
+    info!("[Command] set_always_listening_wake_words called with words: {:?}", wake_words);
 
     // Update app state
     if let Ok(mut wake_words_state) = state.always_listening_wake_words.lock() {
@@ -247,18 +258,20 @@ pub async fn set_always_listening_wake_words(
 }
 
 /// Get always listening wake words
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn get_always_listening_wake_words(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     let wake_words = state.always_listening_wake_words.lock()
-        .map(|w| w.clone())
-        .unwrap_or_default();
+        .map(|words| words.clone())
+        .unwrap_or_else(|_| vec!["hey juno".to_string()]); // Default wake words
 
     Ok(wake_words)
 }
 
-/// Debug command to get detailed always listening status
+// Continue with other voice-features functions...
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn debug_always_listening_status(
     app: AppHandle,
@@ -266,67 +279,61 @@ pub async fn debug_always_listening_status(
 ) -> Result<serde_json::Value, String> {
     info!("[Command] debug_always_listening_status called");
 
-    // Get app state
-    let is_active = state.always_listening_active.lock()
+    // Get app state info
+    let app_active = state.always_listening_active.lock()
         .map(|active| *active)
         .unwrap_or(false);
 
-    let sensitivity = state.always_listening_sensitivity.lock()
+    let app_sensitivity = state.always_listening_sensitivity.lock()
         .map(|s| *s)
         .unwrap_or(0.5);
 
-    let wake_words = state.always_listening_wake_words.lock()
-        .map(|w| w.clone())
+    let app_wake_words = state.always_listening_wake_words.lock()
+        .map(|words| words.clone())
         .unwrap_or_default();
 
-    // Try to get plugin status if available
+    // Get plugin state info if available
     let plugin_status = match app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::always_listening::AlwaysListeningController>>>() {
         Some(controller_state) => {
-            match controller_state.try_lock() {
+            match controller_state.lock() {
                 Ok(controller) => {
                     serde_json::json!({
-                        "plugin_active": controller.is_active(),
-                        "plugin_sensitivity": controller.get_sensitivity(),
-                        "plugin_wake_words": controller.get_wake_words(),
-                        "plugin_available": true
+                        "controller_available": true,
+                        "details": "Controller state available"
                     })
                 }
-                Err(_) => {
+                Err(e) => {
                     serde_json::json!({
-                        "plugin_available": true,
-                        "plugin_locked": true,
-                        "message": "Plugin controller is currently locked"
+                        "controller_available": false,
+                        "error": format!("Failed to lock controller: {}", e)
                     })
                 }
             }
         }
         None => {
             serde_json::json!({
-                "plugin_available": false,
-                "message": "Always listening controller not initialized"
+                "controller_available": false,
+                "error": "Controller not initialized"
             })
         }
     };
 
     let debug_info = serde_json::json!({
         "app_state": {
-            "is_active": is_active,
-            "sensitivity": sensitivity,
-            "wake_words": wake_words
+            "active": app_active,
+            "sensitivity": app_sensitivity,
+            "wake_words": app_wake_words
         },
         "plugin_state": plugin_status,
-        "system_info": {
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-            "version": "1.0.0"
-        }
+        "timestamp": chrono::Utc::now().to_rfc3339()
     });
 
+    info!("[Command] Debug info: {}", debug_info);
     Ok(debug_info)
 }
 
-/// Enhanced Debugging Commands
-
 /// Enable/disable transcription debugging
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn set_transcription_debugging(
     enabled: bool,
@@ -364,6 +371,7 @@ pub async fn set_transcription_debugging(
 }
 
 /// Enable/disable audio level monitoring
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn set_audio_level_monitoring(
     enabled: bool,
@@ -401,6 +409,7 @@ pub async fn set_audio_level_monitoring(
 }
 
 /// Test the Whisper model with synthetic audio
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn test_whisper_model(
     app: AppHandle,
@@ -433,6 +442,7 @@ pub async fn test_whisper_model(
 }
 
 /// Force a transcription test with live audio
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn force_transcription_test(
     app: AppHandle,
@@ -463,4 +473,126 @@ pub async fn force_transcription_test(
             Err(err_msg)
         }
     }
+}
+
+// Stub implementations when voice features are disabled
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn start_always_listening_mode(
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn stop_always_listening_mode(
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn toggle_always_listening_mode(
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<bool, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn get_always_listening_status(
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn set_always_listening_sensitivity(
+    _sensitivity: f32,
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn get_always_listening_sensitivity(
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<f32, String> {
+    Ok(0.5) // Default value
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn set_always_listening_wake_words(
+    _wake_words: Vec<String>,
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn get_always_listening_wake_words(
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<Vec<String>, String> {
+    Ok(vec![])
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn debug_always_listening_status(
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "voice_features_disabled": true,
+        "active": false,
+        "sensitivity": 0.5,
+        "wake_words": [],
+        "debug_enabled": false
+    }))
+}
+
+// Add stub implementations for remaining functions
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn set_transcription_debugging(
+    _enabled: bool,
+    _app: tauri::AppHandle,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn set_audio_level_monitoring(
+    _enabled: bool,
+    _app: tauri::AppHandle,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn test_whisper_model(
+    _app: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn force_transcription_test(
+    _app: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    Err("Voice features are disabled in this build".to_string())
 }

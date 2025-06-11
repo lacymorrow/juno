@@ -72,7 +72,7 @@ html-escape = "0.2"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 lazy_static = "1.4"
 # Voice transcription plugin
-tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription" }
+tauri-plugin-voice-transcription = { path = "../tauri-plugin-voice-transcription", optional = true }
 tauri-plugin-process = "2.2.1"
 tauri-plugin-store = "2.0.1"
 # logging = { path = "../logging" } # Commented out due to path issue and no current usages
@@ -95,11 +95,13 @@ tauri-plugin-autostart = "2.3.0"
 [features]
 # this feature is used for production builds or when `devPath` points to the filesystem
 # DO NOT REMOVE!!
-default = ["custom-protocol", "macos-proxy"]
+default = ["custom-protocol", "macos-proxy", "voice-features"]
 # this feature is used when building mobile applications
 # mobile = ["tauri/mobile"] # Temporarily comment out if causing issues
 macos-proxy = ["tauri/macos-proxy", "cocoa", "objc"]
 custom-protocol = ["tauri/custom-protocol"]
+# CRITICAL FIX: Add voice feature for optional compilation
+voice-features = ["tauri-plugin-voice-transcription"]
 
 [dev-dependencies]
 tokio-test = "0.4"

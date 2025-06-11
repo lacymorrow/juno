@@ -1,9 +1,14 @@
+#[cfg(feature = "voice-features")]
 use crate::state::AppState;
+#[cfg(feature = "voice-features")]
 use tauri::{State, Emitter, AppHandle, Manager};
+#[cfg(feature = "voice-features")]
 use tracing::{info, warn, error};
+#[cfg(feature = "voice-features")]
 use std::sync::{Arc, Mutex};
 
 /// Force reset dictation transcription state (emergency cleanup)
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn force_reset_dictation_transcription(
     app: AppHandle,
@@ -63,6 +68,7 @@ pub async fn force_reset_dictation_transcription(
 }
 
 /// Get current dictation transcription state for debugging
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn get_dictation_transcription_status(
     app: AppHandle,
@@ -95,6 +101,7 @@ pub async fn get_dictation_transcription_status(
 }
 
 /// Emergency cleanup for stuck dictation state (callable from frontend)
+#[cfg(feature = "voice-features")]
 #[tauri::command]
 pub async fn emergency_cleanup_dictation_state(
     app: AppHandle,
@@ -113,4 +120,38 @@ pub async fn emergency_cleanup_dictation_state(
             Err(format!("Emergency cleanup failed: {}", e))
         }
     }
+}
+
+// Stub implementations when voice features are disabled
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn force_reset_dictation_transcription(
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn get_dictation_transcription_status(
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "dictation_active": false,
+        "voice_controller_active": false,
+        "state_consistent": true,
+        "voice_features_disabled": true,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    }))
+}
+
+#[cfg(not(feature = "voice-features"))]
+#[tauri::command]
+pub async fn emergency_cleanup_dictation_state(
+    _app: tauri::AppHandle,
+    _state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    Err("Voice features are disabled in this build".to_string())
 }
