@@ -1156,29 +1156,39 @@ impl ToolMetadata {
 // }
 
 pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
-    let event = AgentEvent {
-        event_type: "stream_start".to_string(),
-        payload: AgentEventPayload::GenericContent(GenericContentPayload {
-            content: format!("Stream started with message ID: {}", message_id),
-        }),
-    };
-    emit_agent_event(app_handle, event);
+    use crate::constants::events;
+    
+    let payload = serde_json::json!({
+        "message_id": message_id
+    });
+    
+    if let Err(e) = app_handle.emit(events::AGENT_STREAM_START, payload) {
+        log::warn!("Failed to emit stream start event: {}", e);
+    }
 }
 
 pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>) {
-    let event = AgentEvent {
-        event_type: "streaming_text_chunk".to_string(),
-        payload: AgentEventPayload::GenericContent(GenericContentPayload { content: text }),
-    };
-    emit_agent_event(app_handle, event);
+    use crate::constants::events;
+    
+    let payload = serde_json::json!({
+        "chunk": text,
+        "message_id": message_id
+    });
+    
+    if let Err(e) = app_handle.emit(events::AGENT_TEXT_STREAM, payload) {
+        log::warn!("Failed to emit streaming text chunk event: {}", e);
+    }
 }
 
-pub fn emit_stream_end(app_handle: &AppHandle, message_id: String) {
-    let event = AgentEvent {
-        event_type: "stream_end".to_string(),
-        payload: AgentEventPayload::GenericContent(GenericContentPayload {
-            content: format!("Stream ended with message ID: {}", message_id),
-        }),
-    };
-    emit_agent_event(app_handle, event);
+pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
+    use crate::constants::events;
+    
+    let payload = serde_json::json!({
+        "message_id": message_id,
+        "complete_text": complete_text
+    });
+    
+    if let Err(e) = app_handle.emit(events::AGENT_STREAM_END, payload) {
+        log::warn!("Failed to emit stream end event: {}", e);
+    }
 }
