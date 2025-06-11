@@ -21,7 +21,7 @@ if ! command -v cargo-set-version >/dev/null 2>&1; then
   if ! command -v cargo-set-version >/dev/null 2>&1; then
     # cargo-set-version is part of cargo-edit
     echo "Installing cargo-edit (provides cargo set-version)…"
-    cargo install cargo-edit --locked --quiet
+    cargo install cargo-edit --version 0.12.3 --locked --quiet
   fi
 fi
 
