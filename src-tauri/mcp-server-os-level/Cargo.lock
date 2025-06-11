@@ -327,12 +327,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cidre"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8242b03b4e62f3b6f9ec711d78e21f1750396b56603f29b741918fd816e89e96"
-
-[[package]]
 name = "clipboard-win"
 version = "5.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -388,7 +382,6 @@ dependencies = [
  "axum",
  "base64",
  "chrono",
- "cidre",
  "core-foundation 0.10.0",
  "core-foundation-sys",
  "core-graphics",

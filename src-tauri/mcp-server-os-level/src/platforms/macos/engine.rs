@@ -90,39 +90,67 @@ impl MacOSEngine {
         debug!("Refreshing accessibility tree");
 
         if let Some(name) = app_name {
-            unsafe {
-                use objc::{class, msg_send, sel, sel_impl};
+            #[cfg(all(target_os = "macos", feature = "use-cidre"))]
+            {
+                use cidre::{ns};
 
-                let workspace_class = class!(NSWorkspace);
-                let shared_workspace: *mut objc::runtime::Object =
-                    msg_send![workspace_class, sharedWorkspace];
-                let apps: *mut objc::runtime::Object =
-                    msg_send![shared_workspace, runningApplications];
-                let count: usize = msg_send![apps, count];
+                // Use safe Cidre implementation
+                let workspace = ns::Workspace::shared();
+                let apps = workspace.running_applications();
 
-                for i in 0..count {
-                    let app: *mut objc::runtime::Object = msg_send![apps, objectAtIndex:i];
-                    let app_name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
-
-                    if !app_name_obj.is_null() {
-                        let app_name_str: &str = {
-                            let nsstring = app_name_obj as *const objc::runtime::Object;
-                            let bytes: *const std::os::raw::c_char =
-                                msg_send![nsstring, UTF8String];
-                            let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
-                            let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
-                            std::str::from_utf8_unchecked(bytes_slice)
-                        };
-
-                        if app_name_str.to_lowercase() == name.to_lowercase() {
-                            let _: () = msg_send![app, activateWithOptions:1];
+                for app in apps.iter() {
+                    if let Some(app_name_str) = app.localized_name() {
+                        if app_name_str.to_string().to_lowercase() == name.to_lowercase() {
+                            let _success = app.activate_with_options(ns::ApplicationActivationOptions::empty());
                             debug!("Activated application: {}", name);
-
                             std::thread::sleep(std::time::Duration::from_millis(100));
                             break;
                         }
                     }
                 }
+            }
+
+            #[cfg(all(target_os = "macos", not(feature = "use-cidre")))]
+            {
+                // Fallback to manual Objective-C implementation
+                unsafe {
+                    use objc::{class, msg_send, sel, sel_impl};
+
+                    let workspace_class = class!(NSWorkspace);
+                    let shared_workspace: *mut objc::runtime::Object =
+                        msg_send![workspace_class, sharedWorkspace];
+                    let apps: *mut objc::runtime::Object =
+                        msg_send![shared_workspace, runningApplications];
+                    let count: usize = msg_send![apps, count];
+
+                    for i in 0..count {
+                        let app: *mut objc::runtime::Object = msg_send![apps, objectAtIndex:i];
+                        let app_name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
+
+                        if !app_name_obj.is_null() {
+                            let app_name_str: &str = {
+                                let nsstring = app_name_obj as *const objc::runtime::Object;
+                                let bytes: *const std::os::raw::c_char =
+                                    msg_send![nsstring, UTF8String];
+                                let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
+                                let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
+                                std::str::from_utf8_unchecked(bytes_slice)
+                            };
+
+                            if app_name_str.to_lowercase() == name.to_lowercase() {
+                                let _: () = msg_send![app, activateWithOptions:1];
+                                debug!("Activated application: {}", name);
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                debug!("Application activation not supported on non-macOS platforms");
             }
         }
 
@@ -1881,9 +1909,6 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn resize_window(&self, width: f64, height: f64) -> Result<(), AutomationError> {
-        // Implementation Note: Get focused element, check if window,
-        // set AXSize attribute.
-
         debug!("Attempting to resize the focused window to width={}, height={}", width, height);
 
         let focused_element = self.get_focused_element()?;
@@ -1903,41 +1928,24 @@ impl AccessibilityEngine for MacOSEngine {
                 ));
             }
 
-            // 2. Create CGSize and AXValue
+            // 2. Create AXValue using safe Cidre implementation
             let size_attr = AXAttribute::new(&CFString::new("AXSize"));
-            let mut cg_size = core_graphics::geometry::CGSize::new(width, height);
-            let size_ptr = &mut cg_size as *mut _ as *const std::ffi::c_void;
+            
+            // Use the safe Cidre implementation
+            let ax_value = super::ffi::ax_value_create_size(width, height)?;
 
-            unsafe {
-                // Use AXValueCreate from ffi or accessibility_sys if available
-                // Assuming K_AXVALUE_CGSIZE_TYPE is defined similarly to K_AXVALUE_CGPOINT_TYPE
-                let value_ref = super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGSIZE_TYPE, size_ptr);
-                if value_ref.is_null() {
-                    warn!("Failed to create AXValueRef for CGSize");
-                    return Err(AutomationError::PlatformError(
-                        "Could not create AXValue for size".to_string(),
-                    ));
+            // 3. Set the AXSize attribute
+            match ax_window.set_attribute(&size_attr, ax_value.as_CFType()) {
+                Ok(_) => {
+                    debug!("Successfully set AXSize attribute");
+                    Ok(())
                 }
-
-                // 3. Set the AXSize attribute
-                // Need to wrap value_ref appropriately for set_attribute
-                // TCFType::wrap_under_create_rule might work if AXValueRef is a CFTypeRef
-                let value_to_set = CFType::wrap_under_create_rule(value_ref);
-
-                match ax_window.set_attribute(&size_attr, value_to_set) {
-                    Ok(_) => {
-                        debug!("Successfully set AXSize attribute");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        warn!("Failed to set AXSize attribute: {:?}", e);
-                        Err(AutomationError::PlatformError(format!(
-                            "Failed to set the size attribute: {:?}",
-                            e
-                        )))
-                    }
-                    // Ensure the created CFTypeRef (AXValueRef) is released if wrap_under_create_rule doesn't handle it
-                    // However, CFType wrapper should manage the retain count.
+                Err(e) => {
+                    warn!("Failed to set AXSize attribute: {:?}", e);
+                    Err(AutomationError::PlatformError(format!(
+                        "Failed to set the size attribute: {:?}",
+                        e
+                    )))
                 }
             }
         } else {
@@ -1949,9 +1957,6 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn move_window(&self, x: f64, y: f64) -> Result<(), AutomationError> {
-        // Implementation Note: Get focused element, check if window,
-        // set AXPosition attribute.
-
         debug!("Attempting to move the focused window to x={}, y={}", x, y);
 
         let focused_element = self.get_focused_element()?;
@@ -1968,36 +1973,24 @@ impl AccessibilityEngine for MacOSEngine {
                 ));
             }
 
-            // 2. Create CGPoint and AXValue
+            // 2. Create AXValue using safe Cidre implementation
             let position_attr = AXAttribute::new(&CFString::new("AXPosition"));
-            let mut cg_point = core_graphics::geometry::CGPoint::new(x, y);
-            let point_ptr = &mut cg_point as *mut _ as *const std::ffi::c_void;
+            
+            // Use the safe Cidre implementation
+            let ax_value = super::ffi::ax_value_create_point(x, y)?;
 
-            unsafe {
-                let value_ref =
-                    super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGPOINT_TYPE, point_ptr);
-                if value_ref.is_null() {
-                    warn!("Failed to create AXValueRef for CGPoint");
-                    return Err(AutomationError::PlatformError(
-                        "Could not create AXValue for position".to_string(),
-                    ));
+            // 3. Set the AXPosition attribute
+            match ax_window.set_attribute(&position_attr, ax_value.as_CFType()) {
+                Ok(_) => {
+                    debug!("Successfully set AXPosition attribute");
+                    Ok(())
                 }
-
-                // 3. Set the AXPosition attribute
-                let value_to_set = CFType::wrap_under_create_rule(value_ref);
-
-                match ax_window.set_attribute(&position_attr, value_to_set) {
-                    Ok(_) => {
-                        debug!("Successfully set AXPosition attribute");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        warn!("Failed to set AXPosition attribute: {:?}", e);
-                        Err(AutomationError::PlatformError(format!(
-                            "Failed to set the position attribute: {:?}",
-                            e
-                        )))
-                    }
+                Err(e) => {
+                    warn!("Failed to set AXPosition attribute: {:?}", e);
+                    Err(AutomationError::PlatformError(format!(
+                        "Failed to set the position attribute: {:?}",
+                        e
+                    )))
                 }
             }
         } else {

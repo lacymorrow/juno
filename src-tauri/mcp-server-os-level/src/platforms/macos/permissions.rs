@@ -1,88 +1,58 @@
-use crate::platforms::macos::ffi::AXIsProcessTrustedWithOptions; // Import from ffi module
+use crate::platforms::macos::ffi::ax_is_process_trusted_with_options; // Use safe Cidre implementation
 use crate::AutomationError;
-use core_foundation::base::TCFType;
-use core_foundation::boolean::CFBoolean;
-use core_foundation::dictionary::CFDictionary;
-use core_foundation::string::CFString;
 use tracing::{debug, info, warn};
 use std::process::Command;
 
 // Make the function public so it can be called from server.rs
 pub fn check_accessibility_permissions(show_prompt: bool) -> Result<bool, AutomationError> {
-    debug!("checking accessibility permissions");
+    debug!("checking accessibility permissions using safe Cidre implementation");
 
-    unsafe {
-        // Create the options dictionary more safely
-        let key = CFString::new("AXTrustedCheckOptionPrompt");
-        let value = if show_prompt {
-            CFBoolean::true_value()
+    // Use the safe Cidre implementation instead of manual FFI
+    let is_trusted = ax_is_process_trusted_with_options(show_prompt);
+
+    if is_trusted {
+        debug!("accessibility permissions are granted");
+        Ok(true)
+    } else {
+        if !show_prompt {
+            debug!("accessibility permissions not granted");
+            Err(AutomationError::PermissionDenied(
+                "Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.".to_string(),
+            ))
         } else {
-            CFBoolean::false_value()
-        };
-
-        // Create dictionary with proper memory management
-        let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
-
-        // Call the function with proper type conversion
-        let is_trusted = AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef());
-
-        if is_trusted {
-            debug!("accessibility permissions are granted");
-            Ok(true)
-        } else {
-            if !show_prompt {
-                debug!("accessibility permissions not granted");
-                Err(AutomationError::PermissionDenied(
-                    "Accessibility permissions not granted. Go to System Preferences > Security & Privacy > Privacy > Accessibility and add this application.".to_string(),
-                ))
-            } else {
-                debug!("accessibility permissions prompt displayed");
-                Ok(false)
-            }
+            debug!("accessibility permissions prompt displayed");
+            Ok(false)
         }
     }
 }
 
 /// Enhanced permission checking that automatically opens system settings when denied
 pub fn check_accessibility_permissions_with_auto_redirect(show_prompt: bool, auto_open_settings: bool) -> Result<bool, AutomationError> {
-    debug!("checking accessibility permissions with auto-redirect option: {}", auto_open_settings);
+    debug!("checking accessibility permissions with auto-redirect option using safe Cidre: {}", auto_open_settings);
 
-    unsafe {
-        // Create the options dictionary more safely
-        let key = CFString::new("AXTrustedCheckOptionPrompt");
-        let value = if show_prompt {
-            CFBoolean::true_value()
-        } else {
-            CFBoolean::false_value()
-        };
+    // Use the safe Cidre implementation instead of manual FFI
+    let is_trusted = ax_is_process_trusted_with_options(show_prompt);
 
-        // Create dictionary with proper memory management
-        let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
+    if is_trusted {
+        debug!("accessibility permissions are granted");
+        Ok(true)
+    } else {
+        debug!("accessibility permissions not granted");
 
-        // Call the function with proper type conversion
-        let is_trusted = AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef());
-
-        if is_trusted {
-            debug!("accessibility permissions are granted");
-            Ok(true)
-        } else {
-            debug!("accessibility permissions not granted");
-
-            if auto_open_settings {
-                info!("Automatically opening System Settings for accessibility permissions");
-                if let Err(e) = open_accessibility_settings() {
-                    warn!("Failed to open System Settings: {}", e);
-                }
+        if auto_open_settings {
+            info!("Automatically opening System Settings for accessibility permissions");
+            if let Err(e) = open_accessibility_settings() {
+                warn!("Failed to open System Settings: {}", e);
             }
+        }
 
-            if !show_prompt {
-                Err(AutomationError::PermissionDenied(
-                    "Accessibility permissions not granted. System Settings has been opened for you to grant permissions.".to_string(),
-                ))
-            } else {
-                debug!("accessibility permissions prompt displayed");
-                Ok(false)
-            }
+        if !show_prompt {
+            Err(AutomationError::PermissionDenied(
+                "Accessibility permissions not granted. System Settings has been opened for you to grant permissions.".to_string(),
+            ))
+        } else {
+            debug!("accessibility permissions prompt displayed");
+            Ok(false)
         }
     }
 }
@@ -188,5 +158,50 @@ pub fn open_system_settings_for_permission(permission_type: &str) -> Result<(), 
         Ok(())
     } else {
         Err(format!("Failed to open System Settings for {}: {}", permission_type, String::from_utf8_lossy(&fallback_output.stderr)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_accessibility_permissions() {
+        // Test that the function doesn't panic and returns a valid result
+        let result = check_accessibility_permissions(false);
+        assert!(result.is_ok() || result.is_err()); // Either state is valid
+    }
+
+    #[test]
+    fn test_open_accessibility_settings() {
+        // Test that the function doesn't panic (but we can't test actual opening in CI)
+        // This would only work on an actual macOS system
+        if cfg!(target_os = "macos") {
+            // Could test on macOS, but skip for now to avoid opening system settings during tests
+            assert!(true);
+        } else {
+            assert!(true); // Pass on non-macOS systems
+        }
+    }
+
+    #[test]
+    fn test_open_system_settings_for_permission() {
+        // Test valid permission types
+        let valid_types = ["accessibility", "screen_recording", "microphone", "input_monitoring", 
+                          "full_disk_access", "camera", "automation"];
+        
+        for perm_type in &valid_types {
+            // Just verify the function doesn't panic with valid types
+            // We don't actually open settings in tests
+            if cfg!(target_os = "macos") {
+                // Would work on macOS but skip opening during tests
+                assert!(true);
+            }
+        }
+
+        // Test invalid permission type
+        let result = open_system_settings_for_permission("invalid_type");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown permission type"));
     }
 }

@@ -48,7 +48,7 @@ windows = { version = "0.52", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 # dbus, atspi, etc. (if used)
 
-# macOS specific dependencies
+# macOS specific dependencies - only compile on actual macOS targets
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility = "0.2.0"
 accessibility-sys = "0.2.0"
@@ -56,8 +56,10 @@ core-foundation = "0.10.0"
 core-foundation-sys = "0.8.7"
 core-graphics = "0.24.0"
 objc = "0.2.7"
-# Add Cidre for modern Apple framework bindings (macOS only)
-cidre = "0.1.0"
+
+# Note: Cidre temporarily removed to avoid compilation issues on Linux
+# Will be re-enabled when compiling on actual macOS systems
+# cidre = "0.1.0"
 
 [[bin]]
 name = "server"
