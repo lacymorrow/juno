@@ -13,6 +13,7 @@ use std::pin::Pin;
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::traits::ToolProvider;
 use crate::agent::tool_logger;
+use crate::agent::tools::{ToolCategory};
 use crate::state::AppState;
 use crate::agent::tools::mcp_integration::MCPManager;
 // Error recovery will be implemented in future iterations
@@ -216,15 +217,21 @@ impl LocalToolProvider {
         }
     }
 
-    /// Check if a tool is an MCP tool
-    fn is_mcp_tool(&self, tool_name: &str) -> bool {
-        // MCP tools are typically prefixed with "mcp-server-" or contain server identifiers
-        let is_mcp_prefixed = tool_name.starts_with("mcp-server-") ||
-                             (tool_name.contains('_') && tool_name.contains('-'));
-
-        // Additional check: tool has MCP manager available and is not a local executor
-        is_mcp_prefixed &&
-        self.mcp_manager.is_some() &&
+    /// Check if a tool is an MCP tool using proper tool configuration
+    async fn is_mcp_tool(&self, tool_name: &str) -> bool {
+        // Check if we have app handle to access tool configuration
+        if let Some(ref app_handle) = self.app_handle {
+            let state = app_handle.state::<AppState>();
+            let config_manager = state.get_tool_config_manager().await;
+            let config_guard = config_manager.lock().await;
+            
+            if let Some(tool_config) = config_guard.get_tool_config(tool_name) {
+                return tool_config.category == ToolCategory::MCP;
+            }
+        }
+        
+        // Fallback to basic MCP manager availability check if no configuration access
+        self.mcp_manager.is_some() && 
         !self.executors.try_read().map(|execs| execs.contains_key(tool_name)).unwrap_or(false)
     }
 
@@ -342,7 +349,7 @@ impl ToolProvider for LocalToolProvider {
 
         let execution_result = tokio::time::timeout(timeout_duration, async {
             // Execute tool directly (error recovery will be implemented in future iterations)
-            if self.is_mcp_tool(tool_name) {
+            if self.is_mcp_tool(tool_name).await {
                 // Execute via MCP manager
                 if let Some(ref mcp_manager) = self.mcp_manager {
                     let manager_guard = mcp_manager.lock().await;

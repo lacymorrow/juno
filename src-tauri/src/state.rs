@@ -768,6 +768,7 @@ impl AppState {
     pub fn clear_last_spoken_content(&self) {
         let mut spoken_guard = self.last_spoken_content.lock().unwrap();
         *spoken_guard = None;
+    }
 
     // Debug mode methods
     pub fn set_debug_mode(&self, enabled: bool) {
