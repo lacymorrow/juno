@@ -272,7 +272,7 @@ fn unregister_escape_key_handler() -> Result<(), String>
 ```typescript
 // Main application components
 App.tsx              // Root application wrapper
-Bar.tsx              // Floating interface with drag/voice indicators
+components/FloatingBar.tsx   // Floating interface with drag/voice indicators
 ChatInterface.tsx    // Agent interaction and message display
 Settings.tsx         // Configuration panel
 ```

@@ -142,10 +142,8 @@ Audio Capture → Whisper.cpp → Transcription → Mode Routing
 ### Component Structure
 ```
 App.tsx (Main Window)
-├── Bar.tsx (Floating Interface)
-│   ├── Voice Indicator
-│   ├── Status Display
-│   └── Drag Handling
+├── components/
+│   └── FloatingBar.tsx (Floating Interface)
 ├── Chat Interface
 │   ├── Message Display
 │   ├── Screenshot Rendering

@@ -443,7 +443,7 @@ echo $?
 
 - [src-tauri/src/anthropic.rs](../../src-tauri/src/anthropic.rs) - Main agent orchestrator
 - [src-tauri/src/state.rs](../../src-tauri/src/state.rs) - Centralized state management
-- [src/Bar.tsx](../../src/Bar.tsx) - Main UI component
+- [src/components/FloatingBar.tsx](../../src/components/FloatingBar.tsx) - Main UI component
 
 ### Essential Environment
 
