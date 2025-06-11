@@ -1156,39 +1156,33 @@ impl ToolMetadata {
 // }
 
 pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
-    use crate::constants::events;
-    
-    let payload = serde_json::json!({
+    let event_data = serde_json::json!({
         "message_id": message_id
     });
-    
-    if let Err(e) = app_handle.emit(events::AGENT_STREAM_START, payload) {
-        log::warn!("Failed to emit stream start event: {}", e);
+
+    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_START, event_data) {
+        warn!("Failed to emit agent-stream-start event: {}", e);
     }
 }
 
 pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>) {
-    use crate::constants::events;
-    
-    let payload = serde_json::json!({
+    let event_data = serde_json::json!({
         "chunk": text,
         "message_id": message_id
     });
-    
-    if let Err(e) = app_handle.emit(events::AGENT_TEXT_STREAM, payload) {
-        log::warn!("Failed to emit streaming text chunk event: {}", e);
+
+    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_TEXT_STREAM, event_data) {
+        warn!("Failed to emit agent-text-stream event: {}", e);
     }
 }
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {
-    use crate::constants::events;
-    
-    let payload = serde_json::json!({
+    let event_data = serde_json::json!({
         "message_id": message_id,
         "complete_text": complete_text
     });
-    
-    if let Err(e) = app_handle.emit(events::AGENT_STREAM_END, payload) {
-        log::warn!("Failed to emit stream end event: {}", e);
+
+    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event_data) {
+        warn!("Failed to emit agent-stream-end event: {}", e);
     }
 }

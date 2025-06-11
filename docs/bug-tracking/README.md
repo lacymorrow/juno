@@ -9,11 +9,13 @@ docs/bug-tracking/
 ├── README.md                    # This file - overview and guidelines
 ├── regressions/                 # Documented regressions and fixes
 │   ├── 2024-12-streaming-jsx-conflict.md
+│   ├── 2024-12-chat-interface-disabled.md
 │   └── template.md             # Template for new regression reports
 ├── known-issues/               # Current known issues
 │   └── template.md
 ├── test-scenarios/             # Critical test scenarios to prevent regressions
-│   └── streaming-responses.md
+│   ├── streaming-responses.md
+│   └── chat-interface-state.md
 └── prevention-checklist.md     # Pre-release checklist
 ```
 
@@ -65,12 +67,17 @@ docs/bug-tracking/
 
 ### Recent Critical Regressions
 
-1. **Streaming/JSX Conflict (2024-12)**: JSX detection interfering with streaming responses
+1. **Chat Interface Disabled (2024-12)**: Chat interface permanently disabled after agent execution
+   - **File**: `docs/bug-tracking/regressions/2024-12-chat-interface-disabled.md`
+   - **Fix**: Fixed streaming event names to match frontend listeners (`agent-stream-end` vs `agent-event`)
+
+2. **Streaming/JSX Conflict (2024-12)**: JSX detection interfering with streaming responses
    - **File**: `docs/bug-tracking/regressions/2024-12-streaming-jsx-conflict.md`
    - **Fix**: Added `!msg.isStreaming &&` condition to prevent JSX detection during streaming
 
 ### Test Scenarios to Always Check
 
+- Chat interface state management during agent execution (enable/disable cycle)
 - Streaming agent responses with partial content
 - JSX/React component rendering in completed messages
 - Voice transcription and dictation modes
@@ -82,6 +89,7 @@ docs/bug-tracking/
 ### Files Most Prone to Regressions
 
 - `src/App.tsx` (lines 1459-1555: streaming logic, line 2620: message rendering)
+- `src-tauri/src/agent/tool_logger.rs` (streaming event emission)
 - `src/components/jsx-message-renderer.tsx` (`isJsxContent()` function)
 - `src-tauri/src/anthropic.rs` (main agent orchestration)
 - `src-tauri/src/agent/tools/` (tool implementations)
