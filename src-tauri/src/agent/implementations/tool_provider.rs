@@ -1,20 +1,21 @@
 use async_trait::async_trait;
 use futures::future::BoxFuture;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::sync::Mutex;
-use tauri::AppHandle;
 use serde_json::Value;
-use tracing::{debug, error, info, warn};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use tauri::{AppHandle, Manager, Emitter};
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
 
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
-use crate::agent::traits::ToolProvider;
 use crate::agent::tool_logger;
-use crate::state::AppState;
 use crate::agent::tools::mcp_integration::MCPManager;
+use crate::agent::tools::ToolCategory;
+use crate::agent::traits::ToolProvider;
+use crate::state::AppState;
 // Error recovery will be implemented in future iterations
 
 // Define an async tool function type
@@ -22,12 +23,12 @@ use crate::agent::tools::mcp_integration::MCPManager;
 // Needs Send + Sync bounds for async execution
 // Add 'static lifetime bound
 // Make the type alias public
-pub type AsyncToolFn = Box<
-    dyn Fn(Value) -> BoxFuture<'static, Result<Value, String>> + Send + Sync + 'static
->;
+pub type AsyncToolFn =
+    Box<dyn Fn(Value) -> BoxFuture<'static, Result<Value, String>> + Send + Sync + 'static>;
 
 /// Type alias for asynchronous tool executors
-pub type AsyncToolExecutor = Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
+pub type AsyncToolExecutor =
+    Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
 
 /// A ToolProvider holding tools in memory, supporting async execution and MCP integration.
 #[derive(Clone)]
@@ -102,10 +103,16 @@ impl LocalToolProvider {
                     Ok(result) => Ok(result),
                     Err(e) => {
                         // Check if this is a display-related error
-                        if e.contains("displayID") || e.contains("RemoteLayerTree") || e.contains("scheduleDisplayLink") {
+                        if e.contains("displayID")
+                            || e.contains("RemoteLayerTree")
+                            || e.contains("scheduleDisplayLink")
+                        {
                             warn!("Display-related error detected in tool execution: {}", e);
                             // Return a more graceful error message
-                            Err(format!("Display system error (this may be temporary): {}", e))
+                            Err(format!(
+                                "Display system error (this may be temporary): {}",
+                                e
+                            ))
                         } else {
                             Err(e)
                         }
@@ -127,9 +134,8 @@ impl LocalToolProvider {
         &mut self,
         definition: ToolDefinition,
         executor: F,
-        app_state: Option<&AppState>
-    )
-    where
+        app_state: Option<&AppState>,
+    ) where
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
@@ -154,9 +160,8 @@ impl LocalToolProvider {
         &mut self,
         definition: ToolDefinition,
         executor: F,
-        app_state: Option<&AppState>
-    )
-    where
+        app_state: Option<&AppState>,
+    ) where
         F: Fn(Value) -> Fut + Send + Sync + 'static,
         Fut: futures::Future<Output = Result<Value, String>> + Send + 'static,
     {
@@ -167,7 +172,10 @@ impl LocalToolProvider {
             drop(config_guard); // Release the lock early
 
             if !is_enabled {
-                tracing::debug!("Tool '{}' is disabled, skipping registration", definition.name);
+                tracing::debug!(
+                    "Tool '{}' is disabled, skipping registration",
+                    definition.name
+                );
                 return;
             }
         };
@@ -194,14 +202,21 @@ impl LocalToolProvider {
                 let mut added_count = 0;
                 for tool_info in mcp_tools {
                     if tool_info.enabled {
-                        defs.insert(tool_info.tool_definition.name.clone(), tool_info.tool_definition);
+                        defs.insert(
+                            tool_info.tool_definition.name.clone(),
+                            tool_info.tool_definition,
+                        );
                         added_count += 1;
                     }
                 }
 
-                log::info!("Refreshed and cached {} MCP tools in provider definitions", added_count);
+                log::info!(
+                    "Refreshed and cached {} MCP tools in provider definitions",
+                    added_count
+                );
                 Ok::<(), String>(())
-            }).await;
+            })
+            .await;
 
             match refresh_result {
                 Ok(Ok(())) => Ok(()),
@@ -216,16 +231,26 @@ impl LocalToolProvider {
         }
     }
 
-    /// Check if a tool is an MCP tool
-    fn is_mcp_tool(&self, tool_name: &str) -> bool {
-        // MCP tools are typically prefixed with "mcp-server-" or contain server identifiers
-        let is_mcp_prefixed = tool_name.starts_with("mcp-server-") ||
-                             (tool_name.contains('_') && tool_name.contains('-'));
+    /// Check if a tool is an MCP tool using proper tool configuration
+    async fn is_mcp_tool(&self, tool_name: &str) -> bool {
+        // Check if we have app handle to access tool configuration
+        if let Some(ref app_handle) = self.app_handle {
+            let state = app_handle.state::<AppState>();
+            let config_manager = state.get_tool_config_manager().await;
+            let config_guard = config_manager.lock().await;
 
-        // Additional check: tool has MCP manager available and is not a local executor
-        is_mcp_prefixed &&
-        self.mcp_manager.is_some() &&
-        !self.executors.try_read().map(|execs| execs.contains_key(tool_name)).unwrap_or(false)
+            if let Some(tool_config) = config_guard.get_tool_config(tool_name) {
+                return tool_config.category == ToolCategory::MCP;
+            }
+        }
+
+        // Fallback to basic MCP manager availability check if no configuration access
+        self.mcp_manager.is_some()
+            && !self
+                .executors
+                .try_read()
+                .map(|execs| execs.contains_key(tool_name))
+                .unwrap_or(false)
     }
 
     /// Deprecated: Registers a synchronous tool. Use register_async_tool instead.
@@ -270,7 +295,9 @@ impl ToolProvider for LocalToolProvider {
         // Only fetch MCP tools if we don't have any cached and we have an MCP manager
         if let Some(ref mcp_manager) = self.mcp_manager {
             // Check if we already have MCP tools cached (they have prefixed names)
-            let has_mcp_tools = all_tools.iter().any(|tool| tool.name.contains("mcp-server-"));
+            let has_mcp_tools = all_tools
+                .iter()
+                .any(|tool| tool.name.contains("mcp-server-"));
 
             if !has_mcp_tools {
                 // Add timeout to MCP tool fetching to prevent hanging on display-related operations
@@ -281,17 +308,28 @@ impl ToolProvider for LocalToolProvider {
                     let mcp_tools = manager_guard.get_all_tools().await;
                     drop(manager_guard);
                     mcp_tools
-                }).await {
+                })
+                .await
+                {
                     Ok(mcp_tools) => {
                         for tool_info in mcp_tools {
                             if tool_info.enabled {
                                 all_tools.push(tool_info.tool_definition);
                             }
                         }
-                        debug!("Fetched {} fresh MCP tools", all_tools.iter().filter(|t| t.name.contains("mcp-server-")).count());
-                    },
+                        debug!(
+                            "Fetched {} fresh MCP tools",
+                            all_tools
+                                .iter()
+                                .filter(|t| t.name.contains("mcp-server-"))
+                                .count()
+                        );
+                    }
                     Err(_) => {
-                        warn!("MCP tools fetch timed out after {:?}, continuing without MCP tools", timeout_duration);
+                        warn!(
+                            "MCP tools fetch timed out after {:?}, continuing without MCP tools",
+                            timeout_duration
+                        );
                     }
                 }
             } else {
@@ -313,7 +351,11 @@ impl ToolProvider for LocalToolProvider {
         }
 
         if !duplicates.is_empty() {
-            warn!("Removed {} duplicate tools: {:?}", duplicates.len(), duplicates);
+            warn!(
+                "Removed {} duplicate tools: {:?}",
+                duplicates.len(),
+                duplicates
+            );
             debug!("Keeping {} unique tools", unique_tools.len());
         } else {
             debug!("All {} tools are unique", unique_tools.len());
@@ -327,13 +369,29 @@ impl ToolProvider for LocalToolProvider {
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
         let tool_name = &tool_call.name;
 
-        // Emit tool call request event if app handle is available
+        // Generate unique command ID for tracking
+        let command_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Record start time for duration calculation
+        let start_time = std::time::Instant::now();
+
+        // Emit command execution start event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
+            if let Err(e) = app_handle.emit("command-execution-start", serde_json::json!({
+                "command": tool_name,
+                "id": command_id
+            })) {
+                error!("Failed to emit command-execution-start event: {}", e);
+            }
+
             tool_logger::log_tool_call_request(
                 app_handle,
                 tool_name,
                 tool_call.input.clone(),
-                Some(format!("Executing tool: {}", tool_name))
+                Some(format!("Executing tool: {}", tool_name)),
             );
         }
 
@@ -342,16 +400,26 @@ impl ToolProvider for LocalToolProvider {
 
         let execution_result = tokio::time::timeout(timeout_duration, async {
             // Execute tool directly (error recovery will be implemented in future iterations)
-            if self.is_mcp_tool(tool_name) {
+            if self.is_mcp_tool(tool_name).await {
                 // Execute via MCP manager
                 if let Some(ref mcp_manager) = self.mcp_manager {
                     let manager_guard = mcp_manager.lock().await;
-                    match manager_guard.execute_tool(&tool_call.name, tool_call.input.clone(), tool_call.id.clone()).await {
+                    match manager_guard
+                        .execute_tool(
+                            &tool_call.name,
+                            tool_call.input.clone(),
+                            tool_call.id.clone(),
+                        )
+                        .await
+                    {
                         Ok(tool_result) => Ok(tool_result),
                         Err(e) => Err(e),
                     }
                 } else {
-                    Err(AgentError::ToolNotFound(format!("MCP tool '{}' requested but no MCP manager available", tool_name)))
+                    Err(AgentError::ToolNotFound(format!(
+                        "MCP tool '{}' requested but no MCP manager available",
+                        tool_name
+                    )))
                 }
             } else {
                 // Execute local tool
@@ -368,18 +436,42 @@ impl ToolProvider for LocalToolProvider {
                     Err(AgentError::ToolNotFound(tool_call.name.clone()))
                 }
             }
-        }).await;
+        })
+        .await;
+
+        // Calculate execution duration
+        let duration_ms = start_time.elapsed().as_millis() as u64;
 
         let result = match execution_result {
             Ok(result) => result,
             Err(_) => {
-                warn!("Tool '{}' execution timed out after {:?}", tool_name, timeout_duration);
-                Err(AgentError::ToolError(format!("Tool '{}' execution timed out", tool_name)))
+                warn!(
+                    "Tool '{}' execution timed out after {:?}",
+                    tool_name, timeout_duration
+                );
+                Err(AgentError::ToolError(format!(
+                    "Tool '{}' execution timed out",
+                    tool_name
+                )))
             }
         };
 
-        // Emit tool call response event if app handle is available
+        // Emit command execution end event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
+            let (success, error_msg) = match &result {
+                Ok(_) => (true, None),
+                Err(e) => (false, Some(e.to_string())),
+            };
+
+            if let Err(e) = app_handle.emit("command-execution-end", serde_json::json!({
+                "id": command_id,
+                "success": success,
+                "duration": duration_ms,
+                "error": error_msg
+            })) {
+                error!("Failed to emit command-execution-end event: {}", e);
+            }
+
             match &result {
                 Ok(tool_result) => {
                     tool_logger::log_tool_call_result(
@@ -388,7 +480,7 @@ impl ToolProvider for LocalToolProvider {
                         tool_result.output.clone(),
                         true, // success = true
                         Some(format!("Tool {} completed successfully", tool_name)),
-                        None
+                        None,
                     );
                 }
                 Err(error) => {
@@ -398,7 +490,7 @@ impl ToolProvider for LocalToolProvider {
                         serde_json::json!({"error": error.to_string()}),
                         false, // success = false
                         Some(format!("Tool {} failed: {}", tool_name, error)),
-                        None
+                        None,
                     );
                 }
             }

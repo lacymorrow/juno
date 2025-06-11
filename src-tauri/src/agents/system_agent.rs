@@ -1,16 +1,16 @@
 use async_trait::async_trait;
-use std::time::{Duration, Instant};
 use serde_json::Value;
-use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
 use tauri::Manager;
+use tokio::sync::RwLock;
 
-use crate::agent::core::{AgentError, ToolCall, ToolResult};
-use crate::agent::tools::{ToolMappingService, ToolCategory};
-use crate::state::AppState;
-use crate::commands;
 use super::base_agent::{
-    SpecializedAgent, AgentType, Task, TaskResult, AgentCapability, AgentStatus
+    AgentCapability, AgentStatus, AgentType, SpecializedAgent, Task, TaskResult,
 };
+use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolCategory, ToolMappingService};
+use crate::commands;
+use crate::state::AppState;
 
 /// Specialized agent for system operations, shell commands, and file management
 pub struct SystemAgent {
@@ -48,9 +48,17 @@ impl SystemAgent {
 
         match tool_call.name.as_str() {
             "dev_bash_command" | "system_exec" => {
-                let command = tool_call.input.get("command").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'command' parameter".to_string()))?;
-                let timeout_seconds = tool_call.input.get("timeout_seconds").and_then(|v| v.as_u64());
+                let command = tool_call
+                    .input
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'command' parameter".to_string())
+                    })?;
+                let timeout_seconds = tool_call
+                    .input
+                    .get("timeout_seconds")
+                    .and_then(|v| v.as_u64());
                 let restart = tool_call.input.get("restart").and_then(|v| v.as_bool());
 
                 let result = commands::shell::dev_bash_command(
@@ -58,8 +66,9 @@ impl SystemAgent {
                     state,
                     command.to_string(),
                     timeout_seconds,
-                    restart
-                ).await;
+                    restart,
+                )
+                .await;
 
                 match result {
                     Ok(output) => Ok(ToolResult {
@@ -74,13 +83,18 @@ impl SystemAgent {
                 }
             }
             "dev_list_files" | "system_list_files" => {
-                let path = tool_call.input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+                let path = tool_call
+                    .input
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(".");
 
                 let result = commands::filesystem::dev_list_files(
                     self.app_handle.clone(),
                     state,
-                    path.to_string()
-                ).await;
+                    path.to_string(),
+                )
+                .await;
 
                 match result {
                     Ok(files_json) => Ok(ToolResult {
@@ -95,14 +109,22 @@ impl SystemAgent {
                 }
             }
             "dev_get_file_content" | "system_read_file" => {
-                let file_path = tool_call.input.get("file_path").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'file_path' parameter".to_string()))?;
+                let file_path = tool_call
+                    .input
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'file_path' parameter".to_string(),
+                        )
+                    })?;
 
                 let result = commands::filesystem::dev_get_file_content(
                     self.app_handle.clone(),
                     state,
-                    file_path.to_string()
-                ).await;
+                    file_path.to_string(),
+                )
+                .await;
 
                 match result {
                     Ok(content) => Ok(ToolResult {
@@ -117,17 +139,30 @@ impl SystemAgent {
                 }
             }
             "dev_set_file_content" | "system_write_file" => {
-                let file_path = tool_call.input.get("file_path").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'file_path' parameter".to_string()))?;
-                let content = tool_call.input.get("content").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'content' parameter".to_string()))?;
+                let file_path = tool_call
+                    .input
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'file_path' parameter".to_string(),
+                        )
+                    })?;
+                let content = tool_call
+                    .input
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'content' parameter".to_string())
+                    })?;
 
                 let result = commands::filesystem::dev_set_file_content(
                     self.app_handle.clone(),
                     state,
                     file_path.to_string(),
-                    content.to_string()
-                ).await;
+                    content.to_string(),
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -142,12 +177,18 @@ impl SystemAgent {
                 }
             }
             "dev_text_editor_view" => {
-                let file_path = tool_call.input.get("file_path").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'file_path' parameter".to_string()))?;
+                let file_path = tool_call
+                    .input
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'file_path' parameter".to_string(),
+                        )
+                    })?;
 
-                let result = commands::text_editor::dev_text_editor_view(
-                    file_path.to_string()
-                ).await;
+                let result =
+                    commands::text_editor::dev_text_editor_view(file_path.to_string()).await;
 
                 match result {
                     Ok(content) => Ok(ToolResult {
@@ -163,16 +204,28 @@ impl SystemAgent {
                 }
             }
             "dev_text_editor_create" => {
-                let file_path = tool_call.input.get("file_path").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'file_path' parameter".to_string()))?;
-                let file_text = tool_call.input.get("file_text").and_then(|v| v.as_str()).unwrap_or("");
+                let file_path = tool_call
+                    .input
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'file_path' parameter".to_string(),
+                        )
+                    })?;
+                let file_text = tool_call
+                    .input
+                    .get("file_text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
 
                 let result = commands::text_editor::dev_text_editor_create(
                     state,
                     self.app_handle.clone(),
                     file_path.to_string(),
-                    file_text.to_string()
-                ).await;
+                    file_text.to_string(),
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -187,20 +240,38 @@ impl SystemAgent {
                 }
             }
             "dev_text_editor_str_replace" => {
-                let file_path = tool_call.input.get("file_path").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'file_path' parameter".to_string()))?;
-                let old_str = tool_call.input.get("old_str").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'old_str' parameter".to_string()))?;
-                let new_str = tool_call.input.get("new_str").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'new_str' parameter".to_string()))?;
+                let file_path = tool_call
+                    .input
+                    .get("file_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'file_path' parameter".to_string(),
+                        )
+                    })?;
+                let old_str = tool_call
+                    .input
+                    .get("old_str")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'old_str' parameter".to_string())
+                    })?;
+                let new_str = tool_call
+                    .input
+                    .get("new_str")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'new_str' parameter".to_string())
+                    })?;
 
                 let result = commands::text_editor::dev_text_editor_str_replace(
                     state,
                     self.app_handle.clone(),
                     file_path.to_string(),
                     old_str.to_string(),
-                    new_str.to_string()
-                ).await;
+                    new_str.to_string(),
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -214,7 +285,7 @@ impl SystemAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            _ => Err(AgentError::ToolNotFound(tool_call.name.clone()))
+            _ => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }
     }
 }
@@ -230,31 +301,56 @@ impl SpecializedAgent for SystemAgent {
             AgentCapability {
                 name: "Shell Command Execution".to_string(),
                 description: "Execute shell commands and handle command output".to_string(),
-                tool_patterns: vec!["bash".to_string(), "command".to_string(), "exec".to_string(), "dev_bash".to_string()],
+                tool_patterns: vec![
+                    "bash".to_string(),
+                    "command".to_string(),
+                    "exec".to_string(),
+                    "dev_bash".to_string(),
+                ],
                 confidence: 0.95,
             },
             AgentCapability {
                 name: "File Operations".to_string(),
                 description: "Read, write, create, and manage files and directories".to_string(),
-                tool_patterns: vec!["file".to_string(), "dev_file".to_string(), "read".to_string(), "write".to_string()],
+                tool_patterns: vec![
+                    "file".to_string(),
+                    "dev_file".to_string(),
+                    "read".to_string(),
+                    "write".to_string(),
+                ],
                 confidence: 0.90,
             },
             AgentCapability {
                 name: "Directory Management".to_string(),
-                description: "List directories, navigate file systems, manage folder structures".to_string(),
-                tool_patterns: vec!["list".to_string(), "directory".to_string(), "dev_list".to_string()],
+                description: "List directories, navigate file systems, manage folder structures"
+                    .to_string(),
+                tool_patterns: vec![
+                    "list".to_string(),
+                    "directory".to_string(),
+                    "dev_list".to_string(),
+                ],
                 confidence: 0.85,
             },
             AgentCapability {
                 name: "Process Management".to_string(),
-                description: "Monitor processes, get system information, manage running applications".to_string(),
-                tool_patterns: vec!["process".to_string(), "system".to_string(), "info".to_string()],
+                description:
+                    "Monitor processes, get system information, manage running applications"
+                        .to_string(),
+                tool_patterns: vec![
+                    "process".to_string(),
+                    "system".to_string(),
+                    "info".to_string(),
+                ],
                 confidence: 0.80,
             },
             AgentCapability {
                 name: "Text Editor Operations".to_string(),
                 description: "Create, edit, and modify text files programmatically".to_string(),
-                tool_patterns: vec!["editor".to_string(), "text".to_string(), "dev_text_editor".to_string()],
+                tool_patterns: vec![
+                    "editor".to_string(),
+                    "text".to_string(),
+                    "dev_text_editor".to_string(),
+                ],
                 confidence: 0.85,
             },
         ]
@@ -270,7 +366,10 @@ impl SpecializedAgent for SystemAgent {
 
         // Use ToolMappingService for task description analysis
         let mapping_agent_type = ToolMappingService::analyze_user_intent(&task.description);
-        matches!(mapping_agent_type, crate::agent::tools::tool_mapping::AgentType::CodingExpert)
+        matches!(
+            mapping_agent_type,
+            crate::agent::tools::tool_mapping::AgentType::CodingExpert
+        )
     }
 
     async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {
@@ -316,7 +415,12 @@ impl SpecializedAgent for SystemAgent {
         let output = if results.is_empty() {
             Value::Null
         } else {
-            Value::Array(results.into_iter().map(|r| serde_json::to_value(r).unwrap_or(Value::Null)).collect())
+            Value::Array(
+                results
+                    .into_iter()
+                    .map(|r| serde_json::to_value(r).unwrap_or(Value::Null))
+                    .collect(),
+            )
         };
 
         Ok(TaskResult {

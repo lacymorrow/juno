@@ -189,7 +189,7 @@ async fn register_additional_computer_use_tools(
             let inner_result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::keyboard::press_key(args.key, args.modifier, state_manager)
+                    commands::keyboard::press_key(args.key, args.modifier, app.clone(), state_manager)
                         .await
                 })
             });
@@ -563,7 +563,7 @@ pub async fn register_desktop_tools(
             let result = tokio::task::block_in_place(|| {
                 let rt = tokio::runtime::Handle::current();
                 rt.block_on(async {
-                    commands::keyboard::type_text(args.text, state_manager).await
+                    commands::keyboard::type_text(args.text, app.clone(), state_manager).await
                 })
             });
             result.map_err(|e| format!("Error typing text: {}", e))?;

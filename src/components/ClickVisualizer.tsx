@@ -11,8 +11,28 @@ type ClickInfo = {
 
 const ClickVisualizer = () => {
   const [clicks, setClicks] = useState<ClickInfo[]>([]);
+  const [isEnabled, setIsEnabled] = useState(
+    localStorage.getItem('juno-show-click-visualization') !== 'false' // Default to true
+  );
+
+  // Check localStorage periodically for setting changes
+  useEffect(() => {
+    const checkSettings = () => {
+      const enabled = localStorage.getItem('juno-show-click-visualization') !== 'false';
+      setIsEnabled(enabled);
+    };
+
+    // Check immediately and then every second
+    checkSettings();
+    const interval = setInterval(checkSettings, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
+    // Only listen for events if overlay is enabled
+    if (!isEnabled) return;
+
     // Listen for click visualization events from the backend
     const unlisten = listen<[number, number, string]>(
       "click-visualization",
@@ -32,14 +52,14 @@ const ClickVisualizer = () => {
     );
 
     return () => {
-      // Cleanup listener when component unmounts
+      // Cleanup listener when component unmounts or is disabled
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, []);
+  }, [isEnabled]);
 
   // Clean up old clicks (remove after animation duration)
   useEffect(() => {
-    if (clicks.length === 0) return;
+    if (clicks.length === 0 || !isEnabled) return;
 
     const cleanupTimeout = setTimeout(() => {
       const now = Date.now();
@@ -49,7 +69,12 @@ const ClickVisualizer = () => {
     }, 100); // Check more frequently for smoother cleanup
 
     return () => clearTimeout(cleanupTimeout);
-  }, [clicks]);
+  }, [clicks, isEnabled]);
+
+  // Don't render anything if disabled
+  if (!isEnabled) {
+    return null;
+  }
 
   return (
     <div

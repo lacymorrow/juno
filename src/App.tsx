@@ -43,6 +43,8 @@ import { Toaster, toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
+import KeyPressOverlay from "./components/KeyPressOverlay";
+import CommandOverlay from "./components/CommandOverlay";
 import Settings from "./components/Settings";
 import "./styles/globals.css";
 
@@ -2379,6 +2381,8 @@ function App() {
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
       <ClickVisualizer />
+      <KeyPressOverlay />
+      <CommandOverlay />
 
       <div className="w-screen h-screen bg-background text-foreground">
         <div className="container mx-auto p-2 h-full flex flex-col">

@@ -1,15 +1,15 @@
 use async_trait::async_trait;
-use std::time::{Duration, Instant};
 use serde_json::Value;
-use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
 use tauri::Manager;
+use tokio::sync::RwLock;
 
-use crate::agent::core::{AgentError, ToolCall, ToolResult};
-use crate::agent::tools::{ToolMappingService, ToolCategory};
-use crate::state::AppState;
 use super::base_agent::{
-    SpecializedAgent, AgentType, Task, TaskResult, AgentCapability, AgentStatus
+    AgentCapability, AgentStatus, AgentType, SpecializedAgent, Task, TaskResult,
 };
+use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolCategory, ToolMappingService};
+use crate::state::AppState;
 
 /// Specialized agent for browser automation and web interactions
 pub struct BrowserAgent {
@@ -55,7 +55,9 @@ impl BrowserAgent {
             crate::agent::structs::AgentError::LlmError(msg) => AgentError::LlmError(msg),
             crate::agent::structs::AgentError::ToolError(msg) => AgentError::ToolError(msg),
             crate::agent::structs::AgentError::MemoryError(msg) => AgentError::MemoryError(msg),
-            crate::agent::structs::AgentError::ConfigurationError(msg) => AgentError::ConfigurationError(msg),
+            crate::agent::structs::AgentError::ConfigurationError(msg) => {
+                AgentError::ConfigurationError(msg)
+            }
             crate::agent::structs::AgentError::StateError(msg) => AgentError::StateError(msg),
             crate::agent::structs::AgentError::MaxStepsReached => AgentError::MaxStepsReached,
             crate::agent::structs::AgentError::LoopError(msg) => AgentError::LoopError(msg),
@@ -63,7 +65,9 @@ impl BrowserAgent {
             crate::agent::structs::AgentError::OutputError(msg) => AgentError::OutputError(msg),
             crate::agent::structs::AgentError::ToolNotFound(msg) => AgentError::ToolNotFound(msg),
             crate::agent::structs::AgentError::Terminated => AgentError::Terminated,
-            crate::agent::structs::AgentError::PermissionDenied(msg) => AgentError::PermissionDenied(msg),
+            crate::agent::structs::AgentError::PermissionDenied(msg) => {
+                AgentError::PermissionDenied(msg)
+            }
             crate::agent::structs::AgentError::Unknown(msg) => AgentError::Unknown(msg),
         }
     }
@@ -73,8 +77,9 @@ impl BrowserAgent {
         let state = self.app_handle.state::<AppState>();
 
         // Get or initialize browser controller
-        let browser_controller = state.get_or_init_browser_controller().await
-            .map_err(|e| AgentError::ToolError(format!("Failed to initialize browser controller: {}", e)))?;
+        let browser_controller = state.get_or_init_browser_controller().await.map_err(|e| {
+            AgentError::ToolError(format!("Failed to initialize browser controller: {}", e))
+        })?;
 
         match tool_call.name.as_str() {
             "browser_navigate" => {
@@ -112,7 +117,7 @@ impl BrowserAgent {
                     Err(e) => Err(self.convert_agent_error(e)),
                 }
             }
-            _ => Err(AgentError::ToolNotFound(tool_call.name.clone()))
+            _ => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }
     }
 }
@@ -128,19 +133,32 @@ impl SpecializedAgent for BrowserAgent {
             AgentCapability {
                 name: "Web Navigation".to_string(),
                 description: "Navigate to URLs, handle browser navigation".to_string(),
-                tool_patterns: vec!["browser_navigate".to_string(), "navigate".to_string(), "url".to_string()],
+                tool_patterns: vec![
+                    "browser_navigate".to_string(),
+                    "navigate".to_string(),
+                    "url".to_string(),
+                ],
                 confidence: 0.95,
             },
             AgentCapability {
                 name: "Element Interaction".to_string(),
                 description: "Click elements, type text, interact with web elements".to_string(),
-                tool_patterns: vec!["browser_click".to_string(), "browser_type".to_string(), "click".to_string(), "type".to_string()],
+                tool_patterns: vec![
+                    "browser_click".to_string(),
+                    "browser_type".to_string(),
+                    "click".to_string(),
+                    "type".to_string(),
+                ],
                 confidence: 0.90,
             },
             AgentCapability {
                 name: "Content Extraction".to_string(),
                 description: "Extract text, data, and content from web pages".to_string(),
-                tool_patterns: vec!["browser_extract".to_string(), "extract".to_string(), "content".to_string()],
+                tool_patterns: vec![
+                    "browser_extract".to_string(),
+                    "extract".to_string(),
+                    "content".to_string(),
+                ],
                 confidence: 0.85,
             },
             AgentCapability {
@@ -152,7 +170,11 @@ impl SpecializedAgent for BrowserAgent {
             AgentCapability {
                 name: "Form Automation".to_string(),
                 description: "Fill forms, submit data, handle web forms".to_string(),
-                tool_patterns: vec!["browser_form".to_string(), "form".to_string(), "submit".to_string()],
+                tool_patterns: vec![
+                    "browser_form".to_string(),
+                    "form".to_string(),
+                    "submit".to_string(),
+                ],
                 confidence: 0.80,
             },
         ]
@@ -168,7 +190,10 @@ impl SpecializedAgent for BrowserAgent {
 
         // Use ToolMappingService for task description analysis
         let mapping_agent_type = ToolMappingService::analyze_user_intent(&task.description);
-        matches!(mapping_agent_type, crate::agent::tools::tool_mapping::AgentType::BrowserExpert)
+        matches!(
+            mapping_agent_type,
+            crate::agent::tools::tool_mapping::AgentType::BrowserExpert
+        )
     }
 
     async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {
@@ -214,7 +239,12 @@ impl SpecializedAgent for BrowserAgent {
         let output = if results.is_empty() {
             Value::Null
         } else {
-            Value::Array(results.into_iter().map(|r| serde_json::to_value(r).unwrap_or(Value::Null)).collect())
+            Value::Array(
+                results
+                    .into_iter()
+                    .map(|r| serde_json::to_value(r).unwrap_or(Value::Null))
+                    .collect(),
+            )
         };
 
         Ok(TaskResult {
