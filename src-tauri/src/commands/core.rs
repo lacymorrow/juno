@@ -228,13 +228,13 @@ pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn set_performance_monitoring(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting performance monitoring to: {}", enabled);
-    
+
     // Update the state
     state.set_performance_monitoring_enabled(enabled);
-    
+
     // TODO: In the future, this could persist the setting to a config file
     // For now, it's stored in memory for the session
-    
+
     Ok(())
 }
 
@@ -288,13 +288,13 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
 #[tauri::command]
 pub async fn store_first_prompt(prompt: String, state: State<'_, AppState>) -> Result<(), String> {
     info!("Storing first prompt from onboarding: {}", prompt);
-    
+
     // Store the prompt in AppState for potential use after onboarding
     state.set_first_onboarding_prompt(prompt.clone());
-    
+
     // Optionally, you could also persist this to a file or database
     // For now, we'll just store it in memory for the session
-    
+
     Ok(())
 }
 
@@ -302,7 +302,7 @@ pub async fn store_first_prompt(prompt: String, state: State<'_, AppState>) -> R
 #[tauri::command]
 pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<Option<String>, String> {
     info!("Retrieving first prompt from onboarding");
-    
+
     let prompt = state.get_first_onboarding_prompt();
     Ok(prompt)
 }
@@ -311,9 +311,9 @@ pub async fn get_first_onboarding_prompt(state: State<'_, AppState>) -> Result<O
 #[tauri::command]
 pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting debug mode to: {}", enabled);
-    
+
     state.set_debug_mode(enabled);
-    
+
     info!("Debug mode successfully set to: {}", enabled);
     Ok(())
 }
@@ -323,4 +323,76 @@ pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result
 pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {
     let debug_mode = state.is_debug_mode();
     Ok(debug_mode)
+}
+
+/// Reset all application settings to their default values
+#[tauri::command]
+pub async fn reset_all_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Resetting all settings to defaults");
+
+    // Reset TTS provider
+    {
+        let mut tts_provider = state.tts_provider.lock()
+            .map_err(|e| format!("Failed to lock TTS provider: {}", e))?;
+        *tts_provider = "system".to_string();
+    }
+
+    // Reset sound settings
+    {
+        let mut sound_enabled = state.sound_enabled.lock()
+            .map_err(|e| format!("Failed to lock sound enabled: {}", e))?;
+        *sound_enabled = true;
+    }
+
+    // Reset performance monitoring
+    state.set_performance_monitoring_enabled(true);
+
+    // Reset debug mode
+    state.set_debug_mode(false);
+
+    // Reset dictation settings
+    {
+        let mut dictation_clipboard = state.dictation_clipboard_enabled.lock()
+            .map_err(|e| format!("Failed to lock dictation clipboard: {}", e))?;
+        *dictation_clipboard = true;
+    }
+
+    // Reset always listening settings
+    if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(app.clone(), state.clone()).await {
+        warn!("Failed to stop always listening: {}", e);
+    }
+    if let Err(e) = crate::commands::always_listening::set_always_listening_sensitivity(0.5, app.clone(), state.clone()).await {
+        warn!("Failed to reset sensitivity: {}", e);
+    }
+    if let Err(e) = crate::commands::always_listening::set_always_listening_wake_words(
+        vec!["hey juno".to_string(), "computer".to_string()],
+        app.clone(),
+        state.clone()
+    ).await {
+        warn!("Failed to reset wake words: {}", e);
+    }
+
+    // Reset keyboard shortcuts
+    if let Err(e) = crate::commands::shortcuts::reset_keyboard_shortcuts(app.clone(), state.clone()).await {
+        warn!("Failed to reset keyboard shortcuts: {}", e);
+    }
+
+    // Reset tool configuration
+    if let Err(e) = crate::commands::tools::reset_tool_configuration(app.clone(), state.clone()).await {
+        warn!("Failed to reset tool configuration: {}", e);
+    }
+
+    // Reset provider settings to defaults (this would require expanding provider commands)
+    // Note: This would need additional implementation in provider commands
+
+    // Reset cloud settings
+    if let Err(e) = crate::commands::cloud::disable_cloud(app.clone(), state.clone()).await {
+        warn!("Failed to disable cloud: {}", e);
+    }
+
+    info!("All settings have been reset to defaults");
+    Ok(())
 }
