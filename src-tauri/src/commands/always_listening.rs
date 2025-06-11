@@ -1,9 +1,15 @@
+// CRITICAL: Conditional compilation for voice features - only available on supported platforms
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::state::AppState;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::{State, AppHandle, Manager, Emitter};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::sync::{Arc, Mutex};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use tracing::{info, error, warn};
 
 /// Start always listening mode
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn start_always_listening_mode(
     app: AppHandle,
@@ -67,6 +73,7 @@ pub async fn start_always_listening_mode(
 }
 
 /// Stop always listening mode
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn stop_always_listening_mode(
     app: AppHandle,
@@ -120,6 +127,7 @@ pub async fn stop_always_listening_mode(
 }
 
 /// Toggle always listening mode
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn toggle_always_listening_mode(
     app: AppHandle,
@@ -141,6 +149,7 @@ pub async fn toggle_always_listening_mode(
 }
 
 /// Get always listening mode status
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn get_always_listening_status(
     state: State<'_, AppState>,
@@ -153,6 +162,7 @@ pub async fn get_always_listening_status(
 }
 
 /// Set always listening sensitivity
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn set_always_listening_sensitivity(
     sensitivity: f32,
@@ -194,6 +204,7 @@ pub async fn set_always_listening_sensitivity(
 }
 
 /// Get always listening sensitivity
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn get_always_listening_sensitivity(
     state: State<'_, AppState>,
@@ -206,6 +217,7 @@ pub async fn get_always_listening_sensitivity(
 }
 
 /// Set always listening wake words
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn set_always_listening_wake_words(
     wake_words: Vec<String>,
@@ -247,6 +259,7 @@ pub async fn set_always_listening_wake_words(
 }
 
 /// Get always listening wake words
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn get_always_listening_wake_words(
     state: State<'_, AppState>,
@@ -259,6 +272,7 @@ pub async fn get_always_listening_wake_words(
 }
 
 /// Debug command to get detailed always listening status
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn debug_always_listening_status(
     app: AppHandle,
@@ -317,7 +331,9 @@ pub async fn debug_always_listening_status(
         "plugin_state": plugin_status,
         "system_info": {
             "timestamp": chrono::Utc::now().to_rfc3339(),
-            "version": "1.0.0"
+            "version": "1.0.0",
+            "platform": std::env::consts::OS,
+            "voice_supported": true
         }
     });
 
@@ -327,6 +343,7 @@ pub async fn debug_always_listening_status(
 /// Enhanced Debugging Commands
 
 /// Enable/disable transcription debugging
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn set_transcription_debugging(
     enabled: bool,
@@ -364,6 +381,7 @@ pub async fn set_transcription_debugging(
 }
 
 /// Enable/disable audio level monitoring
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn set_audio_level_monitoring(
     enabled: bool,
@@ -401,6 +419,7 @@ pub async fn set_audio_level_monitoring(
 }
 
 /// Test the Whisper model with synthetic audio
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn test_whisper_model(
     app: AppHandle,
@@ -433,6 +452,7 @@ pub async fn test_whisper_model(
 }
 
 /// Force a transcription test with live audio
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[tauri::command]
 pub async fn force_transcription_test(
     app: AppHandle,
