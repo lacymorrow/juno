@@ -17,13 +17,16 @@ echo "\n🔄  Bumping repository version to $NEW_VERSION...\n"
 # 1. Rust crates
 # ----------------------
 
-if ! command -v cargo-workspaces >/dev/null 2>&1; then
-  echo "cargo-workspaces not found – installing (this is a one-time step)…"
-  cargo install cargo-workspaces --quiet
+if ! command -v cargo-set-version >/dev/null 2>&1; then
+  if ! command -v cargo-set-version >/dev/null 2>&1; then
+    # cargo-set-version is part of cargo-edit
+    echo "Installing cargo-edit (provides cargo set-version)…"
+    cargo install cargo-edit --locked --quiet
+  fi
 fi
 
-# --yes answers the interactive prompt automatically
-cargo workspaces version "$NEW_VERSION" --force --yes
+# This will rewrite the version across all member crates and the workspace
+cargo set-version --workspace "$NEW_VERSION"
 
 echo "✓ Rust crate versions updated."
 
