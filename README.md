@@ -49,8 +49,6 @@ cargo test --manifest-path src-tauri/Cargo.toml  # Rust tests (macOS required)
 - **Patterns**: Async/await, proper mocking, error handling, serialization validation
 - **Technologies**: Vitest, Testing Library, Cargo test, tokio-test
 
-📋 **[Detailed Testing Guide](TEST_IMPLEMENTATION_SUMMARY.md)** - Complete test implementation documentation
-
 ## 🏗️ Architecture
 
 - **Frontend**: React/TypeScript floating bar + chat interface
@@ -77,15 +75,26 @@ bun run tauri dev     # Development mode
 npm test              # Frontend tests only
 ```
 
-## 📚 For Developers & LLMs
+## 📚 Documentation
 
+### 📋 **Complete Documentation Index**
+**[docs/rules/INDEX.md](docs/rules/INDEX.md)** - Comprehensive navigation for all documentation
+
+### 🎯 **Core Documentation**
+- **[docs/rules/CONSOLIDATED_DOCUMENTATION.md](docs/rules/CONSOLIDATED_DOCUMENTATION.md)** - Complete project overview and consolidated information
 - **[LLMs.txt](LLMs.txt)** - Complete instructions for AI agents working with this codebase
-- **[TEST_IMPLEMENTATION_SUMMARY.md](TEST_IMPLEMENTATION_SUMMARY.md)** - Comprehensive testing documentation
-- **Key Files**: 
-  - `src-tauri/src/anthropic.rs` - Main orchestrator agent
-  - `src-tauri/src/agent/tools/anthropic_computer_use.rs` - Computer Use tools
-  - `src-tauri/mcp-server-os-level/src/platforms/macos/` - macOS automation
-  - `tauri-plugin-voice-transcription/` - Voice processing
+- **[DEVELOPMENT.md](DEVELOPMENT.md)** - Complete development guide and patterns
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design and component architecture
+- **[API.md](API.md)** - Runtime API reference and integration guide
+
+### 📁 **Organized by Category**
+- **[docs/rules/implementation/](docs/rules/implementation/)** - Feature implementations and milestones
+- **[docs/rules/security/](docs/rules/security/)** - Security framework and permissions
+- **[docs/rules/testing/](docs/rules/testing/)** - Testing strategies and validation
+- **[docs/rules/voice/](docs/rules/voice/)** - Voice system implementation
+- **[docs/rules/cloud/](docs/rules/cloud/)** - Cloud connector and remote control
+- **[docs/rules/tools/](docs/rules/tools/)** - Tool system implementations
+- **[docs/rules/ui/](docs/rules/ui/)** - User interface and frontend
 
 ## 🎤 Voice Modes
 
