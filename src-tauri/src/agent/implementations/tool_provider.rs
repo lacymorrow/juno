@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, Emitter};
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::tool_logger;
@@ -30,6 +31,83 @@ pub type AsyncToolFn =
 pub type AsyncToolExecutor =
     Arc<dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, String>> + Send>> + Send + Sync>;
 
+/// Error recovery statistics for tracking tool execution issues
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ErrorRecoveryStats {
+    pub total_executions: u64,
+    pub total_failures: u64,
+    pub total_recoveries: u64,
+    pub recovery_success_rate: f32,
+    pub common_error_patterns: HashMap<String, u32>,
+    pub tool_failure_rates: HashMap<String, f32>,
+    pub last_recovery_attempt: Option<u64>,
+    pub average_recovery_time_ms: f64,
+}
+
+impl Default for ErrorRecoveryStats {
+    fn default() -> Self {
+        Self {
+            total_executions: 0,
+            total_failures: 0,
+            total_recoveries: 0,
+            recovery_success_rate: 0.0,
+            common_error_patterns: HashMap::new(),
+            tool_failure_rates: HashMap::new(),
+            last_recovery_attempt: None,
+            average_recovery_time_ms: 0.0,
+        }
+    }
+}
+
+/// Error recovery configuration for tools
+#[derive(Debug, Clone)]
+pub struct ErrorRecoveryConfig {
+    pub max_retries: u32,
+    pub base_retry_delay_ms: u64,
+    pub max_retry_delay_ms: u64,
+    pub backoff_multiplier: f32,
+    pub enable_pattern_recognition: bool,
+    pub timeout_recovery_enabled: bool,
+    pub display_error_recovery_enabled: bool,
+}
+
+impl Default for ErrorRecoveryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            base_retry_delay_ms: 100,
+            max_retry_delay_ms: 5000,
+            backoff_multiplier: 2.0,
+            enable_pattern_recognition: true,
+            timeout_recovery_enabled: true,
+            display_error_recovery_enabled: true,
+        }
+    }
+}
+
+/// Recovery strategy based on error type
+#[derive(Debug, Clone)]
+pub enum RecoveryStrategy {
+    Retry,
+    RetryWithDelay(Duration),
+    Fallback(String), // Tool name to fall back to
+    Skip,
+    ResetAndRetry,
+}
+
+/// Error classification for recovery decisions
+#[derive(Debug, Clone, PartialEq)]
+pub enum ErrorClass {
+    Timeout,
+    DisplaySystem,
+    NetworkConnectivity,
+    ResourceLocked,
+    PermissionDenied,
+    ToolNotFound,
+    InvalidInput,
+    Unknown,
+}
+
 /// A ToolProvider holding tools in memory, supporting async execution and MCP integration.
 #[derive(Clone)]
 pub struct LocalToolProvider {
@@ -38,6 +116,9 @@ pub struct LocalToolProvider {
     executors: Arc<RwLock<HashMap<String, AsyncToolExecutor>>>,
     app_handle: Option<AppHandle>,
     mcp_manager: Option<Arc<Mutex<MCPManager>>>,
+    error_recovery_stats: Arc<Mutex<ErrorRecoveryStats>>,
+    recovery_config: ErrorRecoveryConfig,
+    tool_execution_history: Arc<Mutex<HashMap<String, Vec<(Instant, bool)>>>>,
 }
 
 impl LocalToolProvider {
@@ -47,6 +128,9 @@ impl LocalToolProvider {
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: None,
             mcp_manager: None,
+            error_recovery_stats: Arc::new(Mutex::new(ErrorRecoveryStats::default())),
+            recovery_config: ErrorRecoveryConfig::default(),
+            tool_execution_history: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -57,6 +141,9 @@ impl LocalToolProvider {
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: Some(app_handle),
             mcp_manager: None,
+            error_recovery_stats: Arc::new(Mutex::new(ErrorRecoveryStats::default())),
+            recovery_config: ErrorRecoveryConfig::default(),
+            tool_execution_history: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -67,6 +154,9 @@ impl LocalToolProvider {
             executors: Arc::new(RwLock::new(HashMap::new())),
             app_handle: Some(app_handle),
             mcp_manager: Some(mcp_manager),
+            error_recovery_stats: Arc::new(Mutex::new(ErrorRecoveryStats::default())),
+            recovery_config: ErrorRecoveryConfig::default(),
+            tool_execution_history: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -78,6 +168,11 @@ impl LocalToolProvider {
     /// Set the MCP manager for external tool support
     pub fn set_mcp_manager(&mut self, mcp_manager: Arc<Mutex<MCPManager>>) {
         self.mcp_manager = Some(mcp_manager);
+    }
+
+    /// Configure error recovery settings
+    pub fn set_recovery_config(&mut self, config: ErrorRecoveryConfig) {
+        self.recovery_config = config;
     }
 
     /// Register an asynchronous tool with this provider
@@ -267,18 +362,358 @@ impl LocalToolProvider {
         self.register_async_tool(definition, async_executor).await;
     }
 
-    /// Get error recovery statistics (placeholder for future implementation)
+    /// Get comprehensive error recovery statistics
     pub async fn get_recovery_stats(&self) -> Value {
-        serde_json::json!({
-            "error_recovery": "not_implemented",
-            "note": "Error recovery will be implemented in future iterations"
+        let stats = self.error_recovery_stats.lock().await;
+        serde_json::to_value(&*stats).unwrap_or_else(|_| {
+            serde_json::json!({
+                "error": "Failed to serialize recovery stats"
+            })
         })
     }
 
-    /// Clear error recovery history (placeholder for future implementation)
+    /// Clear error recovery history
     pub async fn clear_recovery_history(&self) {
-        // Placeholder for future error recovery implementation
-        tracing::debug!("Error recovery history clear requested - feature not yet implemented");
+        let mut stats = self.error_recovery_stats.lock().await;
+        *stats = ErrorRecoveryStats::default();
+        
+        let mut history = self.tool_execution_history.lock().await;
+        history.clear();
+        
+        tracing::info!("Error recovery history cleared");
+    }
+
+    /// Get tool-specific failure rates
+    pub async fn get_tool_failure_rates(&self) -> HashMap<String, f32> {
+        let stats = self.error_recovery_stats.lock().await;
+        stats.tool_failure_rates.clone()
+    }
+
+    /// Get most common error patterns
+    pub async fn get_error_patterns(&self) -> Vec<(String, u32)> {
+        let stats = self.error_recovery_stats.lock().await;
+        let mut patterns: Vec<_> = stats.common_error_patterns.iter()
+            .map(|(pattern, count)| (pattern.clone(), *count))
+            .collect();
+        patterns.sort_by(|a, b| b.1.cmp(&a.1));
+        patterns.truncate(10); // Return top 10 patterns
+        patterns
+    }
+
+    /// Classify error for recovery strategy selection
+    fn classify_error(&self, error_msg: &str) -> ErrorClass {
+        let error_lower = error_msg.to_lowercase();
+        
+        if error_lower.contains("timeout") || error_lower.contains("timed out") {
+            ErrorClass::Timeout
+        } else if error_lower.contains("displayid") 
+                || error_lower.contains("remotelayertree") 
+                || error_lower.contains("display") 
+                || error_lower.contains("scheduleDisplayLink") {
+            ErrorClass::DisplaySystem
+        } else if error_lower.contains("network") 
+                || error_lower.contains("connection") 
+                || error_lower.contains("unreachable") {
+            ErrorClass::NetworkConnectivity
+        } else if error_lower.contains("locked") 
+                || error_lower.contains("busy") 
+                || error_lower.contains("in use") {
+            ErrorClass::ResourceLocked
+        } else if error_lower.contains("permission") 
+                || error_lower.contains("denied") 
+                || error_lower.contains("unauthorized") {
+            ErrorClass::PermissionDenied
+        } else if error_lower.contains("not found") 
+                || error_lower.contains("unknown tool") {
+            ErrorClass::ToolNotFound
+        } else if error_lower.contains("invalid") 
+                || error_lower.contains("malformed") 
+                || error_lower.contains("parse") {
+            ErrorClass::InvalidInput
+        } else {
+            ErrorClass::Unknown
+        }
+    }
+
+    /// Determine recovery strategy based on error class and history
+    async fn determine_recovery_strategy(&self, 
+        error_class: ErrorClass, 
+        tool_name: &str, 
+        retry_count: u32
+    ) -> RecoveryStrategy {
+        if retry_count >= self.recovery_config.max_retries {
+            return RecoveryStrategy::Skip;
+        }
+
+        match error_class {
+            ErrorClass::Timeout => {
+                if self.recovery_config.timeout_recovery_enabled {
+                    let delay = std::cmp::min(
+                        self.recovery_config.base_retry_delay_ms * 
+                        (self.recovery_config.backoff_multiplier.powi(retry_count as i32) as u64),
+                        self.recovery_config.max_retry_delay_ms
+                    );
+                    RecoveryStrategy::RetryWithDelay(Duration::from_millis(delay))
+                } else {
+                    RecoveryStrategy::Skip
+                }
+            },
+            ErrorClass::DisplaySystem => {
+                if self.recovery_config.display_error_recovery_enabled {
+                    // For display errors, try to reset and retry after a short delay
+                    RecoveryStrategy::RetryWithDelay(Duration::from_millis(200))
+                } else {
+                    RecoveryStrategy::Skip
+                }
+            },
+            ErrorClass::ResourceLocked => {
+                // Wait longer for locked resources
+                RecoveryStrategy::RetryWithDelay(Duration::from_millis(500))
+            },
+            ErrorClass::NetworkConnectivity => {
+                // Progressive backoff for network issues
+                let delay = self.recovery_config.base_retry_delay_ms * (retry_count + 1) as u64;
+                RecoveryStrategy::RetryWithDelay(Duration::from_millis(delay))
+            },
+            ErrorClass::PermissionDenied | ErrorClass::ToolNotFound => {
+                // These errors typically don't benefit from retries
+                RecoveryStrategy::Skip
+            },
+            ErrorClass::InvalidInput => {
+                // Input validation errors shouldn't be retried
+                RecoveryStrategy::Skip
+            },
+            ErrorClass::Unknown => {
+                // Conservative retry with backoff for unknown errors
+                let delay = self.recovery_config.base_retry_delay_ms * 2_u64.pow(retry_count);
+                RecoveryStrategy::RetryWithDelay(Duration::from_millis(
+                    std::cmp::min(delay, self.recovery_config.max_retry_delay_ms)
+                ))
+            }
+        }
+    }
+
+    /// Update error recovery statistics
+    async fn update_recovery_stats(&self, 
+        tool_name: &str, 
+        error_msg: &str, 
+        recovery_attempted: bool, 
+        recovery_successful: bool,
+        recovery_time: Option<Duration>
+    ) {
+        let mut stats = self.error_recovery_stats.lock().await;
+        
+        stats.total_executions += 1;
+        stats.total_failures += 1;
+        
+        if recovery_attempted {
+            stats.total_recoveries += 1;
+            if recovery_successful {
+                if let Some(time) = recovery_time {
+                    let time_ms = time.as_millis() as f64;
+                    if stats.total_recoveries == 1 {
+                        stats.average_recovery_time_ms = time_ms;
+                    } else {
+                        stats.average_recovery_time_ms = 
+                            (stats.average_recovery_time_ms * (stats.total_recoveries - 1) as f64 + time_ms) 
+                            / stats.total_recoveries as f64;
+                    }
+                }
+            }
+            stats.last_recovery_attempt = Some(
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+            );
+        }
+
+        // Update recovery success rate
+        if stats.total_recoveries > 0 {
+            stats.recovery_success_rate = 
+                (stats.total_recoveries as f32 - stats.total_failures as f32 + 1.0) 
+                / stats.total_recoveries as f32;
+        }
+
+        // Track error patterns
+        if self.recovery_config.enable_pattern_recognition {
+            let error_pattern = self.extract_error_pattern(error_msg);
+            *stats.common_error_patterns.entry(error_pattern).or_insert(0) += 1;
+        }
+
+        // Update tool failure rates
+        let mut history = self.tool_execution_history.lock().await;
+        let tool_history = history.entry(tool_name.to_string()).or_insert_with(Vec::new);
+        tool_history.push((Instant::now(), !recovery_successful));
+        
+        // Keep only recent history (last 100 executions)
+        if tool_history.len() > 100 {
+            tool_history.remove(0);
+        }
+        
+        // Calculate failure rate for this tool
+        let failures = tool_history.iter().filter(|(_, failed)| *failed).count();
+        let failure_rate = failures as f32 / tool_history.len() as f32;
+        stats.tool_failure_rates.insert(tool_name.to_string(), failure_rate);
+    }
+
+    /// Extract error pattern for tracking
+    fn extract_error_pattern(&self, error_msg: &str) -> String {
+        // Simplify error message to pattern by removing specific details
+        let pattern = error_msg
+            .chars()
+            .filter(|c| c.is_alphabetic() || c.is_whitespace())
+            .collect::<String>()
+            .split_whitespace()
+            .take(5) // Take first 5 words
+            .collect::<Vec<_>>()
+            .join(" ");
+        
+        if pattern.len() > 50 {
+            pattern[..50].to_string()
+        } else {
+            pattern
+        }
+    }
+
+    /// Execute tool with comprehensive error recovery
+    async fn execute_tool_with_recovery(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
+        let tool_name = tool_call.name.clone();
+        let mut retry_count = 0;
+        let recovery_start = Instant::now();
+
+        loop {
+            // Try to execute the tool
+            let result = self.execute_tool_direct(tool_call.clone()).await;
+            
+            match result {
+                Ok(tool_result) => {
+                    // Success - update stats if this was a recovery
+                    if retry_count > 0 {
+                        self.update_recovery_stats(
+                            &tool_name, 
+                            "recovered", 
+                            true, 
+                            true, 
+                            Some(recovery_start.elapsed())
+                        ).await;
+                    }
+                    return Ok(tool_result);
+                },
+                Err(error) => {
+                    // Classify the error
+                    let error_msg = error.to_string();
+                    let error_class = self.classify_error(&error_msg);
+                    
+                    // Determine recovery strategy
+                    let strategy = self.determine_recovery_strategy(error_class, &tool_name, retry_count).await;
+                    
+                    match strategy {
+                        RecoveryStrategy::Skip => {
+                            // No recovery possible, record failure and return error
+                            self.update_recovery_stats(
+                                &tool_name, 
+                                &error_msg, 
+                                retry_count > 0, 
+                                false, 
+                                None
+                            ).await;
+                            return Err(error);
+                        },
+                        RecoveryStrategy::RetryWithDelay(delay) => {
+                            retry_count += 1;
+                            warn!(
+                                "Tool '{}' failed (attempt {}), retrying after {:?}: {}", 
+                                tool_name, retry_count, delay, error_msg
+                            );
+                            tokio::time::sleep(delay).await;
+                            continue;
+                        },
+                        RecoveryStrategy::Retry => {
+                            retry_count += 1;
+                            warn!(
+                                "Tool '{}' failed (attempt {}), retrying immediately: {}", 
+                                tool_name, retry_count, error_msg
+                            );
+                            continue;
+                        },
+                        RecoveryStrategy::ResetAndRetry => {
+                            retry_count += 1;
+                            warn!(
+                                "Tool '{}' failed (attempt {}), resetting and retrying: {}", 
+                                tool_name, retry_count, error_msg
+                            );
+                            // Add a small delay for reset
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            continue;
+                        },
+                        RecoveryStrategy::Fallback(_fallback_tool) => {
+                            // TODO: Implement fallback tool execution
+                            warn!("Fallback strategy not yet implemented for tool '{}'", tool_name);
+                            self.update_recovery_stats(
+                                &tool_name, 
+                                &error_msg, 
+                                true, 
+                                false, 
+                                None
+                            ).await;
+                            return Err(error);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Direct tool execution without recovery
+    async fn execute_tool_direct(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
+        let tool_name = &tool_call.name;
+
+        // Add timeout for all tool executions
+        let timeout_duration = std::time::Duration::from_secs(30);
+
+        let execution_result = tokio::time::timeout(timeout_duration, async {
+            if self.is_mcp_tool(tool_name).await {
+                // Execute via MCP manager
+                if let Some(ref mcp_manager) = self.mcp_manager {
+                    let manager_guard = mcp_manager.lock().await;
+                    manager_guard
+                        .execute_tool(
+                            &tool_call.name,
+                            tool_call.input.clone(),
+                            tool_call.id.clone(),
+                        )
+                        .await
+                } else {
+                    Err(AgentError::ToolNotFound(format!(
+                        "MCP tool '{}' requested but no MCP manager available",
+                        tool_name
+                    )))
+                }
+            } else {
+                // Execute local tool
+                let executors_guard = self.executors.read().await;
+                if let Some(executor) = executors_guard.get(tool_name) {
+                    match executor(tool_call.input.clone()).await {
+                        Ok(output) => Ok(ToolResult {
+                            call_id: tool_call.id.clone(),
+                            output,
+                        }),
+                        Err(error_msg) => Err(AgentError::ToolError(error_msg)),
+                    }
+                } else {
+                    Err(AgentError::ToolNotFound(tool_call.name.clone()))
+                }
+            }
+        })
+        .await;
+
+        match execution_result {
+            Ok(result) => result,
+            Err(_) => {
+                Err(AgentError::ToolError(format!(
+                    "Tool '{}' execution timed out after {:?}",
+                    tool_name, timeout_duration
+                )))
+            }
+        }
     }
 }
 
@@ -367,7 +802,7 @@ impl ToolProvider for LocalToolProvider {
     }
 
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError> {
-        let tool_name = &tool_call.name;
+        let tool_name = tool_call.name.clone();
 
         // Generate unique command ID for tracking
         let command_id = std::time::SystemTime::now()
@@ -389,72 +824,17 @@ impl ToolProvider for LocalToolProvider {
 
             tool_logger::log_tool_call_request(
                 app_handle,
-                tool_name,
+                &tool_name,
                 tool_call.input.clone(),
                 Some(format!("Executing tool: {}", tool_name)),
             );
         }
 
-        // Add timeout for all tool executions to prevent hanging, especially for display-related operations
-        let timeout_duration = std::time::Duration::from_secs(30);
-
-        let execution_result = tokio::time::timeout(timeout_duration, async {
-            // Execute tool directly (error recovery will be implemented in future iterations)
-            if self.is_mcp_tool(tool_name).await {
-                // Execute via MCP manager
-                if let Some(ref mcp_manager) = self.mcp_manager {
-                    let manager_guard = mcp_manager.lock().await;
-                    match manager_guard
-                        .execute_tool(
-                            &tool_call.name,
-                            tool_call.input.clone(),
-                            tool_call.id.clone(),
-                        )
-                        .await
-                    {
-                        Ok(tool_result) => Ok(tool_result),
-                        Err(e) => Err(e),
-                    }
-                } else {
-                    Err(AgentError::ToolNotFound(format!(
-                        "MCP tool '{}' requested but no MCP manager available",
-                        tool_name
-                    )))
-                }
-            } else {
-                // Execute local tool
-                let executors_guard = self.executors.read().await;
-                if let Some(executor) = executors_guard.get(tool_name) {
-                    match executor(tool_call.input.clone()).await {
-                        Ok(output) => Ok(ToolResult {
-                            call_id: tool_call.id.clone(),
-                            output,
-                        }),
-                        Err(error_msg) => Err(AgentError::ToolError(error_msg)),
-                    }
-                } else {
-                    Err(AgentError::ToolNotFound(tool_call.name.clone()))
-                }
-            }
-        })
-        .await;
+        // Execute tool with error recovery
+        let result = self.execute_tool_with_recovery(tool_call).await;
 
         // Calculate execution duration
         let duration_ms = start_time.elapsed().as_millis() as u64;
-
-        let result = match execution_result {
-            Ok(result) => result,
-            Err(_) => {
-                warn!(
-                    "Tool '{}' execution timed out after {:?}",
-                    tool_name, timeout_duration
-                );
-                Err(AgentError::ToolError(format!(
-                    "Tool '{}' execution timed out",
-                    tool_name
-                )))
-            }
-        };
 
         // Emit command execution end event if app handle is available
         if let Some(ref app_handle) = self.app_handle {
@@ -476,7 +856,7 @@ impl ToolProvider for LocalToolProvider {
                 Ok(tool_result) => {
                     tool_logger::log_tool_call_result(
                         app_handle,
-                        tool_name,
+                        &tool_name,
                         tool_result.output.clone(),
                         true, // success = true
                         Some(format!("Tool {} completed successfully", tool_name)),
@@ -486,7 +866,7 @@ impl ToolProvider for LocalToolProvider {
                 Err(error) => {
                     tool_logger::log_tool_call_result(
                         app_handle,
-                        tool_name,
+                        &tool_name,
                         serde_json::json!({"error": error.to_string()}),
                         false, // success = false
                         Some(format!("Tool {} failed: {}", tool_name, error)),
