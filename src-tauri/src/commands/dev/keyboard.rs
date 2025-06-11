@@ -3,14 +3,14 @@
 //! These commands wrap the production keyboard functions with additional
 //! development-specific features like enhanced logging, validation, and debugging utilities.
 
-use tauri::State;
+use tauri::{State, AppHandle};
 use crate::state::AppState;
 use crate::commands::keyboard;
 use tracing::{info, warn, debug};
 
 /// Development wrapper for type_text with enhanced logging and validation
 #[tauri::command]
-pub(crate) async fn dev_type_text(text: String, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn dev_type_text(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     debug!("DEV: type_text called with text length: {}", text.len());
     
     // Development-specific validation
@@ -24,12 +24,12 @@ pub(crate) async fn dev_type_text(text: String, state: State<'_, AppState>) -> R
     }
     
     // Call the production function
-    keyboard::type_text(text, state).await
+    keyboard::type_text(text, app_handle, state).await
 }
 
 /// Development wrapper for press_key with enhanced logging and validation
 #[tauri::command]
-pub(crate) async fn dev_press_key(key: String, modifier: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn dev_press_key(key: String, modifier: Option<String>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     debug!("DEV: press_key called - key: '{}', modifier: {:?}", key, modifier);
     
     // Development-specific validation
@@ -39,12 +39,12 @@ pub(crate) async fn dev_press_key(key: String, modifier: Option<String>, state: 
     }
     
     // Call the production function
-    keyboard::press_key(key, modifier, state).await
+    keyboard::press_key(key, modifier, app_handle, state).await
 }
 
 /// Development wrapper for global_type_text with enhanced logging
 #[tauri::command]
-pub(crate) async fn dev_global_type_text(text: String, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn dev_global_type_text(text: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     debug!("DEV: global_type_text called with text length: {}", text.len());
     
     // Development-specific validation
@@ -54,12 +54,12 @@ pub(crate) async fn dev_global_type_text(text: String, state: State<'_, AppState
     }
     
     // Call the production function
-    keyboard::global_type_text(text, state).await
+    keyboard::global_type_text(text, app_handle, state).await
 }
 
 /// Development wrapper for hold_key with enhanced logging and duration validation
 #[tauri::command]
-pub(crate) async fn dev_hold_key(key: String, duration_ms: Option<u64>, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn dev_hold_key(key: String, duration_ms: Option<u64>, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     debug!("DEV: hold_key called - key: '{}', duration: {:?}ms", key, duration_ms);
     
     // Development-specific validation
@@ -75,12 +75,12 @@ pub(crate) async fn dev_hold_key(key: String, duration_ms: Option<u64>, state: S
     }
     
     // Call the production function
-    keyboard::hold_key(key, duration_ms, state).await
+    keyboard::hold_key(key, duration_ms, app_handle, state).await
 }
 
 /// Development wrapper for release_key with enhanced logging and validation
 #[tauri::command]
-pub(crate) async fn dev_release_key(key: String, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn dev_release_key(key: String, app_handle: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     debug!("DEV: release_key called - key: '{}'", key);
     
     // Development-specific validation
@@ -90,5 +90,5 @@ pub(crate) async fn dev_release_key(key: String, state: State<'_, AppState>) -> 
     }
     
     // Call the production function
-    keyboard::release_key(key, state).await
+    keyboard::release_key(key, app_handle, state).await
 }

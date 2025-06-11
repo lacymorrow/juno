@@ -341,7 +341,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing text typing functionality
-        match crate::commands::keyboard::global_type_text(text.to_string(), app_state).await {
+        match crate::commands::keyboard::global_type_text(text.to_string(), self.app_handle.clone(), app_state).await {
             Ok(_) => {
                 Ok(CommandResult {
                     success: true,
@@ -370,7 +370,7 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<crate::state::AppState>();
 
         // Use the existing key press functionality
-        match crate::commands::keyboard::press_key(key.to_string(), None, app_state).await {
+        match crate::commands::keyboard::press_key(key.to_string(), None, self.app_handle.clone(), app_state).await {
             Ok(_) => {
                 Ok(CommandResult {
                     success: true,
