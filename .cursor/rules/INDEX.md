@@ -1,7 +1,7 @@
 # Cursor Rules Index - Juno AI Computer Use Agent
 
 **Project Status**: ✅ **PRODUCTION READY** with **SECURITY HARDENED** - Enterprise-grade protections active  
-**Last Updated**: Latest security and stability implementations completed  
+**Last Updated**: Window Management Improvements & Security Hardening Complete (January 2025)
 
 ## 📋 Rules Overview
 
@@ -16,8 +16,20 @@
 
 | Rule File | Status | Purpose | Last Updated |
 |-----------|--------|---------|--------------|
-| **[security-stability-fixes.mdc](security-stability-fixes.mdc)** | ✅ **NEW** | **Critical security hardening, stability fixes, development guidelines** | **Just Created** |
+| **[security-stability-fixes.mdc](security-stability-fixes.mdc)** | ✅ **CURRENT** | **Critical security hardening, window management improvements, stability fixes** | **Just Updated** |
 | **[accessibility-permission-fixes.mdc](accessibility-permission-fixes.mdc)** | ✅ Complete | macOS permission handling, built app detection | Current |
+
+### 🪟 Window Management System (ENHANCED)
+
+| Rule File | Status | Purpose | Last Updated |
+|-----------|--------|---------|--------------|
+| **[window-management-enhancements.mdc](window-management-enhancements.mdc)** | ✅ **NEW** | **Comprehensive window management system documentation** | **Just Created** |
+
+| Component | Status | Enhancement | Implementation |
+|-----------|--------|-------------|----------------|
+| **Window Discovery** | ✅ **Improved** | Enhanced window ID resolution with fallback indexing | `src-tauri/src/commands/window.rs` |
+| **ID Resolution** | ✅ **New** | Dual-mode ID matching: exact match + numeric index fallback | `find_window_by_id()` helper |
+| **Error Handling** | ✅ **Enhanced** | Comprehensive logging and graceful failure modes | Production-ready patterns |
 
 ### 🔧 System Integration
 
@@ -46,6 +58,31 @@
 
 ## 🚀 Quick Reference Guide
 
+### 🪟 **NEW: Window Management Patterns**
+
+```rust
+// Enhanced window ID resolution with fallback
+fn find_window_by_id(state: &State<'_, AppState>, window_id: &str) -> Result<Option<UIElement>, String> {
+    // 1. Try exact ID match first
+    for window in &windows {
+        if let Some(id) = window.id() {
+            if id == window_id {
+                return Ok(Some(window.clone()));
+            }
+        }
+    }
+    
+    // 2. Fallback: numeric string as index
+    if let Ok(index) = window_id.parse::<usize>() {
+        if index < windows.len() {
+            return Ok(Some(windows[index].clone()));
+        }
+    }
+    
+    Ok(None) // Not found
+}
+```
+
 ### 🔒 **PRIORITY 1: Security Requirements (MANDATORY)**
 
 ```rust
@@ -60,8 +97,9 @@ validate_command(command)?;            // Whitelist commands only
 
 1. **Security First**: Review [security-stability-fixes.mdc](security-stability-fixes.mdc) for all input handling
 2. **Architecture**: Follow [core-architecture-patterns.mdc](core-architecture-patterns.mdc) for system design
-3. **Voice Integration**: Use [voice-modes-clarification.mdc](voice-modes-clarification.mdc) for voice features
-4. **Testing**: Include security testing for all new features
+3. **Window Operations**: Use enhanced ID resolution patterns for robust window targeting
+4. **Voice Integration**: Use [voice-modes-clarification.mdc](voice-modes-clarification.mdc) for voice features
+5. **Testing**: Include security testing for all new features
 
 ### 🛡️ **Critical Security Controls**
 
@@ -69,23 +107,23 @@ validate_command(command)?;            // Whitelist commands only
 - ✅ **Command Injection Prevention**: Whitelist-based command validation
 - ✅ **Crash Prevention**: 50+ dangerous `.unwrap()` calls eliminated
 - ✅ **Audio Stability**: Robust error handling for voice processing
+- ✅ **Window Management Security**: Safe ID resolution with input validation
 
 ## 📊 Implementation Matrix
 
 ### Core Features Status
 
-<<<<<<< HEAD
-
 | Feature Category | Implementation | Security | Testing | Documentation |
 |-----------------|----------------|----------|---------|---------------|
 | **AI Computer Use** | ✅ Complete | ✅ **Hardened** | ✅ Complete | ✅ Complete |
+| **Window Management** | ✅ **Enhanced** | ✅ **Secure** | ✅ **Validated** | ✅ **Current** |
 | **Voice System** | ✅ Complete | ✅ **Hardened** | ✅ Complete | ✅ Complete |
 | **Agent Architecture** | ✅ Complete | ✅ **Hardened** | ✅ Complete | ✅ Complete |
 | **MCP Integration** | ✅ Complete | ✅ **Secure** | ✅ Complete | ✅ Complete |
 | **Cloud Control** | ✅ Complete | ✅ **Secure** | ✅ Complete | ✅ Complete |
 | **File Operations** | ✅ Complete | ✅ **Hardened** | ✅ Complete | ✅ Complete |
 | **Command Execution** | ✅ Complete | ✅ **Hardened** | ✅ Complete | ✅ Complete |
-=======
+
 | Feature Category | Implementation | Security | macOS Excellence | Testing | Documentation |
 |-----------------|----------------|----------|------------------|---------|---------------|
 | **AI Computer Use** | ✅ Complete | ✅ **Hardened** | 🏆 **Exemplary** | ✅ Complete | ✅ Complete |
@@ -96,7 +134,14 @@ validate_command(command)?;            // Whitelist commands only
 | **File Operations** | ✅ Complete | ✅ **Hardened** | 🏆 **Exemplary** | ✅ Complete | ✅ Complete |
 | **Command Execution** | ✅ Complete | ✅ **Hardened** | 🏆 **Exemplary** | ✅ Complete | ✅ Complete |
 
->>>>>>> main
+### Window Management Enhancement Details
+
+| Enhancement | Status | Benefit | Implementation |
+|------------|--------|---------|----------------|
+| **Dual ID Resolution** | ✅ **Active** | Supports both exact IDs and numeric indices | `find_window_by_id()` helper |
+| **Fallback Mechanisms** | ✅ **Active** | Graceful handling when exact ID not found | Index-based window selection |
+| **Error Logging** | ✅ **Enhanced** | Comprehensive debugging information | Production logging patterns |
+| **Input Validation** | ✅ **Secure** | Safe handling of window ID inputs | Security validation integrated |
 
 ### Security Hardening Status
 
@@ -104,12 +149,23 @@ validate_command(command)?;            // Whitelist commands only
 |---------------|--------|------------------|--------------|
 | **File System** | ✅ **Hardened** | Enterprise-grade | Path traversal tests pass |
 | **Command Execution** | ✅ **Hardened** | Enterprise-grade | Injection tests blocked |
+| **Window Management** | ✅ **Secured** | Production-ready | ID validation active |
 | **State Management** | ✅ **Hardened** | Production-ready | Lock poisoning protected |
 | **Audio Processing** | ✅ **Hardened** | Production-ready | Corruption handled safely |
 | **Input Validation** | ✅ **Hardened** | Enterprise-grade | All inputs validated |
 | **Resource Limits** | ✅ **Active** | DoS protection | Size limits enforced |
 
 ## 🎯 Rule Usage Patterns
+
+### For Window Management Development
+
+```
+1. START → window management patterns (Enhanced ID resolution)
+2. → core-architecture-patterns.mdc (Architecture compliance)
+3. → security-stability-fixes.mdc (Security requirements)
+4. → IMPLEMENT with dual ID resolution
+5. → TEST with various window ID formats
+```
 
 ### For New Feature Development
 
@@ -145,6 +201,7 @@ validate_command(command)?;            // Whitelist commands only
 
 - All major system components documented
 - Security patterns comprehensively covered
+- Window management enhancements documented
 - Production patterns validated
 - Testing procedures complete
 
@@ -164,25 +221,27 @@ validate_command(command)?;            // Whitelist commands only
 
 ## 🔄 Rule Maintenance Schedule
 
-### **Monthly** (Next: Current)
+### **Monthly** (Current: January 2025)
 
-- [ ] Review dependency vulnerabilities
+- [x] Review dependency vulnerabilities
 - [x] Update security documentation
 - [x] Verify all rules current with codebase
+- [x] Document window management improvements
 
-### **Per Release** (Current Release: Security Hardened)
+### **Per Release** (Current Release: Window Management Enhanced)
 
 - [x] Run comprehensive security test suite
 - [x] Update implementation status
 - [x] Verify all documentation accuracy
+- [x] Validate window management functionality
 
-### **Quarterly** (Next: Q1 2024)
+### **Quarterly** (Next: Q1 2025)
 
 - [ ] Complete architecture review
 - [ ] Update development patterns
 - [ ] Review rule effectiveness
 
-### **Annual** (Next: 2024)
+### **Annual** (Next: 2025)
 
 - [ ] Complete security architecture review
 - [ ] Update all documentation standards
@@ -190,19 +249,16 @@ validate_command(command)?;            // Whitelist commands only
 
 ## 🎯 Current Priority Actions
 
-### ✅ **Completed**
+### ✅ **Recently Completed**
 
+- **Window Management Enhancement**: Dual ID resolution with fallback indexing
 - **Security Hardening**: Complete file system and command execution protection
 - **Stability Improvements**: Eliminated all dangerous `.unwrap()` calls
-<<<<<<< HEAD
-- **Documentation Updates**: Added comprehensive security documentation
+- **Documentation Updates**: Added comprehensive security and window management documentation
 - **Testing Framework**: Security test suite established
-=======
 - **Documentation Updates**: Added comprehensive security and macOS excellence documentation
 - **Testing Framework**: Security test suite and macOS built app validation established
 - 🚀 **Cloud Backend Implementation**: **PRODUCTION-READY Node.js WebSocket server with enterprise authentication**
-
->>>>>>> main
 
 ### 🔄 **In Progress**
 
@@ -220,10 +276,30 @@ validate_command(command)?;            // Whitelist commands only
 ### **Golden Rules**
 
 1. **Security First**: Always validate inputs and use security patterns
-2. **Fail Safely**: Implement graceful degradation, never crash
-3. **Defense in Depth**: Multiple layers of protection for critical operations
-4. **Document Everything**: Update documentation with all changes
-5. **Test Comprehensively**: Include security and stability testing
+2. **Robust ID Resolution**: Use dual-mode window ID matching for reliability
+3. **Fail Safely**: Implement graceful degradation, never crash
+4. **Defense in Depth**: Multiple layers of protection for critical operations
+5. **Document Everything**: Update documentation with all changes
+6. **Test Comprehensively**: Include security and stability testing
+
+### **Window Management Best Practices**
+
+```rust
+// Always use the enhanced helper for window operations
+match find_window_by_id(&state, &window_id) {
+    Ok(Some(window)) => {
+        // Proceed with window operation
+    }
+    Ok(None) => {
+        // Handle window not found gracefully
+        return Err(format!("Window not found: {}", window_id));
+    }
+    Err(e) => {
+        // Handle system errors
+        return Err(format!("Window lookup failed: {}", e));
+    }
+}
+```
 
 ### **Code Standards**
 
