@@ -30,7 +30,8 @@ type BarState =
   | "error"
   | "transcribing"
   | "speaking"
-  | "dictating";
+  | "dictating"
+  | "always-listening";
 
 // Use the existing BarStateData interface from the backend
 interface BarStateData {
@@ -42,6 +43,7 @@ interface BarStateData {
   spokenText: string;
   isAgentWorking: boolean;
   isDictationMode: boolean;
+  isAlwaysListening: boolean;
 }
 
 interface FloatingBarConfig {
@@ -62,6 +64,7 @@ export function EnhancedFloatingBar() {
   const [spokenText, setSpokenText] = useState("");
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [isDictationMode, setIsDictationMode] = useState(false);
+  const [isAlwaysListening, setIsAlwaysListening] = useState(false);
 
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
@@ -131,6 +134,7 @@ export function EnhancedFloatingBar() {
           setSpokenText(data.spokenText);
           setIsAgentWorking(data.isAgentWorking);
           setIsDictationMode(data.isDictationMode);
+          setIsAlwaysListening(data.isAlwaysListening);
 
           // Auto-focus input when in input state
           if (data.barState === "input" && inputRef.current) {
@@ -263,6 +267,8 @@ export function EnhancedFloatingBar() {
         return <Type className="h-4 w-4 text-orange-500" />;
       case "listening":
         return <Brain className="h-4 w-4 text-blue-500" />;
+      case "always-listening":
+        return <Mic className="h-4 w-4 text-blue-400" />;
       case "transcribing":
         return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
       case "speaking":
@@ -289,6 +295,8 @@ export function EnhancedFloatingBar() {
         return "Processing dictation...";
       case "listening":
         return "Listening for voice command...";
+      case "always-listening":
+        return "Always listening for wake words...";
       case "speaking":
         return "Playing AI response";
       case "loading":
@@ -332,6 +340,8 @@ export function EnhancedFloatingBar() {
       bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
     } else if (barState === "listening") {
       bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
+    } else if (barState === "always-listening") {
+      bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
     }
 
     const sizeStyles = ["default", "shrinking", "finishing"].includes(barState)
@@ -374,6 +384,9 @@ export function EnhancedFloatingBar() {
                 (isDictationMode || isAgentWorking) && (
                   <VoiceStatusIndicator variant="compact" className="ml-1" />
                 )}
+              {isAlwaysListening && (
+                <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"></div>
+              )}
             </div>
           )}
 
@@ -439,6 +452,29 @@ export function EnhancedFloatingBar() {
                   />
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Always Listening State */}
+          {barState === "always-listening" && (
+            <div className="flex items-center justify-between w-full h-full">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <Mic className="h-4 w-4 text-blue-400 animate-pulse" />
+                <span className="text-sm text-blue-200 truncate font-medium">
+                  Always listening for wake words...
+                </span>
+              </div>
+              <div className="flex items-center gap-1 ml-2">
+                <div className="w-1 h-1 bg-blue-400 rounded-full animate-pulse" />
+                <div
+                  className="w-1 h-2 bg-blue-300 rounded-full animate-pulse"
+                  style={{ animationDelay: "0.1s" }}
+                />
+                <div
+                  className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
+                  style={{ animationDelay: "0.2s" }}
+                />
+              </div>
             </div>
           )}
 
