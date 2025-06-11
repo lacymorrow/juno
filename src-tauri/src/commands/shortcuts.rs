@@ -1,11 +1,16 @@
 // Commands for managing keyboard shortcuts configuration
 
 use crate::state::{AppState, KeyboardShortcuts};
-use tauri::{State, AppHandle};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
+use tauri::{State, AppHandle, Manager};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, Modifiers, ShortcutState};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, error, warn};
 use serde_json;
+use std::sync::Arc;
+
+// Global escape key management
+static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Get the current keyboard shortcuts configuration
 #[tauri::command]
@@ -371,6 +376,100 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
     }
 }
 
+/// Register the escape key for cancellation (only when something can be cancelled)
+pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    
+    // Increment the user count
+    let user_count = ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst) + 1;
+    
+    // Only register if not already registered
+    if !ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
+        let escape_shortcut = Shortcut::new(None, Code::Escape);
+        match app_handle.global_shortcut().register(escape_shortcut) {
+            Ok(()) => {
+                ESCAPE_KEY_REGISTERED.store(true, Ordering::SeqCst);
+                info!("Dynamically registered escape key for cancellation (users: {})", user_count);
+            },
+            Err(e) => {
+                // Rollback user count on failure
+                ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst);
+                error!("Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
+                return Err(format!("Failed to register escape key: {}", e));
+            }
+        }
+    } else {
+        info!("Escape key already registered, increased user count to: {}", user_count);
+    }
+    
+    Ok(())
+}
+
+/// Unregister the escape key (when nothing needs to be cancelled)
+pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    
+    // Decrement the user count
+    let user_count = ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
+    
+    // Only unregister if no more users and currently registered
+    if user_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
+        let escape_shortcut = Shortcut::new(None, Code::Escape);
+        match app_handle.global_shortcut().unregister(escape_shortcut) {
+            Ok(()) => {
+                ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
+                info!("Dynamically unregistered escape key - no more active users");
+            },
+            Err(e) => {
+                // Rollback user count on failure
+                ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
+                warn!("Failed to unregister escape key shortcut: {} - continuing anyway", e);
+                // Don't return error for unregistration failures as it's not critical
+            }
+        }
+    } else {
+        info!("Escape key still has {} users, keeping registered", user_count);
+    }
+    
+    Ok(())
+}
+
+/// Get current escape key registration status (for debugging)
+fn get_escape_key_status_internal() -> (bool, u32) {
+    use std::sync::atomic::Ordering;
+    (
+        ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst),
+        ESCAPE_KEY_USERS.load(Ordering::SeqCst)
+    )
+}
+
+/// Get current escape key registration status (for debugging) - Tauri command
+#[tauri::command]
+pub async fn get_escape_key_status() -> Result<serde_json::Value, String> {
+    let (is_registered, user_count) = get_escape_key_status_internal();
+    let description = if user_count == 0 {
+        "Escape key is not registered - passes through to other apps".to_string()
+    } else if user_count == 1 {
+        if is_registered {
+            "Escape key is registered for 1 user (agent or dictation)".to_string()
+        } else {
+            "ERROR: 1 user but not registered".to_string()
+        }
+    } else {
+        if is_registered {
+            format!("Escape key is registered for {} users (agent and dictation)", user_count)
+        } else {
+            format!("ERROR: {} users but not registered", user_count)
+        }
+    };
+    
+    Ok(serde_json::json!({
+        "escape_key_registered": is_registered,
+        "user_count": user_count,
+        "description": description
+    }))
+}
+
 /// Register global shortcuts with proper error handling for missing permissions
 pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Result<(), String> {
     // Check if we have Input Monitoring permissions first
@@ -449,21 +548,12 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
         warn!("Failed to parse dictation input shortcut: {}", shortcuts.dictation_input);
     }
 
-    // Register the escape key for cancellation with error handling
-    let escape_shortcut = Shortcut::new(None, Code::Escape);
-    match app.global_shortcut().register(escape_shortcut) {
-        Ok(()) => {
-            info!("Registered escape key for cancellation");
-        },
-        Err(e) => {
-            error!("Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
-            // Escape key is critical, but don't fail the entire initialization
-        }
-    }
+    // NOTE: Escape key is now registered dynamically only when needed
+    // This prevents capturing it when there's nothing to cancel
 
     // Note: Settings shortcut is handled by the menu system
 
-    info!("Completed global shortcut registration (some may have failed due to permissions)");
+    info!("Completed global shortcut registration (escape key will be registered dynamically when needed)");
     Ok(())
 }
 
