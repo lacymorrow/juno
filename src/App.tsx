@@ -19,8 +19,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
-import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
 import { notificationService } from "@/lib/notifications";
+import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
 import { cn } from "@/lib/utils";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -36,13 +36,11 @@ import {
   PanelLeftOpen,
   Plus,
   Send,
-  Server,
   Trash2,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { Toaster, toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
-import { Toaster } from "sonner";
 import { FloatingBar } from "./Bar";
 import ClickVisualizer from "./components/ClickVisualizer";
 import Settings from "./components/Settings";
@@ -245,7 +243,6 @@ function formatFullTimestamp(timestamp: number): string {
 
 function App() {
   const [query, setQuery] = useState("");
-  const [lastSubmittedQuery, setLastSubmittedQuery] = useState(""); // Track last query for error recovery
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [serverStatus, setServerStatus] = useState<
@@ -508,7 +505,6 @@ function App() {
       setConversation((prev) => [...prev, userMessage]);
 
       // Store the query before clearing it, for potential error recovery
-      setLastSubmittedQuery(text);
       setQuery(""); // Clear input immediately IF it was from the manual input field
       setIsProcessing(true); // Set processing state
 
@@ -526,7 +522,7 @@ function App() {
         };
         setConversation((prev) => [...prev, errorMessage]);
         setIsProcessing(false); // Reset processing on error
-        
+
         // Restore the input so user can retry
         console.log("Restoring input due to submitQuery error:", text);
         setQuery(text);
@@ -2363,7 +2359,7 @@ function App() {
       const errorExists = conversation.some(
         (msg) => msg.role === "system" && msg.content.includes(error_message)
       );
-      
+
       if (!errorExists) {
         const errorMessage: ChatMessage = {
           role: "system",
@@ -2530,9 +2526,7 @@ function App() {
                             className="text-blue-500 mx-auto"
                           />
                           <div>
-                            <h2 className="text-sm font-semibold">
-                              Juno AI
-                            </h2>
+                            <h2 className="text-sm font-semibold">Juno AI</h2>
                             <p className="text-xs text-muted-foreground">
                               AI desktop assistant
                             </p>
@@ -2881,7 +2875,7 @@ function App() {
       )}
 
       {/* Toast notifications */}
-      <Toaster 
+      <Toaster
         position="bottom-right"
         expand={true}
         richColors={true}
