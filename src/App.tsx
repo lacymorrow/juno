@@ -2626,6 +2626,7 @@ function App() {
                                       </span>
                                     ) : msg.isJsx ||
                                       (msg.role === "assistant" &&
+                                        !msg.isStreaming &&
                                         isJsxContent(msg.content)) ? (
                                       <JsxMessageRenderer jsx={msg.content} />
                                     ) : (
