@@ -38,10 +38,9 @@ echo "✓ Rust crate versions updated."
 # 2. Node packages (if any)
 # ----------------------
 if command -v bunx >/dev/null 2>&1; then
-  if bunx --yes changeset --help >/dev/null 2>&1; then
-    # Use changesets if the repo has it configured
+  if bunx --yes @changesets/cli --help >/dev/null 2>&1; then
     echo "Updating package.json versions via changesets…"
-    bunx --yes changeset version --snapshot "$NEW_VERSION"
+    bunx --yes @changesets/cli version --snapshot "$NEW_VERSION"
   else
     # Fallback: patch all package.json files with jq
     if command -v jq >/dev/null 2>&1; then
