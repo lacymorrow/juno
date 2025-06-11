@@ -616,7 +616,8 @@ impl ToolMetadata {
         metadata
     }
 
-    /// Create metadata from tool configuration
+    /// Create tool metadata from a tool configuration
+    /// This uses the proper tool configuration system when available
     fn from_tool_config(config: &crate::agent::tools::ToolConfig) -> Self {
         use crate::agent::tools::ToolCategory;
 
@@ -664,7 +665,118 @@ impl ToolMetadata {
     }
 
     /// Fallback pattern-based detection for tools not in configuration
+    /// NOTE: This should be used only when ToolMappingService cannot categorize a tool
     fn from_tool_name_patterns(tool_name: &str) -> Self {
+        use crate::agent::tools::{ToolCategory, ToolMappingService};
+
+        // First try to use ToolMappingService for proper categorization
+        if let Some(category) = ToolMappingService::get_tool_category(tool_name) {
+            let (icon, action_verb, category_name, notification_level, estimated_duration) =
+                match category {
+                    ToolCategory::AnthropicComputerUse => match tool_name {
+                        name if name.contains("screenshot") => (
+                            "📸",
+                            "Taking screenshot",
+                            "Screenshot",
+                            "standard",
+                            Some("instant"),
+                        ),
+                        name if name.contains("click") => {
+                            ("👆", "Clicking", "Mouse", "minimal", Some("instant"))
+                        }
+                        name if name.contains("type") => {
+                            ("⌨️", "Typing", "Keyboard", "standard", Some("short"))
+                        }
+                        name if name.contains("key") => (
+                            "🔤",
+                            "Pressing keys",
+                            "Keyboard",
+                            "standard",
+                            Some("instant"),
+                        ),
+                        name if name.contains("scroll") => {
+                            ("📜", "Scrolling", "Mouse", "minimal", Some("instant"))
+                        }
+                        name if name.contains("drag") => {
+                            ("🖱️", "Dragging", "Mouse", "minimal", Some("short"))
+                        }
+                        name if name.contains("move") => {
+                            ("↗️", "Moving cursor", "Mouse", "silent", Some("instant"))
+                        }
+                        _ => (
+                            "🖥️",
+                            "Screen interaction",
+                            "Computer Use",
+                            "standard",
+                            Some("short"),
+                        ),
+                    },
+                    ToolCategory::Browser => (
+                        "🌐",
+                        "Browser action",
+                        "Browser",
+                        "standard",
+                        Some("medium"),
+                    ),
+                    ToolCategory::Desktop => match tool_name {
+                        name if name.contains("click") => {
+                            ("👆", "Clicking", "Mouse", "minimal", Some("instant"))
+                        }
+                        name if name.contains("type") => {
+                            ("⌨️", "Typing", "Keyboard", "standard", Some("short"))
+                        }
+                        name if name.contains("application") => {
+                            ("🖥️", "App control", "Desktop", "standard", Some("short"))
+                        }
+                        name if name.contains("window") => {
+                            ("🪟", "Window control", "Desktop", "standard", Some("short"))
+                        }
+                        name if name.contains("clipboard") => (
+                            "📋",
+                            "Clipboard operation",
+                            "Desktop",
+                            "standard",
+                            Some("instant"),
+                        ),
+                        _ => ("🖥️", "Desktop action", "Desktop", "standard", Some("short")),
+                    },
+                    ToolCategory::Basic => match tool_name {
+                        name if name.contains("file") => {
+                            ("📁", "File operation", "File", "standard", Some("short"))
+                        }
+                        name if name.contains("command")
+                            || name.contains("shell")
+                            || name.contains("bash")
+                            || name.contains("terminal") =>
+                        {
+                            (
+                                "⚡",
+                                "Running command",
+                                "Command",
+                                "detailed",
+                                Some("medium"),
+                            )
+                        }
+                        _ => ("🔧", "Basic operation", "Basic", "standard", Some("short")),
+                    },
+                    ToolCategory::Timer => {
+                        ("⏰", "Timer action", "Timer", "standard", Some("instant"))
+                    }
+                    ToolCategory::MCP => ("🔌", "External tool", "MCP", "standard", Some("medium")),
+                };
+
+            return Self {
+                category: category_name.to_string(),
+                description: None,
+                notification_level: notification_level.to_string(),
+                estimated_duration: estimated_duration.map(|s| s.to_string()),
+                icon: icon.to_string(),
+                action_verb: action_verb.to_string(),
+                tool_inputs: None,
+            };
+        }
+
+        // Legacy fallback for tools not properly categorized yet
         let (icon, action_verb, category, notification_level, estimated_duration) = match tool_name
         {
             // Screenshot tools - always highly visible

@@ -1,16 +1,16 @@
 use async_trait::async_trait;
-use std::time::{Duration, Instant};
 use serde_json::Value;
-use tokio::sync::RwLock;
+use std::time::{Duration, Instant};
 use tauri::Manager;
+use tokio::sync::RwLock;
 
-use crate::agent::core::{AgentError, ToolCall, ToolResult};
-use crate::agent::tools::{ToolCategory};
-use crate::state::AppState;
-use crate::commands;
 use super::base_agent::{
-    SpecializedAgent, AgentType, Task, TaskResult, AgentCapability, AgentStatus
+    AgentCapability, AgentStatus, AgentType, SpecializedAgent, Task, TaskResult,
 };
+use crate::agent::core::{AgentError, ToolCall, ToolResult};
+use crate::agent::tools::{ToolCategory, ToolMappingService};
+use crate::commands;
+use crate::state::AppState;
 
 /// Specialized agent for desktop automation and native application interactions
 pub struct DesktopAgent {
@@ -42,42 +42,35 @@ impl DesktopAgent {
         })
     }
 
-    /// Check if a tool belongs to desktop-relevant categories using proper tool configuration
-    async fn is_desktop_tool(&self, tool_name: &str) -> bool {
-        let state = self.app_handle.state::<AppState>();
-        let config_manager = state.get_tool_config_manager().await;
-        let config_guard = config_manager.lock().await;
-        
-        if let Some(tool_config) = config_guard.get_tool_config(tool_name) {
-            matches!(
-                tool_config.category, 
-                ToolCategory::Desktop | 
-                ToolCategory::AnthropicComputerUse
-            )
-        } else {
-            false
-        }
-    }
-
     /// Execute a desktop-related tool call
     async fn execute_desktop_tool(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
         let state = self.app_handle.state::<AppState>();
 
         match tool_call.name.as_str() {
             "dev_left_click" | "desktop_click" => {
-                let x = tool_call.input.get("x").and_then(|v| v.as_f64()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'x' coordinate".to_string()))?;
-                let y = tool_call.input.get("y").and_then(|v| v.as_f64()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'y' coordinate".to_string()))?;
-                let modifier = tool_call.input.get("modifier").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let x = tool_call
+                    .input
+                    .get("x")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'x' coordinate".to_string())
+                    })?;
+                let y = tool_call
+                    .input
+                    .get("y")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'y' coordinate".to_string())
+                    })?;
+                let modifier = tool_call
+                    .input
+                    .get("modifier")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
-                let result = commands::mouse::dev_left_click(
-                    self.app_handle.clone(),
-                    state,
-                    x,
-                    y,
-                    modifier
-                ).await;
+                let result =
+                    commands::mouse::dev_left_click(self.app_handle.clone(), state, x, y, modifier)
+                        .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -88,14 +81,17 @@ impl DesktopAgent {
                 }
             }
             "dev_type_text" | "dev_global_type_text" | "desktop_type" => {
-                let text = tool_call.input.get("text").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'text' parameter".to_string()))?;
+                let text = tool_call
+                    .input
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'text' parameter".to_string())
+                    })?;
 
-                let result = commands::dev::dev_type_text(
-                    text.to_string(),
-                    self.app_handle.clone(),
-                    state
-                ).await;
+                let result =
+                    commands::dev::dev_type_text(text.to_string(), self.app_handle.clone(), state)
+                        .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -106,16 +102,26 @@ impl DesktopAgent {
                 }
             }
             "dev_press_key" => {
-                let key = tool_call.input.get("key").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'key' parameter".to_string()))?;
-                let modifier = tool_call.input.get("modifier").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let key = tool_call
+                    .input
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'key' parameter".to_string())
+                    })?;
+                let modifier = tool_call
+                    .input
+                    .get("modifier")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
                 let result = commands::dev::dev_press_key(
                     key.to_string(),
                     modifier,
                     self.app_handle.clone(),
-                    state
-                ).await;
+                    state,
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -126,13 +132,18 @@ impl DesktopAgent {
                 }
             }
             "dev_open_application" | "desktop_open_app" => {
-                let app_name = tool_call.input.get("app_name").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'app_name' parameter".to_string()))?;
+                let app_name = tool_call
+                    .input
+                    .get("app_name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'app_name' parameter".to_string(),
+                        )
+                    })?;
 
-                let result = commands::app_url::dev_open_application(
-                    app_name.to_string(),
-                    state
-                ).await;
+                let result =
+                    commands::app_url::dev_open_application(app_name.to_string(), state).await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -143,14 +154,22 @@ impl DesktopAgent {
                 }
             }
             "dev_focus_window" | "desktop_focus_window" => {
-                let window_id = tool_call.input.get("window_id").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'window_id' parameter".to_string()))?;
+                let window_id = tool_call
+                    .input
+                    .get("window_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'window_id' parameter".to_string(),
+                        )
+                    })?;
 
                 let result = commands::window::dev_focus_window(
                     self.app_handle.clone(),
                     state,
-                    window_id.to_string()
-                ).await;
+                    window_id.to_string(),
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -161,9 +180,20 @@ impl DesktopAgent {
                 }
             }
             "dev_scroll_window" | "desktop_scroll" => {
-                let direction = tool_call.input.get("direction").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'direction' parameter".to_string()))?;
-                let scroll_amount = tool_call.input.get("scroll_amount").and_then(|v| v.as_f64()).unwrap_or(3.0);
+                let direction = tool_call
+                    .input
+                    .get("direction")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'direction' parameter".to_string(),
+                        )
+                    })?;
+                let scroll_amount = tool_call
+                    .input
+                    .get("scroll_amount")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(3.0);
                 let x = tool_call.input.get("x").and_then(|v| v.as_f64());
                 let y = tool_call.input.get("y").and_then(|v| v.as_f64());
 
@@ -173,8 +203,9 @@ impl DesktopAgent {
                     direction.to_string(),
                     scroll_amount,
                     x,
-                    y
-                ).await;
+                    y,
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -185,9 +216,8 @@ impl DesktopAgent {
                 }
             }
             "capture_screenshot_command" | "desktop_screenshot" => {
-                let result = commands::core::capture_screenshot_command(
-                    self.app_handle.clone()
-                ).await;
+                let result =
+                    commands::core::capture_screenshot_command(self.app_handle.clone()).await;
 
                 match result {
                     Ok(screenshot_data) => Ok(ToolResult {
@@ -198,9 +228,7 @@ impl DesktopAgent {
                 }
             }
             "dev_get_clipboard" => {
-                let result = commands::core::dev_get_clipboard(
-                    state
-                ).await;
+                let result = commands::core::dev_get_clipboard(state).await;
 
                 match result {
                     Ok(clipboard_content) => Ok(ToolResult {
@@ -211,13 +239,15 @@ impl DesktopAgent {
                 }
             }
             "dev_set_clipboard" => {
-                let content = tool_call.input.get("content").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'content' parameter".to_string()))?;
+                let content = tool_call
+                    .input
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'content' parameter".to_string())
+                    })?;
 
-                let result = commands::core::dev_set_clipboard(
-                    content.to_string(),
-                    state
-                ).await;
+                let result = commands::core::dev_set_clipboard(content.to_string(), state).await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -228,19 +258,34 @@ impl DesktopAgent {
                 }
             }
             "dev_right_click" => {
-                let x = tool_call.input.get("x").and_then(|v| v.as_f64()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'x' coordinate".to_string()))?;
-                let y = tool_call.input.get("y").and_then(|v| v.as_f64()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'y' coordinate".to_string()))?;
-                let modifier = tool_call.input.get("modifier").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let x = tool_call
+                    .input
+                    .get("x")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'x' coordinate".to_string())
+                    })?;
+                let y = tool_call
+                    .input
+                    .get("y")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'y' coordinate".to_string())
+                    })?;
+                let modifier = tool_call
+                    .input
+                    .get("modifier")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
                 let result = commands::mouse::dev_right_click(
                     self.app_handle.clone(),
                     state,
                     x,
                     y,
-                    modifier
-                ).await;
+                    modifier,
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -251,19 +296,34 @@ impl DesktopAgent {
                 }
             }
             "dev_double_click" => {
-                let x = tool_call.input.get("x").and_then(|v| v.as_f64()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'x' coordinate".to_string()))?;
-                let y = tool_call.input.get("y").and_then(|v| v.as_f64()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'y' coordinate".to_string()))?;
-                let modifier = tool_call.input.get("modifier").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let x = tool_call
+                    .input
+                    .get("x")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'x' coordinate".to_string())
+                    })?;
+                let y = tool_call
+                    .input
+                    .get("y")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| {
+                        AgentError::InputError("Missing or invalid 'y' coordinate".to_string())
+                    })?;
+                let modifier = tool_call
+                    .input
+                    .get("modifier")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
 
                 let result = commands::mouse::dev_double_click(
                     self.app_handle.clone(),
                     state,
                     x,
                     y,
-                    modifier
-                ).await;
+                    modifier,
+                )
+                .await;
 
                 match result {
                     Ok(_) => Ok(ToolResult {
@@ -274,10 +334,8 @@ impl DesktopAgent {
                 }
             }
             "dev_get_window_list" => {
-                let result = commands::window::dev_get_window_list(
-                    self.app_handle.clone(),
-                    state
-                ).await;
+                let result =
+                    commands::window::dev_get_window_list(self.app_handle.clone(), state).await;
 
                 match result {
                     Ok(windows) => Ok(ToolResult {
@@ -288,13 +346,19 @@ impl DesktopAgent {
                 }
             }
             "dev_find_element_by_selector" => {
-                let selector = tool_call.input.get("selector").and_then(|v| v.as_str()).ok_or_else(||
-                    AgentError::InputError("Missing or invalid 'selector' parameter".to_string()))?;
+                let selector = tool_call
+                    .input
+                    .get("selector")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        AgentError::InputError(
+                            "Missing or invalid 'selector' parameter".to_string(),
+                        )
+                    })?;
 
-                let result = commands::element::dev_find_element_by_selector(
-                    selector.to_string(),
-                    state
-                ).await;
+                let result =
+                    commands::element::dev_find_element_by_selector(selector.to_string(), state)
+                        .await;
 
                 match result {
                     Ok(element_info) => Ok(ToolResult {
@@ -304,7 +368,7 @@ impl DesktopAgent {
                     Err(e) => Err(AgentError::ToolError(e)),
                 }
             }
-            _ => Err(AgentError::ToolNotFound(tool_call.name.clone()))
+            _ => Err(AgentError::ToolNotFound(tool_call.name.clone())),
         }
     }
 }
@@ -320,31 +384,54 @@ impl SpecializedAgent for DesktopAgent {
             AgentCapability {
                 name: "Mouse Control".to_string(),
                 description: "Control mouse movements, clicks, and interactions".to_string(),
-                tool_patterns: vec!["click".to_string(), "mouse".to_string(), "dev_click".to_string(), "dev_mouse".to_string()],
+                tool_patterns: vec![
+                    "click".to_string(),
+                    "mouse".to_string(),
+                    "dev_click".to_string(),
+                    "dev_mouse".to_string(),
+                ],
                 confidence: 0.95,
             },
             AgentCapability {
                 name: "Keyboard Control".to_string(),
                 description: "Type text, press keys, handle keyboard interactions".to_string(),
-                tool_patterns: vec!["type".to_string(), "key".to_string(), "dev_type".to_string(), "dev_key".to_string()],
+                tool_patterns: vec![
+                    "type".to_string(),
+                    "key".to_string(),
+                    "dev_type".to_string(),
+                    "dev_key".to_string(),
+                ],
                 confidence: 0.95,
             },
             AgentCapability {
                 name: "Application Management".to_string(),
                 description: "Open, focus, and manage native applications".to_string(),
-                tool_patterns: vec!["app".to_string(), "application".to_string(), "dev_open".to_string()],
+                tool_patterns: vec![
+                    "app".to_string(),
+                    "application".to_string(),
+                    "dev_open".to_string(),
+                ],
                 confidence: 0.90,
             },
             AgentCapability {
                 name: "Window Management".to_string(),
-                description: "Focus windows, get window information, manage window state".to_string(),
-                tool_patterns: vec!["window".to_string(), "focus".to_string(), "dev_window".to_string()],
+                description: "Focus windows, get window information, manage window state"
+                    .to_string(),
+                tool_patterns: vec![
+                    "window".to_string(),
+                    "focus".to_string(),
+                    "dev_window".to_string(),
+                ],
                 confidence: 0.85,
             },
             AgentCapability {
                 name: "Screen Interaction".to_string(),
                 description: "Take screenshots, scroll, interact with screen elements".to_string(),
-                tool_patterns: vec!["screenshot".to_string(), "scroll".to_string(), "element".to_string()],
+                tool_patterns: vec![
+                    "screenshot".to_string(),
+                    "scroll".to_string(),
+                    "element".to_string(),
+                ],
                 confidence: 0.85,
             },
             AgentCapability {
@@ -357,24 +444,24 @@ impl SpecializedAgent for DesktopAgent {
     }
 
     async fn can_handle_task(&self, task: &Task) -> bool {
-        // Check if any tool calls are desktop-related
+        // Use ToolMappingService instead of string matching
         for tool_call in &task.tool_calls {
-            if self.is_desktop_tool(&tool_call.name).await {
+            if ToolMappingService::is_tool_in_category(&tool_call.name, &ToolCategory::Desktop)
+                || ToolMappingService::is_tool_in_category(
+                    &tool_call.name,
+                    &ToolCategory::AnthropicComputerUse,
+                )
+            {
                 return true;
             }
         }
 
-        // Check if task description mentions desktop operations
-        let description_lower = task.description.to_lowercase();
-        description_lower.contains("desktop") ||
-        description_lower.contains("application") ||
-        description_lower.contains("window") ||
-        description_lower.contains("click") ||
-        description_lower.contains("type") ||
-        description_lower.contains("mouse") ||
-        description_lower.contains("keyboard") ||
-        description_lower.contains("screenshot") ||
-        description_lower.contains("clipboard")
+        // Use ToolMappingService for task description analysis
+        let mapping_agent_type = ToolMappingService::analyze_user_intent(&task.description);
+        matches!(
+            mapping_agent_type,
+            crate::agent::tools::tool_mapping::AgentType::DesktopExpert
+        )
     }
 
     async fn handle_task(&self, task: Task) -> Result<TaskResult, AgentError> {
@@ -420,7 +507,12 @@ impl SpecializedAgent for DesktopAgent {
         let output = if results.is_empty() {
             Value::Null
         } else {
-            Value::Array(results.into_iter().map(|r| serde_json::to_value(r).unwrap_or(Value::Null)).collect())
+            Value::Array(
+                results
+                    .into_iter()
+                    .map(|r| serde_json::to_value(r).unwrap_or(Value::Null))
+                    .collect(),
+            )
         };
 
         Ok(TaskResult {
