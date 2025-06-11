@@ -258,6 +258,7 @@ use crate::commands::{
     validate_keyboard_shortcut,
     get_shortcut_suggestions,
     get_shortcut_best_practices,
+    get_escape_key_status,
 };
 
 // Import MCP commands explicitly
@@ -809,6 +810,7 @@ pub fn run() {
             validate_keyboard_shortcut,
             get_shortcut_suggestions,
             get_shortcut_best_practices,
+            get_escape_key_status,
             // Cloud Commands
             get_cloud_config,
             update_cloud_config,
@@ -1612,6 +1614,14 @@ pub fn run() {
             app.listen("voice-transcription:dictation-started", move |event| {
                 info!("[Event] Received voice-transcription:dictation-started event");
 
+                // Register escape key for dictation cancellation
+                let app_handle_for_escape = app_handle_for_listener.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_for_escape).await {
+                        warn!("Failed to register escape key for dictation: {} - continuing without escape key cancellation", e);
+                    }
+                });
+
                 // Play voice start sound automatically when dictation starts
                 let app_handle_for_sound = app_handle_for_listener.clone();
                 tauri::async_runtime::spawn(async move {
@@ -1742,6 +1752,14 @@ pub fn run() {
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:dictation-stopped", move |event| {
                 info!("[Event] Received voice-transcription:dictation-stopped event");
+
+                // Unregister escape key as dictation is complete
+                let app_handle_for_escape = app_handle_for_listener.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_for_escape).await {
+                        warn!("Failed to unregister escape key after dictation: {} - continuing anyway", e);
+                    }
+                });
 
                 // Play voice end sound automatically when dictation stops
                 let app_handle_for_sound = app_handle_for_listener.clone();
