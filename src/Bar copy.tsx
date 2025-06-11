@@ -275,12 +275,12 @@ export function FloatingBar() {
 
   return (
     <div
+      data-tauri-drag-region
       data-window-hovered={isWindowHovered}
       className="w-screen h-screen flex items-start justify-start"
     >
       <div className="relative z-50 p-3">
         <div
-          data-tauri-drag-region
           className={cn(
             `
             flex items-center justify-center bg-black/90 text-white
