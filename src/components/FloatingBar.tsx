@@ -462,10 +462,13 @@ export function FloatingBar() {
   };
 
   return (
-    <div className="w-screen h-screen flex items-start justify-start relative bg-transparent">
-      {/* Enhanced Tooltip */}
+    <div 
+      data-tauri-drag-region
+      className="w-screen h-screen flex items-start justify-start relative"
+    >
+      {/* Tooltip */}
       {showTooltip && barState === "default" && (
-        <div className="absolute top-16 left-8 z-50 animate-fade-in">
+        <div className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none">
           <div className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs">
             {getStatusText()}
           </div>
@@ -474,7 +477,6 @@ export function FloatingBar() {
 
       <div className="relative z-50 p-3 bg-transparent">
         <div
-          data-tauri-drag-region
           className={getContainerStyles()}
           style={{ opacity: config.opacity }}
           onClick={
