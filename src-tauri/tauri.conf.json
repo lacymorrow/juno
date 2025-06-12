@@ -38,10 +38,7 @@
         "shadow": false,
         "center": false,
         "x": 20,
-        "y": 20,
-        "hiddenTitle": true,
-        "acceptFirstMouse": true,
-        "tabbingIdentifier": "floating-panel"
+        "y": 20
       },
       {
         "label": "floating-bar",
