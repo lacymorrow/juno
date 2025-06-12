@@ -6,11 +6,22 @@ import { PermissionsFlow } from "@/components/PermissionsFlow";
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   JsxMessageRenderer,
   isJsxContent,
 } from "@/components/ui/jsx-message-renderer";
+import {
+  AIInput,
+  AIInputButton,
+  AIInputSubmit,
+  AIInputTextarea,
+  AIInputToolbar,
+  AIInputTools,
+  AIMessage,
+  AIMessageAvatar,
+  AIMessageContent,
+  AIResponse,
+} from "@/components/ui/kibo-ui/ai";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -231,16 +242,210 @@ function formatMessageTimestamp(timestamp: number): string {
 
 // Helper function to format full timestamp for title attribute (hover tooltip)
 function formatFullTimestamp(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleString([], {
-    weekday: "long",
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  });
+    timeZoneName: "short",
+  }).format(new Date(timestamp));
+}
+
+// Helper function to render messages using Kibo UI components
+function renderChatMessage(
+  msg: ChatMessage,
+  index: number,
+  copyingMessageId: string | null,
+  savingMessageId: string | null,
+  handleCopyResponse: (content: string, index: number) => void,
+  handleSaveResponse: (
+    content: string,
+    format: "html" | "markdown",
+    index: number
+  ) => void
+) {
+  // Handle special message types with existing components
+  if (msg.role === "thinking") {
+    return (
+      <div
+        key={`msg-${index}-${msg.timestamp || Date.now()}`}
+        className="flex justify-start"
+      >
+        <ThinkingMessage content={msg.content} timestamp={msg.timestamp} />
+      </div>
+    );
+  }
+
+  if (msg.role === "tool_call_request") {
+    return (
+      <div
+        key={`msg-${index}-${msg.timestamp || Date.now()}`}
+        className="flex justify-start"
+      >
+        <ToolCallRequest
+          toolName={msg.tool_name || "unknown"}
+          toolArgs={msg.tool_args}
+          content={msg.content}
+          timestamp={msg.timestamp}
+        />
+      </div>
+    );
+  }
+
+  if (msg.role === "tool_call_result") {
+    return (
+      <div
+        key={`msg-${index}-${msg.timestamp || Date.now()}`}
+        className="flex justify-start"
+      >
+        <ToolCallResult
+          toolName={msg.tool_name || "unknown"}
+          toolOutput={msg.tool_output}
+          success={msg.success ?? true}
+          content={msg.content}
+          screenshot_base64={msg.screenshot_base64}
+          timestamp={msg.timestamp}
+        />
+      </div>
+    );
+  }
+
+  // Use Kibo UI components for user and assistant messages
+  const from = msg.role === "user" ? "user" : "assistant";
+  const avatarSrc = msg.role === "user" ? "/user-avatar.png" : "/ai-avatar.png";
+  const avatarName = msg.role === "user" ? "User" : "AI";
+
+  return (
+    <AIMessage key={`msg-${index}-${msg.timestamp || Date.now()}`} from={from}>
+      <AIMessageContent>
+        {msg.role === "assistant" &&
+        (!msg.content || msg.content.trim() === "") ? (
+          <span className="text-muted-foreground italic flex items-center gap-2">
+            <span>✓</span>
+            <span>Task completed successfully</span>
+          </span>
+        ) : msg.isJsx ||
+          (msg.role === "assistant" &&
+            !msg.isStreaming &&
+            isJsxContent(msg.content)) ? (
+          <JsxMessageRenderer jsx={msg.content} />
+        ) : msg.role === "assistant" && msg.content ? (
+          <AIResponse>{msg.content}</AIResponse>
+        ) : (
+          msg.content
+        )}
+
+        {msg.screenshot_base64 && (
+          <div className="mt-2 border-t pt-2">
+            <div className="text-xs text-muted-foreground mb-1">
+              {msg.role === "system"
+                ? "Screenshot captured by AI:"
+                : "Screenshot:"}
+            </div>
+            <div className="relative">
+              <img
+                src={`data:image/png;base64,${msg.screenshot_base64}`}
+                alt="Screenshot"
+                className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
+            </div>
+          </div>
+        )}
+
+        {msg.isStreaming && (
+          <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
+            |
+          </span>
+        )}
+
+        {/* Action buttons for assistant messages */}
+        {msg.role === "assistant" &&
+          msg.content &&
+          msg.content.trim() !== "" &&
+          !msg.isStreaming && (
+            <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
+              <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 w-7 p-0 transition-all duration-150 relative",
+                    copyingMessageId === `copy-${index}`
+                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
+                      : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
+                  )}
+                  onClick={() => handleCopyResponse(msg.content, index)}
+                  disabled={copyingMessageId === `copy-${index}`}
+                  title={
+                    copyingMessageId === `copy-${index}`
+                      ? "Copying..."
+                      : "Copy response to clipboard"
+                  }
+                >
+                  {copyingMessageId === `copy-${index}` ? (
+                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 w-7 p-0 transition-all duration-150 relative",
+                    savingMessageId === `save-html-${index}`
+                      ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
+                      : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
+                  )}
+                  onClick={() => handleSaveResponse(msg.content, "html", index)}
+                  disabled={savingMessageId === `save-html-${index}`}
+                  title={
+                    savingMessageId === `save-html-${index}`
+                      ? "Saving HTML..."
+                      : "Save as HTML file with professional styling"
+                  }
+                >
+                  {savingMessageId === `save-html-${index}` ? (
+                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Code size={14} />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 w-7 p-0 transition-all duration-150 relative",
+                    savingMessageId === `save-markdown-${index}`
+                      ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
+                      : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
+                  )}
+                  onClick={() =>
+                    handleSaveResponse(msg.content, "markdown", index)
+                  }
+                  disabled={savingMessageId === `save-markdown-${index}`}
+                  title={
+                    savingMessageId === `save-markdown-${index}`
+                      ? "Saving Markdown..."
+                      : "Save as Markdown file for documentation"
+                  }
+                >
+                  {savingMessageId === `save-markdown-${index}` ? (
+                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <FileText size={14} />
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+      </AIMessageContent>
+      <AIMessageAvatar src={avatarSrc} name={avatarName} />
+    </AIMessage>
+  );
 }
 
 function App() {
@@ -1431,6 +1636,7 @@ function App() {
     );
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isSystemTool = (toolName: string): boolean => {
     return (
       toolName.includes("mouse") ||
@@ -1442,6 +1648,7 @@ function App() {
     );
   };
 
+  // @ts-ignore - Function may be used in future implementations
   const isImportantTool = (toolName: string): boolean => {
     return (
       isScreenshotTool(toolName) ||
@@ -1451,6 +1658,7 @@ function App() {
     );
   };
 
+  // @ts-ignore - Function may be used in future implementations
   const getFriendlyToolName = (toolName: string): string => {
     // Convert snake_case tool names to user-friendly names
     const friendlyNames: { [key: string]: string } = {
@@ -2567,7 +2775,9 @@ function App() {
 
                         return (
                           <div
-                            key={`msg-${index}-${msg.timestamp || Date.now()}`}
+                            key={`msg-container-${index}-${
+                              msg.timestamp || Date.now()
+                            }`}
                           >
                             {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
                             {showTimestamp && msg.timestamp && (
@@ -2581,218 +2791,13 @@ function App() {
                               </div>
                             )}
 
-                            {/* Handle thinking messages with special component */}
-                            {msg.role === "thinking" ? (
-                              <div className="flex justify-start">
-                                <ThinkingMessage
-                                  content={msg.content}
-                                  timestamp={msg.timestamp}
-                                />
-                              </div>
-                            ) : msg.role === "tool_call_request" ? (
-                              <div className="flex justify-start">
-                                <ToolCallRequest
-                                  toolName={msg.tool_name || "unknown"}
-                                  toolArgs={msg.tool_args}
-                                  content={msg.content}
-                                  timestamp={msg.timestamp}
-                                />
-                              </div>
-                            ) : msg.role === "tool_call_result" ? (
-                              <div className="flex justify-start">
-                                <ToolCallResult
-                                  toolName={msg.tool_name || "unknown"}
-                                  toolOutput={msg.tool_output}
-                                  success={msg.success ?? true} // Default to true if not specified
-                                  content={msg.content}
-                                  screenshot_base64={msg.screenshot_base64}
-                                  timestamp={msg.timestamp}
-                                />
-                              </div>
-                            ) : (
-                              <div
-                                className={`mb-3 flex ${
-                                  msg.role === "user"
-                                    ? "justify-end"
-                                    : "justify-start"
-                                }`}
-                              >
-                                <div className="relative group max-w-[85%]">
-                                  <span
-                                    className={cn(
-                                      "inline-block w-full px-3 py-1.5 rounded-lg shadow-sm",
-                                      msg.role === "user"
-                                        ? "bg-primary text-primary-foreground"
-                                        : msg.role === "assistant"
-                                        ? "bg-muted"
-                                        : msg.role === "system" &&
-                                          msg.screenshot_base64
-                                        ? "bg-muted/80 border border-primary/20 p-2"
-                                        : "bg-secondary text-secondary-foreground text-xs italic opacity-80" // Default system
-                                    )}
-                                  >
-                                    {msg.role === "assistant" &&
-                                    (!msg.content ||
-                                      msg.content.trim() === "") ? (
-                                      <span className="text-muted-foreground italic flex items-center gap-2">
-                                        <span>✓</span>
-                                        <span>Task completed successfully</span>
-                                      </span>
-                                    ) : msg.isJsx ||
-                                      (msg.role === "assistant" &&
-                                        !msg.isStreaming &&
-                                        isJsxContent(msg.content)) ? (
-                                      <JsxMessageRenderer jsx={msg.content} />
-                                    ) : (
-                                      msg.content
-                                    )}
-                                    {msg.screenshot_base64 && (
-                                      <div
-                                        className={cn(
-                                          "mt-2",
-                                          msg.role !== "system" &&
-                                            "border-t pt-2"
-                                        )}
-                                      >
-                                        <div className="text-xs text-muted-foreground mb-1">
-                                          {msg.role === "system"
-                                            ? "Screenshot captured by AI:"
-                                            : "Screenshot:"}
-                                        </div>
-                                        <div className="relative">
-                                          <img
-                                            src={`data:image/png;base64,${msg.screenshot_base64}`}
-                                            alt="Screenshot"
-                                            className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-                                          />
-                                          <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-                                        </div>
-                                      </div>
-                                    )}
-                                    {/* Show typing indicator for streaming messages */}
-                                    {msg.isStreaming && (
-                                      <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
-                                        |
-                                      </span>
-                                    )}
-                                  </span>
-
-                                  {/* Action buttons for assistant messages with content - positioned at bottom */}
-                                  {msg.role === "assistant" &&
-                                    msg.content &&
-                                    msg.content.trim() !== "" &&
-                                    !msg.isStreaming && (
-                                      <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
-                                        <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className={cn(
-                                              "h-7 w-7 p-0 transition-all duration-150 relative",
-                                              copyingMessageId ===
-                                                `copy-${index}`
-                                                ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
-                                                : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
-                                            )}
-                                            onClick={() =>
-                                              handleCopyResponse(
-                                                msg.content,
-                                                index
-                                              )
-                                            }
-                                            disabled={
-                                              copyingMessageId ===
-                                              `copy-${index}`
-                                            }
-                                            title={
-                                              copyingMessageId ===
-                                              `copy-${index}`
-                                                ? "Copying..."
-                                                : "Copy response to clipboard"
-                                            }
-                                          >
-                                            {copyingMessageId ===
-                                            `copy-${index}` ? (
-                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                            ) : (
-                                              <Copy size={14} />
-                                            )}
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className={cn(
-                                              "h-7 w-7 p-0 transition-all duration-150 relative",
-                                              savingMessageId ===
-                                                `save-html-${index}`
-                                                ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
-                                                : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
-                                            )}
-                                            onClick={() =>
-                                              handleSaveResponse(
-                                                msg.content,
-                                                "html",
-                                                index
-                                              )
-                                            }
-                                            disabled={
-                                              savingMessageId ===
-                                              `save-html-${index}`
-                                            }
-                                            title={
-                                              savingMessageId ===
-                                              `save-html-${index}`
-                                                ? "Saving HTML..."
-                                                : "Save as HTML file with professional styling"
-                                            }
-                                          >
-                                            {savingMessageId ===
-                                            `save-html-${index}` ? (
-                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                            ) : (
-                                              <Code size={14} />
-                                            )}
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className={cn(
-                                              "h-7 w-7 p-0 transition-all duration-150 relative",
-                                              savingMessageId ===
-                                                `save-markdown-${index}`
-                                                ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
-                                                : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
-                                            )}
-                                            onClick={() =>
-                                              handleSaveResponse(
-                                                msg.content,
-                                                "markdown",
-                                                index
-                                              )
-                                            }
-                                            disabled={
-                                              savingMessageId ===
-                                              `save-markdown-${index}`
-                                            }
-                                            title={
-                                              savingMessageId ===
-                                              `save-markdown-${index}`
-                                                ? "Saving Markdown..."
-                                                : "Save as Markdown file for documentation"
-                                            }
-                                          >
-                                            {savingMessageId ===
-                                            `save-markdown-${index}` ? (
-                                              <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                            ) : (
-                                              <FileText size={14} />
-                                            )}
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    )}
-                                </div>
-                              </div>
+                            {renderChatMessage(
+                              msg,
+                              index,
+                              copyingMessageId,
+                              savingMessageId,
+                              handleCopyResponse,
+                              handleSaveResponse
                             )}
                           </div>
                         );
@@ -2802,49 +2807,52 @@ function App() {
                   </ScrollArea>
 
                   {/* Input Form */}
-                  <form
-                    onSubmit={handleSubmit}
-                    className="flex gap-2 flex-shrink-0 mt-auto"
-                  >
-                    <Input
-                      type="text"
+                  <AIInput onSubmit={handleSubmit}>
+                    <AIInputTextarea
+                      name="message"
                       placeholder={
-                        isProcessing ? "Processing..." : "Enter your query..."
+                        isProcessing
+                          ? "Processing..."
+                          : "What would you like to know?"
                       }
                       value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      disabled={isProcessing || serverStatus !== "connected"}
-                      className="flex-grow"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={startNewChat}
-                      disabled={isProcessing}
-                      title="Start new agent chat"
-                    >
-                      <Plus size={18} />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={clearConversation}
-                      disabled={isProcessing}
-                      title="Clear conversation history"
-                    >
-                      <Trash2 size={18} />
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={
-                        isProcessing ||
-                        serverStatus !== "connected" ||
-                        !query.trim()
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                        setQuery(e.target.value)
                       }
-                    >
-                      <Send size={18} />
-                    </Button>
-                  </form>
+                      disabled={isProcessing || serverStatus !== "connected"}
+                      minHeight={48}
+                      maxHeight={164}
+                    />
+                    <AIInputToolbar>
+                      <AIInputTools>
+                        <AIInputButton
+                          onClick={startNewChat}
+                          disabled={isProcessing}
+                          title="Start new agent chat"
+                        >
+                          <Plus size={18} />
+                          New Chat
+                        </AIInputButton>
+                        <AIInputButton
+                          onClick={clearConversation}
+                          disabled={isProcessing}
+                          title="Clear conversation history"
+                        >
+                          <Trash2 size={18} />
+                          Clear
+                        </AIInputButton>
+                      </AIInputTools>
+                      <AIInputSubmit
+                        disabled={
+                          isProcessing ||
+                          serverStatus !== "connected" ||
+                          !query.trim()
+                        }
+                      >
+                        <Send size={18} />
+                      </AIInputSubmit>
+                    </AIInputToolbar>
+                  </AIInput>
                 </div>
               </ResizablePanel>
 
