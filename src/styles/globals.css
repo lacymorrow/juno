@@ -314,3 +314,129 @@
     padding: 8px 12px;
   }
 }
+
+/* Enhanced Glass Panel Effects */
+.glass-panel {
+  background: rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 8px 32px 0 rgba(0, 0, 0, 0.37),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.glass-panel-dark {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 12px 40px 0 rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Smooth dragging animations */
+.draggable-panel {
+  will-change: transform, opacity;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.draggable-panel.dragging {
+  transition: none;
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.draggable-panel:hover {
+  cursor: grab;
+}
+
+.draggable-panel:active {
+  cursor: grabbing;
+}
+
+/* Audio level animations */
+@keyframes audioLevel {
+  0%, 100% { height: 4px; opacity: 0.3; }
+  50% { height: 12px; opacity: 1; }
+}
+
+.audio-bar {
+  animation: audioLevel 0.6s ease-in-out infinite;
+}
+
+.audio-bar:nth-child(2) { animation-delay: 0.1s; }
+.audio-bar:nth-child(3) { animation-delay: 0.2s; }
+.audio-bar:nth-child(4) { animation-delay: 0.3s; }
+.audio-bar:nth-child(5) { animation-delay: 0.4s; }
+
+/* Pulse effect for active states */
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+
+.status-pulse {
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+/* Subtle glow effects */
+.panel-glow-blue {
+  box-shadow:
+    0 0 20px rgba(59, 130, 246, 0.15),
+    0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.panel-glow-orange {
+  box-shadow:
+    0 0 20px rgba(249, 115, 22, 0.15),
+    0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.panel-glow-purple {
+  box-shadow:
+    0 0 20px rgba(147, 51, 234, 0.15),
+    0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+/* Hover effects for compact mode */
+.glass-panel-dark:hover {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transform: scale(1.02);
+}
+
+/* Smooth transitions for mode changes */
+.panel-transition {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.panel-transition-fast {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Hide scrollbars but keep functionality */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
