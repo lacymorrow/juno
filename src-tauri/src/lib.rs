@@ -886,6 +886,9 @@ pub fn run() {
             // Settings Window Commands
             commands::open_settings_window,
             commands::close_settings_window,
+            // Onboarding Window Commands
+            commands::open_onboarding_window,
+            commands::close_onboarding_window,
             // Onboarding Commands
             commands::core::store_first_prompt,
             commands::core::get_first_onboarding_prompt,

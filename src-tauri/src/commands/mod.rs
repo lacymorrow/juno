@@ -144,3 +144,58 @@ pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Open the native onboarding window
+#[tauri::command]
+pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    // Check if onboarding window already exists
+    if let Some(onboarding_window) = app.get_webview_window("onboarding") {
+        // If it exists, just show and focus it
+        onboarding_window.show().map_err(|e| e.to_string())?;
+        onboarding_window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Create new onboarding window if it doesn't exist
+    let onboarding_window = WebviewWindowBuilder::new(
+        &app,
+        "onboarding",
+        WebviewUrl::App("/onboarding".into()),
+    )
+    .title("Welcome to Juno")
+    .inner_size(900.0, 700.0)
+    .min_inner_size(800.0, 600.0)
+    .resizable(true)
+    .center()
+    .visible(false) // Start hidden, show after setup
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    // Apply macOS-specific styling
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::TitleBarStyle;
+
+        // Set transparent title bar for native look
+        if let Err(e) = onboarding_window.set_title_bar_style(TitleBarStyle::Transparent) {
+            warn!("Failed to set title bar style for onboarding window: {}", e);
+        }
+    }
+
+    // Show the window
+    onboarding_window.show().map_err(|e| e.to_string())?;
+    onboarding_window.set_focus().map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Close the native onboarding window
+#[tauri::command]
+pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
+    if let Some(onboarding_window) = app.get_webview_window("onboarding") {
+        onboarding_window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
