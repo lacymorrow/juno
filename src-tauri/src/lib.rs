@@ -26,7 +26,7 @@ use std::sync::Mutex; // Added for VoiceController state access
 use {
     cocoa::{
         appkit::{NSWindow, NSWindowCollectionBehavior},
-        base::{id as cocoa_id, nil, NO, BOOL},
+        base::{id as cocoa_id, nil, NO, YES, BOOL},
         foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
@@ -1501,11 +1501,11 @@ pub fn run() {
                                     NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
                                 );
 
-                                // Always ensure mouse events are enabled for visible window
-                                // This fixes the issue where first click doesn't work after app load
+                                // Enable mouse events for floating bar only when it needs them
+                                // This fixes the issue where floating bar interferes with main window clicks
                                 #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
                                 let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-                                info!("macOS Setup: Floating bar mouse events enabled.");
+                                info!("macOS Setup: Floating bar mouse events configured.");
 
                                 info!("macOS standard styling applied to floating-bar.");
                             }
@@ -1517,7 +1517,7 @@ pub fn run() {
                      // --- Setup Mouse Tracking ---
                     macos_tracking::setup_tracking_area(&window, app_handle.clone());
 
-                    // --- Ensure window is properly activated after setup ---
+                    // --- Ensure floating bar window is properly activated after setup ---
                     let window_clone = window.clone();
                     tauri::async_runtime::spawn(async move {
                         // Small delay to ensure window setup is complete
@@ -1540,6 +1540,58 @@ pub fn run() {
 
                 } else {
                     eprintln!("Warning: floating-bar window not found during macOS specific setup.");
+                }
+
+                // --- Fix Main Window Focus Issue ---
+                // This is the key fix: ensure the main window is properly activated and can receive clicks
+                if let Some(main_window) = app_handle.get_webview_window(constants::window_labels::MAIN) {
+                    info!("Setting up main window for proper focus handling.");
+
+                    // Apply macOS-specific fixes for the main window
+                    match main_window.ns_window() {
+                        Ok(ns_window_ptr) => {
+                            let ns_window = ns_window_ptr as cocoa_id;
+                            unsafe {
+                                // Ensure main window can receive mouse events
+                                #[allow(unexpected_cfgs)]
+                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
+
+                                // Make sure the window accepts first responder status
+                                #[allow(unexpected_cfgs)]
+                                let _: BOOL = msg_send![ns_window, setAcceptsMouseMovedEvents: YES];
+
+                                info!("macOS Setup: Main window mouse events enabled.");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting NSWindow for main window setup: {}", e);
+                        }
+                    }
+
+                    // Activate the main window after a short delay to ensure it receives focus
+                    let main_window_clone = main_window.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // Longer delay to ensure all window setup is complete
+                        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+                        // Ensure main window is visible and focused
+                        if let Err(e) = main_window_clone.show() {
+                            warn!("Failed to show main window: {}", e);
+                        }
+
+                        if let Err(e) = main_window_clone.set_focus() {
+                            warn!("Failed to set focus on main window: {}", e);
+                        } else {
+                            info!("Main window focus set successfully - clicks should now work immediately");
+                        }
+
+                        // Unminimize if needed
+                        if let Err(e) = main_window_clone.unminimize() {
+                            warn!("Failed to unminimize main window: {}", e);
+                        }
+                    });
+                } else {
+                    eprintln!("Warning: main window not found during macOS specific setup.");
                 }
             }
             // --- End macOS Specific Setup ---
