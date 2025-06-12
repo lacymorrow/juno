@@ -1,7 +1,6 @@
 import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator"; // Import the AgentExecutionProgressIndicator component
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
-import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
 import { ThinkingMessage } from "@/components/ThinkingMessage";
 import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
@@ -162,7 +161,7 @@ interface AgentEventTauri {
 // --- End Agent Event Types ---
 
 // Type for view state
-type AppView = "chat" | "devtools" | "permissions" | "onboarding";
+type AppView = "chat" | "devtools" | "permissions";
 
 // New modal types for enhanced functionality
 type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
@@ -526,7 +525,6 @@ function App() {
           console.log(
             "Agent execution detected - skipping onboarding and going to chat"
           );
-          setOnboardingChecked(true);
           setPermissionsChecked(true);
           setCurrentView("chat");
           return;
@@ -542,7 +540,7 @@ function App() {
 
         setPermissionsChecked(true);
 
-        // Store permissions result for OnboardingFlow
+        // Store permissions result for onboarding window
         setPermissionsGranted(permissionsResult.allGranted);
 
         // Then check onboarding status
@@ -553,17 +551,17 @@ function App() {
 
         // Decision logic for which flow to show
         if (isDevMode) {
-          // Dev mode: Always show onboarding for QA, but skip permissions if already granted
-          console.log("Dev mode detected - showing onboarding for QA");
-          setShowOnboarding(true);
-          setCurrentView("onboarding");
+          // Dev mode: Always show onboarding for QA
+          console.log("Dev mode detected - opening onboarding window for QA");
+          await invoke("open_onboarding_window");
+          setCurrentView("chat");
         } else if (!hasCompletedOnboarding) {
-          // First-time user: Show onboarding (which includes permissions check)
+          // First-time user: Show onboarding window
           console.log(
-            "First-time user detected - showing full onboarding flow"
+            "First-time user detected - opening onboarding window"
           );
-          setShowOnboarding(true);
-          setCurrentView("onboarding");
+          await invoke("open_onboarding_window");
+          setCurrentView("chat");
         } else if (!permissionsResult.allGranted) {
           // Returning user with missing permissions: Show standalone permissions
           console.log(
@@ -578,12 +576,9 @@ function App() {
           );
           setCurrentView("chat");
         }
-
-        setOnboardingChecked(true);
       } catch (error) {
         console.error("Error during app initialization:", error);
         setPermissionsChecked(true);
-        setOnboardingChecked(true);
 
         // Fallback: show permissions flow on error
         setShowPermissionsFlow(true);
@@ -770,60 +765,42 @@ function App() {
     setIsProcessing(false);
   }, [setConversation, setIsProcessing]);
 
-  // Handle onboarding completion
-  const handleOnboardingComplete = useCallback(async () => {
-    try {
-      // Mark onboarding as completed
-      localStorage.setItem("juno-onboarding-completed", "true");
-      setShowOnboarding(false);
+  // Listen for onboarding completion events from the onboarding window
+  useEffect(() => {
+    const unlistenComplete = listen<{ prompt?: string }>("onboarding-complete", async (event) => {
+      console.log("Onboarding completed from separate window");
+      // Focus main window
+      const currentWindow = getCurrentWindow();
+      await currentWindow.show();
+      await currentWindow.setFocus();
+    });
 
-      // Check if an agent is already executing
-      try {
-        const agentProgress = await invoke<{
-          is_executing: boolean;
-          execution_id?: string;
-        }>("get_agent_execution_progress");
-
-        if (agentProgress.is_executing) {
-          // Agent is already running - just switch to chat view
-          console.log("Agent already executing - switching to chat view");
-          setCurrentView("chat");
-          return;
-        }
-      } catch (error) {
-        console.debug(
-          "Error checking agent execution state during onboarding completion:",
-          error
-        );
+    const unlistenCompleteWithPrompt = listen<{ prompt: string }>("onboarding-complete-with-prompt", async (event) => {
+      console.log("Onboarding completed with prompt from separate window:", event.payload.prompt);
+      // Submit the first prompt
+      if (event.payload.prompt && event.payload.prompt.trim()) {
+        await submitQuery(event.payload.prompt);
       }
+      // Focus main window
+      const currentWindow = getCurrentWindow();
+      await currentWindow.show();
+      await currentWindow.setFocus();
+    });
 
-      // Get the stored first prompt if any
-      try {
-        const firstPrompt = await invoke<string>("get_first_onboarding_prompt");
-        if (firstPrompt && firstPrompt.trim()) {
-          // Submit the first prompt automatically
-          await submitQuery(firstPrompt);
-        }
-      } catch (error) {
-        console.log("No first prompt stored or error retrieving it:", error);
-      }
+    const unlistenSkipped = listen<{}>("onboarding-skipped", async (event) => {
+      console.log("Onboarding skipped from separate window");
+      // Focus main window
+      const currentWindow = getCurrentWindow();
+      await currentWindow.show();
+      await currentWindow.setFocus();
+    });
 
-      // Return to chat view
-      setCurrentView("chat");
-    } catch (error) {
-      console.error("Error completing onboarding:", error);
-      // Still proceed to chat view
-      setCurrentView("chat");
-    }
+    return () => {
+      unlistenComplete.then((fn) => fn());
+      unlistenCompleteWithPrompt.then((fn) => fn());
+      unlistenSkipped.then((fn) => fn());
+    };
   }, [submitQuery]);
-
-  // Handle onboarding skip
-  const handleOnboardingSkip = useCallback(() => {
-    // Mark onboarding as completed even if skipped
-    localStorage.setItem("juno-onboarding-completed", "true");
-    setShowOnboarding(false);
-    setCurrentView("chat");
-  }, []);
 
   // Listen for settings menu requests from native menu
   useEffect(() => {
@@ -2728,10 +2705,9 @@ function App() {
             )}
 
             <div className="flex items-center gap-1">
-              {/* Back Button - show for devtools, permissions and onboarding views */}
+              {/* Back Button - show for devtools, permissions views */}
               {(currentView === "devtools" ||
-                currentView === "permissions" ||
-                currentView === "onboarding") && (
+                currentView === "permissions") && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -2785,16 +2761,6 @@ function App() {
                   }}
                   showSkipOption={true}
                   className="max-w-4xl mx-auto"
-                />
-              </ScrollArea>
-            </div>
-          ) : currentView === "onboarding" ? (
-            <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full p-2">
-                <OnboardingFlow
-                  onComplete={handleOnboardingComplete}
-                  onSkip={handleOnboardingSkip}
-                  permissionsAlreadyGranted={permissionsGranted}
                 />
               </ScrollArea>
             </div>
