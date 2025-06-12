@@ -32,6 +32,23 @@
         "shadow": false
       },
       {
+        "label": "onboarding",
+        "title": "Welcome to Juno",
+        "url": "/onboarding",
+        "width": 900,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 600,
+        "hiddenTitle": false,
+        "resizable": true,
+        "visible": false,
+        "center": true,
+        "skipTaskbar": false,
+        "shadow": true,
+        "transparent": false,
+        "alwaysOnTop": false
+      },
+      {
         "label": "settings",
         "title": "Juno Settings",
         "url": "/settings",
