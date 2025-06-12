@@ -32,6 +32,7 @@ pub mod mcp;
 pub mod memory;
 pub mod always_listening;
 pub mod notifications;
+pub mod stop_operations;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
@@ -52,6 +53,7 @@ pub use self::cloud::*;
 pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::always_listening::*;
+pub use self::stop_operations::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{
