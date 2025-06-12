@@ -1,10 +1,8 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
-use tauri::State;
-use tracing::info;
+use tauri::{AppHandle, WebviewWindow, Wry, State, Emitter, Manager};
+use tracing::{info, warn, error};
 use crate::state::AppState;
-use tauri::{AppHandle, WebviewWindow, Wry};
-use tracing::{warn, error};
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use std::collections::HashMap;
@@ -12,7 +10,6 @@ use std::fs;
 use crate::cloud::CloudClient;
 use crate::anthropic::submit_query;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager}; // Add missing imports for emit and try_state methods
 use crate::voice_control::types::VoiceController;
 
 #[cfg(target_os = "macos")]
@@ -430,7 +427,7 @@ pub async fn stop_all_agent_processes(
     // 2. Stop TTS
     info!("[StopAll] Stopping TTS");
     crate::tts::stop_speech();
-    
+
     // Emit TTS stop event for frontend audio cleanup
     if let Err(e) = app.emit("tts-stop-requested", ()) {
         warn!("[StopAll] Failed to emit TTS stop event: {}", e);
@@ -450,7 +447,7 @@ pub async fn stop_all_agent_processes(
 
     // 4. Emit events to stop streaming and other frontend processes
     info!("[StopAll] Emitting stop events");
-    
+
     if let Err(e) = app.emit("agent-stop-all", ()) {
         warn!("[StopAll] Failed to emit agent-stop-all event: {}", e);
     }
