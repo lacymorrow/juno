@@ -1338,6 +1338,20 @@ function App() {
     const unlisten = listen("tts-stop-requested", async () => {
       console.log("TTS stop requested event received - stopping TTS immediately");
       try {
+        // Immediately stop any currently playing audio
+        if (currentAudio) {
+          console.log("Stopping current audio element immediately");
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
+            URL.revokeObjectURL(currentAudio.src);
+          }
+          currentAudio.src = ""; // Clear the source
+          setCurrentAudio(null);
+          setCurrentAudioElement(null);
+        }
+        
+        // Also call the TTS service stop function
         await stopTTS((msg, level) =>
           console.log(`[TTS-${level || "info"}] ${msg}`)
         );
@@ -1349,7 +1363,43 @@ function App() {
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, []);
+  }, []); // Remove currentAudio dependency to avoid re-registering
+
+  // Direct frontend escape key listener as backup for immediate TTS stopping
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        console.log("Frontend escape key detected - stopping TTS audio immediately");
+        // Immediately stop any currently playing audio
+        if (currentAudio) {
+          console.log("Frontend: Stopping current audio element");
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
+            URL.revokeObjectURL(currentAudio.src);
+          }
+          currentAudio.src = "";
+          setCurrentAudio(null);
+          setCurrentAudioElement(null);
+        }
+        
+        // Also call the TTS service stop function
+        stopTTS((msg, level) =>
+          console.log(`[Frontend TTS Stop-${level || "info"}] ${msg}`)
+        ).catch((error) => {
+          console.error("Frontend: Error stopping TTS:", error);
+        });
+      }
+    };
+
+    // Add the event listener
+    document.addEventListener("keydown", handleKeyDown);
+
+    // Cleanup
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [currentAudio]); // Include currentAudio so we have the latest reference
 
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
