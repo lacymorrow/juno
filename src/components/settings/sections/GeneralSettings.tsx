@@ -156,6 +156,41 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Agent Trigger Mode</CardTitle>
+            <CardDescription>
+              Choose how to activate the AI agent with the shortcut key
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <Label htmlFor="agent-trigger-mode">Trigger Mode</Label>
+              <Select
+                value={settings.agentTriggerMode}
+                onValueChange={settings.handleAgentTriggerModeChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select trigger mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tap">
+                    Tap to Toggle (Default)
+                  </SelectItem>
+                  <SelectItem value="hold">
+                    Hold to Activate
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                <strong>Tap to Toggle:</strong> Press and release to toggle agent mode on/off.
+                <br />
+                <strong>Hold to Activate:</strong> Hold key to activate agent, release to stop (like dictation mode).
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

@@ -44,6 +44,7 @@ pub mod agent;
 pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
 pub mod dictation_monitor; // Module for intelligent dictation input handling
+pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod cloud; // Cloud connectivity and remote control
 pub mod voice_control;
 
@@ -618,12 +619,49 @@ pub fn run() {
 
             // Handle dictation toggle shortcut (Option+D / Alt+D)
             if let Some(ref toggle_shortcut) = dictation_toggle_shortcut {
-                if shortcut == toggle_shortcut && event.state() == ShortcutState::Pressed {
-                    info!("[GlobalShortcut] Dictation toggle shortcut ({:?}) pressed.", shortcut);
-                    // Emit an event for the frontend to handle
-                    if let Err(e) = app.emit("toggle-dictation-request", ()) {
-                        tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
-                    }
+                if shortcut == toggle_shortcut {
+                    info!("[GlobalShortcut] Agent toggle shortcut ({:?}) triggered with state {:?}.", shortcut, event.state());
+
+                    // Check if agent should handle this key event based on trigger mode
+                    let app_clone = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let key_state = match event.state() {
+                            ShortcutState::Pressed => "pressed",
+                            ShortcutState::Released => "released",
+                        };
+
+                        let should_handle = crate::agent_monitor::should_handle_agent_key(&app_clone, key_state).await;
+
+                        if should_handle {
+                            // Get the current agent trigger mode
+                            let app_state = app_clone.state::<crate::state::AppState>();
+                            let trigger_mode = app_state.agent_trigger_mode.lock()
+                                .map(|mode| mode.clone())
+                                .unwrap_or(crate::state::AgentTriggerMode::Tap);
+
+                            match trigger_mode {
+                                crate::state::AgentTriggerMode::Tap => {
+                                    // Original tap behavior - emit toggle request on release
+                                    if event.state() == ShortcutState::Released {
+                                        info!("[GlobalShortcut] Agent tap mode - emitting toggle request");
+                                        if let Err(e) = app_clone.emit("toggle-dictation-request", ()) {
+                                            tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
+                                        }
+                                    }
+                                },
+                                crate::state::AgentTriggerMode::Hold => {
+                                    // New hold behavior - handle press and release
+                                    if event.state() == ShortcutState::Pressed {
+                                        info!("[GlobalShortcut] Hold mode - calling on_agent_input_pressed");
+                                        crate::agent_monitor::on_agent_input_pressed().await;
+                                    } else if event.state() == ShortcutState::Released {
+                                        info!("[GlobalShortcut] Hold mode - calling on_agent_input_released");
+                                        crate::agent_monitor::on_agent_input_released(&app_clone).await;
+                                    }
+                                }
+                            }
+                        }
+                    });
                 }
             }
 
@@ -738,6 +776,9 @@ pub fn run() {
             update_provider_system_prompt,
             get_agent_mode,
             set_agent_mode,
+            // Agent Trigger Mode Commands
+            get_agent_trigger_mode,
+            set_agent_trigger_mode,
             // Dictation Settings Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
@@ -1657,17 +1698,20 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let state = app_handle_shortcuts.state::<state::AppState>();
 
-                // Load keyboard shortcuts from configuration store
-                if let Err(e) = commands::shortcuts::load_shortcuts_from_store(&app_handle_shortcuts, &state).await {
-                    warn!("[GlobalShortcut] Failed to load shortcuts from file: {}", e);
+                // Load keyboard shortcuts from persistent storage
+                if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&app_handle_shortcuts, &state).await {
+                    tracing::warn!("Failed to load keyboard shortcuts: {} - using defaults", e);
                 }
 
-                // Register keyboard shortcuts based on current configuration
-                if let Err(e) = commands::shortcuts::update_global_shortcuts(&app_handle_shortcuts, &state).await {
-                    error!("[GlobalShortcut] Failed to register shortcuts: {}", e);
+                // Load agent trigger mode from persistent storage
+                if let Err(e) = crate::commands::core::load_agent_trigger_mode_from_store(&app_handle_shortcuts, &state).await {
+                    tracing::warn!("Failed to load agent trigger mode: {} - using defaults", e);
                 }
 
-                info!("[GlobalShortcut] Keyboard shortcuts initialized from configuration");
+                // Register global shortcuts after loading configuration
+                if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(&app_handle_shortcuts, &state).await {
+                    tracing::warn!("Failed to register global shortcuts: {} - continuing without shortcuts", e);
+                }
 
                 // Initialize dictation input monitoring system
                 if let Err(e) = crate::dictation_monitor::init_dictation_input_monitoring(app_handle_shortcuts.clone()).await {
@@ -1675,6 +1719,11 @@ pub fn run() {
                 } else {
                     info!("[Setup] Dictation input monitoring system initialized successfully");
                 }
+
+                // Start agent monitor task for hold behavior (after app is fully running)
+                let app_handle_for_agent_monitor = app_handle_shortcuts.clone();
+                let _agent_monitor_handle = crate::agent_monitor::start_agent_monitor_task(app_handle_for_agent_monitor);
+                info!("[Setup] Agent monitor task started successfully");
             });
 
             // Listen for dictation started events from the plugin
@@ -2325,6 +2374,144 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 commands::autostart::init_autostart(&app_handle_for_autostart);
                 tracing::info!("[Setup] Autostart configuration initialized successfully");
+            });
+
+            // Always listening mode is handled by the plugin and commands
+            // No additional monitoring task needed here
+
+            // Agent monitor task will be started after app is fully running
+
+            // === AGENT HOLD MODE EVENT LISTENERS ===
+
+            // Listen for agent transcription start events (hold mode)
+            let app_handle_for_agent_start = app.handle().clone();
+            app.listen("agent-transcription-start", move |_event| {
+                info!("[Event] Received agent-transcription-start event - starting agent mode via hold");
+
+                let app_handle_clone = app_handle_for_agent_start.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Start agent mode using voice transcription
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::start_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(()) => {
+                                    info!("[Agent Mode] Started agent transcription successfully");
+
+                                    if let Err(e) = app_handle_clone.emit("agent-active", true) {
+                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("[Agent Mode] Failed to start agent transcription: {}", e);
+
+                                    // Reset agent input monitor state on failure
+                                    crate::agent_monitor::force_reset_agent_input_state().await;
+
+                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                        tracing::error!("[Agent Mode] Failed to emit agent-active event after failure: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
+
+                            // Reset agent input monitor state
+                            crate::agent_monitor::force_reset_agent_input_state().await;
+
+                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                            }
+                        }
+                    }
+                });
+            });
+
+            // Listen for voice transcription final results specifically for Dictation Mode
+            let app_handle_for_dictation_result = app.handle().clone();
+            app.listen("voice-transcription:final-result", move |event| {
+                // Check if we're in Dictation Mode and handle immediate typing
+                let app_handle_clone = app_handle_for_dictation_result.clone();
+                tauri::async_runtime::spawn(async move {
+                    let app_state = app_handle_clone.state::<state::AppState>();
+
+                    // Check if Dictation Mode is active
+                    let is_dictation_active = app_state.dictation_active.lock()
+                        .map(|active| *active)
+                        .unwrap_or(false);
+
+                    if is_dictation_active {
+                        info!("[Dictation Mode] Processing final result for immediate typing");
+
+                        // Parse the transcription result
+                        let payload_str = event.payload();
+                        match serde_json::from_str::<serde_json::Value>(payload_str) {
+                            Ok(payload_json) => {
+                                if let Some(text_value) = payload_json.get("text") {
+                                    if let Some(text) = text_value.as_str() {
+                                        // Only type if the text is not empty and not just whitespace
+                                        let trimmed_text = text.trim();
+                                        if !trimmed_text.is_empty() {
+                                            // Check if clipboard saving is enabled
+                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
+                                                .map(|enabled| *enabled)
+                                                .unwrap_or(true); // Default to true if lock fails
+
+                                            // Store to clipboard if enabled
+                                            if clipboard_enabled {
+                                                match crate::commands::core::dev_set_clipboard(
+                                                    trimmed_text.to_string(),
+                                                    app_state.clone()
+                                                ).await {
+                                                    Ok(()) => {
+                                                        info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
+                                                    }
+                                                }
+                                            } else {
+                                                info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
+                                            }
+
+                                            // Then type the transcribed text immediately using the computer use tools
+                                            match crate::commands::keyboard::global_type_text(
+                                                trimmed_text.to_string(),
+                                                app_handle_clone.clone(),
+                                                app_state.clone()
+                                            ).await {
+                                                Ok(()) => {
+                                                    info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
+                                                }
+                                            }
+                                        } else {
+                                            info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("[Dictation Mode] Failed to parse final-result payload: {}", e);
+                            }
+                        }
+
+                        // Reset Dictation Mode state after processing
+                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                            *dictation_active = false;
+                        }
+
+                        // Emit state change event for UI
+                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
+                        }
+                    }
+                });
             });
 
             Ok(())
