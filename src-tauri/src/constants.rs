@@ -49,6 +49,7 @@ pub mod events {
 pub mod window_labels {
     pub const MAIN: &str = "main";
     pub const FLOATING_BAR: &str = "floating-bar";
+    pub const ONBOARDING: &str = "onboarding";
 }
 
 pub mod tray_menu_ids {
@@ -294,10 +295,12 @@ mod tests {
     fn test_window_labels() {
         assert_eq!(window_labels::MAIN, "main");
         assert_eq!(window_labels::FLOATING_BAR, "floating-bar");
+        assert_eq!(window_labels::ONBOARDING, "onboarding");
 
         // Ensure labels are not empty
         assert!(!window_labels::MAIN.is_empty());
         assert!(!window_labels::FLOATING_BAR.is_empty());
+        assert!(!window_labels::ONBOARDING.is_empty());
     }
 
     #[test]
