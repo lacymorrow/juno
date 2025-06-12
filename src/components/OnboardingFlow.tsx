@@ -1,4 +1,3 @@
-import { ExamplePrompts } from "@/components/ExamplePrompts";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +11,6 @@ import {
 } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
-import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,14 +18,9 @@ import {
   CheckCircle,
   FileText,
   Globe,
-  Heart,
   Info,
   Keyboard,
-  MessageSquare,
   Mic,
-  Play,
-  Rocket,
-  Settings,
   Shield,
   Sparkles,
   Star,
@@ -42,13 +35,7 @@ interface OnboardingFlowProps {
   permissionsAlreadyGranted?: boolean;
 }
 
-type OnboardingStep =
-  | "welcome"
-  | "features"
-  | "permissions"
-  | "voice-setup"
-  | "examples"
-  | "completion";
+type OnboardingStep = "welcome" | "features" | "permissions" | "voice-setup";
 
 interface FeatureCard {
   icon: React.ComponentType<{ className?: string }>;
@@ -67,20 +54,12 @@ export function OnboardingFlow({
   const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(
     new Set()
   );
-  const [isProcessing, setIsProcessing] = useState(false);
   const [demoBarExpanded, setDemoBarExpanded] = useState(false);
 
   // Dynamically determine steps based on permissions state
   const steps: OnboardingStep[] = permissionsAlreadyGranted
-    ? ["welcome", "features", "voice-setup", "examples", "completion"] // Skip permissions step
-    : [
-        "welcome",
-        "features",
-        "permissions",
-        "voice-setup",
-        "examples",
-        "completion",
-      ]; // Include permissions step
+    ? ["welcome", "features", "voice-setup"] // Skip permissions step
+    : ["welcome", "features", "permissions", "voice-setup"]; // Include permissions step
 
   const currentStepIndex = steps.indexOf(currentStep);
   const progress = ((currentStepIndex + 1) / steps.length) * 100;
@@ -95,6 +74,9 @@ export function OnboardingFlow({
     const nextIndex = currentStepIndex + 1;
     if (nextIndex < steps.length) {
       setCurrentStep(steps[nextIndex]);
+    } else {
+      // Reached the end, complete onboarding
+      onComplete();
     }
   };
 
@@ -126,26 +108,6 @@ export function OnboardingFlow({
       setDemoBarExpanded(false);
     }
   }, [currentStep]);
-
-  // Handle example prompt selection
-  const handleExamplePromptSelect = async (prompt: string) => {
-    setIsProcessing(true);
-    try {
-      // Store the selected prompt for when they complete onboarding
-      await invoke("store_first_prompt", { prompt });
-      markStepCompleted("examples");
-      setTimeout(() => {
-        setCurrentStep("completion");
-        setIsProcessing(false);
-      }, 1000);
-    } catch (error) {
-      console.error("Error storing first prompt:", error);
-      setIsProcessing(false);
-      // Continue anyway
-      markStepCompleted("examples");
-      setCurrentStep("completion");
-    }
-  };
 
   // Feature cards data
   const featureCards: FeatureCard[] = [
@@ -557,124 +519,14 @@ export function OnboardingFlow({
         <Button variant="outline" onClick={prevStep}>
           <ArrowLeft className="w-4 h-4 mr-2" /> Back
         </Button>
-        <Button onClick={nextStep} size="lg">
-          Try Examples <ArrowRight className="w-4 h-4 ml-2" />
-        </Button>
-      </div>
-    </div>
-  );
-
-  const renderExamplesStep = () => (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div className="text-center space-y-4">
-        <div className="flex items-center justify-center">
-          <div className="p-4 rounded-full bg-green-100">
-            <Play className="w-8 h-8 text-green-600" />
-          </div>
-        </div>
-        <h2 className="text-2xl font-bold text-foreground">
-          Try Your First Task
-        </h2>
-        <p className="text-muted-foreground">
-          Select an example below to see Juno in action, or type your own
-          request
-        </p>
-      </div>
-
-      <ExamplePrompts onPromptSelect={handleExamplePromptSelect} />
-
-      {isProcessing && (
-        <div className="text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-100 text-blue-800">
-            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            Preparing your first task...
-          </div>
-        </div>
-      )}
-
-      <div className="flex gap-4 justify-center">
-        <Button variant="outline" onClick={prevStep}>
-          <ArrowLeft className="w-4 h-4 mr-2" /> Back
-        </Button>
         <Button
-          variant="secondary"
-          onClick={() => {
-            markStepCompleted("examples");
-            setCurrentStep("completion");
-          }}
+          onClick={nextStep}
+          size="lg"
+          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
         >
-          Skip Examples
+          Complete Setup <CheckCircle className="w-4 h-4 ml-2" />
         </Button>
       </div>
-    </div>
-  );
-
-  const renderCompletionStep = () => (
-    <div className="max-w-2xl mx-auto text-center space-y-8">
-      <div className="space-y-4">
-        <div className="flex items-center justify-center">
-          <div className="relative">
-            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center">
-              <Rocket className="w-10 h-10 text-white" />
-            </div>
-            <div className="absolute -top-2 -right-2 w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center">
-              <Heart className="w-4 h-4 text-red-600" />
-            </div>
-          </div>
-        </div>
-
-        <h1 className="text-3xl font-bold text-foreground">You're All Set!</h1>
-        <p className="text-lg text-muted-foreground">
-          Juno AI is ready to help you accomplish anything on your computer
-        </p>
-      </div>
-
-      <div className="grid gap-4">
-        <Card className="border-2 border-green-200 bg-green-50/50">
-          <CardContent className="p-6">
-            <h3 className="font-semibold text-green-900 mb-3">
-              Quick Tips to Get Started:
-            </h3>
-            <div className="text-left space-y-2">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">
-                  Start chatting once setup is complete
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Mic className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">
-                  Hold Fn key to dictate instead of typing
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Settings className="w-4 h-4 text-green-600" />
-                <span className="text-sm text-green-800">
-                  Access Settings anytime from the menu
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Alert>
-          <Sparkles className="h-4 w-4" />
-          <AlertDescription>
-            Remember: Juno works best when you're specific about what you want
-            to accomplish. Don't hesitate to describe exactly what you're trying
-            to do!
-          </AlertDescription>
-        </Alert>
-      </div>
-
-      <Button
-        onClick={onComplete}
-        size="lg"
-        className="px-8 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-      >
-        Start Using Juno <Sparkles className="w-4 h-4 ml-2" />
-      </Button>
     </div>
   );
 
@@ -701,8 +553,6 @@ export function OnboardingFlow({
           {currentStep === "features" && renderFeaturesStep()}
           {currentStep === "permissions" && renderPermissionsStep()}
           {currentStep === "voice-setup" && renderVoiceSetupStep()}
-          {currentStep === "examples" && renderExamplesStep()}
-          {currentStep === "completion" && renderCompletionStep()}
         </div>
 
         {/* Step indicators */}
