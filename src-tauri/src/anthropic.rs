@@ -1,8 +1,10 @@
 use log::{info, error, warn};
 use uuid;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{State, Manager, Emitter};
 
 use crate::agent::implementations::{
@@ -22,6 +24,16 @@ use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 
+// ✅ GOOD: Configuration-driven JSX element detection
+lazy_static::lazy_static! {
+    static ref JSX_UI_ELEMENTS: HashSet<&'static str> = {
+        [
+            "Card", "Alert", "Button", "Badge", "Circle", "Rectangle", 
+            "Triangle", "StatusCard", "ColorShowcase", "VisualDemo",
+            "className=", "jsx", "React"
+        ].iter().cloned().collect()
+    };
+}
 
 // --- Agent State ---
 
@@ -84,24 +96,15 @@ struct AnthropicResponse {
 
 // --- Helper Functions ---
 
-/// Simple JSX content detection
+/// Simple JSX content detection using configuration-driven approach
 fn is_jsx_content(content: &str) -> bool {
     // Check for common JSX patterns
-    content.contains("<") && content.contains(">") && (
-        content.contains("Card") ||
-        content.contains("Alert") ||
-        content.contains("Button") ||
-        content.contains("Badge") ||
-        content.contains("Circle") ||
-        content.contains("Rectangle") ||
-        content.contains("Triangle") ||
-        content.contains("StatusCard") ||
-        content.contains("ColorShowcase") ||
-        content.contains("VisualDemo") ||
-        content.contains("className=") ||
-        content.contains("jsx") ||
-        content.contains("React")
-    )
+    if !content.contains("<") || !content.contains(">") {
+        return false;
+    }
+    
+    // Use HashSet for efficient element detection
+    JSX_UI_ELEMENTS.iter().any(|&element| content.contains(element))
 }
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---

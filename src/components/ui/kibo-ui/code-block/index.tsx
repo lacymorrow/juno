@@ -378,6 +378,19 @@ export const CodeBlockFiles = ({
   );
 };
 
+// ✅ GOOD: Configuration-driven regex escaping
+const REGEX_ESCAPE_RULES = [
+  { pattern: /\\/g, replacement: "\\\\" },
+  { pattern: /\./g, replacement: "\\." },
+  { pattern: /\*/g, replacement: ".*" }
+] as const;
+
+function escapePatternForRegex(pattern: string): string {
+  return REGEX_ESCAPE_RULES.reduce((result, rule) => {
+    return result.replace(rule.pattern, rule.replacement);
+  }, pattern);
+}
+
 export type CodeBlockFilenameProps = HTMLAttributes<HTMLDivElement> & {
   icon?: IconType;
   value?: string;
@@ -392,12 +405,8 @@ export const CodeBlockFilename = ({
 }: CodeBlockFilenameProps) => {
   const { value: activeValue } = useContext(CodeBlockContext);
   const defaultIcon = Object.entries(filenameIconMap).find(([pattern]) => {
-    const regex = new RegExp(
-      `^${pattern
-        .replace(/\\/g, "\\\\")
-        .replace(/\./g, "\\.")
-        .replace(/\*/g, ".*")}$`
-    );
+    const escapedPattern = escapePatternForRegex(pattern);
+    const regex = new RegExp(`^${escapedPattern}$`);
     return regex.test(children as string);
   })?.[1];
   const Icon = icon ?? defaultIcon;

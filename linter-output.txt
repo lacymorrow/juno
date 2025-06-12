@@ -1,0 +1,152 @@
+
+> Juno@0.2.3 lint:string-matching
+> node scripts/lint-string-matching.cjs
+
+🔍 Scanning 233 files for string matching anti-patterns...
+
+
+📊 String Matching Anti-Pattern Analysis Report
+
+============================================================
+📈 SUMMARY:
+   Files Scanned: 233
+   Total Violations: 98
+   🔴 High Severity: 14
+   🟡 Medium Severity: 73
+   🟢 Low Severity: 11
+
+🟡 MEDIUM SEVERITY (73 issues)
+----------------------------------------
+📁 src/App.tsx:1679
+   Found 4+ string equality checks - use enum or map
+   💡 Use enum or Map for type classification instead of string comparison
+   📝 Code: === "screenshot" ||
+      toolName === "capture_screenshot" ||
+      toolName ==...
+
+📁 src/App.tsx:2725
+   Found 4+ string equality checks - use enum or map
+   💡 Use enum or Map for type classification instead of string comparison
+   📝 Code: === "settings" ||
+                currentView === "devtools" ||
+                ...
+
+📁 src/components/OnboardingFlow.tsx:75
+   Found hardcoded string array with 4+ items - consider external configuration
+   💡 Move to configuration file or constants module
+   📝 Code: ["welcome", "features", "voice-setup", "examples"...
+
+📁 src/components/OnboardingFlow.tsx:76
+   Found hardcoded string array with 4+ items - consider external configuration
+   💡 Move to configuration file or constants module
+   📝 Code: [
+        "welcome",
+        "features",
+        "permissions",
+        "voice-s...
+
+📁 src/components/OnboardingFlow.tsx:157
+   Found hardcoded string array with 4+ items - consider external configuration
+   💡 Move to configuration file or constants module
+   📝 Code: [
+        "Click buttons and navigate interfaces",
+        "Type text and fill f...
+
+   ... and 68 more medium severity issues
+
+🟢 LOW SEVERITY (11 issues)
+----------------------------------------
+📁 src/components/SettingsWindow.tsx:293
+   Possible manual case conversion - use proper string transformation
+   💡 Use built-in case conversion methods or regex with proper capture groups
+   📝 Code: .replace("Digit", "")...
+
+📁 src/components/SettingsWindow.tsx:297
+   Possible manual case conversion - use proper string transformation
+   💡 Use built-in case conversion methods or regex with proper capture groups
+   📝 Code: .replace("Key", "")...
+
+📁 src/components/SettingsWindow.tsx:301
+   Possible manual case conversion - use proper string transformation
+   💡 Use built-in case conversion methods or regex with proper capture groups
+   📝 Code: .replace("Numpad", "")...
+
+📁 src/components/Settings.tsx:297
+   Possible manual case conversion - use proper string transformation
+   💡 Use built-in case conversion methods or regex with proper capture groups
+   📝 Code: .replace("Digit", "")...
+
+📁 src/components/Settings.tsx:301
+   Possible manual case conversion - use proper string transformation
+   💡 Use built-in case conversion methods or regex with proper capture groups
+   📝 Code: .replace("Key", "")...
+
+   ... and 6 more low severity issues
+
+🔴 HIGH SEVERITY (14 issues)
+----------------------------------------
+📁 src/components/ui/kibo-ui/code-block/index.tsx:397
+   Found 3+ chained .replace() calls - use data-driven transformation
+   💡 Use configuration array with { pattern, replacement } objects
+   📝 Code: .replace(/\\/g, "\\\\")
+        .replace(/\./g, "\\.")
+        .replace...
+
+📁 src-tauri/src/anthropic.rs:91
+   Found 4+ .contains() checks in condition - use Set or configuration
+   💡 Use HashSet or static configuration for membership testing
+   📝 Code: .contains("Card") ||
+        content.contains("Alert") ||
+        content.contai...
+
+📁 src-tauri/src/anthropic.rs:94
+   Found 4+ .contains() checks in condition - use Set or configuration
+   💡 Use HashSet or static configuration for membership testing
+   📝 Code: .contains("Badge") ||
+        content.contains("Circle") ||
+        content.cont...
+
+📁 src-tauri/src/anthropic.rs:97
+   Found 4+ .contains() checks in condition - use Set or configuration
+   💡 Use HashSet or static configuration for membership testing
+   📝 Code: .contains("Triangle") ||
+        content.contains("StatusCard") ||
+        conte...
+
+📁 src-tauri/src/anthropic.rs:100
+   Found 4+ .contains() checks in condition - use Set or configuration
+   💡 Use HashSet or static configuration for membership testing
+   📝 Code: .contains("VisualDemo") ||
+        content.contains("className=") ||
+        con...
+
+   ... and 9 more high severity issues
+
+
+🔧 REFACTORING SUGGESTIONS
+
+============================================================
+💡 Data-Driven Transformation:
+// ✅ GOOD: Configuration-driven approach
+const TRANSFORMATIONS = [
+  { pattern: /Card:/g, replacement: "" },
+  { pattern: /px/g, replacement: " pixels" },
+  { pattern: /×/g, replacement: " by " }
+];
+
+function transform(text) {
+  return TRANSFORMATIONS.reduce((result, rule) => 
+    result.replace(rule.pattern, rule.replacement), text);
+}
+
+
+📋 RECOMMENDED ACTIONS
+
+============================================================
+1. 🚨 Fix HIGH severity violations first (these are blocking)
+2. 📚 Review docs/rules/anti-string-matching.md for patterns
+3. 🔧 Use configuration-driven approaches for transformations
+4. 🧪 Add tests for individual transformation rules
+5. 🔄 Run this linter in CI/CD to prevent regressions
+
+❌ Build should FAIL due to high severity violations

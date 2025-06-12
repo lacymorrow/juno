@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::collections::HashSet;
 
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
 use crate::agent::tool_logger;
@@ -400,39 +401,64 @@ impl LocalToolProvider {
         patterns
     }
 
-    /// Classify error for recovery strategy selection
-    fn classify_error(&self, error_msg: &str) -> ErrorClass {
+    // ✅ GOOD: Configuration-driven error classification
+    lazy_static::lazy_static! {
+        static ref TIMEOUT_ERROR_PATTERNS: HashSet<&'static str> = {
+            ["timeout", "timed out"].iter().cloned().collect()
+        };
+        
+        static ref DISPLAY_SYSTEM_ERROR_PATTERNS: HashSet<&'static str> = {
+            ["displayid", "remotelayertree", "display", "scheduledisplaylink"]
+                .iter().cloned().collect()
+        };
+        
+        static ref NETWORK_ERROR_PATTERNS: HashSet<&'static str> = {
+            ["network", "connection", "unreachable"].iter().cloned().collect()
+        };
+        
+        static ref RESOURCE_LOCKED_ERROR_PATTERNS: HashSet<&'static str> = {
+            ["locked", "busy", "in use"].iter().cloned().collect()
+        };
+        
+        static ref PERMISSION_ERROR_PATTERNS: HashSet<&'static str> = {
+            ["permission", "denied", "unauthorized"].iter().cloned().collect()
+        };
+        
+        static ref NOT_FOUND_ERROR_PATTERNS: HashSet<&'static str> = {
+            ["not found", "unknown tool"].iter().cloned().collect()
+        };
+        
+        static ref INVALID_INPUT_ERROR_PATTERNS: HashSet<&'static str> = {
+            ["invalid", "malformed", "parse"].iter().cloned().collect()
+        };
+    }
+
+    /// Classify error using configuration-driven pattern matching
+    fn classify_error_with_patterns(error_msg: &str) -> ErrorClass {
         let error_lower = error_msg.to_lowercase();
         
-        if error_lower.contains("timeout") || error_lower.contains("timed out") {
+        if TIMEOUT_ERROR_PATTERNS.iter().any(|&pattern| error_lower.contains(pattern)) {
             ErrorClass::Timeout
-        } else if error_lower.contains("displayid") 
-                || error_lower.contains("remotelayertree") 
-                || error_lower.contains("display") 
-                || error_lower.contains("scheduleDisplayLink") {
+        } else if DISPLAY_SYSTEM_ERROR_PATTERNS.iter().any(|&pattern| error_lower.contains(pattern)) {
             ErrorClass::DisplaySystem
-        } else if error_lower.contains("network") 
-                || error_lower.contains("connection") 
-                || error_lower.contains("unreachable") {
+        } else if NETWORK_ERROR_PATTERNS.iter().any(|&pattern| error_lower.contains(pattern)) {
             ErrorClass::NetworkConnectivity
-        } else if error_lower.contains("locked") 
-                || error_lower.contains("busy") 
-                || error_lower.contains("in use") {
+        } else if RESOURCE_LOCKED_ERROR_PATTERNS.iter().any(|&pattern| error_lower.contains(pattern)) {
             ErrorClass::ResourceLocked
-        } else if error_lower.contains("permission") 
-                || error_lower.contains("denied") 
-                || error_lower.contains("unauthorized") {
+        } else if PERMISSION_ERROR_PATTERNS.iter().any(|&pattern| error_lower.contains(pattern)) {
             ErrorClass::PermissionDenied
-        } else if error_lower.contains("not found") 
-                || error_lower.contains("unknown tool") {
+        } else if NOT_FOUND_ERROR_PATTERNS.iter().any(|&pattern| error_lower.contains(pattern)) {
             ErrorClass::ToolNotFound
-        } else if error_lower.contains("invalid") 
-                || error_lower.contains("malformed") 
-                || error_lower.contains("parse") {
+        } else if INVALID_INPUT_ERROR_PATTERNS.iter().any(|&pattern| error_lower.contains(pattern)) {
             ErrorClass::InvalidInput
         } else {
             ErrorClass::Unknown
         }
+    }
+
+    /// Classify error for recovery strategy selection
+    fn classify_error(&self, error_msg: &str) -> ErrorClass {
+        classify_error_with_patterns(error_msg)
     }
 
     /// Determine recovery strategy based on error class and history

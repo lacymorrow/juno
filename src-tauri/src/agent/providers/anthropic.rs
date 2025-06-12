@@ -8,11 +8,47 @@ use tokio::io::AsyncBufReadExt;
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
 use uuid;
-
+use crate::agent::core::*;
 use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use log;
+use tokio_stream::StreamExt;
+use tokio_util::io::StreamReader;
+use tokio::io::AsyncBufReadExt;
+use futures::stream::TryStreamExt;
+use tokio_stream::wrappers::LinesStream;
+use std::collections::HashSet;
+
+// ✅ GOOD: Configuration-driven text processing
+lazy_static::lazy_static! {
+    static ref MARKDOWN_PATTERNS: Vec<(&'static str, &'static str)> = vec![
+        ("**", ""),  // Bold
+        ("*", ""),   // Italic
+        ("#", ""),   // Headers
+    ];
+    
+    static ref ACTION_WORDS: HashSet<&'static str> = {
+        ["completed", "found", "created", "updated", "success", "done", "result", "finished"]
+            .iter().cloned().collect()
+    };
+}
+
+/// Remove markdown formatting using configuration
+fn remove_markdown_formatting(text: &str) -> String {
+    MARKDOWN_PATTERNS.iter().fold(text.to_string(), |acc, (pattern, replacement)| {
+        acc.replace(pattern, replacement)
+    })
+}
+
+/// Check if text contains action words using configuration
+fn contains_action_words(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    ACTION_WORDS.iter().any(|&word| lower.contains(word))
+}
 
 // --- Anthropic API Structs --- //
 
@@ -226,8 +262,8 @@ impl AnthropicBrain {
     
     /// Create a concise version optimized for speech synthesis
     fn create_concise_speech_version(text: &str) -> String {
-        // Remove markdown formatting for speech
-        let text = text.replace("**", "").replace("*", "").replace("#", "");
+        // Remove markdown formatting for speech using configuration
+        let text = remove_markdown_formatting(text);
         
         // Split into sentences and prioritize key information
         let sentences: Vec<&str> = text.split(['.', '!', '?'])
@@ -244,13 +280,9 @@ impl AnthropicBrain {
             // Take first sentence (usually the main result) and key action sentences
             let mut key_sentences = vec![sentences[0]];
             
-            // Add sentences that contain action words or results
+            // Add sentences that contain action words or results using configuration
             for sentence in sentences.iter().skip(1).take(2) {
-                let lower = sentence.to_lowercase();
-                if lower.contains("completed") || lower.contains("found") || 
-                   lower.contains("created") || lower.contains("updated") ||
-                   lower.contains("success") || lower.contains("done") ||
-                   lower.contains("result") || lower.contains("finished") {
+                if contains_action_words(sentence) {
                     key_sentences.push(sentence);
                 }
             }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use tracing::{warn, info, debug, error};
+use std::collections::HashSet;
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
 
@@ -241,12 +242,7 @@ impl ErrorRecoveryManager {
             return ErrorPattern::FileSystemError;
         }
 
-        if error_message.contains("permission denied") || 
-           error_message.contains("access denied") ||
-           error_message.contains("accessibility permissions") ||
-           error_message.contains("screen recording permission") ||
-           error_message.contains("microphone permission") ||
-           error_message.contains("desktop automation is not available") {
+        if PERMISSION_ERROR_PATTERNS.iter().any(|&pattern| error_message.contains(pattern)) {
             return ErrorPattern::PermissionDenied;
         }
 
@@ -607,4 +603,14 @@ impl ErrorRecoveryManager {
     pub fn clear_history(&mut self) {
         self.recovery_history.clear();
     }
+}
+
+lazy_static::lazy_static! {
+    static ref PERMISSION_ERROR_PATTERNS: HashSet<&'static str> = {
+        [
+            "permission denied", "access denied", "accessibility permissions",
+            "screen recording permission", "microphone permission", 
+            "desktop automation is not available"
+        ].iter().cloned().collect()
+    };
 }

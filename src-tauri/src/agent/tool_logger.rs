@@ -9,6 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
@@ -744,11 +746,7 @@ impl ToolMetadata {
                         name if name.contains("file") => {
                             ("📁", "File operation", "File", "standard", Some("short"))
                         }
-                        name if name.contains("command")
-                            || name.contains("shell")
-                            || name.contains("bash")
-                            || name.contains("terminal") =>
-                        {
+                        name if COMMAND_TOOL_PATTERNS.iter().any(|&pattern| name.contains(pattern)) => {
                             (
                                 "⚡",
                                 "Running command",
@@ -821,13 +819,7 @@ impl ToolMetadata {
             }
 
             // Command execution - detailed notifications to show full commands
-            name if name.contains("command")
-                || name.contains("shell")
-                || name.contains("terminal")
-                || name.contains("bash")
-                || name.contains("exec")
-                || name.contains("run") =>
-            {
+            name if COMMAND_TOOL_PATTERNS.iter().any(|&pattern| name.contains(pattern)) => {
                 (
                     "⚡",
                     "Running command",
@@ -1185,4 +1177,12 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
     if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event_data) {
         warn!("Failed to emit agent-stream-end event: {}", e);
     }
+}
+
+// ✅ GOOD: Configuration-driven tool pattern detection
+lazy_static::lazy_static! {
+    static ref COMMAND_TOOL_PATTERNS: HashSet<&'static str> = {
+        ["command", "shell", "bash", "terminal", "exec", "run"]
+            .iter().cloned().collect()
+    };
 }

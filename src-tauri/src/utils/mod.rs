@@ -3,6 +3,20 @@ pub mod coordinates;
 pub mod command_macros;
 
 use computer_use_ai_sdk::Desktop;
+use std::collections::HashSet;
+
+// ✅ GOOD: Configuration-driven UI element detection
+lazy_static::lazy_static! {
+    static ref TEXT_INPUT_ROLES: HashSet<&'static str> = {
+        ["TextField", "TextArea", "ComboBox", "SearchField"]
+            .iter().cloned().collect()
+    };
+    
+    static ref SYSTEM_BUNDLE_PATTERNS: HashSet<&'static str> = {
+        [".worker", "com.apple.WebKit", "com.apple.CoreServices", ".helper", ".agent"]
+            .iter().cloned().collect()
+    };
+}
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::element::get_focused_element_ns_workspace;
@@ -515,15 +529,25 @@ async fn get_focused_window_info(_app_state: Option<&crate::state::AppState>) ->
     }
 }
 
-/// Check if an element is likely a text input
+use std::collections::HashMap;
+use std::sync::Mutex;
+use serde::{Deserialize, Serialize};
+use crate::state::AppState;
+use log::{debug, warn, info, error};
+use tauri::{AppHandle, Manager, Emitter};
+use crate::agent::structs::AgentError;
+use computer_use_ai_sdk::UIElement;
+
+/// Check if an element is likely a text input using configuration-driven approach
 #[cfg(target_os = "macos")]
 fn is_text_input_element(attrs: &computer_use_ai_sdk::UIElementAttributes) -> bool {
     let role = &attrs.role;
-    role.contains("TextField") ||
-    role.contains("TextArea") ||
-    role.contains("ComboBox") ||
-    role.contains("SearchField") ||
-    attrs.properties.contains_key("AXValue")
+    
+    // Check against configured text input roles
+    let role_matches = TEXT_INPUT_ROLES.iter().any(|&input_role| role.contains(input_role));
+    
+    // Also check for AXValue property
+    role_matches || attrs.properties.contains_key("AXValue")
 }
 
 /// Try to get application name from element using NSWorkspace
@@ -695,13 +719,17 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
                     _ => format!("Unknown({})", activation_policy),
                 };
 
-                // Skip system background processes unless they're user-relevant
+                // Skip system background processes unless they're user-relevant using configuration
                 if let Some(ref bundle_id_str) = bundle_id {
-                    if bundle_id_str.contains(".worker") ||
-                       bundle_id_str.contains("com.apple.WebKit") ||
-                       bundle_id_str.contains("com.apple.CoreServices") ||
-                       (bundle_id_str.contains(".helper") && activation_policy == 2) ||
-                       (bundle_id_str.contains(".agent") && activation_policy == 2) {
+                    let is_system_process = SYSTEM_BUNDLE_PATTERNS.iter().any(|&pattern| {
+                        if pattern == ".helper" || pattern == ".agent" {
+                            bundle_id_str.contains(pattern) && activation_policy == 2
+                        } else {
+                            bundle_id_str.contains(pattern)
+                        }
+                    });
+                    
+                    if is_system_process {
                         continue;
                     }
                 }
