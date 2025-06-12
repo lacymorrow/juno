@@ -890,8 +890,8 @@ pub fn run() {
             commands::open_onboarding_window,
             commands::close_onboarding_window,
             // Onboarding Commands
-            commands::core::store_first_prompt,
-            commands::core::get_first_onboarding_prompt,
+
+
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,
@@ -919,7 +919,7 @@ pub fn run() {
             get_system_context,
             get_agent_execution_progress,
             set_agent_execution_progress,
-            get_first_onboarding_prompt,
+
             set_debug_mode,
             get_debug_mode,
         ])
@@ -2699,19 +2699,19 @@ async fn get_window_states(app_handle: &AppHandle) -> (bool, bool) {
         .get_webview_window(constants::window_labels::MAIN)
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
-    
+
     let floating_bar_visible = app_handle
         .get_webview_window(constants::window_labels::FLOATING_BAR)
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
-    
+
     (main_visible, floating_bar_visible)
 }
 
 /// Create a state-aware tray menu with window status indicators
 async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tauri::Wry>> {
     let (main_visible, floating_bar_visible) = get_window_states(app_handle).await;
-    
+
     // Create main window menu item with state-aware text
     let main_window_text = if main_visible { "Hide Juno" } else { "Show Juno" };
     let main_window_id = if main_visible {
@@ -2722,7 +2722,7 @@ async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tau
     let main_window_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, main_window_id, main_window_text, true, None::<&str>).ok()?
     );
-    
+
     // Create floating bar menu items with state-aware text
     let floating_bar_text = if floating_bar_visible { "Hide Floating Bar" } else { "Show Floating Bar" };
     let floating_bar_id = if floating_bar_visible {
@@ -2733,7 +2733,7 @@ async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tau
     let floating_bar_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, floating_bar_id, floating_bar_text, true, None::<&str>).ok()?
     );
-    
+
     // Create other menu items
     let new_chat_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::NEW_CHAT, "New Chat", true, None::<&str>).ok()?
@@ -2747,12 +2747,12 @@ async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tau
     let quit_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).ok()?
     );
-    
+
     // Create separators
     let separator1 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
     let separator2 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
     let separator3 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
-    
+
     // Build the menu with state-aware items
     Menu::with_items(app_handle, &[
         &main_window_item,
