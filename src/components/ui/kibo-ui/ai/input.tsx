@@ -103,13 +103,15 @@ export const AIInputTextarea = ({
   });
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // Submit on Enter (without Shift)
       e.preventDefault();
       const form = e.currentTarget.form;
       if (form) {
         form.requestSubmit();
       }
     }
+    // Allow Shift+Enter for line breaks (default textarea behavior)
   };
 
   return (
