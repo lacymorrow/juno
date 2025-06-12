@@ -1,2 +1,9 @@
 src-tauri/src/agent/error_recovery.rs
 
+src-tauri/src/agent/implementations/tool_provider.rs
+
+src-tauri/src/utils/mod.rs
+
+src-tauri/src/anthropic.rs
+
+src-tauri/src/agent/tool_logger.rs
