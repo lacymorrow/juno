@@ -1333,6 +1333,24 @@ function App() {
     };
   }, []);
 
+  // Listen for TTS stop requests from escape key
+  useEffect(() => {
+    const unlisten = listen("tts-stop-requested", async () => {
+      console.log("TTS stop requested event received - stopping TTS immediately");
+      try {
+        await stopTTS((msg, level) =>
+          console.log(`[TTS-${level || "info"}] ${msg}`)
+        );
+      } catch (error) {
+        console.error("Error stopping TTS:", error);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Listen for agent events (thinking, tool calls, etc.)
   useEffect(() => {
     const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
