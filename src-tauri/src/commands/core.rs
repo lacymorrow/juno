@@ -12,6 +12,8 @@ use std::fs;
 use crate::cloud::CloudClient;
 use crate::anthropic::submit_query;
 use serde::{Deserialize, Serialize};
+use tauri::{Emitter, Manager}; // Add missing imports for emit and try_state methods
+use crate::voice_control::types::VoiceController;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -402,10 +404,72 @@ pub async fn reset_all_settings(
 pub async fn cancel_agent_execution(state: State<'_, AppState>) -> Result<(), String> {
     info!("Cancelling agent execution");
 
+    // Signal cancellation for any running agent
+    state.signal_cancel();
+
     // Use the proper method to mark agent execution as finished
     state.mark_agent_execution_finished();
 
     info!("Agent execution cancelled successfully");
+    Ok(())
+}
+
+/// Stop all agent processes - comprehensive stop for everything
+#[tauri::command]
+pub async fn stop_all_agent_processes(
+    app: AppHandle,
+    state: State<'_, AppState>
+) -> Result<(), String> {
+    info!("Stopping all agent processes - comprehensive stop requested");
+
+    // 1. Stop agent execution
+    info!("[StopAll] Stopping agent execution");
+    state.signal_cancel();
+    state.mark_agent_execution_finished();
+
+    // 2. Stop TTS
+    info!("[StopAll] Stopping TTS");
+    crate::tts::stop_speech();
+    
+    // Emit TTS stop event for frontend audio cleanup
+    if let Err(e) = app.emit("tts-stop-requested", ()) {
+        warn!("[StopAll] Failed to emit TTS stop event: {}", e);
+    }
+
+    // 3. Stop voice controller (simplified approach)
+    info!("[Stop 3/5] Stopping voice controller");
+    // Note: We rely on frontend event listeners to handle voice stopping
+
+    // Clean up dictation state
+    if let Ok(mut dictation_active) = state.dictation_active.lock() {
+        *dictation_active = false;
+    }
+
+    // Reset dictation input monitor state
+    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+    // 4. Emit events to stop streaming and other frontend processes
+    info!("[StopAll] Emitting stop events");
+    
+    if let Err(e) = app.emit("agent-stop-all", ()) {
+        warn!("[StopAll] Failed to emit agent-stop-all event: {}", e);
+    }
+
+    if let Err(e) = app.emit("dictation-active", false) {
+        warn!("[StopAll] Failed to emit dictation-active false event: {}", e);
+    }
+
+    // 5. Update floating bar manager
+    let app_handle_for_bar = app.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::commands::floating_bar::handle_backend_response(
+            &app_handle_for_bar,
+            "Stopped",
+            Some("All processes stopped by user.".to_string())
+        ).await;
+    });
+
+    info!("[StopAll] All agent processes stop completed");
     Ok(())
 }
 

@@ -47,6 +47,7 @@ import {
   PanelLeftOpen,
   Plus,
   Send,
+  Square,
   Trash2,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -1837,6 +1838,30 @@ function App() {
     submitQuery(query);
   };
 
+  // Handle stop button click - stops all agent processes
+  const handleStop = async () => {
+    console.log("Stop button clicked - stopping all agent processes");
+    try {
+      // Call the comprehensive stop command
+      await invoke("stop_all_agent_processes");
+      console.log("Stop command sent successfully");
+      
+      // Also stop frontend TTS and audio
+      await stopTTS();
+      
+      // Reset processing state immediately for better UX
+      setIsProcessing(false);
+      
+      // Clear any current query being typed
+      setQuery("");
+      
+    } catch (error) {
+      console.error("Error stopping agent processes:", error);
+      // Still reset processing state even if backend stop failed
+      setIsProcessing(false);
+    }
+  };
+
   // Helper function to convert base64 to Blob
   function base64ToBlob(base64: string, contentType = "audio/mpeg"): Blob {
     const byteCharacters = atob(base64);
@@ -2671,6 +2696,64 @@ function App() {
     };
   }, [conversation]);
 
+  // Listen for stop all agent processes event
+  useEffect(() => {
+    const unlisten = listen("agent-stop-all", () => {
+      console.log("Stop all agent processes event received");
+      
+      // Reset processing state
+      setIsProcessing(false);
+      
+      // Clear current query
+      setQuery("");
+      
+      // Stop current audio/TTS if playing
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
+          URL.revokeObjectURL(currentAudio.src);
+        }
+        setCurrentAudio(null);
+        setCurrentAudioElement(null);
+      }
+      
+      // Add system message to conversation
+      const stopMessage: ChatMessage = {
+        role: "system",
+        content: "All agent processes stopped by user.",
+        timestamp: Date.now(),
+      };
+      setConversation((prev) => [...prev, stopMessage]);
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [currentAudio]);
+
+  // Listen for TTS stop events
+  useEffect(() => {
+    const unlisten = listen("tts-stop-requested", () => {
+      console.log("TTS stop event received");
+      
+      // Stop current audio if playing
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
+          URL.revokeObjectURL(currentAudio.src);
+        }
+        setCurrentAudio(null);
+        setCurrentAudioElement(null);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [currentAudio]);
+
   return (
     <main className="h-screen flex flex-col">
       {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
@@ -2910,15 +2993,27 @@ function App() {
                           Clear
                         </AIInputButton>
                       </AIInputTools>
-                      <AIInputSubmit
-                        disabled={
-                          isProcessing ||
-                          serverStatus !== "connected" ||
-                          !query.trim()
-                        }
-                      >
-                        <Send size={18} />
-                      </AIInputSubmit>
+                      {isProcessing ? (
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon"
+                          className="gap-1.5 rounded-lg rounded-br-xl"
+                          onClick={handleStop}
+                          title="Stop all processes"
+                        >
+                          <Square size={18} />
+                        </Button>
+                      ) : (
+                        <AIInputSubmit
+                          disabled={
+                            serverStatus !== "connected" ||
+                            !query.trim()
+                          }
+                        >
+                          <Send size={18} />
+                        </AIInputSubmit>
+                      )}
                     </AIInputToolbar>
                   </AIInput>
                 </div>

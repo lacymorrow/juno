@@ -913,6 +913,7 @@ pub fn run() {
             commands::notifications::test_notification,
             // Core Commands
             cancel_agent_execution,
+            stop_all_agent_processes,
             get_system_context,
             get_agent_execution_progress,
             set_agent_execution_progress,
