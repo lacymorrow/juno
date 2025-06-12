@@ -392,7 +392,7 @@ export function TransparentFloatingPanel({
       ref={panelRef}
       data-tauri-drag-region
       className={cn(
-        "w-screen h-screen bg-transparent overflow-hidden pointer-events-none select-none",
+        "w-screen h-screen flex items-start justify-start",
         className
       )}
       onMouseEnter={() => setIsHovered(true)}
@@ -427,7 +427,7 @@ export function TransparentFloatingPanel({
                 setPanelState((prev) => ({ ...prev, mode: "expanded" }));
               }}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2" data-tauri-drag-region>
                 {getStatusIcon()}
                 {panelState.audioLevel > 0 && <AudioLevelIndicator />}
               </div>
@@ -442,9 +442,9 @@ export function TransparentFloatingPanel({
                 data-tauri-drag-region
                 className="flex items-center justify-between mb-2"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2" data-tauri-drag-region>
                   {getStatusIcon()}
-                  <span className="text-xs font-medium">
+                  <span className="text-xs font-medium" data-tauri-drag-region>
                     {panelState.isSpeaking
                       ? "Speaking"
                       : panelState.agentStatus === "thinking"
@@ -459,7 +459,10 @@ export function TransparentFloatingPanel({
                         : "Listening"
                       : "Juno AI"}
                   </span>
-                  <span className="text-xs text-white/50 ml-2">
+                  <span
+                    className="text-xs text-white/50 ml-2"
+                    data-tauri-drag-region
+                  >
                     ({panelState.mode})
                   </span>
                 </div>
@@ -556,7 +559,9 @@ export function TransparentFloatingPanel({
                 data-tauri-drag-region
                 className="flex items-center justify-between mb-2"
               >
-                <h3 className="text-sm font-medium">Recent Chat</h3>
+                <h3 className="text-sm font-medium" data-tauri-drag-region>
+                  Recent Chat
+                </h3>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={(e) => {
@@ -635,7 +640,9 @@ export function TransparentFloatingPanel({
                 data-tauri-drag-region
                 className="flex items-center justify-between mb-3"
               >
-                <h3 className="text-sm font-medium">Panel Settings</h3>
+                <h3 className="text-sm font-medium" data-tauri-drag-region>
+                  Panel Settings
+                </h3>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
