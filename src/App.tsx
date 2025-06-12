@@ -468,7 +468,7 @@ function App() {
   // Permissions state
   const [, setShowPermissionsFlow] = useState(false);
   const [, setPermissionsChecked] = useState(false);
-  const [permissionsGranted, setPermissionsGranted] = useState(false);
+  const [, setPermissionsGranted] = useState(false);
 
   // Enhanced modal and feature state
   const [activeModal, setActiveModal] = useState<ModalType>(null);
@@ -488,9 +488,7 @@ function App() {
   const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
 
-  // Onboarding state
-  const [_showOnboarding, setShowOnboarding] = useState(false);
-  const [_onboardingChecked, setOnboardingChecked] = useState(false);
+  // Onboarding state - handled by separate onboarding window
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -767,7 +765,7 @@ function App() {
   useEffect(() => {
     const unlistenComplete = listen<{ prompt?: string }>(
       "onboarding-complete",
-      async (event) => {
+      async () => {
         console.log("Onboarding completed from separate window");
         // Focus main window
         const currentWindow = getCurrentWindow();
@@ -776,7 +774,7 @@ function App() {
       }
     );
 
-    const unlistenSkipped = listen<{}>("onboarding-skipped", async (event) => {
+    const unlistenSkipped = listen<{}>("onboarding-skipped", async () => {
       console.log("Onboarding skipped from separate window");
       // Focus main window
       const currentWindow = getCurrentWindow();
@@ -1374,6 +1372,38 @@ function App() {
     };
   }, [voiceSounds, sound]);
 
+  // Listen for agent-active events (hold mode)
+  useEffect(() => {
+    const unlisten = listen("agent-active", async (event) => {
+      const isActive = event.payload as boolean;
+      console.log("Received agent-active event:", isActive);
+
+      if (isActive) {
+        // Agent hold mode started - could trigger voice capture
+        try {
+          const isNowDictating = await toggleDictation();
+          console.log("Agent hold mode activated, dictating:", isNowDictating);
+        } catch (error) {
+          console.error("Failed to start agent hold mode:", error);
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `Failed to start agent mode: ${error}`,
+            },
+          ]);
+        }
+      } else {
+        // Agent hold mode ended - ensure voice capture is stopped
+        console.log("Agent hold mode deactivated");
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [toggleDictation]);
+
   // Check server status on mount
   useEffect(() => {
     const checkServer = async () => {
@@ -1917,8 +1947,11 @@ function App() {
                   </h3>
                   <ul className="list-disc list-inside space-y-1">
                     <li>
-                      <strong>Option + D:</strong> Toggle Agent Mode (AI
-                      conversations)
+                      <strong>Option + D:</strong> Activate Agent Mode
+                      <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-sm">
+                        <li><strong>Tap to Toggle:</strong> Press and release to toggle agent mode on/off</li>
+                        <li><strong>Hold to Activate:</strong> Hold key to activate agent, release to stop</li>
+                      </ul>
                     </li>
                     <li>
                       <strong>Option + Space:</strong> Toggle Dictation Mode
@@ -1929,6 +1962,9 @@ function App() {
                       (Always Listening Mode)
                     </li>
                   </ul>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Configure agent trigger mode in Settings → General → Agent Trigger Mode
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-lg font-semibold mb-2">

@@ -7,6 +7,14 @@ export interface KeyboardShortcuts {
     open_settings: string;          // Default: Cmd+, (Ctrl+, on non-macOS)
 }
 
+// Types for agent trigger mode configuration
+export type AgentTriggerMode = "tap" | "hold";
+
+export interface AgentTriggerModeConfig {
+    mode: AgentTriggerMode;
+    description: string;
+}
+
 export interface ShortcutInputProps {
     label: string;
     description: string;
