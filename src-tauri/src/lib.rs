@@ -890,8 +890,8 @@ pub fn run() {
             commands::open_onboarding_window,
             commands::close_onboarding_window,
             // Onboarding Commands
-            commands::core::store_first_prompt,
-            commands::core::get_first_onboarding_prompt,
+
+
             // Debug Mode Commands
             commands::core::set_debug_mode,
             commands::core::get_debug_mode,
@@ -919,7 +919,7 @@ pub fn run() {
             get_system_context,
             get_agent_execution_progress,
             set_agent_execution_progress,
-            get_first_onboarding_prompt,
+
             set_debug_mode,
             get_debug_mode,
         ])
