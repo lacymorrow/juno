@@ -26,7 +26,7 @@ use std::sync::Mutex; // Added for VoiceController state access
 use {
     cocoa::{
         appkit::{NSWindow, NSWindowCollectionBehavior},
-        base::{id as cocoa_id, nil, NO, BOOL},
+        base::{id as cocoa_id, nil, NO, YES, BOOL},
         foundation::{NSRect},
     },
     objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
@@ -1543,7 +1543,7 @@ pub fn run() {
                 // This is the key fix: ensure the main window is properly activated and can receive clicks
                 if let Some(main_window) = app_handle.get_webview_window(constants::window_labels::MAIN) {
                     info!("Setting up main window for proper focus handling.");
-                    
+
                     // Apply macOS-specific fixes for the main window
                     match main_window.ns_window() {
                         Ok(ns_window_ptr) => {
@@ -1552,11 +1552,11 @@ pub fn run() {
                                 // Ensure main window can receive mouse events
                                 #[allow(unexpected_cfgs)]
                                 let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-                                
+
                                 // Make sure the window accepts first responder status
                                 #[allow(unexpected_cfgs)]
                                 let _: BOOL = msg_send![ns_window, setAcceptsMouseMovedEvents: YES];
-                                
+
                                 info!("macOS Setup: Main window mouse events enabled.");
                             }
                         }
@@ -2748,19 +2748,19 @@ async fn get_window_states(app_handle: &AppHandle) -> (bool, bool) {
         .get_webview_window(constants::window_labels::MAIN)
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
-    
+
     let floating_bar_visible = app_handle
         .get_webview_window(constants::window_labels::FLOATING_BAR)
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
-    
+
     (main_visible, floating_bar_visible)
 }
 
 /// Create a state-aware tray menu with window status indicators
 async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tauri::Wry>> {
     let (main_visible, floating_bar_visible) = get_window_states(app_handle).await;
-    
+
     // Create main window menu item with state-aware text
     let main_window_text = if main_visible { "Hide Juno" } else { "Show Juno" };
     let main_window_id = if main_visible {
@@ -2771,7 +2771,7 @@ async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tau
     let main_window_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, main_window_id, main_window_text, true, None::<&str>).ok()?
     );
-    
+
     // Create floating bar menu items with state-aware text
     let floating_bar_text = if floating_bar_visible { "Hide Floating Bar" } else { "Show Floating Bar" };
     let floating_bar_id = if floating_bar_visible {
@@ -2782,7 +2782,7 @@ async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tau
     let floating_bar_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, floating_bar_id, floating_bar_text, true, None::<&str>).ok()?
     );
-    
+
     // Create other menu items
     let new_chat_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::NEW_CHAT, "New Chat", true, None::<&str>).ok()?
@@ -2796,12 +2796,12 @@ async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tau
     let quit_item = MenuItemKind::MenuItem(
         tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).ok()?
     );
-    
+
     // Create separators
     let separator1 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
     let separator2 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
     let separator3 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
-    
+
     // Build the menu with state-aware items
     Menu::with_items(app_handle, &[
         &main_window_item,
