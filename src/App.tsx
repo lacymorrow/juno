@@ -56,7 +56,6 @@ import ClickVisualizer from "./components/ClickVisualizer";
 import CommandOverlay from "./components/CommandOverlay";
 import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
-import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import "./styles/globals.css";
 
 // Type for conversation messages
@@ -163,7 +162,7 @@ interface AgentEventTauri {
 // --- End Agent Event Types ---
 
 // Type for view state
-type AppView = "chat" | "settings" | "devtools" | "permissions" | "onboarding";
+type AppView = "chat" | "devtools" | "permissions" | "onboarding";
 
 // New modal types for enhanced functionality
 type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
@@ -828,9 +827,13 @@ function App() {
 
   // Listen for settings menu requests from native menu
   useEffect(() => {
-    const unlisten = listen<string>("settings-requested", (event) => {
+    const unlisten = listen<string>("settings-requested", async (event) => {
       console.log("Settings requested from menu:", event.payload);
-      setCurrentView("settings");
+      try {
+        await invoke("open_settings_window");
+      } catch (error) {
+        console.error("Failed to open settings window:", error);
+      }
     });
 
     return () => {
@@ -895,13 +898,17 @@ function App() {
 
   // Enhanced help request handler
   useEffect(() => {
-    const unlisten = listen<string>("help-requested", (event) => {
+    const unlisten = listen<string>("help-requested", async (event) => {
       console.log("Help requested from menu:", event.payload);
       const helpType = event.payload;
 
       if (helpType === "shortcuts") {
-        // Show keyboard shortcuts - navigate to settings
-        setCurrentView("settings");
+        // Show keyboard shortcuts - open settings window
+        try {
+          await invoke("open_settings_window");
+        } catch (error) {
+          console.error("Failed to open settings window:", error);
+        }
       } else {
         // General help - show comprehensive help modal
         setActiveModal("help");
@@ -2721,9 +2728,8 @@ function App() {
             )}
 
             <div className="flex items-center gap-1">
-              {/* Back Button - show for settings and devtools views */}
-              {(currentView === "settings" ||
-                currentView === "devtools" ||
+              {/* Back Button - show for devtools, permissions and onboarding views */}
+              {(currentView === "devtools" ||
                 currentView === "permissions" ||
                 currentView === "onboarding") && (
                 <Button
@@ -2756,13 +2762,7 @@ function App() {
           </header>
 
           {/* Main Content Area - Conditional based on current view */}
-          {currentView === "settings" ? (
-            <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full">
-                <ModularSettingsWindow />
-              </ScrollArea>
-            </div>
-          ) : currentView === "devtools" ? (
+          {currentView === "devtools" ? (
             <div className="flex-grow rounded-lg border overflow-hidden">
               <ScrollArea className="h-full w-full p-2">
                 <h2 className="text-sm font-semibold mb-2 border-b pb-1">
