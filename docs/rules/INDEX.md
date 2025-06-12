@@ -11,6 +11,9 @@
 - **[Comprehensive Security Guide](COMPREHENSIVE_SECURITY_GUIDE.md)** - Enterprise security framework and permissions
 - **[Comprehensive Voice Guide](COMPREHENSIVE_VOICE_GUIDE.md)** - Three-mode voice system with debugging
 
+### Development Guidelines
+- **[Anti-String Matching Rules](anti-string-matching.md)** - 🚨 **CRITICAL** - Prevent string matching anti-patterns
+
 ### Overview Documents
 - **[README](README.md)** - Project overview and getting started guide
 - **[SUMMARY](SUMMARY.md)** - Executive summary and key achievements
@@ -74,6 +77,7 @@ Juno AI Computer Use Agent is a **production-ready** macOS desktop application t
 2. **System Architecture Guide** - Learn technical implementation patterns
 3. **Security Guide** - Understand security requirements and patterns
 4. **Voice Guide** - Master voice system debugging and configuration
+5. **Anti-String Matching Rules** - 🚨 **MANDATORY** - Learn to avoid string matching anti-patterns
 
 ### Key Development Patterns
 ```rust
@@ -93,7 +97,19 @@ SecurityValidator::create_audit_log(&operation, &result);
 // State management pattern
 let state = app_state.get_agent_runner()
     .map_err(|e| AgentError::LockError(e.to_string()))?;
+
+// ✅ GOOD: Data-driven transformation (NOT string matching)
+const TRANSFORMATIONS = [
+    { pattern: /Card:/g, replacement: "" },
+    { pattern: /px/g, replacement: " pixels" }
+];
 ```
+
+### Critical Development Rules
+1. **❌ NO STRING MATCHING**: If you need >2 `.replace()` calls, use data-driven approach
+2. **❌ NO STRING CHAINS**: If you have >3 `.contains()` checks, use Sets or configuration
+3. **❌ NO STRING CLASSIFICATION**: If you have >4 string equality checks, use enums
+4. **✅ USE STRUCTURED DATA**: Always prefer configuration over hardcoded strings
 
 ### Mandatory Compilation Check
 ```bash

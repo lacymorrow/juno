@@ -14,7 +14,9 @@
     "tauri:dev:instance2": "node scripts/dev-multi-instance.js --port=1422",
     "tauri:dev:instance3": "node scripts/dev-multi-instance.js --port=1424",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint:string-matching": "node scripts/lint-string-matching.cjs",
+    "lint:string-matching:fix": "echo '🔧 Auto-fix not implemented - see docs/rules/anti-string-matching.md for refactoring patterns'"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.1.1",
