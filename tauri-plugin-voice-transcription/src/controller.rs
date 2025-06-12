@@ -5,96 +5,18 @@ use cpal::SampleFormat;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use hound;
 use tauri::{AppHandle, Emitter, Runtime};
-use tracing::{info, warn, error};
+use tracing::info;
 
 use crate::error::{Error, Result};
 
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 
-// CRITICAL MEMORY MANAGEMENT CONSTANTS
-const MAX_AUDIO_BUFFER_SIZE: usize = 240_000; // 15 seconds at 16kHz for dictation (more than always listening)
-const MAX_MEMORY_USAGE_MB: usize = 100; // Higher limit for dictation sessions
-const AUDIO_CHUNK_SIZE_LIMIT: usize = 24_000; // 1.5 seconds at 16kHz
-const MEMORY_CHECK_INTERVAL_MS: u64 = 2000; // Check memory every 2 seconds for dictation
-
 enum AudioThreadMessage {
     Stop,
-    ForceMemoryCleanup, // Add memory cleanup message
-}
-
-// Enhanced memory tracker with dictation-specific limits
-#[derive(Debug)]
-struct VoiceMemoryTracker {
-    buffer_usage: Arc<RwLock<usize>>,
-    model_usage: Arc<RwLock<usize>>,
-    peak_usage: Arc<RwLock<usize>>,
-    session_start: Arc<RwLock<std::time::Instant>>,
-}
-
-impl VoiceMemoryTracker {
-    fn new() -> Self {
-        Self {
-            buffer_usage: Arc::new(RwLock::new(0)),
-            model_usage: Arc::new(RwLock::new(0)),
-            peak_usage: Arc::new(RwLock::new(0)),
-            session_start: Arc::new(RwLock::new(std::time::Instant::now())),
-        }
-    }
-
-    fn add_buffer_usage(&self, bytes: usize) {
-        if let Ok(mut buffer) = self.buffer_usage.write() {
-            *buffer += bytes;
-            self.update_peak();
-        }
-    }
-
-    fn remove_buffer_usage(&self, bytes: usize) {
-        if let Ok(mut buffer) = self.buffer_usage.write() {
-            *buffer = buffer.saturating_sub(bytes);
-        }
-    }
-
-    fn set_model_usage(&self, bytes: usize) {
-        if let Ok(mut model) = self.model_usage.write() {
-            *model = bytes;
-            self.update_peak();
-        }
-    }
-
-    fn update_peak(&self) {
-        let total = self.get_total_mb();
-        if let Ok(mut peak) = self.peak_usage.write() {
-            if total > *peak {
-                *peak = total;
-            }
-        }
-    }
-
-    fn get_total_mb(&self) -> usize {
-        let buffer_bytes = self.buffer_usage.read().unwrap_or_default();
-        let model_bytes = self.model_usage.read().unwrap_or_default();
-        (*buffer_bytes + *model_bytes) / (1024 * 1024)
-    }
-
-    fn should_cleanup(&self) -> bool {
-        let total_mb = self.get_total_mb();
-        let session_duration = self.session_start.read()
-            .map(|t| t.elapsed().as_secs())
-            .unwrap_or(0);
-        
-        // Cleanup if memory exceeds limit or session is very long
-        total_mb > MAX_MEMORY_USAGE_MB || session_duration > 300 // 5 minutes
-    }
-
-    fn reset_session(&self) {
-        if let Ok(mut start) = self.session_start.write() {
-            *start = std::time::Instant::now();
-        }
-    }
 }
 
 pub struct VoiceController {
@@ -106,7 +28,6 @@ pub struct VoiceController {
     actual_recording_sample_rate: Arc<Mutex<Option<u32>>>,
     is_initialized: bool,
     initialization_error: Option<String>,
-    memory_tracker: VoiceMemoryTracker, // Add memory tracking
 }
 
 impl VoiceController {
@@ -120,10 +41,6 @@ impl VoiceController {
         let ctx = WhisperContext::new_with_params(model_path_str, context_params)
             .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
 
-        let memory_tracker = VoiceMemoryTracker::new();
-        // Track model memory usage (approximate 77MB for tiny.en model)
-        memory_tracker.set_model_usage(77 * 1024 * 1024);
-
         Ok(Self {
             ctx: Some(ctx),
             model_path: model_path_str.to_string(),
@@ -133,7 +50,6 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: true,
             initialization_error: None,
-            memory_tracker,
         })
     }
 
@@ -148,7 +64,6 @@ impl VoiceController {
             actual_recording_sample_rate: Arc::new(Mutex::new(None)),
             is_initialized: false,
             initialization_error: Some(error_message),
-            memory_tracker: VoiceMemoryTracker::new(),
         }
     }
 
@@ -374,61 +289,39 @@ impl VoiceController {
     ) {
         info!("[AudioThread] Thread started. Initializing Whisper context and state.");
 
-        // Initialize memory tracker for this thread
-        let memory_tracker = VoiceMemoryTracker::new();
-        let mut last_memory_check = std::time::Instant::now();
-
         let whisper_context = match WhisperContext::new_with_params(&model_path, WhisperContextParameters::default()) {
-            Ok(ctx) => {
-                // Track model memory usage
-                memory_tracker.set_model_usage(77 * 1024 * 1024);
-                ctx
-            },
+            Ok(ctx) => ctx,
             Err(e) => {
-                error!("Failed to create WhisperContext in audio thread: {:?}", e);
+                tracing::error!("Failed to create WhisperContext in audio thread: {:?}", e);
                 return;
             }
         };
 
         let mut whisper_state = match whisper_context.create_state() {
-            Ok(state) => {
-                // Track additional state memory
-                memory_tracker.add_buffer_usage(10 * 1024 * 1024);
-                state
-            },
+            Ok(state) => state,
             Err(e) => {
-                error!("Failed to create WhisperState in audio thread: {:?}", e);
+                tracing::error!("Failed to create WhisperState in audio thread: {:?}", e);
                 return;
             }
         };
 
-        // Create stream with memory-safe callbacks
         let stream = match sample_format {
             SampleFormat::F32 => {
                 match device.build_input_stream(
                     &config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        // CRITICAL: Limit chunk size to prevent memory exhaustion
-                        let chunk_to_send = if data.len() > AUDIO_CHUNK_SIZE_LIMIT {
-                            warn!("[AudioThread] Audio chunk too large: {} samples, truncating to {}", 
-                                  data.len(), AUDIO_CHUNK_SIZE_LIMIT);
-                            &data[..AUDIO_CHUNK_SIZE_LIMIT]
-                        } else {
-                            data
-                        };
-                        
-                        if let Err(e) = audio_data_tx.send(chunk_to_send.to_vec()) {
-                            error!("Failed to send audio data: {:?}", e);
+                        if let Err(e) = audio_data_tx.send(data.to_vec()) {
+                            tracing::error!("Failed to send audio data: {:?}", e);
                         }
                     },
                     move |err| {
-                        error!("An error occurred on the input stream: {}", err);
+                        tracing::error!("An error occurred on the input stream: {}", err);
                     },
                     None
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
-                        error!("Failed to build f32 input stream: {:?}", e);
+                        tracing::error!("Failed to build f32 input stream: {:?}", e);
                         return;
                     }
                 }
@@ -437,51 +330,42 @@ impl VoiceController {
                 match device.build_input_stream(
                     &config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        // CRITICAL: Limit chunk size to prevent memory exhaustion
-                        let chunk_to_process = if data.len() > AUDIO_CHUNK_SIZE_LIMIT {
-                            warn!("[AudioThread] Audio chunk too large: {} samples, truncating to {}", 
-                                  data.len(), AUDIO_CHUNK_SIZE_LIMIT);
-                            &data[..AUDIO_CHUNK_SIZE_LIMIT]
-                        } else {
-                            data
-                        };
-                        
-                        let mut audio_f32: Vec<f32> = vec![0.0f32; chunk_to_process.len()];
-                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(chunk_to_process, &mut audio_f32) {
-                            error!("Failed to convert i16 to f32: {:?}", e);
+                        let mut audio_f32: Vec<f32> = vec![0.0f32; data.len()];
+                        if let Err(e) = whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32) {
+                            tracing::error!("Failed to convert i16 to f32: {:?}", e);
                             return;
                         }
                         if let Err(e) = audio_data_tx.send(audio_f32) {
-                            error!("Failed to send converted audio data: {:?}", e);
+                            tracing::error!("Failed to send converted audio data: {:?}", e);
                         }
                     },
                     move |err| {
-                        error!("An error occurred on the input stream: {}", err);
+                        tracing::error!("An error occurred on the input stream: {}", err);
                     },
                     None
                 ) {
                     Ok(stream) => stream,
                     Err(e) => {
-                        error!("Failed to build i16 input stream: {:?}", e);
+                        tracing::error!("Failed to build i16 input stream: {:?}", e);
                         return;
                     }
                 }
             },
             _ => {
-                error!("Unsupported sample format {:?}", sample_format);
+                tracing::error!("Unsupported sample format {:?}", sample_format);
                 return;
             }
         };
 
         if let Err(e) = stream.play() {
-            error!("Failed to start audio stream: {:?}", e);
+            tracing::error!("Failed to start audio stream: {:?}", e);
             return;
         }
 
         info!("[AudioThread] Audio stream started.");
         info!("[AudioThread] Recording at {} Hz, will resample to {} Hz for Whisper.", actual_rate, WHISPER_SAMPLE_RATE);
 
-        // Enhanced resampler setup with error handling
+        // Resampler setup
         let mut chunk_resampler: Option<SincFixedIn<f32>> = None;
         if actual_rate != WHISPER_SAMPLE_RATE {
             let params = SincInterpolationParameters {
@@ -491,91 +375,25 @@ impl VoiceController {
                 oversampling_factor: 256,
                 window: WindowFunction::BlackmanHarris2,
             };
-            
-            match SincFixedIn::new(
+            chunk_resampler = SincFixedIn::new(
                 WHISPER_SAMPLE_RATE as f64 / actual_rate as f64,
                 2.0,
                 params,
                 1024,
                 1,
-            ) {
-                Ok(resampler) => {
-                    chunk_resampler = Some(resampler);
-                    info!("[AudioThread] Resampler initialized successfully");
-                },
-                Err(e) => {
-                    error!("[AudioThread] Failed to create resampler: {:?}", e);
-                    return;
-                }
-            }
+            ).ok();
         }
 
-        // CRITICAL: Use bounded buffers to prevent memory exhaustion
         let mut audio_buffer_for_whisper_chunks: Vec<f32> = Vec::new();
+        let partial_buffer_capacity_samples = (actual_rate as u64 * 1500 / 1000) as usize;
         let mut raw_full_session_audio: Vec<f32> = Vec::new();
 
-        // CRITICAL: Bound the buffer capacities
-        let partial_buffer_capacity_samples = std::cmp::min(
-            (actual_rate as u64 * 1500 / 1000) as usize,
-            MAX_AUDIO_BUFFER_SIZE / 4 // Use 1/4 of max for partial processing
-        );
-        
-        let max_session_audio_samples = std::cmp::min(
-            (actual_rate as u64 * 300 / 1000) as usize, // 5 minutes max
-            MAX_AUDIO_BUFFER_SIZE
-        );
-
-        // Pre-allocate buffers to avoid frequent reallocations
-        audio_buffer_for_whisper_chunks.reserve(partial_buffer_capacity_samples);
-        raw_full_session_audio.reserve(max_session_audio_samples);
-
-        // Track initial buffer allocations
-        memory_tracker.add_buffer_usage(
-            (partial_buffer_capacity_samples + max_session_audio_samples) * std::mem::size_of::<f32>()
-        );
-
-        info!("[AudioThread] Memory-bounded buffers initialized: partial={} samples, session={} samples max", 
-              partial_buffer_capacity_samples, max_session_audio_samples);
+        info!("[AudioThread] Partial transcription threshold: {} samples ({:.2} seconds at {}Hz)",
+              partial_buffer_capacity_samples,
+              partial_buffer_capacity_samples as f32 / actual_rate as f32,
+              actual_rate);
 
         loop {
-            // CRITICAL: Periodic memory monitoring and cleanup
-            if last_memory_check.elapsed().as_millis() > MEMORY_CHECK_INTERVAL_MS as u128 {
-                let current_mb = memory_tracker.get_total_mb();
-                if current_mb > 0 {
-                    info!("[AudioThread] Memory usage: {}MB", current_mb);
-                }
-
-                if memory_tracker.should_cleanup() {
-                    warn!("[AudioThread] Memory limit exceeded ({}MB), forcing cleanup", current_mb);
-                    
-                    // Force cleanup: clear buffers and reset tracking
-                    let old_buffer_size = (audio_buffer_for_whisper_chunks.len() + raw_full_session_audio.len()) 
-                        * std::mem::size_of::<f32>();
-                    
-                    audio_buffer_for_whisper_chunks.clear();
-                    audio_buffer_for_whisper_chunks.shrink_to_fit();
-                    
-                    // Keep only recent session audio (last 30 seconds)
-                    let keep_samples = std::cmp::min(actual_rate as usize * 30, raw_full_session_audio.len());
-                    if raw_full_session_audio.len() > keep_samples {
-                        raw_full_session_audio.drain(0..raw_full_session_audio.len() - keep_samples);
-                    }
-                    raw_full_session_audio.shrink_to_fit();
-                    
-                    memory_tracker.remove_buffer_usage(old_buffer_size);
-                    memory_tracker.reset_session();
-                    
-                    // Emit cleanup event
-                    if let Err(e) = app_handle.emit("voice-transcription:memory-cleanup", ()) {
-                        error!("[AudioThread] Failed to emit memory cleanup event: {}", e);
-                    }
-                    
-                    info!("[AudioThread] Memory cleanup completed");
-                }
-                
-                last_memory_check = std::time::Instant::now();
-            }
-
             // Check for control messages
             match control_rx.try_recv() {
                 Ok(AudioThreadMessage::Stop) => {
@@ -598,21 +416,6 @@ impl VoiceController {
 
                     break;
                 }
-                Ok(AudioThreadMessage::ForceMemoryCleanup) => {
-                    info!("[AudioThread] Force memory cleanup requested");
-                    
-                    // Immediate cleanup
-                    let old_buffer_size = (audio_buffer_for_whisper_chunks.len() + raw_full_session_audio.len()) 
-                        * std::mem::size_of::<f32>();
-                    
-                    audio_buffer_for_whisper_chunks.clear();
-                    audio_buffer_for_whisper_chunks.shrink_to_fit();
-                    raw_full_session_audio.clear();
-                    raw_full_session_audio.shrink_to_fit();
-                    
-                    memory_tracker.remove_buffer_usage(old_buffer_size);
-                    memory_tracker.reset_session();
-                }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     info!("[AudioThread] Control channel disconnected.");
@@ -620,39 +423,16 @@ impl VoiceController {
                 }
             }
 
-            // Process audio data with enhanced memory management
+            // Process audio data
             match audio_data_rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(audio_chunk) => {
-                    // CRITICAL: Validate chunk size before processing
-                    if audio_chunk.len() > AUDIO_CHUNK_SIZE_LIMIT {
-                        warn!("[AudioThread] Received oversized audio chunk: {} samples, skipping", audio_chunk.len());
-                        continue;
-                    }
-
-                    // CRITICAL: Check session audio size before adding
-                    if raw_full_session_audio.len() + audio_chunk.len() > max_session_audio_samples {
-                        warn!("[AudioThread] Session audio would exceed limit, removing old data");
-                        
-                        let keep_size = max_session_audio_samples / 2;
-                        if raw_full_session_audio.len() > keep_size {
-                            let removed_size = raw_full_session_audio.len() - keep_size;
-                            raw_full_session_audio.drain(0..removed_size);
-                            memory_tracker.remove_buffer_usage(removed_size * std::mem::size_of::<f32>());
-                        }
-                    }
-
-                    // Track memory for new chunk
-                    memory_tracker.add_buffer_usage(audio_chunk.len() * std::mem::size_of::<f32>());
-                    
-                    // Add to buffers
                     raw_full_session_audio.extend_from_slice(&audio_chunk);
                     audio_buffer_for_whisper_chunks.extend_from_slice(&audio_chunk);
 
-                    // Process partial transcriptions with bounds checking
+                    // Process partial transcriptions
                     if audio_buffer_for_whisper_chunks.len() >= partial_buffer_capacity_samples {
                         info!("[AudioThread] Processing partial transcription. Buffer size: {} samples, threshold: {} samples",
                               audio_buffer_for_whisper_chunks.len(), partial_buffer_capacity_samples);
-                        
                         Self::process_partial_transcription(
                             &mut whisper_state,
                             &audio_buffer_for_whisper_chunks,
@@ -660,25 +440,12 @@ impl VoiceController {
                             chunk_resampler.as_mut(),
                             &app_handle,
                         );
-                        
-                        // Clear and track memory cleanup
-                        let cleared_size = audio_buffer_for_whisper_chunks.len() * std::mem::size_of::<f32>();
                         audio_buffer_for_whisper_chunks.clear();
-                        memory_tracker.remove_buffer_usage(cleared_size);
                     }
                 }
-                Err(_) => {
-                    // Timeout - continue processing
-                }
+                Err(_) => {}
             }
         }
-
-        info!("[AudioThread] Worker thread finished with memory cleanup");
-        
-        // Final cleanup
-        let final_cleanup_size = (audio_buffer_for_whisper_chunks.len() + raw_full_session_audio.len()) 
-            * std::mem::size_of::<f32>();
-        memory_tracker.remove_buffer_usage(final_cleanup_size);
     }
 
     fn process_partial_transcription<R: Runtime>(
