@@ -5,7 +5,7 @@ use cpal::SampleFormat;
 use std::sync::mpsc::{channel, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use rubato::{Resampler, SincFixedIn, SincInterpolationType, SincInterpolationParameters, WindowFunction};
 use tauri::{AppHandle, Emitter, Runtime};
 use tracing::{info, warn, error, debug};
@@ -25,12 +25,6 @@ const MIN_TRANSCRIPTION_DURATION_MS: u64 = 1000; // Increased from 500ms to 1000
 const VOLUME_DROP_TOLERANCE_MS: u64 = 200; // Allow brief volume drops during activity
 const MIN_SPEECH_VOLUME: f32 = 0.02; // Minimum volume required for speech processing
 
-// CRITICAL MEMORY MANAGEMENT CONSTANTS
-const MAX_AUDIO_BUFFER_SIZE: usize = 160_000; // 10 seconds at 16kHz to prevent unbounded growth
-const MAX_MEMORY_USAGE_MB: usize = 50; // Maximum memory usage before forced cleanup
-const MEMORY_CHECK_INTERVAL_MS: u64 = 1000; // Check memory usage every second
-const AUDIO_CHUNK_SIZE_LIMIT: usize = 16_000; // Maximum chunk size (1 second at 16kHz)
-
 enum AlwaysListeningMessage {
     Stop,
     UpdateSensitivity(f32),
@@ -38,7 +32,6 @@ enum AlwaysListeningMessage {
     SetTranscriptionDebugging(bool),
     SetAudioLevelMonitoring(bool),
     ForceTranscriptionTest,
-    ForceMemoryCleanup, // New message for forced memory cleanup
 }
 
 #[derive(Debug, Clone)]
@@ -46,59 +39,6 @@ pub enum AlwaysListeningState {
     Monitoring,   // Continuously monitoring for intent
     Activated,    // Intent detected, actively transcribing
     Processing,   // Processing detected speech
-    MemoryCleanup, // Memory cleanup in progress
-}
-
-// Improved thread-safe memory tracker
-#[derive(Debug)]
-struct MemoryTracker {
-    current_usage: Arc<RwLock<usize>>,
-    peak_usage: Arc<RwLock<usize>>,
-    last_cleanup: Arc<RwLock<Instant>>,
-}
-
-impl MemoryTracker {
-    fn new() -> Self {
-        Self {
-            current_usage: Arc::new(RwLock::new(0)),
-            peak_usage: Arc::new(RwLock::new(0)),
-            last_cleanup: Arc::new(RwLock::new(Instant::now())),
-        }
-    }
-
-    fn add_usage(&self, bytes: usize) {
-        if let Ok(mut current) = self.current_usage.write() {
-            *current += bytes;
-            if let Ok(mut peak) = self.peak_usage.write() {
-                if *current > *peak {
-                    *peak = *current;
-                }
-            }
-        }
-    }
-
-    fn remove_usage(&self, bytes: usize) {
-        if let Ok(mut current) = self.current_usage.write() {
-            *current = current.saturating_sub(bytes);
-        }
-    }
-
-    fn get_current_mb(&self) -> usize {
-        self.current_usage.read().unwrap_or_default() / (1024 * 1024)
-    }
-
-    fn should_cleanup(&self) -> bool {
-        let current_mb = self.get_current_mb();
-        let last_cleanup = self.last_cleanup.read().map(|t| t.elapsed().as_secs()).unwrap_or(0);
-        
-        current_mb > MAX_MEMORY_USAGE_MB || last_cleanup > 30 // Force cleanup every 30 seconds
-    }
-
-    fn mark_cleanup(&self) {
-        if let Ok(mut last) = self.last_cleanup.write() {
-            *last = Instant::now();
-        }
-    }
 }
 
 pub struct AlwaysListeningController {
@@ -109,7 +49,6 @@ pub struct AlwaysListeningController {
     sensitivity: f32,
     wake_words: Vec<String>,
     last_activity: Arc<Mutex<Option<Instant>>>,
-    memory_tracker: MemoryTracker, // Add memory tracking
 }
 
 impl AlwaysListeningController {
@@ -127,7 +66,6 @@ impl AlwaysListeningController {
             sensitivity: 0.5,
             wake_words: vec!["hey juno".to_string(), "computer".to_string()],
             last_activity: Arc::new(Mutex::new(None)),
-            memory_tracker: MemoryTracker::new(),
         })
     }
 
@@ -179,17 +117,9 @@ impl AlwaysListeningController {
     ) {
         info!("[AlwaysListening] Worker thread started");
 
-        // Initialize memory tracker for this thread
-        let memory_tracker = MemoryTracker::new();
-        let mut last_memory_check = Instant::now();
-
-        // Initialize Whisper context with error recovery
+        // Initialize Whisper context
         let whisper_context = match WhisperContext::new_with_params(&model_path, WhisperContextParameters::default()) {
-            Ok(ctx) => {
-                // Track model memory usage (approximate 77MB for tiny.en model)
-                memory_tracker.add_usage(77 * 1024 * 1024);
-                ctx
-            },
+            Ok(ctx) => ctx,
             Err(e) => {
                 error!("Failed to create WhisperContext in always listening thread: {:?}", e);
                 return;
@@ -197,18 +127,14 @@ impl AlwaysListeningController {
         };
 
         let mut whisper_state = match whisper_context.create_state() {
-            Ok(state) => {
-                // Track state memory usage (approximate 10MB)
-                memory_tracker.add_usage(10 * 1024 * 1024);
-                state
-            },
+            Ok(state) => state,
             Err(e) => {
                 error!("Failed to create WhisperState in always listening thread: {:?}", e);
                 return;
             }
         };
 
-        // Set up audio capture with error handling
+        // Set up audio capture
         let host = cpal::default_host();
         let device = match host.default_input_device() {
             Some(dev) => dev,
@@ -224,21 +150,11 @@ impl AlwaysListeningController {
 
         let (audio_data_tx, audio_data_rx) = channel::<Vec<f32>>();
 
-        // Create stream with proper error handling and memory-safe callbacks
         let stream = match sample_format {
             SampleFormat::F32 => device.build_input_stream(
                 &config.config(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    // CRITICAL: Limit audio chunk size to prevent memory exhaustion
-                    let chunk_to_send = if data.len() > AUDIO_CHUNK_SIZE_LIMIT {
-                        warn!("[AlwaysListening] Audio chunk too large: {} samples, truncating to {}", 
-                              data.len(), AUDIO_CHUNK_SIZE_LIMIT);
-                        &data[..AUDIO_CHUNK_SIZE_LIMIT]
-                    } else {
-                        data
-                    };
-                    
-                    if let Err(e) = audio_data_tx.send(chunk_to_send.to_vec()) {
+                    if let Err(e) = audio_data_tx.send(data.to_vec()) {
                         error!("Failed to send audio data: {:?}", e);
                     }
                 },
@@ -250,17 +166,8 @@ impl AlwaysListeningController {
             SampleFormat::I16 => device.build_input_stream(
                 &config.config(),
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    // CRITICAL: Limit audio chunk size to prevent memory exhaustion
-                    let chunk_to_process = if data.len() > AUDIO_CHUNK_SIZE_LIMIT {
-                        warn!("[AlwaysListening] Audio chunk too large: {} samples, truncating to {}", 
-                              data.len(), AUDIO_CHUNK_SIZE_LIMIT);
-                        &data[..AUDIO_CHUNK_SIZE_LIMIT]
-                    } else {
-                        data
-                    };
-                    
-                    let mut audio_f32: Vec<f32> = vec![0.0f32; chunk_to_process.len()];
-                    if let Err(e) = whisper_rs::convert_integer_to_float_audio(chunk_to_process, &mut audio_f32) {
+                    let mut audio_f32: Vec<f32> = vec![0.0f32; data.len()];
+                    if let Err(e) = whisper_rs::convert_integer_to_float_audio(data, &mut audio_f32) {
                         error!("Failed to convert i16 to f32: {:?}", e);
                         return;
                     }
@@ -286,61 +193,16 @@ impl AlwaysListeningController {
 
         info!("[AlwaysListening] Audio monitoring started");
 
-        // Audio processing with enhanced memory management
+        // Resampling will be done on-demand with custom resamplers
+
         let mut audio_buffer: Vec<f32> = Vec::new();
         let mut current_state = AlwaysListeningState::Monitoring;
-        
-        // CRITICAL: Use bounded buffer capacity to prevent unbounded growth
-        let buffer_capacity = std::cmp::min(
-            (sample_rate as u64 * INTENT_DETECTION_BUFFER_MS / 1000) as usize,
-            MAX_AUDIO_BUFFER_SIZE
-        );
-        
+        let buffer_capacity = (sample_rate as u64 * INTENT_DETECTION_BUFFER_MS / 1000) as usize;
         let min_transcription_samples = (sample_rate as u64 * MIN_TRANSCRIPTION_DURATION_MS / 1000) as usize;
         let mut audio_activity_start: Option<Instant> = None;
         let mut last_volume_drop: Option<Instant> = None;
 
-        // Pre-allocate buffer to avoid frequent reallocations
-        audio_buffer.reserve(buffer_capacity);
-        memory_tracker.add_usage(buffer_capacity * std::mem::size_of::<f32>());
-
-        info!("[AlwaysListening] Memory-bounded buffer initialized: {} samples max", buffer_capacity);
-
         loop {
-            // CRITICAL: Periodic memory monitoring and cleanup
-            if last_memory_check.elapsed().as_millis() > MEMORY_CHECK_INTERVAL_MS as u128 {
-                let current_mb = memory_tracker.get_current_mb();
-                if current_mb > 0 {
-                    debug!("[AlwaysListening] Memory usage: {}MB", current_mb);
-                }
-
-                if memory_tracker.should_cleanup() {
-                    warn!("[AlwaysListening] Memory limit exceeded ({}MB), forcing cleanup", current_mb);
-                    
-                    // Force cleanup: clear buffers and reset state
-                    let old_buffer_size = audio_buffer.len() * std::mem::size_of::<f32>();
-                    audio_buffer.clear();
-                    audio_buffer.shrink_to_fit();
-                    memory_tracker.remove_usage(old_buffer_size);
-                    
-                    // Reset activity tracking
-                    audio_activity_start = None;
-                    last_volume_drop = None;
-                    current_state = AlwaysListeningState::Monitoring;
-                    
-                    memory_tracker.mark_cleanup();
-                    
-                    // Emit cleanup event
-                    if let Err(e) = app_handle.emit("always-listening:memory-cleanup", ()) {
-                        error!("[AlwaysListening] Failed to emit memory cleanup event: {}", e);
-                    }
-                    
-                    info!("[AlwaysListening] Memory cleanup completed");
-                }
-                
-                last_memory_check = Instant::now();
-            }
-
             // Check for control messages
             match control_rx.try_recv() {
                 Ok(AlwaysListeningMessage::Stop) => {
@@ -364,18 +226,6 @@ impl AlwaysListeningController {
                 Ok(AlwaysListeningMessage::ForceTranscriptionTest) => {
                     info!("[AlwaysListening] Force transcription test requested");
                 }
-                Ok(AlwaysListeningMessage::ForceMemoryCleanup) => {
-                    info!("[AlwaysListening] Force memory cleanup requested");
-                    // Immediate cleanup
-                    let old_buffer_size = audio_buffer.len() * std::mem::size_of::<f32>();
-                    audio_buffer.clear();
-                    audio_buffer.shrink_to_fit();
-                    memory_tracker.remove_usage(old_buffer_size);
-                    audio_activity_start = None;
-                    last_volume_drop = None;
-                    current_state = AlwaysListeningState::Monitoring;
-                    memory_tracker.mark_cleanup();
-                }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     info!("[AlwaysListening] Control channel disconnected");
@@ -383,32 +233,9 @@ impl AlwaysListeningController {
                 }
             }
 
-            // Process audio data with enhanced error recovery
+            // Process audio data
             match audio_data_rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(audio_chunk) => {
-                    // CRITICAL: Validate audio chunk size before processing
-                    if audio_chunk.len() > AUDIO_CHUNK_SIZE_LIMIT {
-                        warn!("[AlwaysListening] Received oversized audio chunk: {} samples, skipping", audio_chunk.len());
-                        continue;
-                    }
-
-                    // CRITICAL: Check buffer size before adding new data
-                    let new_total_size = audio_buffer.len() + audio_chunk.len();
-                    if new_total_size > MAX_AUDIO_BUFFER_SIZE {
-                        warn!("[AlwaysListening] Buffer would exceed limit ({} > {}), forcing partial cleanup", 
-                              new_total_size, MAX_AUDIO_BUFFER_SIZE);
-                        
-                        // Keep only the most recent data
-                        let keep_size = MAX_AUDIO_BUFFER_SIZE / 2;
-                        if audio_buffer.len() > keep_size {
-                            let removed_size = audio_buffer.len() - keep_size;
-                            audio_buffer.drain(0..removed_size);
-                            memory_tracker.remove_usage(removed_size * std::mem::size_of::<f32>());
-                        }
-                    }
-
-                    // Track memory usage for new chunk
-                    memory_tracker.add_usage(audio_chunk.len() * std::mem::size_of::<f32>());
                     audio_buffer.extend_from_slice(&audio_chunk);
 
                     // Calculate volume level
@@ -563,10 +390,6 @@ impl AlwaysListeningController {
                         }
                         AlwaysListeningState::Processing => {
                             // This state is currently unused but could be used for more complex processing
-                            current_state = AlwaysListeningState::Monitoring;
-                        }
-                        AlwaysListeningState::MemoryCleanup => {
-                            // Memory cleanup in progress
                             current_state = AlwaysListeningState::Monitoring;
                         }
                     }
