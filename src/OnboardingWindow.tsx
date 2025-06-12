@@ -1,7 +1,7 @@
 import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 
 export default function OnboardingWindow() {
@@ -35,31 +35,10 @@ export default function OnboardingWindow() {
       // Mark onboarding as completed
       localStorage.setItem("juno-onboarding-completed", "true");
 
-      // Get the stored first prompt if any and send it to the main window
-      try {
-        const firstPrompt = await invoke<string>("get_first_onboarding_prompt");
-        if (firstPrompt && firstPrompt.trim()) {
-          // Emit event to main window to handle the first prompt
-          const mainWindow = await Window.getByLabel("main");
-          if (mainWindow) {
-            await mainWindow.emit("onboarding-complete-with-prompt", {
-              prompt: firstPrompt,
-            });
-          }
-        } else {
-          // Just notify completion without prompt
-          const mainWindow = await Window.getByLabel("main");
-          if (mainWindow) {
-            await mainWindow.emit("onboarding-complete", {});
-          }
-        }
-      } catch (error) {
-        console.log("No first prompt stored or error retrieving it:", error);
-        // Still notify completion
-        const mainWindow = await Window.getByLabel("main");
-        if (mainWindow) {
-          await mainWindow.emit("onboarding-complete", {});
-        }
+      // Notify main window of completion
+      const mainWindow = await Window.getByLabel("main");
+      if (mainWindow) {
+        await mainWindow.emit("onboarding-complete", {});
       }
 
       // Close the onboarding window

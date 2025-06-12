@@ -557,9 +557,7 @@ function App() {
           setCurrentView("chat");
         } else if (!hasCompletedOnboarding) {
           // First-time user: Show onboarding window
-          console.log(
-            "First-time user detected - opening onboarding window"
-          );
+          console.log("First-time user detected - opening onboarding window");
           await invoke("open_onboarding_window");
           setCurrentView("chat");
         } else if (!permissionsResult.allGranted) {
@@ -767,25 +765,16 @@ function App() {
 
   // Listen for onboarding completion events from the onboarding window
   useEffect(() => {
-    const unlistenComplete = listen<{ prompt?: string }>("onboarding-complete", async (event) => {
-      console.log("Onboarding completed from separate window");
-      // Focus main window
-      const currentWindow = getCurrentWindow();
-      await currentWindow.show();
-      await currentWindow.setFocus();
-    });
-
-    const unlistenCompleteWithPrompt = listen<{ prompt: string }>("onboarding-complete-with-prompt", async (event) => {
-      console.log("Onboarding completed with prompt from separate window:", event.payload.prompt);
-      // Submit the first prompt
-      if (event.payload.prompt && event.payload.prompt.trim()) {
-        await submitQuery(event.payload.prompt);
+    const unlistenComplete = listen<{ prompt?: string }>(
+      "onboarding-complete",
+      async (event) => {
+        console.log("Onboarding completed from separate window");
+        // Focus main window
+        const currentWindow = getCurrentWindow();
+        await currentWindow.show();
+        await currentWindow.setFocus();
       }
-      // Focus main window
-      const currentWindow = getCurrentWindow();
-      await currentWindow.show();
-      await currentWindow.setFocus();
-    });
+    );
 
     const unlistenSkipped = listen<{}>("onboarding-skipped", async (event) => {
       console.log("Onboarding skipped from separate window");
@@ -797,7 +786,6 @@ function App() {
 
     return () => {
       unlistenComplete.then((fn) => fn());
-      unlistenCompleteWithPrompt.then((fn) => fn());
       unlistenSkipped.then((fn) => fn());
     };
   }, [submitQuery]);
@@ -817,48 +805,6 @@ function App() {
       unlisten.then((unlistenFn) => unlistenFn());
     };
   }, []);
-
-  // Monitor agent execution state and automatically skip onboarding if agent starts
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-
-    const checkAgentExecution = async () => {
-      try {
-        const agentProgress = await invoke<{
-          is_executing: boolean;
-          execution_id?: string;
-        }>("get_agent_execution_progress");
-
-        // If agent starts executing while in onboarding, switch to chat
-        if (agentProgress.is_executing && currentView === "onboarding") {
-          console.log(
-            "Agent execution detected during onboarding - switching to chat"
-          );
-          // Mark onboarding as completed to prevent showing it again
-          localStorage.setItem("juno-onboarding-completed", "true");
-          setShowOnboarding(false);
-          setCurrentView("chat");
-        }
-      } catch (error) {
-        // Silently handle errors - this is just a monitoring function
-        console.debug("Error checking agent execution state:", error);
-      }
-    };
-
-    // Only monitor when in onboarding view
-    if (currentView === "onboarding") {
-      // Check immediately
-      checkAgentExecution();
-      // Then check every 500ms for responsive detection
-      intervalId = setInterval(checkAgentExecution, 500);
-    }
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [currentView]);
 
   // Listen for devtools menu requests from tray menu
   useEffect(() => {
@@ -1525,7 +1471,9 @@ function App() {
   // Listen for TTS stop requests from escape key
   useEffect(() => {
     const unlisten = listen("tts-stop-requested", async () => {
-      console.log("TTS stop requested event received - stopping TTS immediately");
+      console.log(
+        "TTS stop requested event received - stopping TTS immediately"
+      );
       try {
         // Immediately stop any currently playing audio
         if (currentAudio) {
@@ -1539,7 +1487,7 @@ function App() {
           setCurrentAudio(null);
           setCurrentAudioElement(null);
         }
-        
+
         // Also call the TTS service stop function
         await stopTTS((msg, level) =>
           console.log(`[TTS-${level || "info"}] ${msg}`)
@@ -1558,7 +1506,9 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        console.log("Frontend escape key detected - stopping TTS audio immediately");
+        console.log(
+          "Frontend escape key detected - stopping TTS audio immediately"
+        );
         // Immediately stop any currently playing audio
         if (currentAudio) {
           console.log("Frontend: Stopping current audio element");
@@ -1571,7 +1521,7 @@ function App() {
           setCurrentAudio(null);
           setCurrentAudioElement(null);
         }
-        
+
         // Also call the TTS service stop function
         stopTTS((msg, level) =>
           console.log(`[Frontend TTS Stop-${level || "info"}] ${msg}`)

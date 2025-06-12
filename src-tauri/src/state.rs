@@ -151,8 +151,7 @@ pub struct AppState {
     // Agent iteration tracking
     pub agent_current_step: Arc<Mutex<Option<u32>>>, // Track the current iteration/step number
     pub agent_max_steps: Arc<Mutex<Option<u32>>>,    // Track the maximum iterations/steps allowed
-    // First onboarding prompt storage
-    pub first_onboarding_prompt: Arc<Mutex<Option<String>>>, // Store the first prompt selected during onboarding
+
 
     // Dual content communication - store spoken content separately for TTS
     pub last_spoken_content: Arc<Mutex<Option<String>>>, // Store spoken content separate from displayed text
@@ -220,8 +219,7 @@ impl AppState {
             // Initialize agent iteration tracking
             agent_current_step: Arc::new(Mutex::new(None)),
             agent_max_steps: Arc::new(Mutex::new(None)),
-            // Initialize first onboarding prompt storage
-            first_onboarding_prompt: Arc::new(Mutex::new(None)),
+
             // Dual content communication - store spoken content separately for TTS
             last_spoken_content: Arc::new(Mutex::new(None)),
             // Initialize debug mode tracking
@@ -789,17 +787,7 @@ impl AppState {
         Ok(())
     }
 
-    // Method to set the first onboarding prompt
-    pub fn set_first_onboarding_prompt(&self, prompt: String) {
-        let mut prompt_guard = self.first_onboarding_prompt.lock().unwrap();
-        *prompt_guard = Some(prompt);
-    }
 
-    // Method to get the first onboarding prompt
-    pub fn get_first_onboarding_prompt(&self) -> Option<String> {
-        let prompt_guard = self.first_onboarding_prompt.lock().unwrap();
-        prompt_guard.clone()
-    }
 
     // Dual content communication methods
 
