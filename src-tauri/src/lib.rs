@@ -559,6 +559,18 @@ pub fn run() {
             if escape_shortcut.id() == shortcut.id() {
                 info!("[GlobalShortcut] Escape shortcut triggered - attempting to stop agent");
 
+                // Stop TTS immediately when escape is pressed
+                info!("[GlobalShortcut] Stopping TTS audio playback");
+                crate::tts::stop_speech();
+                info!("[GlobalShortcut] TTS stop_speech() called");
+
+                // Also emit TTS stop event for frontend audio cleanup
+                if let Err(e) = app.emit("tts-stop-requested", ()) {
+                    warn!("Failed to emit TTS stop event: {}", e);
+                } else {
+                    info!("[GlobalShortcut] tts-stop-requested event emitted successfully");
+                }
+
                 // Check if agent is active and stop it
                 let app_state = app.state::<state::AppState>();
 
@@ -600,6 +612,7 @@ pub fn run() {
                     ).await;
                 });
 
+                info!("[GlobalShortcut] Escape key handling completed");
                 return; // Exit early for escape shortcut
             }
 
