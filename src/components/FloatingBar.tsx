@@ -91,6 +91,7 @@ export function FloatingBar() {
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const [isAnimatingSize, setIsAnimatingSize] = useState(false);
+  // @ts-ignore - Currently commented out in display logic but may be re-enabled in future
   const [showTooltip, setShowTooltip] = useState(false);
   const [config, setConfig] = useState<FloatingBarConfig>({
     showVoiceIndicator: true,
