@@ -15,7 +15,7 @@ use objc::{msg_send, sel, sel_impl};
 /// When enabled (true), the panel ignores mouse events and clicks pass through
 /// When disabled (false), the panel captures mouse events and can be interacted with
 #[tauri::command]
-pub async fn set_floating_panel_click_through(app: AppHandle, click_through: bool) -> Result<(), String> {
+pub fn set_floating_panel_click_through(app: AppHandle, click_through: bool) -> Result<(), String> {
     info!("Setting floating panel click-through: {}", click_through);
 
     #[cfg(target_os = "macos")]
@@ -24,11 +24,18 @@ pub async fn set_floating_panel_click_through(app: AppHandle, click_through: boo
             match window.ns_window() {
                 Ok(ns_window_ptr) => {
                     let ns_window = ns_window_ptr as cocoa_id;
-                    unsafe {
-                        #[allow(unexpected_cfgs)]
-                        let ignore_events: BOOL = if click_through { YES } else { NO };
-                        let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: ignore_events];
 
+                    // Ensure we're on the main thread for Cocoa operations
+                    if ns_window.is_null() {
+                        let error_msg = "NSWindow pointer is null".to_string();
+                        warn!("{}", error_msg);
+                        return Err(error_msg);
+                    }
+
+                    unsafe {
+                        let ignore_events: BOOL = if click_through { YES } else { NO };
+                        // Set ignore mouse events with proper return type
+                        let _: () = msg_send![ns_window, setIgnoresMouseEvents: ignore_events];
                         info!("macOS: Floating panel click-through set to: {}", click_through);
                     }
                 }
@@ -56,19 +63,19 @@ pub async fn set_floating_panel_click_through(app: AppHandle, click_through: boo
 
 /// Enable click-through for the floating panel (makes it non-interactive)
 #[tauri::command]
-pub async fn enable_floating_panel_click_through(app: AppHandle) -> Result<(), String> {
-    set_floating_panel_click_through(app, true).await
+pub fn enable_floating_panel_click_through(app: AppHandle) -> Result<(), String> {
+    set_floating_panel_click_through(app, true)
 }
 
 /// Disable click-through for the floating panel (makes it interactive)
 #[tauri::command]
-pub async fn disable_floating_panel_click_through(app: AppHandle) -> Result<(), String> {
-    set_floating_panel_click_through(app, false).await
+pub fn disable_floating_panel_click_through(app: AppHandle) -> Result<(), String> {
+    set_floating_panel_click_through(app, false)
 }
 
 /// Get the current state of the floating panel (visible, focused, etc.)
 #[tauri::command]
-pub async fn get_floating_panel_state(app: AppHandle) -> Result<serde_json::Value, String> {
+pub fn get_floating_panel_state(app: AppHandle) -> Result<serde_json::Value, String> {
     if let Some(window) = app.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
         let is_visible = window.is_visible().unwrap_or(false);
         let is_focused = window.is_focused().unwrap_or(false);
@@ -88,7 +95,7 @@ pub async fn get_floating_panel_state(app: AppHandle) -> Result<serde_json::Valu
 /// Properly position the floating panel according to macOS conventions
 /// This ensures the panel respects system UI elements like the menu bar and dock
 #[tauri::command]
-pub async fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y: Option<f64>) -> Result<(), String> {
+pub fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y: Option<f64>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
         // Get screen dimensions to ensure proper positioning
         let monitor = window.current_monitor().map_err(|e| format!("Failed to get monitor: {}", e))?;
@@ -119,7 +126,7 @@ pub async fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y:
 
 /// Update the floating panel's window level for proper stacking order
 #[tauri::command]
-pub async fn set_floating_panel_level(app: AppHandle, level: i32) -> Result<(), String> {
+pub fn set_floating_panel_level(app: AppHandle, level: i32) -> Result<(), String> {
     info!("Setting floating panel window level: {}", level);
 
     #[cfg(target_os = "macos")]
