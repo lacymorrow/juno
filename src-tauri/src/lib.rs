@@ -2319,7 +2319,8 @@ pub fn run() {
                 });
             });
 
-
+            // NOTE: Dictation Mode processing is handled by the main voice-transcription:final-result listener
+            // above to prevent duplicate processing and race conditions
 
             // Listen for always listening wake word activation
             let app_handle_for_wake_word = app.handle().clone();
@@ -2465,7 +2466,8 @@ pub fn run() {
                 });
             });
 
-
+            // NOTE: Dictation Mode processing is handled by the main voice-transcription:final-result listener
+            // above to prevent duplicate processing and race conditions
 
             // Listen for agent stop events (hold mode - normal completion)
             let app_handle_for_agent_stop = app.handle().clone();

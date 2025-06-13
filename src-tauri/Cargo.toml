@@ -2,7 +2,7 @@
 name = "juno"
 version = "0.2.6"
 description = "A Tauri App"
-authors = ["you"]
+authors = ["Lacy Morrow <me@lacymorrow.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

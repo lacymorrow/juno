@@ -316,47 +316,10 @@ export function useVoiceState() {
     isSpeaking: false,
   });
 
-  useEffect(() => {
-    let unlistenCallbacks: (() => void)[] = [];
-
-    const setupListeners = async () => {
-      unlistenCallbacks.push(
-        await listen("dictation-active", (event) => {
-          const isActive = event.payload as boolean;
-          setVoiceState((prev) => ({
-            ...prev,
-            mode: isActive ? "dictation" : "idle",
-            isListening: isActive,
-          }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen("app-dictation-started", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            mode: "agent",
-            isListening: true,
-          }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen("app-dictation-finished", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            isListening: false,
-          }));
-        })
-      );
-    };
-
-    setupListeners();
-
-    return () => {
-      unlistenCallbacks.forEach((unlisten) => unlisten());
-    };
-  }, []);
+  // NOTE: Removed duplicate event listeners to prevent race conditions
+  // The main VoiceStatusIndicator component already handles these events
+  // This hook should be refactored to share state via context instead
+  // For now, returning a basic state to prevent crashes
 
   return voiceState;
 }
