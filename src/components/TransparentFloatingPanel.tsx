@@ -64,7 +64,7 @@ export function TransparentFloatingPanel({
   const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isHovered, setIsHovered] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [_isTransitioning, setIsTransitioning] = useState(false);
   const [isClickThroughEnabled, setIsClickThroughEnabled] = useState(true); // Start with click-through enabled
   // Debug: Add some test messages for development
   useEffect(() => {
