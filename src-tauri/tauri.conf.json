@@ -16,7 +16,29 @@
         "title": "Juno",
         "width": 800,
         "height": 600,
-        "visible": true
+        "visible": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "resizable": true,
+        "skipTaskbar": false,
+        "shadow": true
+      },
+      {
+        "label": "floating-panel",
+        "url": "/floating-panel",
+        "width": 180,
+        "height": 100,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "visible": true,
+        "shadow": false,
+        "center": false,
+        "x": 20,
+        "y": 50
       },
       {
         "label": "floating-bar",
@@ -28,7 +50,7 @@
         "alwaysOnTop": true,
         "resizable": false,
         "skipTaskbar": true,
-        "visible": true,
+        "visible": false,
         "shadow": false
       },
       {
