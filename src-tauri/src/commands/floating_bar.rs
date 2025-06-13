@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Listener};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
@@ -21,6 +21,13 @@ pub enum BarState {
     Speaking,
     Dictating,
     AlwaysListening,
+    // New agent-specific states
+    AgentListening,
+    AgentThinking,
+    AgentResponding,
+    DictationReady,
+    DictationActive,
+    DictationProcessing,
 }
 
 impl BarState {
@@ -39,6 +46,13 @@ impl BarState {
             BarState::Speaking => "speaking",
             BarState::Dictating => "dictating",
             BarState::AlwaysListening => "always-listening",
+            // New agent-specific states
+            BarState::AgentListening => "agent_listening",
+            BarState::AgentThinking => "agent_thinking",
+            BarState::AgentResponding => "agent_responding",
+            BarState::DictationReady => "dictation_ready",
+            BarState::DictationActive => "dictation_active",
+            BarState::DictationProcessing => "dictation_processing",
         }
     }
 }
@@ -54,6 +68,8 @@ pub struct FloatingBarManager {
     is_agent_working: bool,
     is_dictation_mode: bool,
     is_always_listening: bool,
+    audio_level: f32,
+    voice_mode: String, // "idle", "agent", "dictation"
     app_handle: AppHandle,
 }
 
@@ -69,6 +85,8 @@ impl FloatingBarManager {
             is_agent_working: false,
             is_dictation_mode: false,
             is_always_listening: false,
+            audio_level: 0.0,
+            voice_mode: "idle".to_string(),
             app_handle,
         }
     }
@@ -85,6 +103,8 @@ impl FloatingBarManager {
             "isAgentWorking": self.is_agent_working,
             "isDictationMode": self.is_dictation_mode,
             "isAlwaysListening": self.is_always_listening,
+            "audioLevel": self.audio_level,
+            "voiceMode": self.voice_mode,
         });
 
         if let Err(e) = self.app_handle.emit("bar-state-update", state_data) {
@@ -139,7 +159,7 @@ impl FloatingBarManager {
             // Only allow expansion from default state when agent is not working
             if self.current_state == BarState::Default && !self.is_agent_working {
                 debug!("FloatingBarManager: Window gained focus, expanding to input state");
-                
+
                 // Start expansion
                 self.set_state(BarState::Expanding).await;
 
@@ -305,9 +325,12 @@ impl FloatingBarManager {
         // If dictation mode is active, go directly to Dictating (orange)
         // Otherwise, go to Listening (blue) for agent mode
         if self.is_dictation_mode {
-            self.set_state(BarState::Dictating).await;
+            self.voice_mode = "dictation".to_string();
+            self.set_state(BarState::DictationActive).await;
         } else {
-            self.set_state(BarState::Listening).await;
+            self.voice_mode = "agent".to_string();
+            self.is_agent_working = true;
+            self.set_state(BarState::AgentListening).await;
         }
 
         Ok(())
@@ -317,8 +340,8 @@ impl FloatingBarManager {
         debug!("FloatingBarManager: Handling dictation partial: '{}'", partial_text);
         self.transcription_text = partial_text;
 
-        if self.current_state == BarState::Listening {
-            self.set_state(if self.is_dictation_mode { BarState::Dictating } else { BarState::Transcribing }).await;
+        if self.current_state == BarState::AgentListening {
+            self.set_state(if self.is_dictation_mode { BarState::DictationProcessing } else { BarState::Transcribing }).await;
         }
 
         self.emit_state_update().await;
@@ -327,38 +350,26 @@ impl FloatingBarManager {
 
     pub async fn handle_dictation_finished(&mut self, query: Option<String>) -> Result<(), String> {
         debug!("FloatingBarManager: Handling dictation finished with query: {:?}", query);
-        self.transcription_text.clear();
 
-        if let Some(query) = query {
+        if let Some(query_text) = query {
+            self.last_submitted_value = query_text.clone();
+            self.input_value = query_text;
+
             if self.is_dictation_mode {
-                // Dictation mode - show completion briefly
-                self.set_state(BarState::Finishing).await;
-
-                let app_handle = self.app_handle.clone();
-                tokio::spawn(async move {
-                    sleep(Duration::from_millis(500)).await;
-                    if let Some(manager) = get_bar_manager(&app_handle).await {
-                        let mut manager = manager.lock().await;
-                        manager.set_state(BarState::Default).await;
-                    }
-                });
+                // In dictation mode, return to default after brief processing
+                self.voice_mode = "idle".to_string();
+                self.set_state(BarState::Default).await;
             } else {
-                // Regular dictation - show in input field
-                self.input_value = query;
-                self.set_state(BarState::Input).await;
+                // In agent mode, continue with agent processing
+                self.voice_mode = "agent".to_string();
+                self.is_agent_working = true;
+                self.set_state(BarState::AgentThinking).await;
             }
         } else {
-            // No query - return to default
-            self.set_state(BarState::Shrinking).await;
-
-            let app_handle = self.app_handle.clone();
-            tokio::spawn(async move {
-                sleep(Duration::from_millis(300)).await;
-                if let Some(manager) = get_bar_manager(&app_handle).await {
-                    let mut manager = manager.lock().await;
-                    manager.set_state(BarState::Default).await;
-                }
-            });
+            // No query, return to default
+            self.voice_mode = "idle".to_string();
+            self.transcription_text.clear();
+            self.set_state(BarState::Default).await;
         }
 
         Ok(())
@@ -385,8 +396,10 @@ impl FloatingBarManager {
         self.is_dictation_mode = is_active;
 
         if is_active {
+            self.voice_mode = "dictation".to_string();
             self.set_state(BarState::Dictating).await;
         } else {
+            self.voice_mode = "idle".to_string();
             // When dictation mode becomes inactive, return to default state
             // This ensures the orange UI disappears when keys are released before threshold
             if self.current_state == BarState::Dictating {
@@ -411,12 +424,44 @@ impl FloatingBarManager {
         Ok(())
     }
 
+    // Handle agent status changes
+    pub async fn handle_agent_started(&mut self) -> Result<(), String> {
+        debug!("FloatingBarManager: Handling agent started");
+        self.is_agent_working = true;
+        self.voice_mode = "agent".to_string();
+        self.set_state(BarState::AgentListening).await;
+        Ok(())
+    }
+
+    pub async fn handle_agent_stopped(&mut self) -> Result<(), String> {
+        debug!("FloatingBarManager: Handling agent stopped");
+        self.is_agent_working = false;
+        self.voice_mode = "idle".to_string();
+        // Return to default state unless we're in a specific state that should be preserved
+        if matches!(self.current_state, BarState::AgentListening | BarState::AgentThinking | BarState::AgentResponding | BarState::Listening | BarState::Transcribing) {
+            self.set_state(BarState::Default).await;
+        }
+        Ok(())
+    }
+
+    pub async fn handle_agent_cancelled(&mut self) -> Result<(), String> {
+        debug!("FloatingBarManager: Handling agent cancelled");
+        self.is_agent_working = false;
+        self.voice_mode = "idle".to_string();
+        // Clear any transcription text and return to default
+        self.transcription_text.clear();
+        self.set_state(BarState::Default).await;
+        Ok(())
+    }
+
     // Helper to check if bar should remain expanded
     fn should_remain_expanded_for_status(&self) -> bool {
         matches!(self.current_state,
             BarState::Loading | BarState::Finishing | BarState::Success |
             BarState::Speaking | BarState::Listening | BarState::Transcribing |
-            BarState::Dictating | BarState::AlwaysListening | BarState::Error
+            BarState::Dictating | BarState::AlwaysListening | BarState::Error |
+            BarState::AgentListening | BarState::AgentThinking | BarState::AgentResponding |
+            BarState::DictationReady | BarState::DictationActive | BarState::DictationProcessing
         ) || self.is_agent_working
     }
 }
@@ -424,11 +469,55 @@ impl FloatingBarManager {
 // Static storage for the bar manager
 static BAR_MANAGER: TokioMutex<Option<Arc<TokioMutex<FloatingBarManager>>>> = TokioMutex::const_new(None);
 
-// Initialize the bar manager
+// Initialize the bar manager with event listeners
 pub async fn initialize_bar_manager(app_handle: AppHandle) {
-    let manager = Arc::new(TokioMutex::new(FloatingBarManager::new(app_handle)));
+    let manager = Arc::new(TokioMutex::new(FloatingBarManager::new(app_handle.clone())));
     let mut global_manager = BAR_MANAGER.lock().await;
-    *global_manager = Some(manager);
+    *global_manager = Some(manager.clone());
+
+    // Set up event listeners for agent status changes
+    setup_agent_event_listeners(app_handle, manager).await;
+}
+
+// Set up event listeners for agent status changes
+async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex<FloatingBarManager>>) {
+    // Listen for agent-transcription-start
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-transcription-start", move |_event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            if let Err(e) = manager.handle_agent_started().await {
+                error!("Failed to handle agent started: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-stop
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-stop", move |_event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            if let Err(e) = manager.handle_agent_stopped().await {
+                error!("Failed to handle agent stopped: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-cancel
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-cancel", move |_event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            if let Err(e) = manager.handle_agent_cancelled().await {
+                error!("Failed to handle agent cancelled: {}", e);
+            }
+        });
+    });
+
+    debug!("FloatingBarManager: Agent event listeners set up successfully");
 }
 
 // Get the bar manager
@@ -566,6 +655,34 @@ pub async fn handle_always_listening_change(app_handle: &AppHandle, is_active: b
         let mut manager = manager.lock().await;
         if let Err(e) = manager.handle_always_listening_change(is_active).await {
             error!("Failed to handle always listening mode change: {}", e);
+        }
+    }
+}
+
+// Agent event handlers for external use
+pub async fn handle_agent_started(app_handle: &AppHandle) {
+    if let Some(manager) = get_bar_manager(app_handle).await {
+        let mut manager = manager.lock().await;
+        if let Err(e) = manager.handle_agent_started().await {
+            error!("Failed to handle agent started: {}", e);
+        }
+    }
+}
+
+pub async fn handle_agent_stopped(app_handle: &AppHandle) {
+    if let Some(manager) = get_bar_manager(app_handle).await {
+        let mut manager = manager.lock().await;
+        if let Err(e) = manager.handle_agent_stopped().await {
+            error!("Failed to handle agent stopped: {}", e);
+        }
+    }
+}
+
+pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
+    if let Some(manager) = get_bar_manager(app_handle).await {
+        let mut manager = manager.lock().await;
+        if let Err(e) = manager.handle_agent_cancelled().await {
+            error!("Failed to handle agent cancelled: {}", e);
         }
     }
 }

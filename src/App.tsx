@@ -1375,6 +1375,27 @@ function App() {
     };
   }, [voiceSounds, sound]);
 
+  // Listen for agent-active events (hold mode)
+  useEffect(() => {
+    const unlisten = listen("agent-active", async (event) => {
+      const isActive = event.payload as boolean;
+      console.log("Received agent-active event:", isActive);
+
+      if (isActive) {
+        // Agent mode is activated - the transcription is already being handled
+        // by the agent monitor in hold mode, so we don't need to call toggleDictation()
+        console.log("Agent mode activated - transcription handled by backend");
+      } else {
+        // Agent mode ended
+        console.log("Agent mode deactivated");
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, []);
+
   // Check server status on mount
   useEffect(() => {
     const checkServer = async () => {
@@ -1938,8 +1959,11 @@ function App() {
                   </h3>
                   <ul className="list-disc list-inside space-y-1">
                     <li>
-                      <strong>Option + D:</strong> Toggle Agent Mode (AI
-                      conversations)
+                      <strong>Option + D:</strong> Activate Agent Mode
+                      <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-sm">
+                        <li><strong>Tap to Toggle:</strong> Press and release to toggle agent mode on/off</li>
+                        <li><strong>Hold to Activate:</strong> Hold key to activate agent, release to stop</li>
+                      </ul>
                     </li>
                     <li>
                       <strong>Option + Space:</strong> Toggle Dictation Mode
@@ -1950,6 +1974,9 @@ function App() {
                       (Always Listening Mode)
                     </li>
                   </ul>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Configure agent trigger mode in Settings → General → Agent Trigger Mode
+                  </p>
                 </section>
                 <section>
                   <h3 className="text-lg font-semibold mb-2">
