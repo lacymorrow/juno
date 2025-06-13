@@ -414,12 +414,7 @@ export function FloatingBar() {
       bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
     }
 
-    const sizeStyles = [
-      "default",
-      "dictation_ready",
-      "shrinking",
-      "finishing",
-    ].includes(barState)
+    const sizeStyles = ["default"].includes(barState)
       ? "h-[20px] w-[60px] px-2"
       : "h-[50px] w-[280px] px-4";
 
