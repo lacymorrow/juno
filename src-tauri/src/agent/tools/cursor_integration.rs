@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 
 use crate::agent::structs::{ToolCall, ToolResult, ToolDefinition};
 use crate::agent::traits::ToolProvider;

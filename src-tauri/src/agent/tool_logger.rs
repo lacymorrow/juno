@@ -1,14 +1,10 @@
-use crate::agent::structs::AgentError;
-use crate::state::AppState;
 use chrono::{DateTime, Local};
 use futures::FutureExt;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::sync::Arc;
+use serde::Serialize;
+use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::Mutex as TokioMutex;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Type for tool usage events sent to the frontend
 #[derive(Serialize, Clone)]
