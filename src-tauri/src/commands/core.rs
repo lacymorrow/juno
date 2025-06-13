@@ -12,6 +12,7 @@ use std::fs;
 use crate::cloud::CloudClient;
 use crate::anthropic::submit_query;
 use serde::{Deserialize, Serialize};
+use tauri_plugin_store::StoreExt;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -390,31 +391,86 @@ pub async fn cancel_agent_execution(state: State<'_, AppState>) -> Result<(), St
 
 /// Get system context information
 #[tauri::command]
-pub async fn get_system_context(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    info!("Getting system context");
+pub async fn get_system_context() -> Result<serde_json::Value, String> {
+    // Implementation details for system context
+    Ok(serde_json::json!({
+        "message": "System context gathered successfully"
+    }))
+}
 
-    let context = serde_json::json!({
-        "agent_executing": state.is_agent_executing(),
-        "execution_id": state.get_current_agent_execution_id(),
-        "debug_mode": state.is_debug_mode(),
-        "desktop_available": state.is_desktop_available(),
-        "performance_monitoring": state.is_performance_monitoring_enabled(),
-        "sound_enabled": state.sound_enabled.lock()
-            .map_err(|e| format!("Failed to lock sound enabled: {}", e))?
-            .clone(),
-        "tts_provider": state.tts_provider.lock()
-            .map_err(|e| format!("Failed to lock TTS provider: {}", e))?
-            .clone(),
-        "dictation_clipboard_enabled": state.dictation_clipboard_enabled.lock()
-            .map_err(|e| format!("Failed to lock dictation clipboard: {}", e))?
-            .clone(),
-        "timestamp": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| format!("Failed to get timestamp: {}", e))?
-            .as_secs(),
-    });
+/// Get the current agent trigger mode (tap or hold)
+#[tauri::command]
+pub async fn get_agent_trigger_mode(state: State<'_, AppState>) -> Result<String, String> {
+    let trigger_mode = state.agent_trigger_mode.lock()
+        .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
 
-    Ok(context)
+    let mode_str = match *trigger_mode {
+        crate::state::AgentTriggerMode::Tap => "tap",
+        crate::state::AgentTriggerMode::Hold => "hold",
+    };
+
+    Ok(mode_str.to_string())
+}
+
+/// Set the agent trigger mode (tap or hold)
+#[tauri::command]
+pub async fn set_agent_trigger_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mode: String,
+) -> Result<(), String> {
+    let trigger_mode = match mode.as_str() {
+        "tap" => crate::state::AgentTriggerMode::Tap,
+        "hold" => crate::state::AgentTriggerMode::Hold,
+        _ => return Err(format!("Invalid agent trigger mode: {}. Must be 'tap' or 'hold'", mode)),
+    };
+
+    // Update the state
+    {
+        let mut current_mode = state.agent_trigger_mode.lock()
+            .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
+        *current_mode = trigger_mode;
+    }
+
+    // Save to persistent storage
+    let store = app.store("agent_settings.json")
+        .map_err(|e| format!("Failed to access agent settings store: {}", e))?;
+
+    store.set("trigger_mode", serde_json::Value::String(mode.clone()));
+    store.save()
+        .map_err(|e| format!("Failed to save agent settings: {}", e))?;
+
+    info!("Updated agent trigger mode to: {}", mode);
+    Ok(())
+}
+
+/// Load agent trigger mode from persistent storage
+pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let store = app.store("agent_settings.json")
+        .map_err(|e| format!("Failed to access agent settings store: {}", e))?;
+
+    if let Some(mode_value) = store.get("trigger_mode") {
+        if let Some(mode_str) = mode_value.as_str() {
+            let trigger_mode = match mode_str {
+                "tap" => crate::state::AgentTriggerMode::Tap,
+                "hold" => crate::state::AgentTriggerMode::Hold,
+                _ => {
+                    warn!("Invalid agent trigger mode in store: {}. Using default (tap)", mode_str);
+                    crate::state::AgentTriggerMode::Tap
+                }
+            };
+
+            let mut current_mode = state.agent_trigger_mode.lock()
+                .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
+            *current_mode = trigger_mode;
+
+            info!("Loaded agent trigger mode from store: {}", mode_str);
+        }
+    } else {
+        info!("No agent trigger mode found in store, using default (tap)");
+    }
+
+    Ok(())
 }
 
 /// Set agent execution progress

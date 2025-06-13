@@ -1,0 +1,338 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Event System and State Management Patterns
+
+## Overview
+Juno implements a sophisticated event-driven architecture with Tauri events, React state management, and comprehensive cleanup patterns. The system ensures reliable state synchronization between frontend and backend components.
+
+## Event Architecture
+
+### Tauri Event System
+Core event handling in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+```rust
+use tauri::{AppHandle, Manager};
+
+// Global shortcut events
+app.global_shortcut_manager().register("Alt+D", move |app, event| {
+    match event.shortcut().state() {
+        ShortcutState::Pressed => {
+            app.emit_all("agent-input-pressed", ()).unwrap();
+        }
+        ShortcutState::Released => {
+            app.emit_all("agent-input-released", ()).unwrap();
+        }
+    }
+});
+```
+
+### Frontend Event Listeners
+Event subscription patterns in [src/App.tsx](mdc:src/App.tsx):
+```typescript
+import { listen } from '@tauri-apps/api/event';
+
+useEffect(() => {
+  const unlistenPromises = [
+    listen('agent-transcription-start', () => setIsAgentActive(true)),
+    listen('agent-committed', () => setIsCommitted(true)),
+    listen('agent-cancel', () => handleAgentCancel()),
+    listen('agent-stop', () => handleAgentStop()),
+  ];
+
+  return () => {
+    unlistenPromises.forEach(async (unlisten) => {
+      (await unlisten)();
+    });
+  };
+}, []);
+```
+
+## State Management Patterns
+
+### Backend State Container
+Centralized state in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs):
+```rust
+use std::sync::{Arc, Mutex};
+
+pub struct AppState {
+    // Thread-safe state with Arc<Mutex<T>>
+    agent_monitor: Arc<Mutex<AgentMonitor>>,
+    dictation_monitor: Arc<Mutex<DictationMonitor>>,
+    agent_trigger_mode: Arc<Mutex<AgentTriggerMode>>,
+
+    // Specialized managers
+    memory_manager: Arc<Mutex<AdvancedMemoryManager>>,
+    tool_config_manager: Arc<Mutex<ToolConfigManager>>,
+}
+
+impl AppState {
+    // Getter pattern with proper locking
+    pub fn get_agent_trigger_mode(&self) -> AgentTriggerMode {
+        self.agent_trigger_mode.lock().unwrap().clone()
+    }
+
+    // Setter pattern with state updates
+    pub fn set_agent_trigger_mode(&self, mode: AgentTriggerMode) {
+        *self.agent_trigger_mode.lock().unwrap() = mode;
+    }
+}
+```
+
+### Frontend State Management
+React state patterns in components:
+```typescript
+// Local component state
+const [isAgentActive, setIsAgentActive] = useState(false);
+const [agentTriggerMode, setAgentTriggerMode] = useState<AgentTriggerMode>('Tap');
+
+// Global state via context or custom hooks
+const { settings, updateSetting } = useSettings();
+
+// State synchronization with backend
+useEffect(() => {
+  const loadState = async () => {
+    const mode = await invoke('get_agent_trigger_mode');
+    setAgentTriggerMode(mode);
+  };
+  loadState();
+}, []);
+```
+
+## Monitor Patterns
+
+### State Monitoring Template
+Pattern used in [src-tauri/src/voice_control/agent_monitor.rs](mdc:src-tauri/src/voice_control/agent_monitor.rs):
+```rust
+pub struct AgentMonitor {
+    is_active: bool,
+    start_time: Option<Instant>,
+    committed: bool,
+    session_id: Option<String>,
+    cleanup_needed: bool,
+}
+
+impl AgentMonitor {
+    // State transition methods
+    pub fn on_agent_input_pressed(&mut self, app: &AppHandle) -> Result<(), String> {
+        if self.is_active { return Ok(()); } // Prevent double activation
+
+        self.is_active = true;
+        self.start_time = Some(Instant::now());
+        self.committed = false;
+
+        // Emit events for frontend synchronization
+        app.emit_all("agent-transcription-start", ()).unwrap();
+        Ok(())
+    }
+
+    pub fn on_agent_input_released(&mut self, app: &AppHandle) -> Result<(), String> {
+        if !self.is_active { return Ok(()); }
+
+        let duration = self.start_time.unwrap().elapsed();
+
+        if duration >= Duration::from_millis(AGENT_HOLD_THRESHOLD_MS) {
+            self.committed = true;
+            app.emit_all("agent-committed", ()).unwrap();
+        } else {
+            app.emit_all("agent-cancel", ()).unwrap();
+            self.cleanup();
+        }
+
+        Ok(())
+    }
+
+    // Cleanup pattern
+    fn cleanup(&mut self) {
+        self.is_active = false;
+        self.start_time = None;
+        self.committed = false;
+        self.session_id = None;
+        self.cleanup_needed = false;
+    }
+}
+```
+
+### Background Monitoring
+Background task patterns:
+```rust
+// Background monitoring task
+pub async fn start_agent_background_monitor(app: AppHandle) {
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+
+    loop {
+        interval.tick().await;
+
+        // Check state and emit events as needed
+        let app_state = app.state::<AppState>();
+        let mut monitor = app_state.agent_monitor.lock().unwrap();
+
+        if monitor.needs_cleanup() {
+            monitor.cleanup();
+            app.emit_all("agent-force-cleanup", ()).unwrap();
+        }
+
+        if monitor.is_timeout() {
+            monitor.force_stop();
+            app.emit_all("agent-force-stop", ()).unwrap();
+        }
+    }
+}
+```
+
+## Event Categories
+
+### Voice Control Events
+Agent and dictation mode events:
+- `agent-transcription-start` - Voice recording begins
+- `agent-committed` - Hold duration exceeds threshold
+- `agent-cancel` - Hold duration below threshold
+- `agent-stop` - Normal session termination
+- `agent-force-stop` - Timeout or emergency stop
+- `dictation-active` - Dictation mode activated
+- `dictation-inactive` - Dictation mode deactivated
+
+### Application Events
+General application state events:
+- `settings-changed` - Settings updated
+- `window-focus-changed` - Window focus state
+- `shortcut-registered` - Global shortcut registration
+- `permission-changed` - System permission updates
+
+### Tool Events
+Tool execution and management events:
+- `tool-execution-start` - Tool begins execution
+- `tool-execution-complete` - Tool completes successfully
+- `tool-execution-error` - Tool execution fails
+- `tool-config-updated` - Tool configuration changes
+
+## Error Handling Patterns
+
+### Event Error Recovery
+```rust
+// Robust event emission with error handling
+pub fn emit_safe(app: &AppHandle, event: &str, payload: impl Serialize + Clone) {
+    if let Err(e) = app.emit_all(event, payload.clone()) {
+        eprintln!("Failed to emit event {}: {}", event, e);
+
+        // Attempt local fallback
+        if let Err(e2) = app.emit_to("main", event, payload) {
+            eprintln!("Fallback emit also failed: {}", e2);
+        }
+    }
+}
+```
+
+### State Recovery
+```rust
+// State recovery mechanisms
+impl AgentMonitor {
+    pub fn force_cleanup(&mut self, app: &AppHandle) {
+        // Emergency cleanup regardless of current state
+        self.cleanup();
+
+        // Emit cleanup events
+        app.emit_all("agent-force-cleanup", ()).unwrap_or_else(|e| {
+            eprintln!("Failed to emit cleanup event: {}", e);
+        });
+
+        // Reset any dependent systems
+        self.reset_dependent_systems(app);
+    }
+}
+```
+
+## Performance Optimization
+
+### Event Throttling
+```rust
+use std::time::{Duration, Instant};
+
+pub struct EventThrottler {
+    last_emit: Option<Instant>,
+    min_interval: Duration,
+}
+
+impl EventThrottler {
+    pub fn should_emit(&mut self) -> bool {
+        let now = Instant::now();
+
+        if let Some(last) = self.last_emit {
+            if now.duration_since(last) < self.min_interval {
+                return false;
+            }
+        }
+
+        self.last_emit = Some(now);
+        true
+    }
+}
+```
+
+### Batch Event Processing
+```typescript
+// Frontend batch processing
+const useEventBatcher = (events: string[], batchSize: number = 10) => {
+  const [eventQueue, setEventQueue] = useState([]);
+
+  useEffect(() => {
+    const unlistenPromises = events.map(eventName =>
+      listen(eventName, (event) => {
+        setEventQueue(queue => {
+          const newQueue = [...queue, event];
+
+          if (newQueue.length >= batchSize) {
+            // Process batch
+            processBatch(newQueue);
+            return [];
+          }
+
+          return newQueue;
+        });
+      })
+    );
+
+    return () => {
+      unlistenPromises.forEach(async (unlisten) => {
+        (await unlisten)();
+      });
+    };
+  }, [events, batchSize]);
+};
+```
+
+## Implementation Guidelines
+
+### Adding New Events
+1. **Define Event**: Create event name constant
+2. **Backend Emission**: Add emit calls in appropriate locations
+3. **Frontend Listener**: Add event listener in relevant components
+4. **Error Handling**: Include try-catch and fallback mechanisms
+5. **Cleanup**: Ensure proper event listener cleanup
+6. **Documentation**: Add event to this documentation
+
+### State Monitor Creation
+1. **Create Monitor Struct**: Define state fields and methods
+2. **Add to AppState**: Include in central state container
+3. **Implement Transitions**: Add state change methods
+4. **Background Tasks**: Create monitoring loops if needed
+5. **Event Integration**: Emit events on state changes
+6. **Cleanup Logic**: Implement proper resource cleanup
+
+### Event Flow Debugging
+```rust
+// Event flow logging
+pub fn log_event_flow(event: &str, direction: &str, payload: &str) {
+    if cfg!(debug_assertions) {
+        println!("[EVENT {}] {}: {}", direction, event, payload);
+    }
+}
+```
+
+## Related Files
+- [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs) - Central state management
+- [src-tauri/src/voice_control/](mdc:src-tauri/src/voice_control) - Voice control monitors
+- [src/App.tsx](mdc:src/App.tsx) - Main frontend event listeners
+- [src/hooks/](mdc:src/hooks) - Custom React hooks for state management
+- [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs) - Global event setup and routing
