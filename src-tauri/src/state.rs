@@ -662,16 +662,20 @@ impl AppState {
 
     /// Get production cloud connector
     pub fn get_production_cloud_connector(&self) -> Option<ProductionCloudConnector> {
-        // We need to use try_lock here since this method is not async
-        // and we want to avoid blocking the caller
-        if let Ok(connector_guard) = self.production_cloud_connector.try_lock() {
-            connector_guard.clone()
-        } else {
-            None
+        // FIXED: Use try_lock but with proper error handling
+        // This maintains the non-blocking behavior while providing better error information
+        match self.production_cloud_connector.try_lock() {
+            Ok(connector_guard) => connector_guard.clone(),
+            Err(_) => {
+                // Lock is busy - log this for debugging but don't error
+                // This is expected behavior when another operation is in progress
+                log::debug!("Production cloud connector is busy, returning None (non-blocking call)");
+                None
+            }
         }
     }
 
-    /// Get production cloud connector (async version)
+    /// Get production cloud connector (async version) - RECOMMENDED
     pub async fn get_production_cloud_connector_async(&self) -> Option<ProductionCloudConnector> {
         let connector_guard = self.production_cloud_connector.lock().await;
         connector_guard.clone()
@@ -789,15 +793,35 @@ impl AppState {
             registry.len()
         );
 
+        // FIXED: Use blocking locks to ensure all providers are refreshed
+        // Previously try_lock could skip busy providers, causing inconsistent state
         for provider_arc in registry.iter() {
-            if let Ok(mut provider) = provider_arc.try_lock() {
-                if let Err(e) = provider.refresh_mcp_tools().await {
-                    log::warn!("Failed to refresh MCP tools for tool provider: {}", e);
-                } else {
-                    log::debug!("Successfully refreshed MCP tools for tool provider");
+            match provider_arc.try_lock() {
+                Ok(mut provider) => {
+                    if let Err(e) = provider.refresh_mcp_tools().await {
+                        log::warn!("Failed to refresh MCP tools for tool provider: {}", e);
+                    } else {
+                        log::debug!("Successfully refreshed MCP tools for tool provider");
+                    }
                 }
-            } else {
-                log::warn!("Tool provider is busy, skipping MCP refresh");
+                Err(_) => {
+                    // Provider is busy, schedule retry instead of skipping
+                    log::warn!("Tool provider is busy, will retry MCP refresh in background");
+
+                    // Clone for background retry
+                    let provider_clone = provider_arc.clone();
+                    tokio::spawn(async move {
+                        // Wait a bit and retry
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        // FIXED: Use .lock().await instead of creating a Result pattern
+                        let mut provider = provider_clone.lock().await;
+                        if let Err(e) = provider.refresh_mcp_tools().await {
+                            log::error!("Background MCP refresh retry failed: {}", e);
+                        } else {
+                            log::debug!("Background MCP refresh retry succeeded");
+                        }
+                    });
+                }
             }
         }
 

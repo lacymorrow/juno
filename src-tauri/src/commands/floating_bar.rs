@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, Listener};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
+use uuid::Uuid;
 
 // Bar states that match the frontend
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +72,7 @@ pub struct FloatingBarManager {
     audio_level: f32,
     voice_mode: String, // "idle", "agent", "dictation"
     app_handle: AppHandle,
+    current_transition_id: Option<String>,
 }
 
 impl FloatingBarManager {
@@ -88,6 +90,7 @@ impl FloatingBarManager {
             audio_level: 0.0,
             voice_mode: "idle".to_string(),
             app_handle,
+            current_transition_id: None,
         }
     }
 
@@ -160,16 +163,26 @@ impl FloatingBarManager {
             if self.current_state == BarState::Default && !self.is_agent_working {
                 debug!("FloatingBarManager: Window gained focus, expanding to input state");
 
-                // Start expansion
+                // FIXED: Consolidated state transition to avoid race conditions
+                // First set expanding state, then schedule input state after animation
                 self.set_state(BarState::Expanding).await;
 
-                // After animation, transition to input
+                // Store transition target to prevent race conditions with other operations
+                let transition_id = Uuid::new_v4().to_string();
+                self.current_transition_id = Some(transition_id.clone());
+
+                // After animation, transition to input (if no other transitions happened)
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_millis(300)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
-                        manager.set_state(BarState::Input).await;
+
+                        // Only proceed if this is still the active transition
+                        if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                            manager.set_state(BarState::Input).await;
+                            manager.current_transition_id = None;
+                        }
                     }
                 });
             } else {
@@ -191,16 +204,26 @@ impl FloatingBarManager {
 
         // Only shrink if in input state and input is empty and agent is not working
         if self.current_state == BarState::Input && self.input_value.trim().is_empty() && !self.should_remain_expanded_for_status() {
+            // FIXED: Consolidated state transition to avoid race conditions
             self.set_state(BarState::Shrinking).await;
 
-            // After animation, return to default
+            // Store transition target to prevent race conditions with other operations
+            let transition_id = Uuid::new_v4().to_string();
+            self.current_transition_id = Some(transition_id.clone());
+
+            // After animation, return to default (if no other transitions happened)
             let app_handle = self.app_handle.clone();
             tokio::spawn(async move {
                 sleep(Duration::from_millis(300)).await;
                 if let Some(manager) = get_bar_manager(&app_handle).await {
                     let mut manager = manager.lock().await;
-                    manager.input_value.clear();
-                    manager.set_state(BarState::Default).await;
+
+                    // Only proceed if this is still the active transition
+                    if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                        manager.input_value.clear();
+                        manager.set_state(BarState::Default).await;
+                        manager.current_transition_id = None;
+                    }
                 }
             });
         }
@@ -229,8 +252,13 @@ impl FloatingBarManager {
         self.current_error = None;
         self.is_agent_working = true;
 
+        // FIXED: Consolidated state transition to avoid race conditions
         // Show success state briefly, then transition directly to loading (stay expanded)
         self.set_state(BarState::Success).await;
+
+        // Store transition target to prevent race conditions with other operations
+        let transition_id = Uuid::new_v4().to_string();
+        self.current_transition_id = Some(transition_id.clone());
 
         // Transition directly to loading without shrinking
         let app_handle = self.app_handle.clone();
@@ -239,23 +267,28 @@ impl FloatingBarManager {
             sleep(Duration::from_millis(600)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
-                // Skip shrinking, go directly to loading to keep bar expanded
-                manager.set_state(BarState::Loading).await;
 
-                // Trigger the AI agent
-                let app_handle_for_agent = app_handle.clone();
-                tokio::spawn(async move {
-                    let app_handle_clone = app_handle_for_agent.clone();
-                    let state = app_handle_for_agent.state::<crate::state::AppState>();
-                    if let Err(e) = crate::anthropic::submit_query(query_for_agent, state, app_handle_clone).await {
-                        error!("Failed to submit query to AI agent: {}", e);
-                        // Handle the error by updating the floating bar
-                        if let Some(manager) = get_bar_manager(&app_handle).await {
-                            let mut manager = manager.lock().await;
-                            let _ = manager.handle_agent_completion("Failed", Some(e)).await;
+                // Only proceed if this is still the active transition
+                if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                    // Skip shrinking, go directly to loading to keep bar expanded
+                    manager.set_state(BarState::Loading).await;
+                    manager.current_transition_id = None;
+
+                    // Trigger the AI agent
+                    let app_handle_for_agent = app_handle.clone();
+                    tokio::spawn(async move {
+                        let app_handle_clone = app_handle_for_agent.clone();
+                        let state = app_handle_for_agent.state::<crate::state::AppState>();
+                        if let Err(e) = crate::anthropic::submit_query(query_for_agent, state, app_handle_clone).await {
+                            error!("Failed to submit query to AI agent: {}", e);
+                            // Handle the error by updating the floating bar
+                            if let Some(manager) = get_bar_manager(&app_handle).await {
+                                let mut manager = manager.lock().await;
+                                let _ = manager.handle_agent_completion("Failed", Some(e)).await;
+                            }
                         }
-                    }
-                });
+                    });
+                }
             }
         });
 
@@ -274,6 +307,11 @@ impl FloatingBarManager {
         self.transcription_text.clear();
         self.spoken_text.clear();
 
+        // FIXED: Consolidated state transitions to avoid race conditions
+        // Store transition target to prevent race conditions with other operations
+        let transition_id = Uuid::new_v4().to_string();
+        self.current_transition_id = Some(transition_id.clone());
+
         match agent_state {
             "Finished" => {
                 self.set_state(BarState::Finishing).await;
@@ -283,7 +321,12 @@ impl FloatingBarManager {
                     sleep(Duration::from_millis(300)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
-                        manager.set_state(BarState::Default).await;
+
+                        // Only proceed if this is still the active transition
+                        if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                            manager.set_state(BarState::Default).await;
+                            manager.current_transition_id = None;
+                        }
                     }
                 });
             }
@@ -302,13 +345,19 @@ impl FloatingBarManager {
                     sleep(Duration::from_millis(3000)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
-                        manager.current_error = None;
-                        manager.set_state(BarState::Default).await;
+
+                        // Only proceed if this is still the active transition
+                        if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                            manager.current_error = None;
+                            manager.set_state(BarState::Default).await;
+                            manager.current_transition_id = None;
+                        }
                     }
                 });
             }
             _ => {
                 self.set_state(BarState::Default).await;
+                self.current_transition_id = None;
             }
         }
 
