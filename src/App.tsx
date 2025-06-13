@@ -1379,30 +1379,19 @@ function App() {
       console.log("Received agent-active event:", isActive);
 
       if (isActive) {
-        // Agent hold mode started - could trigger voice capture
-        try {
-          const isNowDictating = await toggleDictation();
-          console.log("Agent hold mode activated, dictating:", isNowDictating);
-        } catch (error) {
-          console.error("Failed to start agent hold mode:", error);
-          setConversation((prev) => [
-            ...prev,
-            {
-              role: "system",
-              content: `Failed to start agent mode: ${error}`,
-            },
-          ]);
-        }
+        // Agent mode is activated - the transcription is already being handled
+        // by the agent monitor in hold mode, so we don't need to call toggleDictation()
+        console.log("Agent mode activated - transcription handled by backend");
       } else {
-        // Agent hold mode ended - ensure voice capture is stopped
-        console.log("Agent hold mode deactivated");
+        // Agent mode ended
+        console.log("Agent mode deactivated");
       }
     });
 
     return () => {
       unlisten.then((unlistenFn) => unlistenFn());
     };
-  }, [toggleDictation]);
+  }, []);
 
   // Check server status on mount
   useEffect(() => {
