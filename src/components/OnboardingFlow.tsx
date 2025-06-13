@@ -17,7 +17,16 @@ import {
   Shield,
   Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
+// Import the KeyboardShortcuts type
+interface KeyboardShortcuts {
+  agent_mode_toggle: string;
+  dictation_input: string;
+  stop_current_task: string;
+  open_settings: string;
+}
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -33,6 +42,25 @@ export function OnboardingFlow({
   permissionsAlreadyGranted = false,
 }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>("welcome");
+  const [keyboardShortcuts, setKeyboardShortcuts] =
+    useState<KeyboardShortcuts | null>(null);
+
+  // Load current keyboard shortcuts on mount
+  useEffect(() => {
+    const loadShortcuts = async () => {
+      try {
+        const shortcuts = await invoke<KeyboardShortcuts>(
+          "get_keyboard_shortcuts"
+        );
+        setKeyboardShortcuts(shortcuts);
+      } catch (error) {
+        console.error("Failed to load keyboard shortcuts:", error);
+        // Keep defaults if loading fails
+      }
+    };
+
+    loadShortcuts();
+  }, []);
 
   // Dynamically determine steps based on permissions state
   const steps: OnboardingStep[] = permissionsAlreadyGranted
@@ -122,18 +150,18 @@ export function OnboardingFlow({
         </Alert>
       )}
 
-      {/* Voice shortcuts info */}
+      {/* Voice shortcuts info - Now using dynamic shortcuts */}
       <Card className="border-2 border-blue-200 bg-blue-50/50 p-4">
         <div className="flex items-center justify-center gap-6 text-sm">
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="bg-blue-100">
-              Option+D
+              {keyboardShortcuts?.agent_mode_toggle || "Loading..."}
             </Badge>
             <span className="text-blue-800">Agent Mode</span>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="bg-blue-100">
-              Hold Fn
+              {keyboardShortcuts?.dictation_input || "Loading..."}
             </Badge>
             <span className="text-blue-800">Dictation Mode</span>
           </div>
