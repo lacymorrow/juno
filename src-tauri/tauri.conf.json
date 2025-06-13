@@ -27,8 +27,8 @@
       {
         "label": "floating-panel",
         "url": "/floating-panel",
-        "width": 450,
-        "height": 350,
+        "width": 180,
+        "height": 100,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
@@ -38,7 +38,7 @@
         "shadow": false,
         "center": false,
         "x": 20,
-        "y": 20
+        "y": 50
       },
       {
         "label": "floating-bar",
