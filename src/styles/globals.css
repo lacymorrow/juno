@@ -440,3 +440,165 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background-color: rgba(255, 255, 255, 0.3);
 }
+
+/* Enhanced Drag Region Styles */
+.drag-header {
+  /* Visual feedback for draggable areas */
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+}
+
+.drag-header:hover {
+  /* Subtle visual feedback on hover */
+  background-color: rgba(255, 255, 255, 0.05);
+  transition: background-color 0.2s ease;
+}
+
+.drag-header:active {
+  /* Visual feedback when dragging */
+  background-color: rgba(255, 255, 255, 0.1);
+  cursor: grabbing;
+}
+
+/* Interactive Content - Prevents dragging */
+.interactive-content {
+  /* Ensure interactive elements don't trigger drag */
+  -webkit-app-region: no-drag;
+  position: relative;
+  z-index: 10;
+}
+
+.interactive-content * {
+  /* All children of interactive content should not be draggable */
+  -webkit-app-region: no-drag;
+}
+
+/* Click-through window behavior */
+.click-through-enabled {
+  pointer-events: none;
+}
+
+.click-through-enabled .interactive-content {
+  pointer-events: auto;
+}
+
+.click-through-enabled .drag-header {
+  pointer-events: auto;
+}
+
+/* Enhanced panel styles for floating panels */
+.floating-panel-container {
+  /* Base container for floating panels */
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.floating-panel-container.hover-active {
+  /* Enhanced shadow when hovered */
+  filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.3));
+}
+
+/* 3D Shelf Effect for Floating Panel */
+.floating-panel-shelf-effect {
+  /* Container for 3D shelf transformation */
+  transform-style: preserve-3d;
+  transition: all 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+  backface-visibility: hidden;
+  will-change: transform, opacity, filter;
+}
+
+.floating-panel-shelf-effect.shelf-stored {
+  /* Panel is "stored" on the shelf - rotated away */
+  transform: perspective(1200px) rotateX(-15deg) translateY(-12px) translateZ(-60px) scale(0.92);
+  opacity: 0.8;
+  filter: blur(1px) brightness(0.9);
+  box-shadow:
+    0 25px 50px rgba(0, 0, 0, 0.4),
+    0 15px 35px rgba(0, 0, 0, 0.3);
+}
+
+.floating-panel-shelf-effect.shelf-active {
+  /* Panel is active - pulled forward from shelf */
+  transform: perspective(1200px) rotateX(0deg) translateY(0px) translateZ(0px) scale(1);
+  opacity: 1;
+  filter: blur(0px) brightness(1);
+  box-shadow:
+    0 15px 40px rgba(0, 0, 0, 0.5),
+    0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* Depth layering for shelf effect */
+.floating-panel-content-layer {
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.floating-panel-content-layer.shelf-stored {
+  transform: translateZ(-10px);
+}
+
+.floating-panel-content-layer.shelf-active {
+  transform: translateZ(10px);
+}
+
+/* Draggable region indicators (optional, for development) */
+[data-tauri-drag-region] {
+  /* Optional: Add a subtle indicator in development */
+  /* outline: 1px dashed rgba(255, 255, 255, 0.1); */
+}
+
+/* Button interactions within draggable areas */
+.drag-header button {
+  /* Ensure buttons work properly within drag regions */
+  -webkit-app-region: no-drag;
+  position: relative;
+  z-index: 20;
+}
+
+.drag-header input {
+  /* Ensure inputs work properly within drag regions */
+  -webkit-app-region: no-drag;
+  position: relative;
+  z-index: 20;
+}
+
+.drag-header form {
+  /* Ensure forms work properly within drag regions */
+  -webkit-app-region: no-drag;
+  position: relative;
+  z-index: 20;
+}
+
+/* Improved glass effect for draggable panels */
+.glass-panel-enhanced {
+  backdrop-filter: blur(20px) saturate(180%);
+  background-color: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Hover states for enhanced interaction */
+.interactive-content:hover {
+  /* Subtle highlight for interactive areas */
+  background-color: rgba(255, 255, 255, 0.02);
+  transition: background-color 0.2s ease;
+}
+
+/* Focus states for accessibility */
+.interactive-content:focus-within {
+  outline: 2px solid rgba(59, 130, 246, 0.5);
+  outline-offset: 2px;
+}
+
+/* Smooth transitions for panel state changes */
+.panel-mode-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.panel-mode-transition * {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}

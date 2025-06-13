@@ -1542,6 +1542,45 @@ pub fn run() {
                     eprintln!("Warning: floating-bar window not found during macOS specific setup.");
                 }
 
+                // --- macOS Specific Setup for Floating Panel ---
+                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_PANEL) {
+                    info!("Found floating-panel for macOS setup.");
+                    // --- Apply Standard Window Styling ---
+                    match window.ns_window() {
+                        Ok(ns_window_ptr) => {
+                            let ns_window = ns_window_ptr as cocoa_id;
+                            unsafe {
+                                // Keep window floating above others - Use integer value for Floating level
+                                ns_window.setLevel_(5); // kCGFloatingWindowLevelKey is typically 5
+                                // Allow clicks to pass through transparent areas
+                                ns_window.setOpaque_(NO);
+                                ns_window.setHasShadow_(NO); // Remove shadow
+                                // Keep it visible across spaces
+                                ns_window.setCollectionBehavior_(
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
+                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
+                                );
+
+                                // Enable mouse events for floating panel
+                                #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
+                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
+                                info!("macOS Setup: Floating panel mouse events configured.");
+
+                                info!("macOS standard styling applied to floating-panel.");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting NSWindow for styling floating-panel: {}", e);
+                        }
+                    }
+                     // --- Setup Mouse Tracking for Floating Panel ---
+                    macos_tracking::setup_tracking_area(&window, app_handle.clone());
+
+                } else {
+                    eprintln!("Warning: floating-panel window not found during macOS specific setup.");
+                }
+
                 // --- Fix Main Window Focus Issue ---
                 // This is the key fix: ensure the main window is properly activated and can receive clicks
                 if let Some(main_window) = app_handle.get_webview_window(constants::window_labels::MAIN) {
@@ -2636,35 +2675,45 @@ mod macos_tracking {
     // Static storage for the AppHandle, wrapped for thread safety
     static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
 
+    // Store the current window label for tracking
+    static CURRENT_WINDOW_LABEL: Mutex<Option<String>> = Mutex::new(None);
+
     // Delegate implementation
     extern "C" fn mouse_entered(_this: &Object, _cmd: Sel, _event: cocoa_id) {
         info!("[Tracking Delegate] Mouse Entered");
         if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-             if let Some(window) = handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                let _ = window.emit("mouse-entered-window", ()); // Emit specific event
-                 info!("[Tracking Delegate] Emitted mouse-entered-window");
-             } else {
-                  eprintln!("[Tracking Delegate Error] Floating bar window not found for mouse_entered emit.");
-             }
+            if let Some(window_label) = CURRENT_WINDOW_LABEL.lock().unwrap().as_ref() {
+                if let Some(window) = handle.get_webview_window(window_label) {
+                    let _ = window.emit("mouse-entered-window", ()); // Emit specific event
+                    info!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
+                } else {
+                    eprintln!("[Tracking Delegate Error] Window '{}' not found for mouse_entered emit.", window_label);
+                }
+            }
         }
     }
 
     extern "C" fn mouse_exited(_this: &Object, _cmd: Sel, _event: cocoa_id) {
          info!("[Tracking Delegate] Mouse Exited");
          if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-             if let Some(window) = handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                let _ = window.emit("mouse-left-window", ()); // Emit specific event
-                 info!("[Tracking Delegate] Emitted mouse-left-window");
-             } else {
-                 eprintln!("[Tracking Delegate Error] Floating bar window not found for mouse_exited emit.");
-             }
+            if let Some(window_label) = CURRENT_WINDOW_LABEL.lock().unwrap().as_ref() {
+                if let Some(window) = handle.get_webview_window(window_label) {
+                    let _ = window.emit("mouse-left-window", ()); // Emit specific event
+                    info!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
+                } else {
+                    eprintln!("[Tracking Delegate Error] Window '{}' not found for mouse_exited emit.", window_label);
+                }
+            }
          }
     }
 
     pub fn setup_tracking_area(window: &tauri::WebviewWindow<tauri::Wry>, app_handle: AppHandle) {
-        info!("Setting up macOS tracking area for floating-bar...");
-        // Store the AppHandle statically
+        let window_label = window.label().to_string();
+        info!("Setting up macOS tracking area for window: {}", window_label);
+
+        // Store the AppHandle and window label statically
         *APP_HANDLE.lock().unwrap() = Some(app_handle.clone());
+        *CURRENT_WINDOW_LABEL.lock().unwrap() = Some(window_label.clone());
 
         let ns_window = match window.ns_window() {
             Ok(ptr) => ptr as cocoa_id,

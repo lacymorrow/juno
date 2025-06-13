@@ -27,8 +27,8 @@
       {
         "label": "floating-panel",
         "url": "/floating-panel",
-        "width": 400,
-        "height": 400,
+        "width": 450,
+        "height": 350,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

@@ -49,6 +49,7 @@ pub mod events {
 pub mod window_labels {
     pub const MAIN: &str = "main";
     pub const FLOATING_BAR: &str = "floating-bar";
+    pub const FLOATING_PANEL: &str = "floating-panel";
     pub const ONBOARDING: &str = "onboarding";
 }
 
