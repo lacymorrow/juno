@@ -3,3 +3,277 @@ description:
 globs:
 alwaysApply: false
 ---
+# Settings and Persistence Architecture
+
+## Overview
+Juno implements a comprehensive settings system with persistent storage, real-time updates, and type-safe frontend integration. Settings are managed through a combination of Tauri commands, tauri-plugin-store, and React hooks.
+
+## Backend Persistence
+
+### Storage Technology
+- **Primary**: [tauri-plugin-store](mdc:https:/github.com/tauri-apps/plugins-workspace/tree/v2/plugins/store) - Tauri's official persistent storage
+- **Format**: JSON files in application data directory
+- **Structure**: Multiple store files for different setting categories
+
+### Store Files
+- `"agent_settings.json"` - Agent-specific settings (trigger mode, etc.)
+- `"user_settings.json"` - General user preferences
+- Additional specialized stores as needed
+
+### Storage Implementation Pattern
+Located in [src-tauri/src/commands/core.rs](mdc:src-tauri/src/commands/core.rs):
+```rust
+use tauri_plugin_store::{Store, StoreExt};
+
+#[tauri::command]
+async fn set_agent_trigger_mode(
+    app: tauri::AppHandle,
+    mode: AgentTriggerMode,
+) -> Result<(), String> {
+    // Get or create store
+    let mut store = app.store_builder("agent_settings.json").build()?;
+
+    // Save setting
+    store.set("agent_trigger_mode", mode.clone())?;
+    store.save()?;
+
+    // Update runtime state
+    app.state::<AppState>().set_agent_trigger_mode(mode);
+    Ok(())
+}
+```
+
+## Frontend Settings Management
+
+### Settings Hook
+Centralized settings management in [src/hooks/useSettings.ts](mdc:src/hooks/useSettings.ts):
+```typescript
+export const useSettings = () => {
+  const [agentTriggerMode, setAgentTriggerMode] = useState<AgentTriggerMode>('Tap');
+
+  // Load settings on mount
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  // Setting change handlers
+  const handleAgentTriggerModeChange = async (mode: AgentTriggerMode) => {
+    await invoke('set_agent_trigger_mode', { mode });
+    setAgentTriggerMode(mode);
+  };
+
+  return {
+    agentTriggerMode,
+    handleAgentTriggerModeChange,
+    // ... other settings
+  };
+};
+```
+
+### Settings UI Components
+Settings interface in [src/components/settings/sections/GeneralSettings.tsx](mdc:src/components/settings/sections/GeneralSettings.tsx):
+- Organized into logical sections
+- Real-time updates with immediate persistence
+- Descriptive help text and validation
+- Accessible form controls
+
+## State Synchronization
+
+### Runtime State Management
+Primary state container in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs):
+```rust
+pub struct AppState {
+    // Settings cached in memory for performance
+    agent_trigger_mode: Arc<Mutex<AgentTriggerMode>>,
+    // ... other cached settings
+}
+
+impl AppState {
+    pub fn set_agent_trigger_mode(&self, mode: AgentTriggerMode) {
+        *self.agent_trigger_mode.lock().unwrap() = mode;
+    }
+
+    pub fn get_agent_trigger_mode(&self) -> AgentTriggerMode {
+        self.agent_trigger_mode.lock().unwrap().clone()
+    }
+}
+```
+
+### Initialization Pattern
+Settings loaded on app startup in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+```rust
+// Load persistent settings into runtime state
+if let Ok(mode) = load_agent_trigger_mode_from_store(&app).await {
+    app.state::<AppState>().set_agent_trigger_mode(mode);
+}
+```
+
+## Implementation Patterns
+
+### Adding New Settings
+
+#### 1. Backend Implementation
+```rust
+// 1. Add to state.rs
+pub struct AppState {
+    new_setting: Arc<Mutex<NewSettingType>>,
+}
+
+// 2. Add getter/setter methods
+impl AppState {
+    pub fn get_new_setting(&self) -> NewSettingType { /* ... */ }
+    pub fn set_new_setting(&self, value: NewSettingType) { /* ... */ }
+}
+
+// 3. Add Tauri commands in commands/core.rs
+#[tauri::command]
+async fn get_new_setting(app: tauri::AppHandle) -> Result<NewSettingType, String> {
+    // Load from store or return default
+}
+
+#[tauri::command]
+async fn set_new_setting(
+    app: tauri::AppHandle,
+    value: NewSettingType
+) -> Result<(), String> {
+    // Save to store and update state
+}
+```
+
+#### 2. Frontend Integration
+```typescript
+// 1. Add to useSettings hook
+const [newSetting, setNewSetting] = useState<NewSettingType>(defaultValue);
+
+const handleNewSettingChange = async (value: NewSettingType) => {
+  await invoke('set_new_setting', { value });
+  setNewSetting(value);
+};
+
+// 2. Add UI in appropriate settings section
+<SettingControl
+  value={newSetting}
+  onChange={handleNewSettingChange}
+  // ... other props
+/>
+```
+
+### Error Handling
+```rust
+// Backend error handling
+#[tauri::command]
+async fn set_setting(app: tauri::AppHandle, value: String) -> Result<(), String> {
+    match app.store_builder("settings.json").build() {
+        Ok(mut store) => {
+            store.set("key", value)?;
+            store.save().map_err(|e| e.to_string())
+        }
+        Err(e) => Err(format!("Store error: {}", e))
+    }
+}
+```
+
+```typescript
+// Frontend error handling
+const handleSettingChange = async (value: string) => {
+  try {
+    await invoke('set_setting', { value });
+    setSetting(value);
+  } catch (error) {
+    console.error('Failed to save setting:', error);
+    // Show user notification
+  }
+};
+```
+
+## Type Safety
+
+### TypeScript Definitions
+Settings types in [src/types/keyboard.ts](mdc:src/types/keyboard.ts) and other type files:
+```typescript
+export type AgentTriggerMode = 'Tap' | 'Hold';
+
+export interface SettingsState {
+  agentTriggerMode: AgentTriggerMode;
+  // ... other settings
+}
+```
+
+### Rust Type Definitions
+Corresponding Rust types with Serde serialization:
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AgentTriggerMode {
+    Tap,
+    Hold,
+}
+```
+
+## Performance Considerations
+
+### Caching Strategy
+- Settings loaded once on startup into runtime state
+- Immediate access via AppState getters (no async calls)
+- Persistence happens asynchronously in background
+- Frontend state synchronized with backend changes
+
+### Batch Updates
+For multiple related settings:
+```rust
+#[tauri::command]
+async fn update_multiple_settings(
+    app: tauri::AppHandle,
+    settings: HashMap<String, serde_json::Value>
+) -> Result<(), String> {
+    let mut store = app.store_builder("settings.json").build()?;
+
+    for (key, value) in settings {
+        store.set(key, value)?;
+    }
+
+    store.save()?;
+    // Update runtime state
+    Ok(())
+}
+```
+
+## Migration and Versioning
+
+### Schema Evolution
+```rust
+// Handle setting migrations
+async fn migrate_settings(app: &tauri::AppHandle) -> Result<(), String> {
+    let store = app.store_builder("settings.json").build()?;
+
+    // Check version and migrate if needed
+    if let Some(version) = store.get("schema_version") {
+        match version.as_u64() {
+            Some(1) => migrate_from_v1(&store)?,
+            Some(2) => migrate_from_v2(&store)?,
+            _ => {}, // Current version
+        }
+    }
+
+    Ok(())
+}
+```
+
+### Default Values
+```rust
+// Provide sensible defaults
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            agent_trigger_mode: Arc::new(Mutex::new(AgentTriggerMode::Tap)),
+            // ... other defaults
+        }
+    }
+}
+```
+
+## Related Files
+- [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs) - Central state management
+- [src-tauri/src/commands/core.rs](mdc:src-tauri/src/commands/core.rs) - Settings commands
+- [src/hooks/useSettings.ts](mdc:src/hooks/useSettings.ts) - Frontend settings hook
+- [src/components/settings/](mdc:src/components/settings) - Settings UI components
+- [src/types/](mdc:src/types) - TypeScript type definitions
