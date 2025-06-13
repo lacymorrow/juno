@@ -90,6 +90,9 @@ export function useSettings() {
   // Agent Mode Settings
   const [agentMode, setAgentMode] = useState<string>("multi");
 
+  // Agent Trigger Mode Settings
+  const [agentTriggerMode, setAgentTriggerMode] = useState<string>("tap");
+
   // Dictation Settings
   const [dictationClipboardEnabled, setDictationClipboardEnabled] = useState<boolean>(true);
 
@@ -173,6 +176,10 @@ export function useSettings() {
       // Load agent mode settings
       const currentAgentMode = await invoke<string>("get_agent_mode");
       setAgentMode(currentAgentMode);
+
+      // Load agent trigger mode settings
+      const currentAgentTriggerMode = await invoke<string>("get_agent_trigger_mode");
+      setAgentTriggerMode(currentAgentTriggerMode);
 
       // Load dictation settings
       const currentClipboardEnabled = await invoke<boolean>("get_dictation_clipboard_enabled");
@@ -424,6 +431,17 @@ export function useSettings() {
     }
   };
 
+  const handleAgentTriggerModeChange = async (newMode: string) => {
+    try {
+      await invoke("set_agent_trigger_mode", { mode: newMode });
+      setAgentTriggerMode(newMode);
+      toast.success(`Agent trigger mode set to: ${newMode === "tap" ? "Tap to Toggle" : "Hold to Activate"}`);
+    } catch (error) {
+      console.error("Failed to set agent trigger mode:", error);
+      toast.error("Failed to set agent trigger mode");
+    }
+  };
+
   const handleDictationClipboardChange = async (enabled: boolean) => {
     try {
       await invoke("set_dictation_clipboard_enabled", { enabled });
@@ -479,6 +497,7 @@ export function useSettings() {
     providerSettings,
     isLoading,
     agentMode,
+    agentTriggerMode,
     dictationClipboardEnabled,
     soundEnabled,
     performanceMonitoringEnabled,
@@ -503,7 +522,7 @@ export function useSettings() {
     shortcutsLoading,
     editingShortcut,
     setEditingShortcut,
-    
+
     // Actions
     loadAllSettings,
     handleTtsProviderChange,
@@ -512,6 +531,7 @@ export function useSettings() {
     handleSoundEnabledChange,
     handlePerformanceMonitoringChange,
     handleAgentModeChange,
+    handleAgentTriggerModeChange,
     handleDictationClipboardChange,
     handleAlwaysListeningToggle,
     handleSensitivityChange,
