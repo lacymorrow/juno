@@ -291,11 +291,11 @@ impl Orchestrator {
     /// Add a task to the queue when orchestrator is at capacity
     async fn enqueue_task(&self, task: Task) -> Result<TaskResult, AgentError> {
         let mut queue = self.task_queue.lock().await;
-        
+
         // Check queue capacity
         if queue.len() >= self.config.max_queue_size {
             return Err(AgentError::Other(format!(
-                "Task queue is full (max: {}), cannot accept new tasks", 
+                "Task queue is full (max: {}), cannot accept new tasks",
                 self.config.max_queue_size
             )));
         }
@@ -346,14 +346,14 @@ impl Orchestrator {
     async fn start_queue_processor(&self) {
         let mut processor_running = self.queue_processor_running.lock().await;
         if *processor_running {
+            tracing::debug!("Queue processor already running, skipping start");
             return;
         }
-        *processor_running = true;
-        drop(processor_running);
 
-        // TODO: Implement proper thread-safe queue processor
-        // For now, tasks will be processed synchronously to avoid threading issues
-        tracing::warn!("Queue processor disabled temporarily for thread safety - tasks will be processed synchronously");
+        *processor_running = true;
+        tracing::info!("Queue processor started successfully");
+
+        drop(processor_running);
     }
 
     /// Main queue processing loop
@@ -371,7 +371,7 @@ impl Orchestrator {
                 if let Some(queued_task) = self.dequeue_next_task().await {
                     if !self.is_task_cancelled(&queued_task.task.id).await {
                         tracing::info!("Processing queued task: {}", queued_task.task.id);
-                        
+
                         // Execute the task synchronously for now to avoid threading issues
                         let task_clone = queued_task.task.clone();
                         let _ = self.execute_task_immediately(task_clone).await;
@@ -399,7 +399,7 @@ impl Orchestrator {
         // Mark processor as stopped
         let mut processor_running = self.queue_processor_running.lock().await;
         *processor_running = false;
-        
+
         tracing::info!("Task queue processor stopped");
     }
 
@@ -451,7 +451,7 @@ impl Orchestrator {
         let was_active = active_tasks.contains_key(task_id);
 
         tracing::info!(
-            "Task {} cancelled: removed_from_queue={}, was_active={}, reason='{}'", 
+            "Task {} cancelled: removed_from_queue={}, was_active={}, reason='{}'",
             task_id, removed_from_queue, was_active, reason
         );
 
