@@ -1859,19 +1859,18 @@ pub fn run() {
                 }
             });
 
-            // Listen for final result events from the plugin (for AI Agent Mode only)
+            // Listen for final result events from the plugin (UNIFIED HANDLER for both modes)
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:final-result", move |event| {
                 info!("[Event] Received voice-transcription:final-result event: {:?}", event.payload());
 
-                // Check if Dictation Mode is active - if so, skip AI agent processing
-                // This prevents AI processing when user is doing immediate voice-to-text
+                // Check if Dictation Mode is active to determine processing mode
                 let app_state = app_handle_for_listener.state::<state::AppState>();
                 let is_dictation_active = app_state.dictation_active.lock()
                     .map(|active| *active)
                     .unwrap_or(false);
 
-                // Extract text from payload for floating bar manager
+                // Extract text from payload
                 let payload_str = event.payload();
                 let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
                     Ok(payload_json) => {
@@ -1883,45 +1882,101 @@ pub fn run() {
                 if is_dictation_active {
                     info!("[Event] Processing final result for Dictation Mode");
 
-                    // Update floating bar manager for dictation mode completion
+                    // Handle immediate typing for Dictation Mode
                     let app_handle_clone = app_handle_for_listener.clone();
+                    let text_for_spawn = extracted_text.clone();
                     tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, None).await;
-                    });
-                    return; // Exit early, let dictation handler process this
-                }
+                        if let Some(text) = text_for_spawn {
+                            let trimmed_text = text.trim();
+                            if !trimmed_text.is_empty() {
+                                // Check if clipboard saving is enabled
+                                let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
+                                    .map(|enabled| *enabled)
+                                    .unwrap_or(true); // Default to true if lock fails
 
-                info!("[Event] Processing final result for AI Agent Mode");
+                                // Store to clipboard if enabled
+                                if clipboard_enabled {
+                                    match crate::commands::core::dev_set_clipboard(
+                                        trimmed_text.to_string(),
+                                        app_state.clone()
+                                    ).await {
+                                        Ok(()) => {
+                                            info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
+                                }
 
-                // Update floating bar manager for agent mode query
-                if let Some(text) = &extracted_text {
-                    let app_handle_clone = app_handle_for_listener.clone();
-                    let query_text = text.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(query_text)).await;
-                    });
-                }
-
-                // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
-                match serde_json::from_str::<serde_json::Value>(payload_str) {
-                    Ok(payload_json) => {
-                        if let Some(text_value) = payload_json.get("text") {
-                            // Transform { "text": "..." } to { "query": "..." }
-                            let transformed_payload = serde_json::json!({
-                                "query": text_value
-                            });
-                            if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", transformed_payload) {
-                                tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
+                                // Then type the transcribed text immediately using the computer use tools
+                                info!("Executing global_type_text for text: '{}'", trimmed_text);
+                                match crate::commands::keyboard::global_type_text(
+                                    trimmed_text.to_string(),
+                                    app_handle_clone.clone(),
+                                    app_state.clone()
+                                ).await {
+                                    Ok(()) => {
+                                        info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
+                                    }
+                                }
+                            } else {
+                                info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
                             }
-                        } else {
-                            tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
                         }
+
+                        // Reset Dictation Mode state after processing
+                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                            *dictation_active = false;
+                        }
+
+                        // Emit state change event for UI
+                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
+                        }
+
+                        // Update floating bar manager for dictation mode completion
+                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, None).await;
+                        info!("[Dictation Mode] Completed dictation successfully");
+                    });
+                } else {
+                    info!("[Event] Processing final result for AI Agent Mode");
+
+                    // Update floating bar manager for agent mode query
+                    if let Some(text) = &extracted_text {
+                        let app_handle_clone = app_handle_for_listener.clone();
+                        let query_text = text.clone();
+                        tauri::async_runtime::spawn(async move {
+                            commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(query_text)).await;
+                        });
                     }
-                    Err(e) => {
-                        tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
-                        // Fallback: emit with original payload
-                        if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
-                            tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
+
+                    // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
+                    match serde_json::from_str::<serde_json::Value>(payload_str) {
+                        Ok(payload_json) => {
+                            if let Some(text_value) = payload_json.get("text") {
+                                // Transform { "text": "..." } to { "query": "..." }
+                                let transformed_payload = serde_json::json!({
+                                    "query": text_value
+                                });
+                                if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", transformed_payload) {
+                                    tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
+                                }
+                            } else {
+                                tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
+                            // Fallback: emit with original payload
+                            if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
+                                tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
+                            }
                         }
                     }
                 }
@@ -2264,89 +2319,7 @@ pub fn run() {
                 });
             });
 
-            // Listen for voice transcription final results specifically for Dictation Mode
-            let app_handle_for_dictation_result = app.handle().clone();
-            app.listen("voice-transcription:final-result", move |event| {
-                // Check if we're in Dictation Mode and handle immediate typing
-                let app_handle_clone = app_handle_for_dictation_result.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app_state = app_handle_clone.state::<state::AppState>();
 
-                    // Check if Dictation Mode is active
-                    let is_dictation_active = app_state.dictation_active.lock()
-                        .map(|active| *active)
-                        .unwrap_or(false);
-
-                    if is_dictation_active {
-                        info!("[Dictation Mode] Processing final result for immediate typing");
-
-                        // Parse the transcription result
-                        let payload_str = event.payload();
-                        match serde_json::from_str::<serde_json::Value>(payload_str) {
-                            Ok(payload_json) => {
-                                if let Some(text_value) = payload_json.get("text") {
-                                    if let Some(text) = text_value.as_str() {
-                                        // Only type if the text is not empty and not just whitespace
-                                        let trimmed_text = text.trim();
-                                        if !trimmed_text.is_empty() {
-                                            // Check if clipboard saving is enabled
-                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                                .map(|enabled| *enabled)
-                                                .unwrap_or(true); // Default to true if lock fails
-
-                                            // Store to clipboard if enabled
-                                            if clipboard_enabled {
-                                                match crate::commands::core::dev_set_clipboard(
-                                                    trimmed_text.to_string(),
-                                                    app_state.clone()
-                                                ).await {
-                                                    Ok(()) => {
-                                                        info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
-                                                    }
-                                                }
-                                            } else {
-                                                info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
-                                            }
-
-                                            // Then type the transcribed text immediately using the computer use tools
-                                            match crate::commands::keyboard::global_type_text(
-                                                trimmed_text.to_string(),
-                                                app_handle_clone.clone(),
-                                                app_state.clone()
-                                            ).await {
-                                                Ok(()) => {
-                                                    info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
-                                                }
-                                            }
-                                        } else {
-                                            info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("[Dictation Mode] Failed to parse final-result payload: {}", e);
-                            }
-                        }
-
-                        // Reset Dictation Mode state after processing
-                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                            *dictation_active = false;
-                        }
-
-                        // Emit state change event for UI
-                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
-                        }
-                    }
-                });
-            });
 
             // Listen for always listening wake word activation
             let app_handle_for_wake_word = app.handle().clone();
@@ -2492,89 +2465,7 @@ pub fn run() {
                 });
             });
 
-            // Listen for voice transcription final results specifically for Dictation Mode
-            let app_handle_for_dictation_result = app.handle().clone();
-            app.listen("voice-transcription:final-result", move |event| {
-                // Check if we're in Dictation Mode and handle immediate typing
-                let app_handle_clone = app_handle_for_dictation_result.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app_state = app_handle_clone.state::<state::AppState>();
 
-                    // Check if Dictation Mode is active
-                    let is_dictation_active = app_state.dictation_active.lock()
-                        .map(|active| *active)
-                        .unwrap_or(false);
-
-                    if is_dictation_active {
-                        info!("[Dictation Mode] Processing final result for immediate typing");
-
-                        // Parse the transcription result
-                        let payload_str = event.payload();
-                        match serde_json::from_str::<serde_json::Value>(payload_str) {
-                            Ok(payload_json) => {
-                                if let Some(text_value) = payload_json.get("text") {
-                                    if let Some(text) = text_value.as_str() {
-                                        // Only type if the text is not empty and not just whitespace
-                                        let trimmed_text = text.trim();
-                                        if !trimmed_text.is_empty() {
-                                            // Check if clipboard saving is enabled
-                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                                .map(|enabled| *enabled)
-                                                .unwrap_or(true); // Default to true if lock fails
-
-                                            // Store to clipboard if enabled
-                                            if clipboard_enabled {
-                                                match crate::commands::core::dev_set_clipboard(
-                                                    trimmed_text.to_string(),
-                                                    app_state.clone()
-                                                ).await {
-                                                    Ok(()) => {
-                                                        info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
-                                                    }
-                                                }
-                                            } else {
-                                                info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
-                                            }
-
-                                            // Then type the transcribed text immediately using the computer use tools
-                                            match crate::commands::keyboard::global_type_text(
-                                                trimmed_text.to_string(),
-                                                app_handle_clone.clone(),
-                                                app_state.clone()
-                                            ).await {
-                                                Ok(()) => {
-                                                    info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
-                                                }
-                                            }
-                                        } else {
-                                            info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("[Dictation Mode] Failed to parse final-result payload: {}", e);
-                            }
-                        }
-
-                        // Reset Dictation Mode state after processing
-                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                            *dictation_active = false;
-                        }
-
-                        // Emit state change event for UI
-                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
-                        }
-                    }
-                });
-            });
 
             // Listen for agent stop events (hold mode - normal completion)
             let app_handle_for_agent_stop = app.handle().clone();
