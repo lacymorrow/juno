@@ -69,6 +69,20 @@ pub use self::tools::{
     get_tool_configuration_summary,
 };
 
+// Explicitly re-export vibrancy functions
+pub use self::floating_panel::{
+    apply_pill_vibrancy,
+    remove_vibrancy,
+    create_pill_window,
+    make_window_interactive,
+    set_floating_panel_click_through,
+    enable_floating_panel_click_through,
+    disable_floating_panel_click_through,
+    get_floating_panel_state,
+    position_floating_panel_properly,
+    set_floating_panel_level,
+};
+
 // Shared helper function for sending notifications from dev tools
 // Needs to be pub(crate) so submodules can access it via super::
 pub(crate) fn send_dev_tool_notification(

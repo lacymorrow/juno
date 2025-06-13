@@ -864,6 +864,11 @@ pub fn run() {
             get_floating_panel_state,
             position_floating_panel_properly,
             set_floating_panel_level,
+            // Vibrancy Commands
+            apply_pill_vibrancy,
+            remove_vibrancy,
+            create_pill_window,
+            make_window_interactive,
             // Keyboard Shortcuts Commands
             get_keyboard_shortcuts,
             set_keyboard_shortcut,

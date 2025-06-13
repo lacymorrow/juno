@@ -90,10 +90,7 @@ export default function FloatingPanel() {
             filter: isHovered ? "blur(0px)" : "blur(0.5px)",
           }}
         >
-          <TransparentFloatingPanel
-            isWindowHovered={isHovered}
-            className="h-full w-full"
-          />
+          <TransparentFloatingPanel isWindowHovered={isHovered} />
         </div>
       )}
     </div>
