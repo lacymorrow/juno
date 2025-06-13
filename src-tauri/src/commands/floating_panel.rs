@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, PhysicalSize};
+use tauri::{AppHandle, Manager};
 use tracing::{info, warn};
 
 #[cfg(target_os = "macos")]
@@ -171,27 +171,4 @@ pub fn set_floating_panel_level(app: AppHandle, level: i32) -> Result<(), String
     }
 
     Ok(())
-}
-
-/// Update the floating panel's size based on its content
-#[tauri::command]
-pub fn update_floating_panel_size(app: AppHandle, width: u32, height: u32) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(crate::constants::window_labels::FLOATING_PANEL) {
-        let new_size = PhysicalSize::new(width, height);
-        match window.set_size(new_size) {
-            Ok(_) => {
-                info!("Floating panel resized to: {}x{}", width, height);
-                Ok(())
-            }
-            Err(e) => {
-                let error_msg = format!("Failed to resize floating panel: {}", e);
-                warn!("{}", error_msg);
-                Err(error_msg)
-            }
-        }
-    } else {
-        let error_msg = "Floating panel window not found".to_string();
-        warn!("{}", error_msg);
-        Err(error_msg)
-    }
 }

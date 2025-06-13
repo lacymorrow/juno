@@ -36,9 +36,7 @@
         "skipTaskbar": true,
         "visible": true,
         "shadow": false,
-        "center": false,
-        "x": 20,
-        "y": 50
+        "center": false
       },
       {
         "label": "floating-bar",
