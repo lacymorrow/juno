@@ -1,12 +1,14 @@
 import TransparentFloatingPanel from "@/components/TransparentFloatingPanel";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/tauri";
 import "./styles/globals.css";
 
 export default function FloatingPanel() {
   const [isHovered, setIsHovered] = useState(false);
   const [windowReady, setWindowReady] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const setupWindow = async () => {
@@ -44,6 +46,42 @@ export default function FloatingPanel() {
 
     setupWindow();
   }, []);
+
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element || !windowReady) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+
+        const paddedWidth = Math.ceil(width) + 2;
+        const paddedHeight = Math.ceil(height) + 2;
+
+        console.log(
+          `Content resized: ${width}x${height}. Resizing window to ${paddedWidth}x${paddedHeight}`
+        );
+        invoke("update_floating_panel_size", {
+          width: paddedWidth,
+          height: paddedHeight,
+        }).catch(console.error);
+      }
+    });
+
+    // Observe the direct child of the ref'd div, which should be the content container.
+    // This avoids observing the parent which is stuck at 100% width/height.
+    if (element.children[0]) {
+      resizeObserver.observe(element.children[0]);
+    } else {
+      console.warn(
+        "ResizeObserver: Could not find a child element to observe."
+      );
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [windowReady]);
 
   // Listen for Rust-based window hover events (same as floating bar)
   useEffect(() => {
@@ -90,10 +128,12 @@ export default function FloatingPanel() {
             filter: isHovered ? "blur(0px)" : "blur(0.5px)",
           }}
         >
-          <TransparentFloatingPanel
-            isWindowHovered={isHovered}
-            className="h-full w-full"
-          />
+          <div ref={contentRef} className="inline-block">
+            <TransparentFloatingPanel
+              isWindowHovered={isHovered}
+              className="h-full w-full"
+            />
+          </div>
         </div>
       )}
     </div>
