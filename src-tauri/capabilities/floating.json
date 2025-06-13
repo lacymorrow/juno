@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "floating",
-  "description": "Capability for the floating bar",
-  "windows": ["floating-bar"],
+  "description": "Capability for the floating bar and panel",
+  "windows": ["floating-bar", "floating-panel"],
   "permissions": [
     "core:default",
     "core:path:default",
@@ -15,6 +15,8 @@
     "core:window:allow-set-size",
     "core:window:allow-set-title",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-position",
+    "core:window:allow-current-monitor",
     "opener:default",
     "notification:default",
     "voice-transcription:default",

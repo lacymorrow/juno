@@ -16,6 +16,7 @@ pub mod dictation_reset;
 pub mod element;
 pub mod filesystem;
 pub mod floating_bar;
+pub mod floating_panel;
 pub mod keyboard;
 pub mod mouse;
 pub mod permissions;
@@ -32,6 +33,7 @@ pub mod mcp;
 pub mod memory;
 pub mod always_listening;
 pub mod notifications;
+pub mod stop_operations;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
@@ -40,6 +42,7 @@ pub use self::dev::*;
 pub use self::dictation::*;
 pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
 pub use self::floating_bar::*;
+pub use self::floating_panel::*;
 pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};
 pub use self::mouse::*;
 pub use self::permissions::*;
@@ -52,6 +55,7 @@ pub use self::cloud::*;
 pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::always_listening::*;
+pub use self::stop_operations::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

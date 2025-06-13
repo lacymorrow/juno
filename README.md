@@ -24,6 +24,7 @@ bun run tauri dev
 ✅ **Complete macOS platform support** with accessibility APIs  
 ✅ **Multi-agent architecture** with intelligent task delegation  
 ✅ **Voice integration** with dual modes (Agent/Dictation)  
+✅ **Transparent floating panel** with glass effects and real-time status  
 ✅ **Auto-launch functionality** with seamless startup integration  
 ✅ **JSX Visual Responses** with rich React component rendering  
 ✅ **Timer system** for long-running tasks with context resumption  
@@ -44,6 +45,7 @@ cargo test --manifest-path src-tauri/Cargo.toml  # Rust tests (macOS required)
 ```
 
 **Test Coverage:**
+
 - **Frontend**: 22+ tests covering components, utilities, and API integration
 - **Backend**: Comprehensive Rust unit tests for agent systems, state management, and configuration
 - **Patterns**: Async/await, proper mocking, error handling, serialization validation
@@ -78,9 +80,11 @@ npm test              # Frontend tests only
 ## 📚 Documentation
 
 ### 📋 **Complete Documentation Index**
+
 **[docs/rules/INDEX.md](docs/rules/INDEX.md)** - Comprehensive navigation for all documentation
 
 ### 🎯 **Core Documentation**
+
 - **[docs/rules/CONSOLIDATED_DOCUMENTATION.md](docs/rules/CONSOLIDATED_DOCUMENTATION.md)** - Complete project overview and consolidated information
 - **[LLMs.txt](LLMs.txt)** - Complete instructions for AI agents working with this codebase
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Complete development guide and patterns
@@ -88,6 +92,7 @@ npm test              # Frontend tests only
 - **[API.md](API.md)** - Runtime API reference and integration guide
 
 ### 📁 **Organized by Category**
+
 - **[docs/rules/implementation/](docs/rules/implementation/)** - Feature implementations and milestones
 - **[docs/rules/security/](docs/rules/security/)** - Security framework and permissions
 - **[docs/rules/testing/](docs/rules/testing/)** - Testing strategies and validation
@@ -95,6 +100,11 @@ npm test              # Frontend tests only
 - **[docs/rules/cloud/](docs/rules/cloud/)** - Cloud connector and remote control
 - **[docs/rules/tools/](docs/rules/tools/)** - Tool system implementations
 - **[docs/rules/ui/](docs/rules/ui/)** - User interface and frontend
+
+### 🎨 **Floating Panel System**
+
+- **[docs/TRANSPARENT_FLOATING_PANEL.md](docs/TRANSPARENT_FLOATING_PANEL.md)** - Complete floating panel documentation
+- **[docs/FLOATING_PANEL_QUICK_REFERENCE.md](docs/FLOATING_PANEL_QUICK_REFERENCE.md)** - Quick reference guide
 
 ## 🎤 Voice Modes
 
