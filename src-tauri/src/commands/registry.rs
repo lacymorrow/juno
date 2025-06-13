@@ -194,6 +194,17 @@ macro_rules! generate_invoke_handler {
             floating_bar_input_blur,
             floating_bar_input_change,
             floating_bar_submit,
+            // Floating Panel Commands
+            set_floating_panel_click_through,
+            enable_floating_panel_click_through,
+            disable_floating_panel_click_through,
+            get_floating_panel_state,
+            position_floating_panel_properly,
+            set_floating_panel_level,
+            update_floating_panel_size,
+            // Keyboard Shortcuts Commands
+            get_keyboard_shortcuts,
+            set_keyboard_shortcut,
 
             // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
             list_ai_providers,
