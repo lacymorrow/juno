@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "floating",
-  "description": "Capability for the floating bar",
-  "windows": ["floating-bar"],
+  "description": "Capability for the floating bar and panel",
+  "windows": ["floating-bar", "floating-panel"],
   "permissions": [
     "core:default",
     "core:path:default",
