@@ -3,19 +3,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH, Instant};
 use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot};
-use tokio::time::{interval, timeout};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tracing::{info, warn, error, debug};
 use tauri::{AppHandle, Manager, Emitter};
 use uuid::Uuid;
-use url::Url;
 use crate::cloud::types::*;
 use crate::cloud::config::CloudConfig;
 use crate::cloud::auth::DeviceAuth;
 use crate::cloud::security::CloudSecurity;
 use crate::cloud::commands::CloudCommandProcessor;
 use serde_json::json;
-use crate::cloud::client::CloudClient;
 
 use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
@@ -718,7 +714,7 @@ impl ProductionCloudConnector {
 
     /// Create device status for reporting
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
-        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let _app_state = self.app_handle.state::<crate::state::AppState>();
 
         let device_id = self.auth.get_credentials()
             .map(|c| c.device_id.clone())

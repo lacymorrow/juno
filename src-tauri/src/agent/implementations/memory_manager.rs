@@ -1,6 +1,4 @@
 use crate::agent::structs::{
-    ToolCall,
-    AgentAction,
     AgentError,
     Message,
     Role,
@@ -8,13 +6,10 @@ use crate::agent::structs::{
 use crate::agent::traits::MemoryManager;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use tokio::sync::RwLock;
 use std::sync::Arc;
-use chrono::{DateTime, Utc};
-use tracing::{info, warn, debug};
-use std::time::{Instant, Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, Duration, SystemTime};
 use uuid::Uuid;
 
 /// Configuration for advanced memory management

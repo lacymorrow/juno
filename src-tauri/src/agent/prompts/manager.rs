@@ -5,7 +5,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Manages prompt templates, configuration, and generation
 pub struct PromptManager {
@@ -104,7 +104,7 @@ impl PromptManager {
             // If development prompt is not available, log and fall back to default
             warn!("Development prompt not available in debug mode, falling back to default");
         }
-        
+
         // Production mode or fallback: use the standard prompt
         self.get_prompt(PromptType::SystemDefault, None)
             .unwrap_or_else(|_| DefaultPrompts::system_default().content)
@@ -229,7 +229,7 @@ impl PromptManager {
     fn substitute_variables(
         &self,
         content: &str,
-        template_variables: &[String],
+        _template_variables: &[String],
         context: &PromptContext,
     ) -> Result<String, AgentError> {
         let mut result = content.to_string();

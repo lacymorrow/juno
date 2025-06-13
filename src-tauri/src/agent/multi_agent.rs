@@ -2,8 +2,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+<<<<<<< HEAD
 
 use tracing::{info, debug, warn, error};
+=======
+use tracing::{debug, warn};
+>>>>>>> asd1
 use uuid;
 
 use crate::agent::structs::{
@@ -83,7 +87,7 @@ pub struct MultiAgentOrchestrator {
 
 impl MultiAgentOrchestrator {
     pub async fn new(
-        memory: Arc<dyn MemoryManager + Send + Sync>,
+        _memory: Arc<dyn MemoryManager + Send + Sync>,
         tool_provider: Arc<dyn ToolProvider + Send + Sync>,
     ) -> Result<Self, AgentError> {
         // Load prompt manager
@@ -237,7 +241,7 @@ impl AgentBrain for MultiAgentOrchestrator {
     async fn decide_next_action(
         &self,
         messages: &[Message],
-        available_tools: &[ToolDefinition],
+        _available_tools: &[ToolDefinition],
     ) -> Result<AgentAction, AgentError> {
         // For the orchestrator, we should route to an expert
         let expert_type = self.decide_expert(messages).await?;
