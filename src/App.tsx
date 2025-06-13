@@ -46,6 +46,7 @@ import {
   PanelLeftOpen,
   Plus,
   Send,
+  Square,
   Trash2,
 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -468,7 +469,7 @@ function App() {
   // Permissions state
   const [, setShowPermissionsFlow] = useState(false);
   const [, setPermissionsChecked] = useState(false);
-  const [, setPermissionsGranted] = useState(false);
+  const [_permissionsGranted, setPermissionsGranted] = useState(false);
 
   // Enhanced modal and feature state
   const [activeModal, setActiveModal] = useState<ModalType>(null);
@@ -488,7 +489,9 @@ function App() {
   const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
 
-  // Onboarding state - handled by separate onboarding window
+  // Onboarding state
+  const [_showOnboarding, _setShowOnboarding] = useState(false);
+  const [_onboardingChecked, _setOnboardingChecked] = useState(false);
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -765,7 +768,7 @@ function App() {
   useEffect(() => {
     const unlistenComplete = listen<{ prompt?: string }>(
       "onboarding-complete",
-      async () => {
+      async (_event) => {
         console.log("Onboarding completed from separate window");
         // Focus main window
         const currentWindow = getCurrentWindow();
@@ -774,7 +777,7 @@ function App() {
       }
     );
 
-    const unlistenSkipped = listen<{}>("onboarding-skipped", async () => {
+    const unlistenSkipped = listen<{}>("onboarding-skipped", async (_event) => {
       console.log("Onboarding skipped from separate window");
       // Focus main window
       const currentWindow = getCurrentWindow();
@@ -1547,6 +1550,14 @@ function App() {
         ).catch((error) => {
           console.error("Frontend: Error stopping TTS:", error);
         });
+
+        // Call our centralized stop function for backend operations
+        invoke("stop_all_operations").catch((error) => {
+          console.error(
+            "Frontend: Error stopping all operations via escape key:",
+            error
+          );
+        });
       }
     };
 
@@ -1788,6 +1799,18 @@ function App() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     submitQuery(query);
+  };
+
+  // Handle stop button click - stop all operations
+  const handleStop = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      console.log("Stop button clicked - stopping all operations");
+      await invoke("stop_all_operations");
+      console.log("Stop operations completed successfully");
+    } catch (error) {
+      console.error("Failed to stop operations:", error);
+    }
   };
 
   // Helper function to convert base64 to Blob
@@ -2816,7 +2839,7 @@ function App() {
                   </ScrollArea>
 
                   {/* Input Form */}
-                  <AIInput onSubmit={handleSubmit}>
+                  <AIInput onSubmit={isProcessing ? handleStop : handleSubmit}>
                     <AIInputTextarea
                       name="message"
                       placeholder={
@@ -2853,12 +2876,19 @@ function App() {
                       </AIInputTools>
                       <AIInputSubmit
                         disabled={
-                          isProcessing ||
-                          serverStatus !== "connected" ||
-                          !query.trim()
+                          !isProcessing &&
+                          (serverStatus !== "connected" || !query.trim())
+                        }
+                        variant={isProcessing ? "destructive" : "default"}
+                        title={
+                          isProcessing ? "Stop all operations" : "Submit query"
                         }
                       >
-                        <Send size={18} />
+                        {isProcessing ? (
+                          <Square size={18} />
+                        ) : (
+                          <Send size={18} />
+                        )}
                       </AIInputSubmit>
                     </AIInputToolbar>
                   </AIInput>

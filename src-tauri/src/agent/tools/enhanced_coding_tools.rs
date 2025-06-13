@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::fs;
-use tracing::{info, warn, error, debug};
+use tracing::info;
 use chrono;
 
 use crate::agent::structs::{ToolCall, ToolResult, ToolDefinition};
