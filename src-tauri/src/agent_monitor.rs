@@ -187,11 +187,13 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
     let (agent_started, threshold_reached, duration) = state.end_hold();
 
     if threshold_reached {
-        info!("[AgentMonitor] Agent input released after threshold reached - completing Agent Mode normally");
+        info!("[AgentMonitor] Agent input released after threshold reached - stopping transcription to process with agent");
 
-        // Emit event to stop agent normally
-        if let Err(e) = app_handle.emit("agent-stop", ()) {
-            error!("[AgentMonitor] Failed to emit agent-stop: {}", e);
+        // When threshold is reached, we want to stop the transcription so the final result
+        // gets processed by the voice-transcription:final-result handler, which will
+        // send the transcribed text to the agent for processing
+        if let Err(e) = app_handle.emit("agent-transcription-stop", ()) {
+            error!("[AgentMonitor] Failed to emit agent-transcription-stop: {}", e);
         }
     } else if agent_started {
         info!(
@@ -199,7 +201,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
             duration.as_millis()
         );
 
-        // Emit event to cancel agent
+        // If released before threshold, cancel the agent
         if let Err(e) = app_handle.emit("agent-cancel", ()) {
             error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
         }

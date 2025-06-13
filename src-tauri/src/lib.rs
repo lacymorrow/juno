@@ -2676,6 +2676,54 @@ pub fn run() {
                 });
             });
 
+            // Listen for agent transcription stop events (hold mode - threshold reached)
+            let app_handle_for_agent_transcription_stop = app.handle().clone();
+            app.listen("agent-transcription-stop", move |_event| {
+                info!("[Event] Received agent-transcription-stop event - stopping transcription to process result");
+
+                let app_handle_clone = app_handle_for_agent_transcription_stop.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Stop transcription to trigger final result processing
+                    // This will cause the voice-transcription:final-result event to be emitted
+                    // which will then process the transcribed text with the agent
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(_) => {
+                                    info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
+                                    // Note: We don't emit agent-active false here because the agent will continue
+                                    // processing the transcribed text. The agent-active false will be emitted
+                                    // after the agent completes processing the query.
+                                }
+                                Err(e) => {
+                                    error!("[Agent Mode] Failed to stop transcription: {}", e);
+
+                                    // Reset agent input monitor state on failure
+                                    crate::agent_monitor::force_reset_agent_input_state().await;
+
+                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                        tracing::error!("[Agent Mode] Failed to emit agent-active event after transcription stop failure: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            warn!("[Agent Mode] Voice controller not available - cannot stop transcription");
+
+                            // Reset agent input monitor state
+                            crate::agent_monitor::force_reset_agent_input_state().await;
+
+                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                            }
+                        }
+                    }
+                });
+            });
+
             Ok(())
         });
 
