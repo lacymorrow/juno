@@ -3,3 +3,420 @@ description:
 globs:
 alwaysApply: false
 ---
+# Tauri Architecture Patterns and Development Guidelines
+
+## Overview
+Juno follows established Tauri v2 patterns with multi-agent AI orchestration, voice control, and advanced tool management. The architecture emphasizes security, performance, and maintainability through consistent patterns.
+
+## Project Structure
+
+### Core Architecture
+```
+src-tauri/
+├── src/
+│   ├── lib.rs                    # Main Tauri app setup and global shortcuts
+│   ├── state.rs                  # Central AppState container
+│   ├── anthropic.rs              # AI orchestrator and main agent entry point
+│   ├── commands/                 # Tauri command handlers
+│   │   ├── core.rs              # Core app commands (settings, etc.)
+│   │   ├── tools.rs             # Tool configuration commands
+│   │   ├── orchestrator.rs      # Task orchestration commands
+│   │   ├── memory.rs            # Memory management commands
+│   │   └── dev/                 # Development-specific commands
+│   ├── agent/                   # AI agent implementations
+│   │   ├── tools/               # Tool providers and implementations
+│   │   ├── implementations/     # Specialized agent types
+│   │   └── prompts/             # Agent prompt templates
+│   ├── voice_control/           # Voice input monitoring
+│   │   ├── dictation_monitor.rs # Spacebar hold for dictation
+│   │   └── agent_monitor.rs     # Option+D hold for agent
+│   └── cloud/                   # External service integrations
+└── tauri.conf.json              # Tauri configuration
+```
+
+### Frontend Integration
+```
+src/
+├── App.tsx                      # Main React app with event listeners
+├── hooks/
+│   └── useSettings.ts           # Settings state management
+├── components/
+│   ├── settings/                # Settings UI components
+│   └── ui/                      # Reusable UI components
+└── types/                       # TypeScript type definitions
+```
+
+## Command Pattern Implementation
+
+### Tauri Commands Structure
+All commands follow this pattern in [src-tauri/src/commands/](mdc:src-tauri/src/commands):
+```rust
+use tauri::{AppHandle, command};
+use crate::state::AppState;
+
+#[command]
+pub async fn command_name(
+    app: AppHandle,
+    param: ParamType,
+) -> Result<ReturnType, String> {
+    // 1. Access state
+    let app_state = app.state::<AppState>();
+
+    // 2. Perform operation
+    let result = perform_operation(&app_state, param)?;
+
+    // 3. Update state if needed
+    app_state.update_something(result.clone());
+
+    // 4. Emit events if needed
+    app.emit_all("event-name", &result)?;
+
+    // 5. Return result
+    Ok(result)
+}
+```
+
+### Command Registration
+Commands registered in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+```rust
+fn main() {
+    tauri::Builder::default()
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            // Core commands
+            commands::core::get_agent_trigger_mode,
+            commands::core::set_agent_trigger_mode,
+
+            // Tool commands
+            commands::tools::get_tool_config,
+            commands::tools::set_tool_config,
+
+            // Memory commands
+            commands::memory::get_memory_status,
+
+            // Other command modules...
+        ])
+        .setup(|app| {
+            setup_global_shortcuts(&app.handle())?;
+            initialize_monitors(&app.handle())?;
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+```
+
+## State Management Architecture
+
+### AppState Pattern
+Central state container in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs):
+```rust
+use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
+
+#[derive(Default)]
+pub struct AppState {
+    // Core monitors
+    dictation_monitor: Arc<Mutex<DictationMonitor>>,
+    agent_monitor: Arc<Mutex<AgentMonitor>>,
+
+    // Settings
+    agent_trigger_mode: Arc<Mutex<AgentTriggerMode>>,
+
+    // Managers
+    memory_manager: Arc<Mutex<AdvancedMemoryManager>>,
+    tool_config_manager: Arc<Mutex<ToolConfigManager>>,
+
+    // Runtime state
+    is_agent_active: Arc<Mutex<bool>>,
+    current_session_id: Arc<Mutex<Option<String>>>,
+}
+
+impl AppState {
+    // Getter pattern - always clone for thread safety
+    pub fn get_agent_trigger_mode(&self) -> AgentTriggerMode {
+        self.agent_trigger_mode.lock().unwrap().clone()
+    }
+
+    // Setter pattern - update state and emit events
+    pub fn set_agent_trigger_mode(&self, mode: AgentTriggerMode) {
+        *self.agent_trigger_mode.lock().unwrap() = mode;
+    }
+
+    // Manager access pattern
+    pub fn with_memory_manager<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut AdvancedMemoryManager) -> R,
+    {
+        let mut manager = self.memory_manager.lock().unwrap();
+        f(&mut *manager)
+    }
+}
+```
+
+### Thread Safety Guidelines
+- **Always use Arc<Mutex<T>>** for shared state
+- **Clone values when returning** from getters
+- **Keep lock scope minimal** to prevent deadlocks
+- **Use with_* methods** for complex manager operations
+
+## Error Handling Patterns
+
+### AgentError Enum
+Centralized error handling in [src-tauri/src/agent/mod.rs](mdc:src-tauri/src/agent/mod.rs):
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum AgentError {
+    #[error("Anthropic API error: {0}")]
+    AnthropicError(String),
+
+    #[error("Tool execution failed: {0}")]
+    ToolError(String),
+
+    #[error("Memory management error: {0}")]
+    MemoryError(String),
+
+    #[error("Voice control error: {0}")]
+    VoiceError(String),
+
+    #[error("State error: {0}")]
+    StateError(String),
+}
+```
+
+### Error Handling in Commands
+```rust
+#[command]
+pub async fn risky_operation(app: AppHandle) -> Result<String, String> {
+    // Convert AgentError to String for Tauri
+    perform_operation()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// Internal error handling
+async fn perform_operation() -> Result<String, AgentError> {
+    let result = dangerous_operation()
+        .map_err(|e| AgentError::ToolError(format!("Operation failed: {}", e)))?;
+
+    Ok(result)
+}
+```
+
+## Plugin Integration Patterns
+
+### Custom Plugin Structure
+Voice transcription plugin in [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription):
+```rust
+// Plugin definition
+use tauri::{plugin::TauriPlugin, Runtime};
+
+pub fn init<R: Runtime>() -> TauriPlugin<R> {
+    tauri::plugin::Builder::new("voice-transcription")
+        .invoke_handler(tauri::generate_handler![
+            start_transcription,
+            stop_transcription,
+            get_transcription_status,
+        ])
+        .setup(|app| {
+            // Plugin initialization
+            Ok(())
+        })
+        .build()
+}
+```
+
+### Plugin Usage in Main App
+```rust
+// In lib.rs
+fn main() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_voice_transcription::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        // ... other plugins
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+```
+
+## Global Shortcut Management
+
+### Shortcut Registration Pattern
+Global shortcuts in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+```rust
+use tauri::GlobalShortcutManager;
+
+fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let app_handle = app.clone();
+
+    // Spacebar for dictation
+    app.global_shortcut_manager().register("Space", move |app, event| {
+        handle_dictation_shortcut(app, event);
+    })?;
+
+    // Option+D for agent
+    let app_handle = app.clone();
+    app.global_shortcut_manager().register("Alt+D", move |app, event| {
+        handle_agent_shortcut(app, event);
+    })?;
+
+    Ok(())
+}
+
+fn handle_agent_shortcut(app: &AppHandle, event: GlobalShortcutEvent) {
+    let app_state = app.state::<AppState>();
+
+    match app_state.get_agent_trigger_mode() {
+        AgentTriggerMode::Tap => handle_tap_mode(app, event),
+        AgentTriggerMode::Hold => handle_hold_mode(app, event),
+    }
+}
+```
+
+### Escape Key Dynamic Registration
+Pattern for context-sensitive escape key:
+```rust
+pub fn register_escape_key(app: &AppHandle) -> Result<(), String> {
+    app.global_shortcut_manager()
+        .register("Escape", move |app, _| {
+            // Handle escape based on current context
+            if app.state::<AppState>().is_agent_active() {
+                stop_agent_session(app);
+            } else if app.state::<AppState>().is_dictation_active() {
+                stop_dictation_session(app);
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+pub fn unregister_escape_key(app: &AppHandle) -> Result<(), String> {
+    app.global_shortcut_manager()
+        .unregister("Escape")
+        .map_err(|e| e.to_string())
+}
+```
+
+## Frontend-Backend Communication
+
+### Event-Driven Updates
+Frontend listens for backend events:
+```typescript
+// In App.tsx
+useEffect(() => {
+  const unlistenPromises = [
+    listen('agent-transcription-start', handleAgentStart),
+    listen('agent-committed', handleAgentCommit),
+    listen('settings-changed', handleSettingsChange),
+  ];
+
+  return () => {
+    unlistenPromises.forEach(async (unlisten) => {
+      (await unlisten)();
+    });
+  };
+}, []);
+```
+
+### Command Invocation Pattern
+Frontend calls backend commands:
+```typescript
+import { invoke } from '@tauri-apps/api/tauri';
+
+// Simple command
+const mode = await invoke<AgentTriggerMode>('get_agent_trigger_mode');
+
+// Command with parameters
+await invoke('set_agent_trigger_mode', { mode: 'Hold' });
+
+// Error handling
+try {
+  const result = await invoke<string>('risky_command', { param: value });
+  // Handle success
+} catch (error) {
+  console.error('Command failed:', error);
+  // Handle error
+}
+```
+
+## Security and Permissions
+
+### macOS Entitlements
+Required entitlements in [src-tauri/juno.entitlements](mdc:src-tauri/juno.entitlements):
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+    <!-- Other required permissions -->
+</dict>
+</plist>
+```
+
+### Permission Validation
+Permission checking patterns:
+```rust
+#[command]
+pub async fn check_permissions(app: AppHandle) -> Result<PermissionStatus, String> {
+    let mut status = PermissionStatus::default();
+
+    // Check accessibility permissions
+    status.accessibility = check_accessibility_permission().await?;
+
+    // Check microphone permissions
+    status.microphone = check_microphone_permission().await?;
+
+    Ok(status)
+}
+```
+
+## Development Guidelines
+
+### Code Organization
+1. **Commands**: Group related commands in modules under `commands/`
+2. **State**: Keep all shared state in `AppState`
+3. **Errors**: Use `AgentError` enum for internal errors, convert to `String` for Tauri
+4. **Events**: Use descriptive event names with consistent patterns
+5. **Cleanup**: Always implement proper resource cleanup
+
+### Performance Best Practices
+1. **Lazy Initialization**: Initialize expensive resources only when needed
+2. **Background Tasks**: Use tokio for long-running operations
+3. **Memory Management**: Implement proper cleanup and memory limits
+4. **Event Throttling**: Prevent event spam with throttling mechanisms
+
+### Testing Patterns
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_agent_trigger_mode() {
+        let state = AppState::default();
+
+        // Test default value
+        assert_eq!(state.get_agent_trigger_mode(), AgentTriggerMode::Tap);
+
+        // Test setting value
+        state.set_agent_trigger_mode(AgentTriggerMode::Hold);
+        assert_eq!(state.get_agent_trigger_mode(), AgentTriggerMode::Hold);
+    }
+}
+```
+
+### Compilation Verification
+Always run after Rust changes:
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+## Related Documentation
+- [LLMs.txt](mdc:LLMs.txt) - Comprehensive project instructions for AI agents
+- [ARCHITECTURE.md](mdc:ARCHITECTURE.md) - High-level system architecture
+- [DEVELOPMENT.md](mdc:DEVELOPMENT.md) - Development setup and guidelines
+- [agent-trigger-modes.mdc](mdc:.cursor/rules/agent-trigger-modes.mdc) - Agent trigger mode implementation
+- [voice-system-architecture.mdc](mdc:.cursor/rules/voice-system-architecture.mdc) - Voice control system details

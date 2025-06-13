@@ -3,3 +3,151 @@ description:
 globs:
 alwaysApply: false
 ---
+# Voice System Architecture
+
+## Overview
+Juno implements a sophisticated voice control system with two primary modes:
+1. **Dictation Mode** - Spacebar hold triggers voice-to-text output
+2. **Agent Mode** - Option+D triggers AI agent with voice input
+
+## Architecture Components
+
+### Core Voice Infrastructure
+- **Voice Transcription Plugin**: [tauri-plugin-voice-transcription/](mdc:tauri-plugin-voice-transcription) - Custom Tauri plugin for voice input
+- **Voice Control Module**: [src-tauri/src/voice_control/](mdc:src-tauri/src/voice_control) - Core voice logic
+- **Audio Models**: Whisper-based transcription with multiple model sizes
+
+### Mode-Specific Monitors
+
+#### Dictation Monitor
+Located in [src-tauri/src/voice_control/dictation_monitor.rs](mdc:src-tauri/src/voice_control/dictation_monitor.rs):
+- **Trigger**: Spacebar hold
+- **Function**: Voice-to-text output to current application focus
+- **Pattern**: Hold-to-activate with immediate text output
+- **State Tracking**: Session timing, cleanup, and interruption handling
+
+#### Agent Monitor
+Located in [src-tauri/src/voice_control/agent_monitor.rs](mdc:src-tauri/src/voice_control/agent_monitor.rs):
+- **Trigger**: Option+D (hold mode)
+- **Function**: Voice input to AI agent for task execution
+- **Pattern**: Hold-to-activate with agent processing
+- **State Tracking**: Similar to dictation but routes to agent system
+
+### Global Shortcut Management
+Centralized in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+```rust
+// Spacebar for dictation mode
+app.global_shortcut_manager().register("Space", move |app, event| {
+    // Routes to dictation_monitor
+});
+
+// Option+D for agent mode
+app.global_shortcut_manager().register("Alt+D", move |app, event| {
+    // Routes based on AgentTriggerMode (tap vs hold)
+});
+```
+
+## State Management
+
+### Voice Control State
+Primary state container in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs):
+```rust
+pub struct AppState {
+    dictation_monitor: Arc<Mutex<DictationMonitor>>,
+    agent_monitor: Arc<Mutex<AgentMonitor>>,
+    agent_trigger_mode: Arc<Mutex<AgentTriggerMode>>,
+    // ... other voice-related state
+}
+```
+
+### Memory and Context
+- **Memory Management**: [src-tauri/src/commands/memory.rs](mdc:src-tauri/src/commands/memory.rs) - Token-aware conversation history
+- **Context Resumption**: Timer system preserves context between voice sessions
+- **Agent Orchestration**: [src-tauri/src/anthropic.rs](mdc:src-tauri/src/anthropic.rs) - AI response processing
+
+## Event Flow
+
+### Dictation Mode Flow
+1. Spacebar press → `dictation_monitor::on_input_pressed()`
+2. Voice recording starts immediately
+3. Spacebar release → `dictation_monitor::on_input_released()`
+4. Transcription processed → Text output to focused application
+5. Session cleanup and state reset
+
+### Agent Mode Flow (Hold)
+1. Option+D press → `agent_monitor::on_agent_input_pressed()`
+2. Voice recording starts immediately
+3. Option+D release → `agent_monitor::on_agent_input_released()`
+4. If >500ms → Agent processing with AI response
+5. If <500ms → Session cancelled
+6. Session cleanup and state reset
+
+### Agent Mode Flow (Tap)
+1. Option+D press → `toggle-dictation-request` event
+2. Voice recording starts/stops based on current state
+3. Transcription → Agent processing
+4. AI response → User interaction
+5. Manual stop or timeout cleanup
+
+## Frontend Integration
+
+### Voice Status UI
+Status indicators in [src/App.tsx](mdc:src/App.tsx):
+- Visual feedback for active voice sessions
+- Mode indicators (dictation vs agent)
+- Recording state and transcription progress
+
+### Settings Integration
+Voice settings in [src/components/settings/sections/GeneralSettings.tsx](mdc:src/components/settings/sections/GeneralSettings.tsx):
+- Agent trigger mode selection
+- Voice model configuration
+- Microphone and audio settings
+
+## Performance Characteristics
+
+### Responsiveness
+- **Immediate Start**: 0ms delay for voice recording
+- **Hold Thresholds**: 500ms for agent commitment
+- **Cleanup**: 150ms cooldown periods
+- **Max Sessions**: 2-minute automatic timeouts
+
+### Resource Management
+- **Memory**: Token-aware conversation pruning
+- **Audio**: Streaming transcription processing
+- **State**: Arc-based shared state for thread safety
+- **Cleanup**: Comprehensive resource deallocation
+
+## Error Handling and Recovery
+
+### Voice Input Errors
+- Microphone permission validation
+- Audio device availability checks
+- Transcription service fallbacks
+- Network connectivity handling
+
+### State Recovery
+- Automatic session cleanup on errors
+- State synchronization between monitors
+- Emergency stop mechanisms
+- Memory leak prevention
+
+## Extension Patterns
+
+### Adding New Voice Modes
+1. Create new monitor module (follow dictation_monitor.rs pattern)
+2. Add state fields to AppState
+3. Register global shortcuts in lib.rs
+4. Implement event handlers and state tracking
+5. Add frontend UI and settings integration
+6. Include comprehensive error handling
+
+### Voice Model Integration
+- Models stored in [tauri-plugin-voice-transcription/models/](mdc:tauri-plugin-voice-transcription/models)
+- Configuration via plugin API
+- Multiple model size support (base, small, medium, large)
+- Dynamic model switching capability
+
+## Related Documentation
+- [VOICE_REGRESSION_FIX_SUMMARY.md](mdc:VOICE_REGRESSION_FIX_SUMMARY.md) - Voice system fixes and improvements
+- [TTS_ESCAPE_KEY_FIX_SUMMARY.md](mdc:TTS_ESCAPE_KEY_FIX_SUMMARY.md) - Text-to-speech integration
+- [ESCAPE_KEY_BEHAVIOR_FIX_COMPLETE.md](mdc:ESCAPE_KEY_BEHAVIOR_FIX_COMPLETE.md) - Escape key behavior patterns
