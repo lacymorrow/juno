@@ -39,6 +39,19 @@ pub struct KeyboardShortcuts {
     pub open_settings: String,     // Default: Cmd+, (Ctrl+, on non-macOS)
 }
 
+/// Agent trigger mode configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AgentTriggerMode {
+    Tap,  // Press and release to toggle agent mode
+    Hold, // Hold to activate agent mode, release to stop
+}
+
+impl Default for AgentTriggerMode {
+    fn default() -> Self {
+        AgentTriggerMode::Tap // Default to existing behavior
+    }
+}
+
 impl Default for KeyboardShortcuts {
     fn default() -> Self {
         Self {
@@ -130,6 +143,8 @@ pub struct AppState {
     pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
     // Keyboard shortcuts configuration
     pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
+    // Agent trigger mode configuration
+    pub agent_trigger_mode: Arc<Mutex<AgentTriggerMode>>, // Track how agent is triggered (tap vs hold)
     // MCP manager for external MCP server support
     pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
     // Tool provider registry for refreshing MCP tools
@@ -193,6 +208,8 @@ impl AppState {
             production_cloud_connector: Arc::new(TokioMutex::new(None)),
             // Initialize keyboard shortcuts configuration
             keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
+            // Initialize agent trigger mode configuration
+            agent_trigger_mode: Arc::new(Mutex::new(AgentTriggerMode::Tap)),
             // Initialize MCP manager
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             // Initialize tool provider registry

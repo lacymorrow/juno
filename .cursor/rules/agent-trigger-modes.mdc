@@ -1,0 +1,102 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Agent Trigger Modes Implementation
+
+## Overview
+The app supports two agent trigger modes via Option+D key combination:
+1. **Tap to Toggle** (default) - Press Option+D to start/stop agent
+2. **Hold to Activate** (new) - Hold Option+D to activate agent, release to stop
+
+## Architecture
+
+### Backend State Management
+Agent trigger mode is managed in [src-tauri/src/state.rs](mdc:src-tauri/src/state.rs):
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AgentTriggerMode {
+    Tap,
+    Hold,
+}
+
+pub struct AppState {
+    agent_trigger_mode: Arc<Mutex<AgentTriggerMode>>,
+    // ... other fields
+}
+```
+
+### Hold Mode Implementation
+Hold functionality is implemented in [src-tauri/src/voice_control/agent_monitor.rs](mdc:src-tauri/src/voice_control/agent_monitor.rs):
+- **Hold Threshold**: 500ms to commit to agent mode
+- **Immediate Start**: 0ms delay for responsiveness
+- **Max Session**: 2 minutes with automatic cleanup
+- **Cooldown**: 150ms after cancellation
+
+### Global Shortcut Routing
+Key routing logic in [src-tauri/src/lib.rs](mdc:src-tauri/src/lib.rs):
+```rust
+// Routes Option+D based on current trigger mode
+match app.state::<AppState>().get_agent_trigger_mode() {
+    AgentTriggerMode::Tap => // Original toggle behavior
+    AgentTriggerMode::Hold => // New agent_monitor handling
+}
+```
+
+## Frontend Integration
+
+### Settings UI
+Agent trigger mode selection in [src/components/settings/sections/GeneralSettings.tsx](mdc:src/components/settings/sections/GeneralSettings.tsx):
+- Select dropdown with descriptive labels
+- Help text explaining both modes
+- Integrated with existing settings system
+
+### State Management
+Settings hook in [src/hooks/useSettings.ts](mdc:src/hooks/useSettings.ts):
+```typescript
+const [agentTriggerMode, setAgentTriggerMode] = useState<AgentTriggerMode>('Tap');
+
+const handleAgentTriggerModeChange = async (mode: AgentTriggerMode) => {
+  // Persists to tauri-plugin-store
+  await invoke('set_agent_trigger_mode', { mode });
+};
+```
+
+## Persistence
+Settings stored via tauri-plugin-store in "agent_settings.json":
+- Automatically loads on app startup
+- Preserves user preference across sessions
+- Fallback to 'Tap' mode if not set
+
+## Event System
+Hold mode uses comprehensive event listeners:
+- `agent-transcription-start` - Voice input begins
+- `agent-committed` - Session committed (>500ms)
+- `agent-cancel` - Session cancelled (<500ms)
+- `agent-stop` - Normal session end
+- `agent-force-stop` - Manual interruption
+- `agent-force-cleanup` - Emergency cleanup
+
+## Implementation Patterns
+
+### Adding New Trigger Modes
+1. Extend `AgentTriggerMode` enum in state.rs
+2. Add routing logic in lib.rs global shortcut handler
+3. Create monitor module if needed (like agent_monitor.rs)
+4. Add Tauri commands for get/set operations
+5. Update frontend settings UI and hook
+6. Add help documentation in App.tsx
+
+### Key Architecture Principles
+- **State Isolation**: Each mode has independent state tracking
+- **Event-Driven**: Comprehensive event system for state changes
+- **Persistence**: All user preferences saved automatically
+- **Cleanup**: Proper resource management and timeout handling
+- **Consistency**: Similar patterns to existing dictation_monitor.rs
+
+## Related Files
+- [src-tauri/src/voice_control/dictation_monitor.rs](mdc:src-tauri/src/voice_control/dictation_monitor.rs) - Similar hold pattern for dictation mode
+- [src-tauri/src/commands/core.rs](mdc:src-tauri/src/commands/core.rs) - Agent trigger mode commands
+- [src/App.tsx](mdc:src/App.tsx) - Help modal documentation
+- [src/types/keyboard.ts](mdc:src/types/keyboard.ts) - TypeScript type definitions
