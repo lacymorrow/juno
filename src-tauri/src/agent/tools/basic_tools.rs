@@ -1,18 +1,18 @@
 //! # Basic Tools Module - Balanced Security
-//! 
+//!
 //! Core system tools providing fundamental file operations and terminal command execution.
 //! These tools form the foundation for agent interactions with the host system.
-//! 
+//!
 //! ## Security Features:
 //! - Basic path validation (prevents only the most dangerous path traversal)
 //! - Command blacklisting (blocks only truly destructive commands)
 //! - Resource limits and timeouts
 //! - Audit logging
-//! 
+//!
 //! ## Tools Provided:
 //! - `read_file`: Read file contents with basic safety checks
 //! - `run_terminal_command`: Execute shell commands with minimal restrictions
-//! 
+//!
 //! ## Usage
 //! Used by: Orchestrator agent, coding specialists, general agent workflows
 //! Registration: Called via `register_basic_tools()` during agent initialization
@@ -21,7 +21,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use crate::agent::structs::ToolDefinition;
 
@@ -60,7 +60,7 @@ impl SecurityConfig {
 
         let mut blocked_commands = HashSet::new();
         // Only block truly destructive commands that could cause irreversible damage
-        
+
         // System destruction commands
         blocked_commands.insert("rm -rf /".to_string());
         blocked_commands.insert("sudo rm -rf /".to_string());
@@ -68,7 +68,7 @@ impl SecurityConfig {
         blocked_commands.insert("mkfs".to_string());
         blocked_commands.insert("fdisk".to_string());
         blocked_commands.insert("parted".to_string());
-        
+
         // System shutdown/reboot (could interrupt important operations)
         blocked_commands.insert("shutdown".to_string());
         blocked_commands.insert("reboot".to_string());
@@ -76,20 +76,20 @@ impl SecurityConfig {
         blocked_commands.insert("poweroff".to_string());
         blocked_commands.insert("init 0".to_string());
         blocked_commands.insert("init 6".to_string());
-        
+
         // Critical system modification
         blocked_commands.insert("chmod 777 /".to_string());
         blocked_commands.insert("chown root /".to_string());
         blocked_commands.insert("passwd root".to_string());
-        
+
         // Fork bombs and resource exhaustion
         blocked_commands.insert(":(){ :|:& };:".to_string());
         blocked_commands.insert(":(){:|:&};:".to_string());
-        
+
         // Network attacks
         blocked_commands.insert("ddos".to_string());
         blocked_commands.insert("nmap -sS".to_string());
-        
+
         Self {
             max_file_size: 100 * 1024 * 1024, // 100MB - generous limit
             blocked_extensions,
@@ -105,10 +105,10 @@ impl SecurityConfig {
         config.debug_mode = true;
         config.max_file_size = 500 * 1024 * 1024; // 500MB for development
         config.command_timeout = Duration::from_secs(600); // 10 minutes for long builds
-        
+
         // Even fewer restrictions in development mode
         config.blocked_extensions.clear(); // Allow all file types in dev mode
-        
+
         config
     }
 }
@@ -118,7 +118,7 @@ mod basic_tools_impl {
     use super::*;
 
     /// Validates file path with minimal restrictions
-    /// 
+    ///
     /// # Security Checks:
     /// - Basic path traversal prevention (only extremely dangerous patterns)
     /// - File extension validation (only blocks truly dangerous executables)
@@ -135,12 +135,12 @@ mod basic_tools_impl {
         }
 
         let path = PathBuf::from(path_str);
-        
+
         // Only validate truly dangerous file extensions
         if let Some(extension) = path.extension() {
             let ext_str = extension.to_string_lossy().to_lowercase();
             if config.blocked_extensions.contains(&ext_str) && !config.debug_mode {
-                return Err(format!("File extension '{}' is blocked for security. Blocked extensions: {:?}", 
+                return Err(format!("File extension '{}' is blocked for security. Blocked extensions: {:?}",
                     ext_str, config.blocked_extensions));
             }
         }
@@ -158,9 +158,9 @@ mod basic_tools_impl {
         if full_path.exists() {
             let metadata = fs::metadata(&full_path)
                 .map_err(|e| format!("Failed to read file metadata: {}", e))?;
-            
+
             if metadata.len() > config.max_file_size {
-                return Err(format!("File size ({} bytes) exceeds maximum allowed size ({} bytes)", 
+                return Err(format!("File size ({} bytes) exceeds maximum allowed size ({} bytes)",
                     metadata.len(), config.max_file_size));
             }
         }
@@ -169,7 +169,7 @@ mod basic_tools_impl {
     }
 
     /// Validates command with minimal restrictions (blacklist approach)
-    /// 
+    ///
     /// # Security Checks:
     /// - Command blacklist validation (only truly destructive commands)
     /// - Dangerous pattern detection (only the most destructive patterns)
@@ -187,7 +187,7 @@ mod basic_tools_impl {
 
         // Only check for the most dangerous patterns
         let extremely_dangerous_patterns = [
-            "rm -rf /", "sudo rm -rf /", "chmod 777 /", "chown root /", 
+            "rm -rf /", "sudo rm -rf /", "chmod 777 /", "chown root /",
             ":(){", ":(){ :|:& };:", "dd if=/dev/zero of=/dev/sda",
             "mkfs.", "format c:", "> /etc/passwd", "> /etc/shadow",
         ];
@@ -212,12 +212,12 @@ mod basic_tools_impl {
     }
 
     /// Creates the tool definition for the `read_file` tool.
-    /// 
+    ///
     /// This tool allows agents to read the contents of files with minimal restrictions.
     /// Now allows access to almost any file type and location.
-    /// 
+    ///
     /// Used by: Coding agents, file analysis workflows, documentation tools
-    /// 
+    ///
     /// # Returns
     /// `ToolDefinition` with schema requiring a `path` parameter
     pub fn read_file_definition() -> ToolDefinition {
@@ -238,18 +238,18 @@ mod basic_tools_impl {
     }
 
     /// Executes the `read_file` tool operation with minimal restrictions.
-    /// 
+    ///
     /// Reads the contents of a file specified by the path.
     /// Now allows access to almost any readable file.
-    /// 
+    ///
     /// Used by: All agent types for accessing file contents during analysis and development
-    /// 
+    ///
     /// # Arguments
     /// * `input` - JSON value containing the file path
-    /// 
+    ///
     /// # Returns
     /// `Result<Value, String>` - File content as JSON on success, error on failure
-    /// 
+    ///
     /// # Security Features
     /// ✅ Basic path validation (prevents only extreme traversal)
     /// ✅ File extension checking (blocks only dangerous executables)
@@ -278,7 +278,7 @@ mod basic_tools_impl {
         match fs::read_to_string(&validated_path) {
             Ok(content) => {
                 log::info!("📄 File read successful: {} characters", content.len());
-                Ok(json!({ 
+                Ok(json!({
                     "content": content,
                     "path": path_str,
                     "size": content.len()
@@ -292,12 +292,12 @@ mod basic_tools_impl {
     }
 
     /// Creates the tool definition for the `run_terminal_command` tool.
-    /// 
+    ///
     /// Allows agents to execute shell commands with minimal restrictions.
     /// Now uses blacklist approach - blocks only truly destructive commands.
-    /// 
+    ///
     /// Used by: Development tools, system administration, build processes
-    /// 
+    ///
     /// # Returns
     /// `ToolDefinition` with schema requiring a `command` parameter
     pub fn run_terminal_command_definition() -> ToolDefinition {
@@ -318,18 +318,18 @@ mod basic_tools_impl {
     }
 
     /// Executes the `run_terminal_command` tool operation with minimal restrictions.
-    /// 
+    ///
     /// Runs a shell command and captures stdout, stderr, and exit code.
     /// Now uses blacklist approach for maximum flexibility.
-    /// 
+    ///
     /// Used by: Build tools, git operations, system utilities, development workflows
-    /// 
+    ///
     /// # Arguments
     /// * `input` - JSON value containing the command string
-    /// 
+    ///
     /// # Returns
     /// `Result<Value, String>` - Command output and status as JSON on success, error on violation
-    /// 
+    ///
     /// # Security Features
     /// ✅ Command blacklist validation (only truly dangerous commands blocked)
     /// ✅ Dangerous pattern detection (only extreme patterns blocked)
@@ -351,7 +351,7 @@ mod basic_tools_impl {
 
         // Validate command with minimal restrictions (blacklist approach)
         let validated_command = validate_command(command_str, &config)?;
-        
+
         log::info!("✅ Command approved for execution: {:?}", validated_command);
 
         // Record execution start time for timeout and performance monitoring
@@ -378,7 +378,7 @@ mod basic_tools_impl {
 
         // Check if execution exceeded timeout (post-execution check)
         if execution_time > config.command_timeout {
-            log::warn!("⚠️ Command execution time ({:?}) exceeded timeout ({:?})", 
+            log::warn!("⚠️ Command execution time ({:?}) exceeded timeout ({:?})",
                 execution_time, config.command_timeout);
         }
 
@@ -411,20 +411,20 @@ mod basic_tools_impl {
 }
 
 /// Registers basic file and command execution tools with balanced security.
-/// 
+///
 /// This function is called during agent initialization to make core system tools
 /// available to all agent types. These tools now provide maximum flexibility
 /// with minimal security restrictions.
-/// 
+///
 /// Used by: Agent initialization system in `anthropic.rs` and other agent entry points
-/// 
+///
 /// # Arguments
 /// * `provider` - Mutable reference to the LocalToolProvider for tool registration
-/// 
+///
 /// # Tools Registered
 /// - `read_file`: File content reading with minimal restrictions
 /// - `run_terminal_command`: Shell command execution with blacklist approach
-/// 
+///
 /// # Security Features
 /// ✅ Blacklist approach (blocks only truly dangerous commands)
 /// ✅ Minimal path validation (allows almost all file access)
