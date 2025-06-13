@@ -1,7 +1,5 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::Mutex;
 use tracing::{info, error, debug, warn};
 use crate::state::{AppState, AgentTriggerMode};
 

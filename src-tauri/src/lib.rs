@@ -2514,6 +2514,168 @@ pub fn run() {
                 });
             });
 
+            // Listen for agent stop events (hold mode - normal completion)
+            let app_handle_for_agent_stop = app.handle().clone();
+            app.listen("agent-stop", move |_event| {
+                info!("[Event] Received agent-stop event - stopping agent mode via hold");
+
+                let app_handle_clone = app_handle_for_agent_stop.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Stop agent mode using voice transcription
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(_) => {
+                                    info!("[Agent Mode] Stopped agent transcription successfully");
+
+                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("[Agent Mode] Failed to stop agent transcription: {}", e);
+
+                                    // Force reset agent input monitor state on failure
+                                    crate::agent_monitor::force_reset_agent_input_state().await;
+
+                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            warn!("[Agent Mode] Voice controller not available - cannot stop agent transcription");
+
+                            // Reset agent input monitor state
+                            crate::agent_monitor::force_reset_agent_input_state().await;
+
+                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                            }
+                        }
+                    }
+                });
+            });
+
+            // Listen for agent cancel events (hold mode - cancelled before threshold)
+            let app_handle_for_agent_cancel = app.handle().clone();
+            app.listen("agent-cancel", move |_event| {
+                info!("[Event] Received agent-cancel event - cancelling agent mode via hold");
+
+                let app_handle_clone = app_handle_for_agent_cancel.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Cancel agent mode using voice transcription
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            match tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await {
+                                Ok(_) => {
+                                    info!("[Agent Mode] Cancelled agent transcription successfully");
+
+                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("[Agent Mode] Failed to cancel agent transcription: {}", e);
+
+                                    // Force reset agent input monitor state on failure
+                                    crate::agent_monitor::force_reset_agent_input_state().await;
+
+                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            warn!("[Agent Mode] Voice controller not available - cannot cancel agent transcription");
+
+                            // Reset agent input monitor state
+                            crate::agent_monitor::force_reset_agent_input_state().await;
+
+                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                            }
+                        }
+                    }
+                });
+            });
+
+            // Listen for agent force-stop events (hold mode - timeout or stuck)
+            let app_handle_for_agent_force_stop = app.handle().clone();
+            app.listen("agent-force-stop", move |_event| {
+                info!("[Event] Received agent-force-stop event - force stopping agent mode");
+
+                let app_handle_clone = app_handle_for_agent_force_stop.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Force stop agent mode
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            // Force stop voice transcription
+                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await;
+                        }
+                        None => {
+                            warn!("[Agent Mode] Voice controller not available during force stop");
+                        }
+                    }
+
+                    // Reset agent input monitor state
+                    crate::agent_monitor::force_reset_agent_input_state().await;
+
+                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    }
+
+                    info!("[Agent Mode] Force stopped agent mode successfully");
+                });
+            });
+
+            // Listen for agent force-cleanup events (hold mode - emergency cleanup)
+            let app_handle_for_agent_force_cleanup = app.handle().clone();
+            app.listen("agent-force-cleanup", move |_event| {
+                info!("[Event] Received agent-force-cleanup event - emergency cleanup");
+
+                let app_handle_clone = app_handle_for_agent_force_cleanup.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Emergency cleanup - stop everything
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            // Force stop voice transcription
+                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await;
+                        }
+                        None => {
+                            warn!("[Agent Mode] Voice controller not available during emergency cleanup");
+                        }
+                    }
+
+                    // Reset all state
+                    crate::agent_monitor::force_reset_agent_input_state().await;
+
+                    // Mark agent execution as finished
+                    let app_state = app_handle_clone.state::<crate::state::AppState>();
+                    app_state.mark_agent_execution_finished();
+
+                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
+                    }
+
+                    warn!("[Agent Mode] Emergency cleanup completed");
+                });
+            });
+
             Ok(())
         });
 
