@@ -493,6 +493,14 @@ function App() {
   const [_showOnboarding, _setShowOnboarding] = useState(false);
   const [_onboardingChecked, _setOnboardingChecked] = useState(false);
 
+  // Keyboard shortcuts state
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState<{
+    agent_mode_toggle: string;
+    dictation_input: string;
+    stop_current_task: string;
+    open_settings: string;
+  } | null>(null);
+
   // Fetch app version dynamically
   useEffect(() => {
     const fetchVersion = async () => {
@@ -505,6 +513,26 @@ function App() {
       }
     };
     fetchVersion();
+  }, []);
+
+  // Load keyboard shortcuts
+  useEffect(() => {
+    const loadShortcuts = async () => {
+      try {
+        const shortcuts = await invoke<{
+          agent_mode_toggle: string;
+          dictation_input: string;
+          stop_current_task: string;
+          open_settings: string;
+        }>("get_keyboard_shortcuts");
+        setKeyboardShortcuts(shortcuts);
+      } catch (error) {
+        console.error("Failed to load keyboard shortcuts:", error);
+        // Keep defaults if loading fails
+      }
+    };
+
+    loadShortcuts();
   }, []);
 
   // Consolidated startup flow - check both permissions and onboarding status
@@ -1959,15 +1987,27 @@ function App() {
                   </h3>
                   <ul className="list-disc list-inside space-y-1">
                     <li>
-                      <strong>Option + D:</strong> Activate Agent Mode
+                      <strong>
+                        {keyboardShortcuts?.agent_mode_toggle || "Option + D"}:
+                      </strong>{" "}
+                      Activate Agent Mode
                       <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-sm">
-                        <li><strong>Tap to Toggle:</strong> Press and release to toggle agent mode on/off</li>
-                        <li><strong>Hold to Activate:</strong> Hold key to activate agent, release to stop</li>
+                        <li>
+                          <strong>Tap to Toggle:</strong> Press and release to
+                          toggle agent mode on/off
+                        </li>
+                        <li>
+                          <strong>Hold to Activate:</strong> Hold key to
+                          activate agent, release to stop
+                        </li>
                       </ul>
                     </li>
                     <li>
-                      <strong>Option + Space:</strong> Toggle Dictation Mode
-                      (voice typing)
+                      <strong>
+                        {keyboardShortcuts?.dictation_input || "Option + Space"}
+                        :
+                      </strong>{" "}
+                      Toggle Dictation Mode (voice typing)
                     </li>
                     <li>
                       <strong>Wake Words:</strong> Say "Hey Juno" or "Computer"
@@ -1975,7 +2015,8 @@ function App() {
                     </li>
                   </ul>
                   <p className="text-xs text-gray-500 mt-2">
-                    Configure agent trigger mode in Settings → General → Agent Trigger Mode
+                    Configure agent trigger mode in Settings → General → Agent
+                    Trigger Mode
                   </p>
                 </section>
                 <section>
