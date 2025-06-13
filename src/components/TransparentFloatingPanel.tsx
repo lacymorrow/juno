@@ -65,6 +65,7 @@ export function TransparentFloatingPanel({
   const [inputValue, setInputValue] = useState("");
   const [isHovered, setIsHovered] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isClickThroughEnabled, setIsClickThroughEnabled] = useState(true); // Start with click-through enabled
   // Debug: Add some test messages for development
   useEffect(() => {
     if (recentMessages.length === 0) {
@@ -286,6 +287,40 @@ export function TransparentFloatingPanel({
     };
   }, []);
 
+  // PRODUCTION READY: Manage click-through behavior based on panel state and hover
+  useEffect(() => {
+    const shouldBeInteractive =
+      isHovered ||
+      isWindowHovered ||
+      panelState.mode !== "compact" ||
+      panelState.isListening ||
+      panelState.isTranscribing ||
+      panelState.isSpeaking ||
+      panelState.agentStatus !== "idle";
+
+    const newClickThroughState = !shouldBeInteractive;
+
+    if (newClickThroughState !== isClickThroughEnabled) {
+      setIsClickThroughEnabled(newClickThroughState);
+
+      // Update the native window click-through behavior
+      invoke("set_floating_panel_click_through", {
+        clickThrough: newClickThroughState,
+      }).catch((error) => {
+        console.warn("Failed to set click-through behavior:", error);
+      });
+    }
+  }, [
+    isHovered,
+    isWindowHovered,
+    panelState.mode,
+    panelState.isListening,
+    panelState.isTranscribing,
+    panelState.isSpeaking,
+    panelState.agentStatus,
+    isClickThroughEnabled,
+  ]);
+
   // Auto-expand panel when there's activity or hover
   useEffect(() => {
     const hasActivity =
@@ -314,19 +349,19 @@ export function TransparentFloatingPanel({
   // Note: Drag functionality now handled by Tauri's data-tauri-drag-region
   // This allows proper desktop window dragging instead of webview-only dragging
 
-  // Get panel dimensions based on mode
+  // PRODUCTION READY: Get panel dimensions based on mode - optimized for macOS
   const getPanelDimensions = () => {
     switch (panelState.mode) {
       case "compact":
-        return { width: 160, height: 80 };
+        return { width: 140, height: 60 }; // Smaller, more macOS-appropriate
       case "expanded":
-        return { width: Math.min(maxWidth, 350), height: 120 };
+        return { width: Math.min(maxWidth, 300), height: 100 }; // More conservative
       case "chat":
-        return { width: Math.min(maxWidth, 400), height: 300 };
+        return { width: Math.min(maxWidth, 350), height: 250 }; // Slightly smaller
       case "settings":
-        return { width: Math.min(maxWidth, 320), height: 200 };
+        return { width: Math.min(maxWidth, 280), height: 180 }; // More compact
       default:
-        return { width: 160, height: 80 };
+        return { width: 140, height: 60 };
     }
   };
 
@@ -440,14 +475,17 @@ export function TransparentFloatingPanel({
     </div>
   );
 
-  // Non-draggable content area
+  // PRODUCTION READY: Interactive content wrapper that ensures proper click handling
   const InteractiveContent = ({
     children,
     className: contentClassName,
     ...props
   }: any) => (
     <div
-      className={cn("interactive-content cursor-default", contentClassName)}
+      className={cn(
+        "interactive-content cursor-default pointer-events-auto relative z-10",
+        contentClassName
+      )}
       onMouseDown={(e) => e.stopPropagation()}
       onMouseUp={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
@@ -462,10 +500,8 @@ export function TransparentFloatingPanel({
       ref={panelRef}
       className={cn(
         "w-screen h-screen bg-transparent overflow-hidden select-none",
-        // Enable pointer events only when hovered or in expanded modes
-        isHovered || isWindowHovered || panelState.mode !== "compact"
-          ? "pointer-events-auto"
-          : "pointer-events-none",
+        // PRODUCTION READY: Smart pointer events based on click-through state
+        !isClickThroughEnabled ? "pointer-events-auto" : "pointer-events-none",
         className
       )}
       onMouseEnter={() => setIsHovered(true)}
@@ -475,6 +511,10 @@ export function TransparentFloatingPanel({
         transform: isWindowHovered ? "translateZ(0px)" : "translateZ(-20px)",
         transformStyle: "preserve-3d",
       }}
+      // PRODUCTION READY: Add accessibility attributes
+      role="dialog"
+      aria-label="Juno AI Assistant Panel"
+      aria-live="polite"
     >
       <div
         className="relative z-50 p-3"
