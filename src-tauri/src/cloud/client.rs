@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex as TokioMutex, mpsc, oneshot, broadcast};
+use tokio::sync::{Mutex as TokioMutex, mpsc};
 use tokio::time;
 use tokio_tungstenite::{connect_async, WebSocketStream, MaybeTlsStream};
 use tokio_tungstenite::tungstenite::{Message, protocol::CloseFrame};
@@ -139,7 +139,7 @@ impl CloudClient {
 
     /// Handle WebSocket communication
     async fn handle_websocket(&self, ws_stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>) -> Result<(), CloudError> {
-        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+        let (ws_sender, mut ws_receiver) = ws_stream.split();
         let ws_sender = Arc::new(TokioMutex::new(ws_sender));
 
         // Authenticate first
@@ -358,7 +358,7 @@ impl CloudClient {
 
     /// Create device status report
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
-        let app_state = self.app_handle.state::<crate::state::AppState>();
+        let _app_state = self.app_handle.state::<crate::state::AppState>();
 
         let device_id = self.auth.get_credentials()
             .map(|c| c.device_id.clone())

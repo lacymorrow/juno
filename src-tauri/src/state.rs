@@ -543,7 +543,7 @@ impl AppState {
 
         // Update enabled status
         {
-            let mut enabled_guard = self.cloud_enabled.lock();
+            let enabled_guard = self.cloud_enabled.lock();
             if let Ok(mut enabled) = enabled_guard {
                 *enabled = config.enabled;
             }
@@ -613,7 +613,7 @@ impl AppState {
 
         // Update enabled status
         {
-            let mut enabled_guard = self.cloud_enabled.lock();
+            let enabled_guard = self.cloud_enabled.lock();
             if let Ok(mut enabled) = enabled_guard {
                 *enabled = config.enabled;
             }
@@ -758,7 +758,7 @@ impl AppState {
     pub async fn notify_mcp_tools_updated(&self) {
         // Try to get an app handle and emit the event
         if let Ok(controller_guard) = self.browser_controller.try_lock() {
-            if let Some(ref controller) = *controller_guard {
+            if let Some(ref _controller) = *controller_guard {
                 // Just emit without trying to get app handle from controller
                 log::debug!("MCP tools updated, notifying frontend");
             }

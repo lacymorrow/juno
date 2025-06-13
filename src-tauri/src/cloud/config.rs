@@ -2,8 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::fs;
 use super::types::CloudError;
-use tauri::{AppHandle, Manager};
-use tracing::{info, warn, error};
+use tauri::Manager;
 
 /// Cloud configuration settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
