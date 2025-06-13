@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, Emitter};
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::agent::structs::{AgentError, ToolCall, ToolDefinition, ToolResult};
@@ -376,10 +376,10 @@ impl LocalToolProvider {
     pub async fn clear_recovery_history(&self) {
         let mut stats = self.error_recovery_stats.lock().await;
         *stats = ErrorRecoveryStats::default();
-        
+
         let mut history = self.tool_execution_history.lock().await;
         history.clear();
-        
+
         tracing::info!("Error recovery history cleared");
     }
 
@@ -403,31 +403,31 @@ impl LocalToolProvider {
     /// Classify error for recovery strategy selection
     fn classify_error(&self, error_msg: &str) -> ErrorClass {
         let error_lower = error_msg.to_lowercase();
-        
+
         if error_lower.contains("timeout") || error_lower.contains("timed out") {
             ErrorClass::Timeout
-        } else if error_lower.contains("displayid") 
-                || error_lower.contains("remotelayertree") 
-                || error_lower.contains("display") 
+        } else if error_lower.contains("displayid")
+                || error_lower.contains("remotelayertree")
+                || error_lower.contains("display")
                 || error_lower.contains("scheduleDisplayLink") {
             ErrorClass::DisplaySystem
-        } else if error_lower.contains("network") 
-                || error_lower.contains("connection") 
+        } else if error_lower.contains("network")
+                || error_lower.contains("connection")
                 || error_lower.contains("unreachable") {
             ErrorClass::NetworkConnectivity
-        } else if error_lower.contains("locked") 
-                || error_lower.contains("busy") 
+        } else if error_lower.contains("locked")
+                || error_lower.contains("busy")
                 || error_lower.contains("in use") {
             ErrorClass::ResourceLocked
-        } else if error_lower.contains("permission") 
-                || error_lower.contains("denied") 
+        } else if error_lower.contains("permission")
+                || error_lower.contains("denied")
                 || error_lower.contains("unauthorized") {
             ErrorClass::PermissionDenied
-        } else if error_lower.contains("not found") 
+        } else if error_lower.contains("not found")
                 || error_lower.contains("unknown tool") {
             ErrorClass::ToolNotFound
-        } else if error_lower.contains("invalid") 
-                || error_lower.contains("malformed") 
+        } else if error_lower.contains("invalid")
+                || error_lower.contains("malformed")
                 || error_lower.contains("parse") {
             ErrorClass::InvalidInput
         } else {
@@ -436,9 +436,9 @@ impl LocalToolProvider {
     }
 
     /// Determine recovery strategy based on error class and history
-    async fn determine_recovery_strategy(&self, 
-        error_class: ErrorClass, 
-        tool_name: &str, 
+    async fn determine_recovery_strategy(&self,
+        error_class: ErrorClass,
+        tool_name: &str,
         retry_count: u32
     ) -> RecoveryStrategy {
         if retry_count >= self.recovery_config.max_retries {
@@ -449,7 +449,7 @@ impl LocalToolProvider {
             ErrorClass::Timeout => {
                 if self.recovery_config.timeout_recovery_enabled {
                     let delay = std::cmp::min(
-                        self.recovery_config.base_retry_delay_ms * 
+                        self.recovery_config.base_retry_delay_ms *
                         (self.recovery_config.backoff_multiplier.powi(retry_count as i32) as u64),
                         self.recovery_config.max_retry_delay_ms
                     );
@@ -494,18 +494,18 @@ impl LocalToolProvider {
     }
 
     /// Update error recovery statistics
-    async fn update_recovery_stats(&self, 
-        tool_name: &str, 
-        error_msg: &str, 
-        recovery_attempted: bool, 
+    async fn update_recovery_stats(&self,
+        tool_name: &str,
+        error_msg: &str,
+        recovery_attempted: bool,
         recovery_successful: bool,
         recovery_time: Option<Duration>
     ) {
         let mut stats = self.error_recovery_stats.lock().await;
-        
+
         stats.total_executions += 1;
         stats.total_failures += 1;
-        
+
         if recovery_attempted {
             stats.total_recoveries += 1;
             if recovery_successful {
@@ -514,8 +514,8 @@ impl LocalToolProvider {
                     if stats.total_recoveries == 1 {
                         stats.average_recovery_time_ms = time_ms;
                     } else {
-                        stats.average_recovery_time_ms = 
-                            (stats.average_recovery_time_ms * (stats.total_recoveries - 1) as f64 + time_ms) 
+                        stats.average_recovery_time_ms =
+                            (stats.average_recovery_time_ms * (stats.total_recoveries - 1) as f64 + time_ms)
                             / stats.total_recoveries as f64;
                     }
                 }
@@ -527,8 +527,8 @@ impl LocalToolProvider {
 
         // Update recovery success rate
         if stats.total_recoveries > 0 {
-            stats.recovery_success_rate = 
-                (stats.total_recoveries as f32 - stats.total_failures as f32 + 1.0) 
+            stats.recovery_success_rate =
+                (stats.total_recoveries as f32 - stats.total_failures as f32 + 1.0)
                 / stats.total_recoveries as f32;
         }
 
@@ -542,12 +542,12 @@ impl LocalToolProvider {
         let mut history = self.tool_execution_history.lock().await;
         let tool_history = history.entry(tool_name.to_string()).or_insert_with(Vec::new);
         tool_history.push((Instant::now(), !recovery_successful));
-        
+
         // Keep only recent history (last 100 executions)
         if tool_history.len() > 100 {
             tool_history.remove(0);
         }
-        
+
         // Calculate failure rate for this tool
         let failures = tool_history.iter().filter(|(_, failed)| *failed).count();
         let failure_rate = failures as f32 / tool_history.len() as f32;
@@ -565,7 +565,7 @@ impl LocalToolProvider {
             .take(5) // Take first 5 words
             .collect::<Vec<_>>()
             .join(" ");
-        
+
         if pattern.len() > 50 {
             pattern[..50].to_string()
         } else {
@@ -582,16 +582,16 @@ impl LocalToolProvider {
         loop {
             // Try to execute the tool
             let result = self.execute_tool_direct(tool_call.clone()).await;
-            
+
             match result {
                 Ok(tool_result) => {
                     // Success - update stats if this was a recovery
                     if retry_count > 0 {
                         self.update_recovery_stats(
-                            &tool_name, 
-                            "recovered", 
-                            true, 
-                            true, 
+                            &tool_name,
+                            "recovered",
+                            true,
+                            true,
                             Some(recovery_start.elapsed())
                         ).await;
                     }
@@ -601,18 +601,18 @@ impl LocalToolProvider {
                     // Classify the error
                     let error_msg = error.to_string();
                     let error_class = self.classify_error(&error_msg);
-                    
+
                     // Determine recovery strategy
                     let strategy = self.determine_recovery_strategy(error_class, &tool_name, retry_count).await;
-                    
+
                     match strategy {
                         RecoveryStrategy::Skip => {
                             // No recovery possible, record failure and return error
                             self.update_recovery_stats(
-                                &tool_name, 
-                                &error_msg, 
-                                retry_count > 0, 
-                                false, 
+                                &tool_name,
+                                &error_msg,
+                                retry_count > 0,
+                                false,
                                 None
                             ).await;
                             return Err(error);
@@ -620,7 +620,7 @@ impl LocalToolProvider {
                         RecoveryStrategy::RetryWithDelay(delay) => {
                             retry_count += 1;
                             warn!(
-                                "Tool '{}' failed (attempt {}), retrying after {:?}: {}", 
+                                "Tool '{}' failed (attempt {}), retrying after {:?}: {}",
                                 tool_name, retry_count, delay, error_msg
                             );
                             tokio::time::sleep(delay).await;
@@ -629,7 +629,7 @@ impl LocalToolProvider {
                         RecoveryStrategy::Retry => {
                             retry_count += 1;
                             warn!(
-                                "Tool '{}' failed (attempt {}), retrying immediately: {}", 
+                                "Tool '{}' failed (attempt {}), retrying immediately: {}",
                                 tool_name, retry_count, error_msg
                             );
                             continue;
@@ -637,7 +637,7 @@ impl LocalToolProvider {
                         RecoveryStrategy::ResetAndRetry => {
                             retry_count += 1;
                             warn!(
-                                "Tool '{}' failed (attempt {}), resetting and retrying: {}", 
+                                "Tool '{}' failed (attempt {}), resetting and retrying: {}",
                                 tool_name, retry_count, error_msg
                             );
                             // Add a small delay for reset
@@ -648,10 +648,10 @@ impl LocalToolProvider {
                             // TODO: Implement fallback tool execution
                             warn!("Fallback strategy not yet implemented for tool '{}'", tool_name);
                             self.update_recovery_stats(
-                                &tool_name, 
-                                &error_msg, 
-                                true, 
-                                false, 
+                                &tool_name,
+                                &error_msg,
+                                true,
+                                false,
                                 None
                             ).await;
                             return Err(error);
