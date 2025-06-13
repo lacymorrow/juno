@@ -2,12 +2,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-<<<<<<< HEAD
 
 use tracing::{info, debug, warn, error};
-=======
-use tracing::{debug, warn};
->>>>>>> asd1
 use uuid;
 
 use crate::agent::structs::{
