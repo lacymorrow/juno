@@ -41,12 +41,14 @@ interface TransparentFloatingPanelProps {
   className?: string;
   maxWidth?: number;
   opacity?: number;
+  isWindowHovered?: boolean;
 }
 
 export function TransparentFloatingPanel({
   className,
   maxWidth = 400,
   opacity = 0.92,
+  isWindowHovered = false,
 }: TransparentFloatingPanelProps) {
   // State management
   const [panelState, setPanelState] = useState<PanelState>({
@@ -62,6 +64,7 @@ export function TransparentFloatingPanel({
   const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isHovered, setIsHovered] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   // Debug: Add some test messages for development
   useEffect(() => {
     if (recentMessages.length === 0) {
@@ -84,26 +87,51 @@ export function TransparentFloatingPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Window and panel management
+  // Window and panel management with delayed resizing for smooth transitions
   useEffect(() => {
     const setupWindow = async () => {
       try {
         const appWindow = await Window.getByLabel("floating-panel");
 
-        // Configure window based on panel mode
-        const dimensions = getPanelDimensions();
-        await appWindow?.setSize(
-          new LogicalSize(dimensions.width, dimensions.height)
-        );
+        // Configure window properties (but delay size changes during transitions)
         await appWindow?.setAlwaysOnTop(true);
         await appWindow?.setSkipTaskbar(true);
         await appWindow?.setResizable(false);
+
+        // Mark as transitioning
+        setIsTransitioning(true);
+
+        // Delay window resize to allow CSS transitions to complete
+        // This prevents the window from clipping the 3D shelf animation
+        const resizeTimer = setTimeout(async () => {
+          try {
+            const dimensions = getWindowDimensions();
+            await appWindow?.setSize(
+              new LogicalSize(dimensions.width, dimensions.height)
+            );
+
+            // Mark transition as complete
+            setIsTransitioning(false);
+          } catch (error) {
+            console.error("Failed to resize window:", error);
+            setIsTransitioning(false);
+          }
+        }, 750); // Slightly longer than the 700ms CSS transition
+
+        return () => {
+          clearTimeout(resizeTimer);
+          setIsTransitioning(false);
+        };
       } catch (error) {
         console.error("Failed to setup floating panel window:", error);
+        setIsTransitioning(false);
       }
     };
 
-    setupWindow();
+    const cleanup = setupWindow();
+    return () => {
+      cleanup?.then((cleanupFn) => cleanupFn?.());
+    };
   }, [panelState.mode]);
 
   // Listen for agent events and update panel state
@@ -269,10 +297,10 @@ export function TransparentFloatingPanel({
     if ((hasActivity || isHovered) && panelState.mode === "compact") {
       setPanelState((prev) => ({ ...prev, mode: "expanded" }));
     } else if (!hasActivity && panelState.mode === "expanded" && !isHovered) {
-      // Auto-collapse after a delay
+      // Auto-collapse after a longer delay to account for transition + window resize
       const timer = setTimeout(() => {
         setPanelState((prev) => ({ ...prev, mode: "compact" }));
-      }, 2000);
+      }, 2500); // Increased delay to ensure smooth transitions
       return () => clearTimeout(timer);
     }
   }, [
@@ -290,7 +318,7 @@ export function TransparentFloatingPanel({
   const getPanelDimensions = () => {
     switch (panelState.mode) {
       case "compact":
-        return { width: 80, height: 40 };
+        return { width: 160, height: 80 };
       case "expanded":
         return { width: Math.min(maxWidth, 350), height: 120 };
       case "chat":
@@ -298,8 +326,18 @@ export function TransparentFloatingPanel({
       case "settings":
         return { width: Math.min(maxWidth, 320), height: 200 };
       default:
-        return { width: 80, height: 40 };
+        return { width: 160, height: 80 };
     }
+  };
+
+  // Get window dimensions (panel + padding)
+  const getWindowDimensions = () => {
+    const panel = getPanelDimensions();
+    // Add padding: p-3 = 12px on all sides = 24px total
+    return {
+      width: panel.width + 24,
+      height: panel.height + 24,
+    };
   };
 
   // Get main status icon
@@ -387,23 +425,69 @@ export function TransparentFloatingPanel({
 
   const dimensions = getPanelDimensions();
 
+  // Enhanced draggable header component
+  const DraggableHeader = ({
+    children,
+    className: headerClassName,
+    ...props
+  }: any) => (
+    <div
+      data-tauri-drag-region
+      className={cn("drag-header select-none cursor-move", headerClassName)}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+
+  // Non-draggable content area
+  const InteractiveContent = ({
+    children,
+    className: contentClassName,
+    ...props
+  }: any) => (
+    <div
+      className={cn("interactive-content cursor-default", contentClassName)}
+      onMouseDown={(e) => e.stopPropagation()}
+      onMouseUp={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+
   return (
     <div
       ref={panelRef}
-      data-tauri-drag-region
       className={cn(
-        "w-screen h-screen bg-transparent overflow-hidden pointer-events-none select-none",
+        "w-screen h-screen bg-transparent overflow-hidden select-none",
+        // Enable pointer events only when hovered or in expanded modes
+        isHovered || isWindowHovered || panelState.mode !== "compact"
+          ? "pointer-events-auto"
+          : "pointer-events-none",
         className
       )}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      style={{
+        // Enhance the 3D effect with additional transforms
+        transform: isWindowHovered ? "translateZ(0px)" : "translateZ(-20px)",
+        transformStyle: "preserve-3d",
+      }}
     >
-      <div className="relative z-50 p-3" data-tauri-drag-region>
+      <div
+        className="relative z-50 p-3"
+        style={{
+          // Add subtle depth to the content area
+          transform: isWindowHovered ? "translateZ(5px)" : "translateZ(0px)",
+          transition: "transform 0.4s ease-out",
+        }}
+      >
         <div
-          data-tauri-drag-region
           className={cn(
-            "rounded-2xl border border-white/10 backdrop-blur-xl glass-panel-dark",
-            "panel-transition shadow-2xl shadow-black/20 pointer-events-auto",
+            "rounded-2xl border border-white/60 backdrop-blur-xl glass-panel-dark",
+            "panel-transition pointer-events-auto",
             getBackgroundColor(),
             panelState.voiceMode === "dictation" && "panel-glow-orange",
             (panelState.voiceMode === "agent" ||
@@ -419,10 +503,9 @@ export function TransparentFloatingPanel({
         >
           {/* Compact Mode */}
           {panelState.mode === "compact" && (
-            <div
-              data-tauri-drag-region
+            <DraggableHeader
               className="w-full h-full flex items-center justify-center p-2 cursor-pointer"
-              onClick={(e) => {
+              onClick={(e: React.MouseEvent) => {
                 e.stopPropagation();
                 setPanelState((prev) => ({ ...prev, mode: "expanded" }));
               }}
@@ -431,17 +514,14 @@ export function TransparentFloatingPanel({
                 {getStatusIcon()}
                 {panelState.audioLevel > 0 && <AudioLevelIndicator />}
               </div>
-            </div>
+            </DraggableHeader>
           )}
 
           {/* Expanded Mode */}
           {panelState.mode === "expanded" && (
             <div className="w-full h-full p-3 text-white">
-              {/* Header */}
-              <div
-                data-tauri-drag-region
-                className="flex items-center justify-between mb-2"
-              >
+              {/* Draggable Header */}
+              <DraggableHeader className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   {getStatusIcon()}
                   <span className="text-xs font-medium">
@@ -463,7 +543,7 @@ export function TransparentFloatingPanel({
                     ({panelState.mode})
                   </span>
                 </div>
-                <div className="flex items-center gap-1">
+                <InteractiveContent className="flex items-center gap-1">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -494,11 +574,11 @@ export function TransparentFloatingPanel({
                   >
                     <Minimize2 className="h-3 w-3" />
                   </button>
-                </div>
-              </div>
+                </InteractiveContent>
+              </DraggableHeader>
 
-              {/* Content Area */}
-              <div className="space-y-2">
+              {/* Interactive Content Area */}
+              <InteractiveContent className="space-y-2">
                 {/* Current Activity */}
                 {(panelState.transcriptionText ||
                   panelState.currentResponse) && (
@@ -544,20 +624,17 @@ export function TransparentFloatingPanel({
                     Ask
                   </button>
                 </form>
-              </div>
+              </InteractiveContent>
             </div>
           )}
 
           {/* Chat Mode */}
           {panelState.mode === "chat" && (
             <div className="w-full h-full p-3 text-white flex flex-col">
-              {/* Header */}
-              <div
-                data-tauri-drag-region
-                className="flex items-center justify-between mb-2"
-              >
+              {/* Draggable Header */}
+              <DraggableHeader className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium">Recent Chat</h3>
-                <div className="flex items-center gap-1">
+                <InteractiveContent className="flex items-center gap-1">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -578,11 +655,11 @@ export function TransparentFloatingPanel({
                   >
                     <Minimize2 className="h-3 w-3" />
                   </button>
-                </div>
-              </div>
+                </InteractiveContent>
+              </DraggableHeader>
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto space-y-2 mb-2 custom-scrollbar">
+              {/* Messages - Interactive Content */}
+              <InteractiveContent className="flex-1 overflow-y-auto space-y-2 mb-2 custom-scrollbar">
                 {recentMessages.length === 0 ? (
                   <div className="text-xs text-white/50 text-center py-4">
                     No recent messages
@@ -602,54 +679,55 @@ export function TransparentFloatingPanel({
                     </div>
                   ))
                 )}
-              </div>
+              </InteractiveContent>
 
-              {/* Chat Input */}
-              <form onSubmit={handleSubmit} className="flex gap-1">
-                <input
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onFocus={(e) => e.stopPropagation()}
-                  placeholder="Type a message..."
-                  className="flex-1 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/30 cursor-text"
-                />
-                <button
-                  type="submit"
-                  disabled={!inputValue.trim()}
-                  onClick={(e) => e.stopPropagation()}
-                  className="px-2 py-1 bg-blue-500/30 hover:bg-blue-500/50 rounded text-xs transition-colors disabled:opacity-50 cursor-pointer"
-                >
-                  Send
-                </button>
-              </form>
+              {/* Chat Input - Interactive Content */}
+              <InteractiveContent>
+                <form onSubmit={handleSubmit} className="flex gap-1">
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onFocus={(e) => e.stopPropagation()}
+                    placeholder="Type a message..."
+                    className="flex-1 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/30 cursor-text"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!inputValue.trim()}
+                    onClick={(e) => e.stopPropagation()}
+                    className="px-2 py-1 bg-blue-500/30 hover:bg-blue-500/50 rounded text-xs transition-colors disabled:opacity-50 cursor-pointer"
+                  >
+                    Send
+                  </button>
+                </form>
+              </InteractiveContent>
             </div>
           )}
 
           {/* Settings Mode */}
           {panelState.mode === "settings" && (
             <div className="w-full h-full p-3 text-white">
-              {/* Header */}
-              <div
-                data-tauri-drag-region
-                className="flex items-center justify-between mb-3"
-              >
+              {/* Draggable Header */}
+              <DraggableHeader className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-medium">Panel Settings</h3>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPanelState((prev) => ({ ...prev, mode: "expanded" }));
-                  }}
-                  className="p-1 hover:bg-white/10 rounded transition-colors cursor-pointer"
-                  title="Back"
-                >
-                  <ChevronUp className="h-3 w-3" />
-                </button>
-              </div>
+                <InteractiveContent>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPanelState((prev) => ({ ...prev, mode: "expanded" }));
+                    }}
+                    className="p-1 hover:bg-white/10 rounded transition-colors cursor-pointer"
+                    title="Back"
+                  >
+                    <ChevronUp className="h-3 w-3" />
+                  </button>
+                </InteractiveContent>
+              </DraggableHeader>
 
-              {/* Settings Content */}
-              <div className="space-y-3 text-xs">
+              {/* Settings Content - Interactive */}
+              <InteractiveContent className="space-y-3 text-xs">
                 <div>
                   <label className="block text-white/70 mb-1">Opacity</label>
                   <input
@@ -682,7 +760,7 @@ export function TransparentFloatingPanel({
                     <option>Disabled</option>
                   </select>
                 </div>
-              </div>
+              </InteractiveContent>
             </div>
           )}
         </div>
