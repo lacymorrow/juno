@@ -3,13 +3,15 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tracing::{info, error, debug, warn};
+use crate::constants::monitor_sessions;
+use crate::constants::timeouts;
 
 // Configuration constants
-const HOLD_DURATION_MS: u64 = 500; // Hold dictation input key for 500ms to commit dictation
-const IMMEDIATE_START_MS: u64 = 0; // Start transcription immediately (0ms delay)
-const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds max transcription time
-const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
-const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // Reduced from 300ms to 150ms for better responsiveness
+// const HOLD_DURATION_MS: u64 = 500; // Hold dictation input key for 500ms to commit dictation
+// const IMMEDIATE_START_MS: u64 = 0; // Start transcription immediately (0ms delay)
+// const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds max transcription time
+// const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
+// const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // Reduced from 300ms to 150ms for better responsiveness
 
 // State for dictation input monitoring
 #[derive(Debug)]
@@ -46,7 +48,7 @@ impl DictationInputMonitorState {
         // Check if we're in cooldown period after a recent cancellation
         if let Some(last_cancel) = self.last_cancellation_time {
             let time_since_cancel = last_cancel.elapsed().as_millis();
-            if time_since_cancel < COOLDOWN_AFTER_CANCEL_MS as u128 {
+            if time_since_cancel < monitor_sessions::COOLDOWN_AFTER_CANCEL_MS as u128 {
                 debug!("[DictationMonitor] Ignoring dictation input press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
                 return false; // Don't start tracking during cooldown
             }
@@ -97,7 +99,7 @@ impl DictationInputMonitorState {
 
         if let Some(start_time) = self.hold_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= IMMEDIATE_START_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::IMMEDIATE_START_MS as u128 {
                 self.transcription_started = true;
                 self.transcription_start_time = Some(Instant::now());
                 info!("[DictationMonitor] Dictation input held for {}ms - starting immediate transcription", duration.as_millis());
@@ -114,7 +116,7 @@ impl DictationInputMonitorState {
 
         if let Some(start_time) = self.hold_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= HOLD_DURATION_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::HOLD_DURATION_MS as u128 {
                 self.hold_threshold_reached = true;
                 info!("[DictationMonitor] Dictation input held for {}ms - threshold reached, committing to Dictation Mode", duration.as_millis());
                 return true;
@@ -127,7 +129,7 @@ impl DictationInputMonitorState {
     pub fn check_transcription_timeout(&mut self) -> bool {
         if let Some(start_time) = self.transcription_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= MAX_TRANSCRIPTION_DURATION_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS as u128 {
                 warn!("[DictationMonitor] Transcription has been running for {}ms - forcing cleanup", duration.as_millis());
                 return true;
             }
@@ -141,7 +143,7 @@ impl DictationInputMonitorState {
         if self.transcription_started && self.hold_start_time.is_none() && !self.force_cleanup_scheduled {
             if let Some(start_time) = self.transcription_start_time {
                 let duration = start_time.elapsed();
-                if duration.as_millis() >= FORCE_CLEANUP_TIMEOUT_MS as u128 {
+                if duration.as_millis() >= monitor_sessions::FORCE_CLEANUP_TIMEOUT_MS as u128 {
                     self.force_cleanup_scheduled = true;
                     warn!("[DictationMonitor] Scheduling force cleanup - transcription stuck for {}ms", duration.as_millis());
                     return true;

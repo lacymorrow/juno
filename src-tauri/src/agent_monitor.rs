@@ -2,13 +2,14 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, error, debug, warn};
 use crate::state::{AppState, AgentTriggerMode};
+use crate::constants::monitor_sessions;
 
 // Configuration constants
-const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
-const IMMEDIATE_START_MS: u64 = 0; // Start agent immediately (0ms delay)
-const MAX_AGENT_DURATION_MS: u64 = 120_000; // 2 minutes max agent session time
-const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
-const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms cooldown for better responsiveness
+// const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
+// const IMMEDIATE_START_MS: u64 = 0; // Start agent immediately (0ms delay)
+// const MAX_AGENT_DURATION_MS: u64 = 120_000; // 2 minutes max agent session time
+// const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
+// const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms cooldown for better responsiveness
 
 // State for agent input monitoring
 #[derive(Debug)]
@@ -43,7 +44,7 @@ impl AgentInputMonitorState {
         // Check if we're in cooldown period after a recent cancellation
         if let Some(last_cancel) = self.last_cancellation_time {
             let time_since_cancel = last_cancel.elapsed().as_millis();
-            if time_since_cancel < COOLDOWN_AFTER_CANCEL_MS as u128 {
+            if time_since_cancel < monitor_sessions::COOLDOWN_AFTER_CANCEL_MS as u128 {
                 debug!("[AgentMonitor] Ignoring agent input press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
                 return false; // Don't start tracking during cooldown
             }
@@ -92,7 +93,7 @@ impl AgentInputMonitorState {
 
         if let Some(start_time) = self.hold_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= IMMEDIATE_START_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::IMMEDIATE_START_MS as u128 {
                 self.agent_started = true;
                 self.agent_start_time = Some(Instant::now());
                 info!("[AgentMonitor] Agent input held for {}ms - starting immediate agent mode", duration.as_millis());
@@ -109,7 +110,7 @@ impl AgentInputMonitorState {
 
         if let Some(start_time) = self.hold_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= HOLD_DURATION_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::HOLD_DURATION_MS as u128 {
                 self.hold_threshold_reached = true;
                 info!("[AgentMonitor] Agent input held for {}ms - threshold reached, committing to Agent Mode", duration.as_millis());
                 return true;
@@ -122,7 +123,7 @@ impl AgentInputMonitorState {
     pub fn check_agent_timeout(&mut self) -> bool {
         if let Some(start_time) = self.agent_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= MAX_AGENT_DURATION_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::MAX_AGENT_DURATION_MS as u128 {
                 warn!("[AgentMonitor] Agent has been running for {}ms - forcing cleanup", duration.as_millis());
                 return true;
             }
@@ -136,7 +137,7 @@ impl AgentInputMonitorState {
         if self.agent_started && self.hold_start_time.is_none() && !self.force_cleanup_scheduled {
             if let Some(start_time) = self.agent_start_time {
                 let duration = start_time.elapsed();
-                if duration.as_millis() >= FORCE_CLEANUP_TIMEOUT_MS as u128 {
+                if duration.as_millis() >= monitor_sessions::FORCE_CLEANUP_TIMEOUT_MS as u128 {
                     self.force_cleanup_scheduled = true;
                     warn!("[AgentMonitor] Scheduling force cleanup - agent stuck for {}ms", duration.as_millis());
                     return true;
