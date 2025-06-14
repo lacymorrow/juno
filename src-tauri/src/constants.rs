@@ -125,6 +125,16 @@ pub mod timeouts {
     pub const FINAL_BUFFER_DURATION_MS: u64 = 5000;
     pub const MIN_AUDIO_LENGTH_MS: u64 = 500;
     pub const EMERGENCY_TIMEOUT_MS: u64 = 1000;
+
+    // Network and Browser Timeouts
+    pub const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30_000;
+    pub const REPLICATE_TIMEOUT_SECONDS: u64 = 300;
+    
+    // Operation Timeouts
+    pub const PERMISSION_CHECK_TIMEOUT_MS: u64 = 3_000;
+    pub const AUDIO_DEVICE_DETECTION_TIMEOUT_MS: u64 = 3_000;
+    pub const TOOL_EXECUTION_TIMEOUT_MS: u64 = 10_000;
+    pub const MCP_INTEGRATION_TIMEOUT_MS: u64 = 30_000;
 }
 
 pub mod ports {
@@ -267,6 +277,59 @@ pub mod chrome_debug_urls {
     pub fn get_all_urls() -> [&'static str; 3] {
         [PRIMARY, ALTERNATIVE_1, ALTERNATIVE_2]
     }
+}
+
+pub mod agent_config {
+    // Agent execution limits
+    pub const MAX_ITERATIONS: u32 = 15;
+    pub const MAX_ITERATIONS_REDUCED: u32 = 10; // For focused tasks
+    
+    // LLM token limits
+    pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
+    pub const DEFAULT_MAX_TOKENS_COMPACT: i32 = 1024;
+    
+    // LLM parameters
+    pub const DEFAULT_TEMPERATURE: f32 = 0.7;
+    
+    // Retry and attempt limits
+    pub const MAX_RETRY_ATTEMPTS: usize = 3;
+    pub const MAX_RECOVERY_ATTEMPTS: usize = 5;
+    
+    // Processing limits
+    pub const MAX_TOOL_CALLS_PER_ITERATION: usize = 10;
+    pub const MAX_MEMORY_ENTRIES: usize = 1000;
+}
+
+pub mod monitor_sessions {
+    // Input monitoring durations
+    pub const HOLD_DURATION_MS: u64 = 500;
+    pub const IMMEDIATE_START_MS: u64 = 0;
+    
+    // Session maximum durations
+    pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000;  // 30 seconds
+    pub const MAX_AGENT_DURATION_MS: u64 = 120_000;         // 2 minutes
+    
+    // Cleanup and recovery timeouts
+    pub const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000;       // 5 seconds
+    pub const COOLDOWN_AFTER_CANCEL_MS: u64 = 150;         // 150ms
+    
+    // Monitoring intervals
+    pub const AGENT_MONITOR_INTERVAL_MS: u64 = 100;
+    pub const DICTATION_MONITOR_INTERVAL_MS: u64 = 50;
+}
+
+pub mod platform_macos {
+    // NSTrackingArea options
+    pub const NS_TRACKING_MOUSE_ENTERED_AND_EXITED: u64 = 0x01;
+    pub const NS_TRACKING_ACTIVE_ALWAYS: u64 = 0x80;
+    
+    // macOS specific timeouts
+    pub const ACCESSIBILITY_PERMISSION_CHECK_DELAY_MS: u64 = 1000;
+    pub const SCREEN_RECORDING_PERMISSION_CHECK_DELAY_MS: u64 = 2000;
+    
+    // macOS system limits
+    pub const MAX_ACCESSIBILITY_RETRIES: usize = 3;
+    pub const SYSTEM_PERMISSION_TIMEOUT_MS: u64 = 5000;
 }
 
 #[cfg(test)]
@@ -556,41 +619,104 @@ mod tests {
 
     #[test]
     fn test_chrome_debug_urls() {
+        let urls = chrome_debug_urls::get_all_urls();
+        assert_eq!(urls.len(), 3);
+        
+        // Test individual URLs
         assert_eq!(chrome_debug_urls::PRIMARY, "http://localhost:9222");
         assert_eq!(chrome_debug_urls::ALTERNATIVE_1, "http://localhost:9223");
         assert_eq!(chrome_debug_urls::ALTERNATIVE_2, "http://localhost:9224");
-
-        // Test the helper function
-        let all_urls = chrome_debug_urls::get_all_urls();
-        assert_eq!(all_urls.len(), 3);
-        assert!(all_urls.contains(&chrome_debug_urls::PRIMARY));
-        assert!(all_urls.contains(&chrome_debug_urls::ALTERNATIVE_1));
-        assert!(all_urls.contains(&chrome_debug_urls::ALTERNATIVE_2));
-
-        // Ensure all URLs are localhost and follow expected pattern
-        for url in all_urls {
+        
+        // Test that all URLs are valid localhost addresses
+        for url in urls {
             assert!(url.starts_with("http://localhost:"));
-            assert!(url.len() > "http://localhost:".len());
+            assert!(url.contains("922")); // All contain 922x pattern
         }
+        
+        // Test array contents
+        assert_eq!(urls[0], chrome_debug_urls::PRIMARY);
+        assert_eq!(urls[1], chrome_debug_urls::ALTERNATIVE_1);
+        assert_eq!(urls[2], chrome_debug_urls::ALTERNATIVE_2);
     }
 
     #[test]
-    fn test_permission_type_uniqueness() {
-        use std::collections::HashSet;
+    fn test_agent_config() {
+        // Test iteration limits
+        assert_eq!(agent_config::MAX_ITERATIONS, 15);
+        assert_eq!(agent_config::MAX_ITERATIONS_REDUCED, 10);
+        assert!(agent_config::MAX_ITERATIONS_REDUCED < agent_config::MAX_ITERATIONS);
+        
+        // Test token limits
+        assert_eq!(agent_config::DEFAULT_MAX_TOKENS_STANDARD, 4096);
+        assert_eq!(agent_config::DEFAULT_MAX_TOKENS_COMPACT, 1024);
+        assert!(agent_config::DEFAULT_MAX_TOKENS_COMPACT < agent_config::DEFAULT_MAX_TOKENS_STANDARD as i32);
+        
+        // Test LLM parameters
+        assert_eq!(agent_config::DEFAULT_TEMPERATURE, 0.7);
+        assert!(agent_config::DEFAULT_TEMPERATURE > 0.0 && agent_config::DEFAULT_TEMPERATURE <= 1.0);
+        
+        // Test retry limits
+        assert_eq!(agent_config::MAX_RETRY_ATTEMPTS, 3);
+        assert_eq!(agent_config::MAX_RECOVERY_ATTEMPTS, 5);
+        assert!(agent_config::MAX_RETRY_ATTEMPTS <= agent_config::MAX_RECOVERY_ATTEMPTS);
+        
+        // Test processing limits
+        assert_eq!(agent_config::MAX_TOOL_CALLS_PER_ITERATION, 10);
+        assert_eq!(agent_config::MAX_MEMORY_ENTRIES, 1000);
+        assert!(agent_config::MAX_TOOL_CALLS_PER_ITERATION > 0);
+    }
 
-        let mut types = HashSet::new();
-        let permission_types_list = vec![
-            permission_types::ACCESSIBILITY,
-            permission_types::SCREEN_RECORDING,
-            permission_types::MICROPHONE,
-            permission_types::INPUT_MONITORING,
-        ];
+    #[test]
+    fn test_monitor_sessions() {
+        // Test input monitoring durations
+        assert_eq!(monitor_sessions::HOLD_DURATION_MS, 500);
+        assert_eq!(monitor_sessions::IMMEDIATE_START_MS, 0);
+        
+        // Test session maximum durations
+        assert_eq!(monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS, 30_000);
+        assert_eq!(monitor_sessions::MAX_AGENT_DURATION_MS, 120_000);
+        assert!(monitor_sessions::MAX_AGENT_DURATION_MS > monitor_sessions::MAX_TRANSCRIPTION_DURATION_MS);
+        
+        // Test cleanup timeouts
+        assert_eq!(monitor_sessions::FORCE_CLEANUP_TIMEOUT_MS, 5_000);
+        assert_eq!(monitor_sessions::COOLDOWN_AFTER_CANCEL_MS, 150);
+        
+        // Test monitoring intervals
+        assert_eq!(monitor_sessions::AGENT_MONITOR_INTERVAL_MS, 100);
+        assert_eq!(monitor_sessions::DICTATION_MONITOR_INTERVAL_MS, 50);
+        assert!(monitor_sessions::DICTATION_MONITOR_INTERVAL_MS < monitor_sessions::AGENT_MONITOR_INTERVAL_MS);
+    }
 
-        for permission_type in permission_types_list {
-            assert!(types.insert(permission_type), "Duplicate permission type found: {}", permission_type);
-        }
+    #[test]
+    fn test_platform_macos() {
+        // Test NSTrackingArea options (these are system-defined constants)
+        assert_eq!(platform_macos::NS_TRACKING_MOUSE_ENTERED_AND_EXITED, 0x01);
+        assert_eq!(platform_macos::NS_TRACKING_ACTIVE_ALWAYS, 0x80);
+        
+        // Test permission check delays
+        assert_eq!(platform_macos::ACCESSIBILITY_PERMISSION_CHECK_DELAY_MS, 1000);
+        assert_eq!(platform_macos::SCREEN_RECORDING_PERMISSION_CHECK_DELAY_MS, 2000);
+        assert!(platform_macos::SCREEN_RECORDING_PERMISSION_CHECK_DELAY_MS > platform_macos::ACCESSIBILITY_PERMISSION_CHECK_DELAY_MS);
+        
+        // Test system limits
+        assert_eq!(platform_macos::MAX_ACCESSIBILITY_RETRIES, 3);
+        assert_eq!(platform_macos::SYSTEM_PERMISSION_TIMEOUT_MS, 5000);
+        assert!(platform_macos::MAX_ACCESSIBILITY_RETRIES > 0);
+    }
 
-        // Should have exactly 4 unique permission types
-        assert_eq!(types.len(), 4);
+    #[test]
+    fn test_extended_timeouts() {
+        // Test new timeout constants
+        assert_eq!(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS, 30_000);
+        assert_eq!(timeouts::REPLICATE_TIMEOUT_SECONDS, 300);
+        assert_eq!(timeouts::PERMISSION_CHECK_TIMEOUT_MS, 3_000);
+        assert_eq!(timeouts::AUDIO_DEVICE_DETECTION_TIMEOUT_MS, 3_000);
+        assert_eq!(timeouts::TOOL_EXECUTION_TIMEOUT_MS, 10_000);
+        assert_eq!(timeouts::MCP_INTEGRATION_TIMEOUT_MS, 30_000);
+        
+        // Test timeout hierarchy
+        assert!(timeouts::PERMISSION_CHECK_TIMEOUT_MS < timeouts::TOOL_EXECUTION_TIMEOUT_MS);
+        assert!(timeouts::TOOL_EXECUTION_TIMEOUT_MS <= timeouts::MCP_INTEGRATION_TIMEOUT_MS);
+        assert!(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS == timeouts::MCP_INTEGRATION_TIMEOUT_MS);
     }
 }

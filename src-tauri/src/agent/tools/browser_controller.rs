@@ -9,12 +9,13 @@ use std::env;
 
 use crate::agent::structs::{AgentError, ToolResult};
 use crate::constants::chrome_debug_urls;
+use crate::constants::timeouts;
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
 
 // Timeout defaults
-const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
+// const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30000;
 
 #[derive(Clone)]
 pub struct BrowserController {
@@ -584,7 +585,7 @@ impl BrowserController {
 
     pub async fn navigate(&self, args: &Value) -> ControllerResult<ToolResult> {
         let url = args["url"].as_str().ok_or_else(|| AgentError::ToolError("Missing 'url' argument".to_string()))?;
-        let timeout_ms = args["timeout"].as_u64().unwrap_or(DEFAULT_NAVIGATION_TIMEOUT_MS);
+        let timeout_ms = args["timeout"].as_u64().unwrap_or(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS);
 
         log::info!("Navigating to: {}", url);
 
