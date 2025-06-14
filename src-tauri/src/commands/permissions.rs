@@ -1,6 +1,8 @@
 // macOS permissions management for accessibility, screen recording, and microphone
 
 use serde::{Deserialize, Serialize};
+use std::process::Command;
+use std::time::Duration;
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::permissions::{
     check_accessibility_permissions,
