@@ -1,9 +1,27 @@
 #!/bin/bash
 
-# Duplicate Event Listener Detection Script
-# Prevents race conditions and application crashes caused by duplicate listeners
+# Script to detect duplicate event listeners in the codebase
+# This helps prevent race conditions and performance issues
 
-echo "🔍 Scanning for duplicate event listeners..."
+echo "🔍 Checking for duplicate event listeners..."
+
+# Define the events we're monitoring
+EVENTS=(
+    "dictation-active"
+    "app-dictation-started"
+    "app-dictation-finished"
+    "dictation-transcription-partial"
+    "dictation-transcription-final"
+    "tts-started"
+    "tts-finished"
+    "audio-level"
+    "voice-error"
+    "agent-started"
+    "agent-thinking"
+    "agent-responding"
+    "streaming-text"
+    "stream-end"
+)
 
 # Colors for output
 RED='\033[0;31m'
@@ -11,80 +29,45 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Counter for issues found
 ISSUES_FOUND=0
 
-# Function to check for duplicate listeners in a file
-check_file_for_duplicates() {
-    local file="$1"
-    echo "Checking: $file"
+echo "📋 Scanning for event listeners in TypeScript/JavaScript files..."
 
-    # Extract all event listener patterns
-    if [[ "$file" == *.rs ]]; then
-        # Rust backend listeners: app.listen("event-name", ...)
-        grep -n 'app\.listen(' "$file" | while read -r line; do
-            event_name=$(echo "$line" | sed -n 's/.*app\.listen("\([^"]*\)".*/\1/p')
-            if [[ -n "$event_name" ]]; then
-                count=$(grep -c "app\.listen(\"$event_name\"" "$file")
-                if [[ $count -gt 1 ]]; then
-                    echo -e "${RED}❌ DUPLICATE: $event_name appears $count times in $file${NC}"
-                    grep -n "app\.listen(\"$event_name\"" "$file"
-                    ((ISSUES_FOUND++))
-                fi
-            fi
-        done
-    elif [[ "$file" == *.ts ]] || [[ "$file" == *.tsx ]] || [[ "$file" == *.js ]] || [[ "$file" == *.jsx ]]; then
-        # Frontend listeners: listen("event-name", ...) or addEventListener
-        grep -n 'listen(' "$file" | while read -r line; do
-            event_name=$(echo "$line" | sed -n "s/.*listen(['\"]\\([^'\"]*\\)['\"].*/\\1/p")
-            if [[ -n "$event_name" ]]; then
-                count=$(grep -c "listen(['\"]$event_name['\"]" "$file")
-                if [[ $count -gt 1 ]]; then
-                    echo -e "${RED}❌ DUPLICATE: $event_name appears $count times in $file${NC}"
-                    grep -n "listen(['\"]$event_name['\"]" "$file"
-                    ((ISSUES_FOUND++))
-                fi
-            fi
-        done
+for event in "${EVENTS[@]}"; do
+    echo -e "\n🎯 Checking event: ${YELLOW}$event${NC}"
+
+    # Find all listen() calls for this event
+    MATCHES=$(grep -r "listen.*['\"]$event['\"]" src/ --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" 2>/dev/null)
+
+    if [ -n "$MATCHES" ]; then
+        COUNT=$(echo "$MATCHES" | wc -l)
+
+        if [ $COUNT -gt 1 ]; then
+            echo -e "  ${RED}❌ DUPLICATE LISTENERS FOUND ($COUNT instances):${NC}"
+            echo "$MATCHES" | sed 's/^/    /'
+            ISSUES_FOUND=$((ISSUES_FOUND + 1))
+        else
+            echo -e "  ${GREEN}✅ Single listener found${NC}"
+            echo "$MATCHES" | sed 's/^/    /'
+        fi
+    else
+        echo -e "  ${YELLOW}⚠️  No listeners found${NC}"
     fi
-}
-
-# Check all relevant files
-echo "Scanning Rust backend files..."
-find src-tauri/src -name "*.rs" -type f | while read -r file; do
-    check_file_for_duplicates "$file"
 done
 
-echo "Scanning TypeScript/JavaScript frontend files..."
-find src -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -type f | while read -r file; do
-    check_file_for_duplicates "$file"
-done
-
-# Check for critical voice transcription events specifically
-echo ""
-echo "🎯 Checking critical voice transcription events..."
-
-# Count voice-transcription:final-result listeners across all files
-FINAL_RESULT_COUNT=$(find . -name "*.rs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | xargs grep -l "voice-transcription:final-result" | wc -l)
-echo "Files with voice-transcription:final-result: $FINAL_RESULT_COUNT"
-
-# List all voice-transcription:final-result occurrences
-echo "All voice-transcription:final-result listeners:"
-find . -name "*.rs" -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | xargs grep -n "voice-transcription:final-result" | head -20
-
-# Check for multiple app.listen calls in lib.rs
-LIB_RS_LISTENERS=$(grep -c "app\.listen(" src-tauri/src/lib.rs 2>/dev/null || echo "0")
-echo "Total app.listen calls in lib.rs: $LIB_RS_LISTENERS"
-
-# Summary
-echo ""
-if [[ $ISSUES_FOUND -eq 0 ]]; then
-    echo -e "${GREEN}✅ No duplicate listeners detected!${NC}"
+echo -e "\n📊 Summary:"
+if [ $ISSUES_FOUND -eq 0 ]; then
+    echo -e "${GREEN}✅ No duplicate event listeners detected!${NC}"
+    echo "All voice events have centralized listeners in VoiceContext."
 else
-    echo -e "${RED}❌ Found $ISSUES_FOUND duplicate listener issues!${NC}"
-    echo -e "${YELLOW}⚠️  These duplicates can cause race conditions and crashes.${NC}"
-    exit 1
+    echo -e "${RED}❌ Found $ISSUES_FOUND event(s) with duplicate listeners${NC}"
+    echo "Consider consolidating these listeners into the VoiceContext."
 fi
 
-echo ""
-echo "Event listener audit complete."
+echo -e "\n💡 Best Practices:"
+echo "- Use VoiceContext for all voice-related event listeners"
+echo "- Avoid setting up listeners in individual components"
+echo "- Use context hooks (useVoiceState, useAgentState) instead"
+echo "- Run this script after making changes to voice components"
+
+exit $ISSUES_FOUND
