@@ -1891,107 +1891,16 @@ pub fn run() {
                     Err(_) => None,
                 };
 
-                if is_dictation_active {
-                    info!("[Event] Processing final result for Dictation Mode");
+                // Clone everything needed for the async tasks
+                let app_handle_clone = app_handle_for_listener.clone();
+                let app_state_clone = app_handle_for_listener.state::<state::AppState>();
+                let payload_str_clone = payload_str.to_string();
+                let extracted_text_clone = extracted_text.clone();
 
-                    // Handle immediate typing for Dictation Mode
-                    let app_handle_clone = app_handle_for_listener.clone();
-                    let text_for_spawn = extracted_text.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Some(text) = text_for_spawn {
-                            let trimmed_text = text.trim();
-                            if !trimmed_text.is_empty() {
-                                // Check if clipboard saving is enabled
-                                let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                    .map(|enabled| *enabled)
-                                    .unwrap_or(true); // Default to true if lock fails
-
-                                // Store to clipboard if enabled
-                                if clipboard_enabled {
-                                    match crate::commands::core::dev_set_clipboard(
-                                        trimmed_text.to_string(),
-                                        app_state.clone()
-                                    ).await {
-                                        Ok(()) => {
-                                            info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
-                                        }
-                                        Err(e) => {
-                                            tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
-                                        }
-                                    }
-                                } else {
-                                    info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
-                                }
-
-                                // Then type the transcribed text immediately using the computer use tools
-                                info!("Executing global_type_text for text: '{}'", trimmed_text);
-                                match crate::commands::keyboard::global_type_text(
-                                    trimmed_text.to_string(),
-                                    app_handle_clone.clone(),
-                                    app_state.clone()
-                                ).await {
-                                    Ok(()) => {
-                                        info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
-                                    }
-                                }
-                            } else {
-                                info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
-                            }
-                        }
-
-                        // Reset Dictation Mode state after processing
-                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                            *dictation_active = false;
-                        }
-
-                        // Emit state change event for UI
-                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
-                        }
-
-                        // Update floating bar manager for dictation mode completion
-                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, None).await;
-                        info!("[Dictation Mode] Completed dictation successfully");
-                    });
-                } else {
-                    info!("[Event] Processing final result for AI Agent Mode");
-
-                    // Update floating bar manager for agent mode query
-                    if let Some(text) = &extracted_text {
-                        let app_handle_clone = app_handle_for_listener.clone();
-                        let query_text = text.clone();
-                        tauri::async_runtime::spawn(async move {
-                            commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(query_text)).await;
-                        });
-                    }
-
-                    // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
-                    match serde_json::from_str::<serde_json::Value>(payload_str) {
-                        Ok(payload_json) => {
-                            if let Some(text_value) = payload_json.get("text") {
-                                // Transform { "text": "..." } to { "query": "..." }
-                                let transformed_payload = serde_json::json!({
-                                    "query": text_value
-                                });
-                                if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", transformed_payload) {
-                                    tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
-                                }
-                            } else {
-                                tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
-                            // Fallback: emit with original payload
-                            if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
-                                tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
-                            }
-                        }
-                    }
-                }
+                // Spawn a task to handle the processing outside the event handler closure
+                tauri::async_runtime::spawn(async move {
+                    handle_voice_transcription_final_result(app_handle_clone, is_dictation_active, extracted_text_clone, payload_str_clone).await;
+                });
             });
 
             // Listen for dictation stopped events from the plugin
@@ -1999,41 +1908,29 @@ pub fn run() {
             app.listen("voice-transcription:dictation-stopped", move |event| {
                 info!("[Event] Received voice-transcription:dictation-stopped event");
 
-                // Unregister escape key as dictation is complete
-                let app_handle_for_escape = app_handle_for_listener.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_for_escape).await {
-                        warn!("Failed to unregister escape key after dictation: {} - continuing anyway", e);
-                    }
-                });
+                // Clone everything needed for the async tasks
+                let app_handle_clone = app_handle_for_listener.clone();
+                let state_clone = app_handle_for_listener.state::<crate::state::AppState>();
+                let payload_clone = event.payload().to_string();
 
-                // Play voice end sound automatically when dictation stops
-                let app_handle_for_sound = app_handle_for_listener.clone();
+                // Spawn a task to handle the processing outside the event handler closure
                 tauri::async_runtime::spawn(async move {
-                    let state = app_handle_for_sound.state::<crate::state::AppState>();
-                    if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle_for_sound.clone(), state).await {
-                        warn!("Failed to play voice end sound: {}", e);
-                    }
+                    handle_voice_transcription_dictation_stopped(app_handle_clone, payload_clone).await;
                 });
-
-                // Rebroadcast the event as app-dictation-stopped for backward compatibility
-                if let Err(e) = app_handle_for_listener.emit("app-dictation-stopped", event.payload()) {
-                    tracing::error!("[Event] Failed to rebroadcast dictation-stopped event: {}", e);
-                }
             });
 
             // Listen for voice transcription error events
             let app_handle_for_error_listener = app.handle().clone();
-            app.listen("voice-transcription:error", move |event| {
+            app.listen("voice-transcription:error", move |_event| {
                 info!("[Event] Received voice-transcription:error event");
 
-                // Play voice error sound automatically when transcription fails
-                let app_handle_for_sound = app_handle_for_error_listener.clone();
+                // Clone everything needed for the async task
+                let app_handle_clone = app_handle_for_error_listener.clone();
+                let state_clone = app_handle_for_error_listener.state::<crate::state::AppState>();
+
+                // Spawn a task to handle the processing outside the event handler closure
                 tauri::async_runtime::spawn(async move {
-                    let state = app_handle_for_sound.state::<crate::state::AppState>();
-                    if let Err(e) = crate::commands::sound::play_voice_error_sound(app_handle_for_sound.clone(), state).await {
-                        warn!("Failed to play voice error sound: {}", e);
-                    }
+                    handle_voice_transcription_error(app_handle_clone).await;
                 });
             });
 
@@ -2044,83 +1941,11 @@ pub fn run() {
 
                 // Start dictation using the voice transcription plugin command
                 let app_handle_clone = app_handle_for_dictation_start.clone();
+                let app_state_clone = app_handle_for_dictation_start.state::<state::AppState>();
+
+                // Use a separate task to handle the dictation start to avoid lifetime issues
                 tauri::async_runtime::spawn(async move {
-                    // Mark this as Dictation Mode in AppState BEFORE starting transcription
-                    // This prevents race condition where voice controller emits events before we set the flag
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = true;
-                    }
-
-                    // Update floating bar manager to set dictation mode
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
-                    });
-
-                    // Use the plugin command to start dictation only if controller exists
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::start_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(()) => {
-                                    info!("[Dictation Mode] Started immediate transcription successfully");
-
-                                    if let Err(e) = app_handle_clone.emit("dictation-active", true) {
-                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
-
-                                    // Clean up state if start failed
-                                    let app_state = app_handle_clone.state::<state::AppState>();
-                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                                        *dictation_active = false;
-                                    }
-
-                                    // Update floating bar manager
-                                    let app_handle_for_bar = app_handle_clone.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                                    });
-
-                                    // Reset dictation input monitor state
-                                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                                    // Emit failure event to UI
-                                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot start transcription");
-
-                            // Clean up state since start failed
-                            let app_state = app_handle_clone.state::<state::AppState>();
-                            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                                *dictation_active = false;
-                            }
-
-                            // Update floating bar manager
-                            let app_handle_for_bar = app_handle_clone.clone();
-                            tauri::async_runtime::spawn(async move {
-                                commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                            });
-
-                            // Reset dictation input monitor state
-                            crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                            // Emit failure event to UI
-                            if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
-                            }
-                        }
-                    }
+                    handle_dictation_transcription_start(app_handle_clone).await;
                 });
             });
 
@@ -3208,5 +3033,221 @@ async fn update_tray_menu(app_handle: &AppHandle) {
         }
     } else {
         tracing::warn!("[Tray Menu] Failed to create updated tray menu");
+    }
+}
+
+// Helper function to handle the voice-transcription:final-result event outside the closure
+async fn handle_voice_transcription_final_result(
+    app_handle: AppHandle,
+    is_dictation_active: bool,
+    extracted_text: Option<String>,
+    payload_str: String,
+) {
+    if is_dictation_active {
+        info!("[Event] Processing final result for Dictation Mode");
+
+        // Handle immediate typing for Dictation Mode
+        if let Some(text) = extracted_text {
+            let trimmed_text = text.trim();
+            if !trimmed_text.is_empty() {
+                let app_state = app_handle.state::<state::AppState>();
+                // Check if clipboard saving is enabled
+                let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
+                    .map(|enabled| *enabled)
+                    .unwrap_or(true); // Default to true if lock fails
+
+                // Store to clipboard if enabled
+                if clipboard_enabled {
+                    match crate::commands::core::dev_set_clipboard(
+                        trimmed_text.to_string(),
+                        app_state.clone()
+                    ).await {
+                        Ok(()) => {
+                            info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
+                        }
+                        Err(e) => {
+                            tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
+                        }
+                    }
+                } else {
+                    info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
+                }
+
+                // Then type the transcribed text immediately using the computer use tools
+                info!("Executing global_type_text for text: '{}'", trimmed_text);
+                match crate::commands::keyboard::global_type_text(
+                    trimmed_text.to_string(),
+                    app_handle.clone(),
+                    app_state.clone()
+                ).await {
+                    Ok(()) => {
+                        info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
+                    }
+                    Err(e) => {
+                        tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
+                    }
+                }
+            } else {
+                info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
+            }
+        }
+
+        // Reset Dictation Mode state after processing
+        let app_state = app_handle.state::<state::AppState>();
+        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+            *dictation_active = false;
+        }
+
+        // Emit state change event for UI
+        if let Err(e) = app_handle.emit("dictation-active", false) {
+            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
+        }
+
+        // Update floating bar manager for dictation mode completion
+        commands::floating_bar::handle_dictation_finished(&app_handle, None).await;
+        info!("[Dictation Mode] Completed dictation successfully");
+    } else {
+        info!("[Event] Processing final result for AI Agent Mode");
+
+        // Update floating bar manager for agent mode query
+        if let Some(text) = &extracted_text {
+            let query_text = text.clone();
+            commands::floating_bar::handle_dictation_finished(&app_handle, Some(query_text)).await;
+        }
+
+        // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
+        match serde_json::from_str::<serde_json::Value>(&payload_str) {
+            Ok(payload_json) => {
+                if let Some(text_value) = payload_json.get("text") {
+                    // Transform { "text": "..." } to { "query": "..." }
+                    let transformed_payload = serde_json::json!({
+                        "query": text_value
+                    });
+                    if let Err(e) = app_handle.emit("app-dictation-finished", transformed_payload) {
+                        tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
+                    }
+                } else {
+                    tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
+                }
+            }
+            Err(e) => {
+                tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
+                // Fallback: emit with original payload
+                if let Err(e) = app_handle.emit("app-dictation-finished", payload_str) {
+                    tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
+                }
+            }
+        }
+    }
+}
+
+// Helper function to handle the voice-transcription:dictation-stopped event outside the closure
+async fn handle_voice_transcription_dictation_stopped(
+    app_handle: AppHandle,
+    payload: String,
+) {
+    // Unregister escape key as dictation is complete
+    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
+        warn!("Failed to unregister escape key after dictation: {} - continuing anyway", e);
+    }
+
+    // Play voice end sound automatically when dictation stops
+    let state = app_handle.state::<crate::state::AppState>();
+    if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle.clone(), state).await {
+        warn!("Failed to play voice end sound: {}", e);
+    }
+
+    // Rebroadcast the event as app-dictation-stopped for backward compatibility
+    if let Err(e) = app_handle.emit("app-dictation-stopped", payload) {
+        tracing::error!("[Event] Failed to rebroadcast dictation-stopped event: {}", e);
+    }
+}
+
+// Helper function to handle the voice-transcription:error event outside the closure
+async fn handle_voice_transcription_error(
+    app_handle: AppHandle,
+) {
+    // Play voice error sound automatically when transcription fails
+    let state = app_handle.state::<crate::state::AppState>();
+    if let Err(e) = crate::commands::sound::play_voice_error_sound(app_handle.clone(), state).await {
+        warn!("Failed to play voice error sound: {}", e);
+    }
+}
+
+// Helper function to handle the dictation-transcription-start event outside the closure
+async fn handle_dictation_transcription_start(
+    app_handle: AppHandle,
+) {
+    // Mark this as Dictation Mode in AppState BEFORE starting transcription
+    // This prevents race condition where voice controller emits events before we set the flag
+    let app_state = app_handle.state::<state::AppState>();
+    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        *dictation_active = true;
+    }
+
+    // Update floating bar manager to set dictation mode
+    let app_handle_for_bar = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
+    });
+
+    // Use the plugin command to start dictation only if controller exists
+    match app_handle.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+        Some(controller_state) => {
+            match tauri_plugin_voice_transcription::commands::start_dictation(
+                app_handle.clone(),
+                controller_state
+            ).await {
+                Ok(()) => {
+                    info!("[Dictation Mode] Started immediate transcription successfully");
+
+                    if let Err(e) = app_handle.emit("dictation-active", true) {
+                        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
+                    }
+
+                    // Register escape key to cancel dictation
+                    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
+                        warn!("Failed to register escape key for dictation: {} - continuing anyway", e);
+                    }
+
+                    // Play voice start sound
+                    if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle.clone(), app_state).await {
+                        warn!("Failed to play voice start sound: {}", e);
+                    }
+                }
+                Err(e) => {
+                    error!("[Dictation Mode] Failed to start dictation: {}", e);
+
+                    // Reset the dictation active flag
+                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                        *dictation_active = false;
+                    }
+
+                    // Emit state change event for UI
+                    if let Err(e) = app_handle.emit("dictation-active", false) {
+                        error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
+                    }
+
+                    // Update floating bar manager to reset dictation mode
+                    let app_handle_for_bar = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
+                    });
+                }
+            }
+        }
+        None => {
+            error!("[Dictation Mode] Voice controller not found, cannot start dictation");
+
+            // Reset the dictation active flag
+            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                *dictation_active = false;
+            }
+
+            // Emit state change event for UI
+            if let Err(e) = app_handle.emit("dictation-active", false) {
+                error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
+            }
+        }
     }
 }
