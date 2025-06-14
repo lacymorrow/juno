@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use once_cell::sync::OnceCell;
+use tracing::warn;
 
 use crate::agents::{
     AgentFactory, AgentStatus, Orchestrator, OrchestratorConfig, Task, TaskResult, TaskPriority
