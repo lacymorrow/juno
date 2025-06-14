@@ -100,7 +100,7 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
         MCPServerConfig::new(
             "sqlite".to_string(),
             "npx".to_string(),
-            vec!["mcp-server-sqlite".to_string(), "--db-path", "./juno-agent-data.db".to_string()]
+            vec!["mcp-server-sqlite".to_string(), "--db-path".to_string(), "./juno-agent-data.db".to_string()]
         ).with_description("Local SQLite database for structured data storage and queries".to_string()),
 
         // Calculator for mathematical operations
@@ -137,7 +137,7 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
     // Start all enabled servers with staggered startup to avoid overwhelming npm
     let configs = mcp_manager.get_server_configs().await;
     tracing::info!("Starting {} MCP servers...", configs.len());
-    
+
     for (i, config) in configs.iter().enumerate() {
         if config.enabled && config.auto_start {
             // Add a small delay between server starts to prevent npm conflicts
@@ -151,7 +151,7 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
                 }
                 Err(e) => {
                     tracing::warn!("Failed to start MCP server '{}': {}", config.name, e);
-                    
+
                     // For critical servers, we might want to retry
                     if config.name == "filesystem" || config.name == "memory" {
                         tracing::info!("Retrying critical MCP server '{}'...", config.name);
