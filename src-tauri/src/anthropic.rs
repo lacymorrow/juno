@@ -21,7 +21,7 @@ use crate::agent::providers::config::AgentMode;
 use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
-use crate::constants::{agent_config, tool_names, events};
+use crate::constants::{agent_config, tool_names, events, anthropic_content_types, timeouts};
 
 
 // --- Agent State ---
@@ -132,7 +132,7 @@ pub async fn submit_query(
         info!("Signaled cancellation for existing agent execution");
 
         // Give existing agent a brief moment to clean up gracefully
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MEDIUM_DELAY_MS)).await;
 
         // Reset the cancellation signal for the new agent
         state.reset_cancel();

@@ -1,14 +1,10 @@
-import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator"; // Import the AgentExecutionProgressIndicator component
+import { AppHeader, type AppView } from "@/components/AppHeader";
+import { ChatMessageComponent, type ChatMessage } from "@/components/ChatMessage";
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
+import { ModalSystem, type ModalType, type FeedbackData, type UpdateInfo, type ChatExport } from "@/components/ModalSystem";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
-import { ThinkingMessage } from "@/components/ThinkingMessage";
-import { ToolCallRequest, ToolCallResult } from "@/components/ToolCallMessage";
-import { Button } from "@/components/ui/button";
-import {
-  JsxMessageRenderer,
-  isJsxContent,
-} from "@/components/ui/jsx-message-renderer";
+import { isJsxContent } from "@/components/ui/jsx-message-renderer";
 import {
   AIInput,
   AIInputButton,
@@ -16,10 +12,6 @@ import {
   AIInputTextarea,
   AIInputToolbar,
   AIInputTools,
-  AIMessage,
-  AIMessageAvatar,
-  AIMessageContent,
-  AIResponse,
 } from "@/components/ui/kibo-ui/ai";
 import {
   ResizableHandle,
@@ -27,24 +19,16 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { VoiceProvider } from "@/contexts/VoiceContext";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { notificationService } from "@/lib/notifications";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
-import { cn } from "@/lib/utils";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  ArrowLeft,
-  Code,
-  Copy,
   DogIcon,
-  FileText,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Send,
   Square,
@@ -60,26 +44,6 @@ import KeyPressOverlay from "./components/KeyPressOverlay";
 import ToolApprovalModal from "./components/ToolApprovalModal";
 import "./styles/globals.css";
 
-// Type for conversation messages
-type ChatMessage = {
-  role:
-    | "user"
-    | "assistant"
-    | "system"
-    | "thinking"
-    | "tool_call_request"
-    | "tool_call_result";
-  content: string;
-  isJsx?: boolean; // Flag to indicate if content should be rendered as JSX
-  screenshot_base64?: string; // Optional base64 screenshot data
-  tool_name?: string;
-  tool_args?: any;
-  tool_output?: any;
-  success?: boolean; // For tool call results - indicates if the tool call was successful
-  timestamp?: number; // Add timestamp field for message grouping
-  isStreaming?: boolean; // Indicates if this message is currently being streamed
-  messageId?: string; // Unique identifier for streaming messages
-};
 
 // Type for the result from submit_query
 type SubmitQueryResult = {
@@ -163,39 +127,6 @@ interface AgentEventTauri {
 }
 // --- End Agent Event Types ---
 
-// Type for view state
-type AppView = "chat" | "devtools" | "permissions";
-
-// New modal types for enhanced functionality
-type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
-
-// Enhanced feedback form data
-interface FeedbackData {
-  type: "issue" | "feature" | "general";
-  title: string;
-  description: string;
-  email?: string;
-  priority: "low" | "medium" | "high";
-}
-
-// Update check result
-interface UpdateInfo {
-  available: boolean;
-  version?: string;
-  notes?: string;
-  date?: string;
-}
-
-// Chat export format
-interface ChatExport {
-  version: string;
-  exported_at: string;
-  conversation: ChatMessage[];
-  metadata: {
-    total_messages: number;
-    export_type: "full" | "filtered";
-  };
-}
 
 // Simple debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
@@ -255,199 +186,6 @@ function formatFullTimestamp(timestamp: number): string {
 }
 
 // Helper function to render messages using Kibo UI components
-function renderChatMessage(
-  msg: ChatMessage,
-  index: number,
-  copyingMessageId: string | null,
-  savingMessageId: string | null,
-  handleCopyResponse: (content: string, index: number) => void,
-  handleSaveResponse: (
-    content: string,
-    format: "html" | "markdown",
-    index: number
-  ) => void
-) {
-  // Handle special message types with existing components
-  if (msg.role === "thinking") {
-    return (
-      <div
-        key={`msg-${index}-${msg.timestamp || Date.now()}`}
-        className="flex justify-start"
-      >
-        <ThinkingMessage content={msg.content} timestamp={msg.timestamp} />
-      </div>
-    );
-  }
-
-  if (msg.role === "tool_call_request") {
-    return (
-      <div
-        key={`msg-${index}-${msg.timestamp || Date.now()}`}
-        className="flex justify-start"
-      >
-        <ToolCallRequest
-          toolName={msg.tool_name || "unknown"}
-          toolArgs={msg.tool_args}
-          content={msg.content}
-          timestamp={msg.timestamp}
-        />
-      </div>
-    );
-  }
-
-  if (msg.role === "tool_call_result") {
-    return (
-      <div
-        key={`msg-${index}-${msg.timestamp || Date.now()}`}
-        className="flex justify-start"
-      >
-        <ToolCallResult
-          toolName={msg.tool_name || "unknown"}
-          toolOutput={msg.tool_output}
-          success={msg.success ?? true}
-          content={msg.content}
-          screenshot_base64={msg.screenshot_base64}
-          timestamp={msg.timestamp}
-        />
-      </div>
-    );
-  }
-
-  // Use Kibo UI components for user and assistant messages
-  const from = msg.role === "user" ? "user" : "assistant";
-  const avatarSrc = msg.role === "user" ? "/user-avatar.png" : "/ai-avatar.png";
-  const avatarName = msg.role === "user" ? "User" : "AI";
-
-  return (
-    <AIMessage key={`msg-${index}-${msg.timestamp || Date.now()}`} from={from}>
-      <AIMessageContent>
-        {msg.role === "assistant" &&
-        (!msg.content || msg.content.trim() === "") ? (
-          <span className="text-muted-foreground italic flex items-center gap-2">
-            <span>✓</span>
-            <span>Task completed successfully</span>
-          </span>
-        ) : msg.isJsx ||
-          (msg.role === "assistant" &&
-            !msg.isStreaming &&
-            isJsxContent(msg.content)) ? (
-          <JsxMessageRenderer jsx={msg.content} />
-        ) : msg.role === "assistant" && msg.content ? (
-          <AIResponse>{msg.content}</AIResponse>
-        ) : (
-          msg.content
-        )}
-
-        {msg.screenshot_base64 && (
-          <div className="mt-2 border-t pt-2">
-            <div className="text-xs text-muted-foreground mb-1">
-              {msg.role === "system"
-                ? "Screenshot captured by AI:"
-                : "Screenshot:"}
-            </div>
-            <div className="relative">
-              <img
-                src={`data:image/png;base64,${msg.screenshot_base64}`}
-                alt="Screenshot"
-                className="rounded w-full object-contain max-h-[300px] border border-border shadow-sm"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-background/20 to-transparent pointer-events-none"></div>
-            </div>
-          </div>
-        )}
-
-        {msg.isStreaming && (
-          <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
-            |
-          </span>
-        )}
-
-        {/* Action buttons for assistant messages */}
-        {msg.role === "assistant" &&
-          msg.content &&
-          msg.content.trim() !== "" &&
-          !msg.isStreaming && (
-            <div className="mt-2 pt-2 border-t border-border/50 opacity-0 group-hover:opacity-100 transition-all duration-200 flex justify-end gap-2">
-              <div className="flex gap-1 bg-background/90 backdrop-blur-sm rounded-md p-1 shadow-sm border">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    copyingMessageId === `copy-${index}`
-                      ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 scale-95"
-                      : "hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950 dark:hover:text-blue-400 hover:scale-105"
-                  )}
-                  onClick={() => handleCopyResponse(msg.content, index)}
-                  disabled={copyingMessageId === `copy-${index}`}
-                  title={
-                    copyingMessageId === `copy-${index}`
-                      ? "Copying..."
-                      : "Copy response to clipboard"
-                  }
-                >
-                  {copyingMessageId === `copy-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Copy size={14} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    savingMessageId === `save-html-${index}`
-                      ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 scale-95"
-                      : "hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-950 dark:hover:text-green-400 hover:scale-105"
-                  )}
-                  onClick={() => handleSaveResponse(msg.content, "html", index)}
-                  disabled={savingMessageId === `save-html-${index}`}
-                  title={
-                    savingMessageId === `save-html-${index}`
-                      ? "Saving HTML..."
-                      : "Save as HTML file with professional styling"
-                  }
-                >
-                  {savingMessageId === `save-html-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Code size={14} />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 w-7 p-0 transition-all duration-150 relative",
-                    savingMessageId === `save-markdown-${index}`
-                      ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
-                      : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
-                  )}
-                  onClick={() =>
-                    handleSaveResponse(msg.content, "markdown", index)
-                  }
-                  disabled={savingMessageId === `save-markdown-${index}`}
-                  title={
-                    savingMessageId === `save-markdown-${index}`
-                      ? "Saving Markdown..."
-                      : "Save as Markdown file for documentation"
-                  }
-                >
-                  {savingMessageId === `save-markdown-${index}` ? (
-                    <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <FileText size={14} />
-                  )}
-                </Button>
-              </div>
-            </div>
-          )}
-      </AIMessageContent>
-      <AIMessageAvatar src={avatarSrc} name={avatarName} />
-    </AIMessage>
-  );
-}
 
 function App() {
   const [appVersion, setAppVersion] = useState<string | null>(null);
@@ -504,6 +242,10 @@ function App() {
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const [lastScrollTime, setLastScrollTime] = useState(0);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // Add missing view state variables
+  const [currentView, setCurrentView] = useState<AppView>("chat");
+  const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -1959,457 +1701,24 @@ function App() {
     [handleSubmit]
   );
 
-  // Enhanced render with new modals
-  const renderModal = () => {
-    if (!activeModal) return null;
+  // Helper functions for ModalSystem
+  const handleFeedbackDataChange = (data: Partial<FeedbackData>) => {
+    setFeedbackData((prev) => ({ ...prev, ...data }));
+  };
 
-    const modalContent = () => {
-      switch (activeModal) {
-        case "help":
-          return (
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Help & Documentation
-                </h2>
-                <button
-                  onClick={() => setActiveModal(null)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-              <div className="space-y-4 text-gray-700 dark:text-gray-300">
-                <section>
-                  <h3 className="text-lg font-semibold mb-2">
-                    🎙️ Voice Controls
-                  </h3>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>
-                      <strong>
-                        {keyboardShortcuts?.agent_mode_toggle || "Option + D"}:
-                      </strong>{" "}
-                      Activate Agent Mode
-                      <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-sm">
-                        <li>
-                          <strong>Tap to Toggle:</strong> Press and release to
-                          toggle agent mode on/off
-                        </li>
-                        <li>
-                          <strong>Hold to Activate:</strong> Hold key to
-                          activate agent, release to stop
-                        </li>
-                      </ul>
-                    </li>
-                    <li>
-                      <strong>
-                        {keyboardShortcuts?.dictation_input || "Option + Space"}
-                        :
-                      </strong>{" "}
-                      Toggle Dictation Mode (voice typing)
-                    </li>
-                    <li>
-                      <strong>Wake Words:</strong> Say "Hey Juno" or "Computer"
-                      (Always Listening Mode)
-                    </li>
-                  </ul>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Configure agent trigger mode in Settings → General → Agent
-                    Trigger Mode
-                  </p>
-                </section>
-                <section>
-                  <h3 className="text-lg font-semibold mb-2">
-                    💬 Chat Features
-                  </h3>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>Type your questions and press Enter</li>
-                    <li>Use voice commands for hands-free interaction</li>
-                    <li>Export conversations for backup or sharing</li>
-                    <li>Import previous conversations to continue</li>
-                  </ul>
-                </section>
-                <section>
-                  <h3 className="text-lg font-semibold mb-2">
-                    🛠️ Tools & Automation
-                  </h3>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>Screen capture and analysis</li>
-                    <li>File operations and code analysis</li>
-                    <li>Web browsing automation</li>
-                    <li>System control and monitoring</li>
-                  </ul>
-                </section>
-                <section>
-                  <h3 className="text-lg font-semibold mb-2">
-                    ⚙️ Settings & Permissions
-                  </h3>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>
-                      Configure accessibility permissions for screen control
-                    </li>
-                    <li>Adjust voice recognition settings</li>
-                    <li>Customize keyboard shortcuts</li>
-                    <li>Enable developer tools for advanced features</li>
-                  </ul>
-                </section>
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-600">
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    For more detailed documentation, visit our GitHub repository
-                    or contact support.
-                  </p>
-                </div>
-              </div>
-            </div>
-          );
+  const handleUpdateConversation = (newMessages: ChatMessage[]) => {
+    setConversation(newMessages);
+  };
 
-        case "feedback":
-          return (
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Submit Feedback
-                </h2>
-                <button
-                  onClick={() => setActiveModal(null)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleSubmitFeedback();
-                }}
-                className="space-y-4"
-              >
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Feedback Type
-                  </label>
-                  <select
-                    value={feedbackData.type}
-                    onChange={(e) =>
-                      setFeedbackData((prev) => ({
-                        ...prev,
-                        type: e.target.value as "issue" | "feature" | "general",
-                      }))
-                    }
-                    className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                  >
-                    <option value="general">General Feedback</option>
-                    <option value="issue">Bug Report</option>
-                    <option value="feature">Feature Request</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Title *
-                  </label>
-                  <input
-                    type="text"
-                    value={feedbackData.title}
-                    onChange={(e) =>
-                      setFeedbackData((prev) => ({
-                        ...prev,
-                        title: e.target.value,
-                      }))
-                    }
-                    className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                    placeholder="Brief summary of your feedback"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Description *
-                  </label>
-                  <textarea
-                    value={feedbackData.description}
-                    onChange={(e) =>
-                      setFeedbackData((prev) => ({
-                        ...prev,
-                        description: e.target.value,
-                      }))
-                    }
-                    className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white h-24"
-                    placeholder="Detailed description of your feedback"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Priority
-                  </label>
-                  <select
-                    value={feedbackData.priority}
-                    onChange={(e) =>
-                      setFeedbackData((prev) => ({
-                        ...prev,
-                        priority: e.target.value as "low" | "medium" | "high",
-                      }))
-                    }
-                    className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Email (Optional)
-                  </label>
-                  <input
-                    type="email"
-                    value={feedbackData.email}
-                    onChange={(e) =>
-                      setFeedbackData((prev) => ({
-                        ...prev,
-                        email: e.target.value,
-                      }))
-                    }
-                    className="w-full p-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                    placeholder="your.email@example.com"
-                  />
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setActiveModal(null)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 dark:text-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-                  >
-                    Submit
-                  </button>
-                </div>
-              </form>
-            </div>
-          );
-
-        case "export":
-          return (
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Export Chat
-                </h2>
-                <button
-                  onClick={() => setActiveModal(null)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-              <div className="space-y-4">
-                <p className="text-gray-700 dark:text-gray-300">
-                  Export your current conversation to a JSON file for backup or
-                  sharing.
-                </p>
-                <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm">
-                  <strong>Messages to export:</strong>{" "}
-                  {conversation.filter((msg) => msg.role !== "system").length}
-                  <br />
-                  <strong>Format:</strong> JSON
-                  <br />
-                  <strong>Includes:</strong> All user and assistant messages
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => setActiveModal(null)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 dark:text-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleExportChat}
-                    disabled={isExporting}
-                    className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 disabled:opacity-50"
-                  >
-                    {isExporting ? "Exporting..." : "Export"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-
-        case "import":
-          return (
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Import Chat
-                </h2>
-                <button
-                  onClick={() => setActiveModal(null)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-              <div className="space-y-4">
-                <p className="text-gray-700 dark:text-gray-300">
-                  Import a previously exported chat conversation from a JSON
-                  file.
-                </p>
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded text-sm text-yellow-800 dark:text-yellow-200">
-                  <strong>Warning:</strong> This will replace your current
-                  conversation. Make sure to export it first if you want to keep
-                  it.
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => setActiveModal(null)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 dark:text-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleImportChat}
-                    disabled={isImporting}
-                    className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:opacity-50"
-                  >
-                    {isImporting ? "Importing..." : "Select File"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-
-        case "update":
-          return updateInfo ? (
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                  Update Available
-                </h2>
-                <button
-                  onClick={() => setActiveModal(null)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                >
-                  <svg
-                    className="w-6 h-6"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <p className="text-gray-700 dark:text-gray-300">
-                    A new version of Juno AI is available!
-                  </p>
-                  {updateInfo.version && (
-                    <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded">
-                      <p className="text-sm">
-                        <strong>Version:</strong> {updateInfo.version}
-                      </p>
-                      {updateInfo.date && (
-                        <p className="text-sm">
-                          <strong>Date:</strong> {updateInfo.date}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {updateInfo.notes && (
-                    <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
-                      <p className="text-sm font-medium mb-1">Release Notes:</p>
-                      <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {updateInfo.notes}
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => setActiveModal(null)}
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 dark:text-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
-                  >
-                    Later
-                  </button>
-                  <button
-                    onClick={handleInstallUpdate}
-                    className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600"
-                  >
-                    Install Update
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null;
-
-        default:
-          return null;
-      }
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        {modalContent()}
-      </div>
-    );
+  const handleAddSystemMessage = (content: string) => {
+    setConversation((prev) => [
+      ...prev,
+      {
+        role: "system",
+        content,
+        timestamp: Date.now(),
+      },
+    ]);
   };
 
   // Copy and Save handlers for agent responses with enhanced feedback
@@ -2767,77 +2076,14 @@ function App() {
         <div className="w-screen h-screen bg-background text-foreground">
           <div className="container mx-auto p-2 h-full flex flex-col">
             {/* Header */}
-            <header className="flex items-center justify-between py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <DogIcon size={16} className="text-blue-500" />
-                  <span className="text-sm font-semibold">Juno AI</span>
-                  <div className="flex items-center gap-1">
-                    <div
-                      className={cn(
-                        "w-1.5 h-1.5 rounded-full",
-                        serverStatus === "connected"
-                          ? "bg-green-500"
-                          : serverStatus === "error"
-                          ? "bg-red-500"
-                          : "bg-yellow-500"
-                      )}
-                    />
-                    {isProcessing && (
-                      <div className="text-xs text-muted-foreground">
-                        <AgentExecutionProgressIndicator
-                          compact
-                          className="text-muted-foreground"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Voice Status Indicator - only show in chat view */}
-              {currentView === "chat" && (
-                <div className="flex-1 flex justify-center mx-2">
-                  <VoiceStatusIndicator
-                    variant="compact"
-                    className="max-w-xs"
-                    showText={false}
-                  />
-                </div>
-              )}
-
-              <div className="flex items-center gap-1">
-                {/* Back Button - show for devtools, permissions views */}
-                {(currentView === "devtools" ||
-                  currentView === "permissions") && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentView("chat")}
-                    title="Back to Chat"
-                    className="h-7 w-7 p-0"
-                  >
-                    <ArrowLeft size={14} />
-                  </Button>
-                )}
-                {/* Toggle Dev Panel Button - only show in chat view */}
-                {currentView === "chat" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
-                    title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
-                    className="h-7 w-7 p-0"
-                  >
-                    {isDevPanelOpen ? (
-                      <PanelLeftClose size={14} />
-                    ) : (
-                      <PanelLeftOpen size={14} />
-                    )}
-                  </Button>
-                )}
-              </div>
-            </header>
+            <AppHeader
+              serverStatus={serverStatus}
+              isProcessing={isProcessing}
+              currentView={currentView}
+              isDevPanelOpen={isDevPanelOpen}
+              onViewChange={setCurrentView}
+              onToggleDevPanel={() => setIsDevPanelOpen(!isDevPanelOpen)}
+            />
 
             {/* Main Content Area - Conditional based on current view */}
             {currentView === "devtools" ? (
@@ -2927,14 +2173,14 @@ function App() {
                                 </div>
                               )}
 
-                              {renderChatMessage(
-                                msg,
-                                index,
-                                copyingMessageId,
-                                savingMessageId,
-                                handleCopyResponse,
-                                handleSaveResponse
-                              )}
+                              <ChatMessageComponent
+                                msg={msg}
+                                index={index}
+                                copyingMessageId={copyingMessageId}
+                                savingMessageId={savingMessageId}
+                                onCopyResponse={handleCopyResponse}
+                                onSaveResponse={handleSaveResponse}
+                              />
                             </div>
                           );
                         })
@@ -3032,7 +2278,19 @@ function App() {
         </div>
 
         {/* Enhanced modal system */}
-        {renderModal()}
+        <ModalSystem
+          activeModal={activeModal}
+          onClose={() => setActiveModal(null)}
+          feedbackData={feedbackData}
+          onFeedbackDataChange={handleFeedbackDataChange}
+          updateInfo={updateInfo}
+          conversation={conversation}
+          isExporting={isExporting}
+          isImporting={isImporting}
+          keyboardShortcuts={keyboardShortcuts}
+          onUpdateConversation={handleUpdateConversation}
+          onAddSystemMessage={handleAddSystemMessage}
+        />
 
         {/* Update check loading indicator */}
         {isCheckingUpdate && (
