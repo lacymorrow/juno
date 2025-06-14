@@ -245,15 +245,8 @@ function App() {
   const [lastScrollTime, setLastScrollTime] = useState(0);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
-<<<<<<< HEAD
-  // App view and panel state
-  const [currentView, setCurrentView] = useState<
-    "chat" | "devtools" | "permissions"
-  >("chat");
-=======
   // Add missing view state variables
   const [currentView, setCurrentView] = useState<AppView>("chat");
->>>>>>> main
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
 
   // Fetch app version dynamically
@@ -2081,7 +2074,9 @@ function App() {
   // Listen for comprehensive agent-stop-all events
   useEffect(() => {
     const unlisten = listen("agent-stop-all", async () => {
-      console.log("Agent stop all event received - performing comprehensive UI cleanup");
+      console.log(
+        "Agent stop all event received - performing comprehensive UI cleanup"
+      );
       try {
         // Stop TTS immediately
         await stopTTS((msg, level) =>
