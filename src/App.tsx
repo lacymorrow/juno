@@ -2072,6 +2072,43 @@ function App() {
     return () => scrollElement.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
 
+  // Listen for comprehensive agent-stop-all events
+  useEffect(() => {
+    const unlisten = listen("agent-stop-all", async () => {
+      console.log("Agent stop all event received - performing comprehensive UI cleanup");
+      try {
+        // Stop TTS immediately
+        await stopTTS((msg, level) =>
+          console.log(`[Agent Stop All TTS-${level || "info"}] ${msg}`)
+        );
+
+        // Reset processing state
+        setIsProcessing(false);
+
+        // Stop any currently playing audio
+        if (currentAudio) {
+          console.log("Agent stop all: Stopping current audio element");
+          currentAudio.pause();
+          currentAudio.currentTime = 0;
+          if (currentAudio.src && currentAudio.src.startsWith("blob:")) {
+            URL.revokeObjectURL(currentAudio.src);
+          }
+          currentAudio.src = "";
+          setCurrentAudio(null);
+          setCurrentAudioElement(null);
+        }
+
+        console.log("Agent stop all: UI cleanup completed successfully");
+      } catch (error) {
+        console.error("Error during agent stop all cleanup:", error);
+      }
+    });
+
+    return () => {
+      unlisten.then((unlistenFn) => unlistenFn());
+    };
+  }, [currentAudio]); // Include currentAudio dependency for proper cleanup
+
   return (
     <VoiceProvider>
       <main className="h-screen flex flex-col">
