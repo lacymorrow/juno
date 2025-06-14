@@ -195,7 +195,7 @@ pub async fn set_mcp_server_enabled(
 /// Test MCP server connection (without adding it permanently)
 #[tauri::command]
 pub async fn test_mcp_server_connection(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     config: MCPServerConfig,
 ) -> Result<String, String> {
     info!("Testing MCP server connection: {}", config.name);

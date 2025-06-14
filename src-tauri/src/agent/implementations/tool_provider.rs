@@ -438,7 +438,7 @@ impl LocalToolProvider {
     /// Determine recovery strategy based on error class and history
     async fn determine_recovery_strategy(&self,
         error_class: ErrorClass,
-        tool_name: &str,
+        _tool_name: &str,
         retry_count: u32
     ) -> RecoveryStrategy {
         if retry_count >= self.recovery_config.max_retries {
@@ -713,7 +713,7 @@ impl LocalToolProvider {
                     "Tool '{}' execution timed out after {:?}",
                     tool_name, timeout_duration
                 );
-                
+
                 // Return a proper ToolResult with timeout error instead of AgentError
                 // This ensures the conversation remains consistent
                 Ok(ToolResult {
