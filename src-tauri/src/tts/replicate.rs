@@ -5,9 +5,10 @@ use tokio; // Ensure tokio is available for sleep
 use tracing::{error, info, warn}; // Import tracing macros
 use std::env;
 use base64::Engine;
+use crate::constants::timeouts;
 
 // Maximum time to wait for Replicate prediction to complete (5 minutes)
-const REPLICATE_TIMEOUT_SECONDS: u64 = 300;
+// const REPLICATE_TIMEOUT_SECONDS: u64 = 300;
 
 // --- Replicate API Structures ---
 #[derive(Serialize)]
@@ -155,7 +156,7 @@ pub async fn invoke_replicate_tts(
 
     // 2. Poll for the result with timeout
     let start_time = std::time::Instant::now();
-    let timeout_duration = Duration::from_secs(REPLICATE_TIMEOUT_SECONDS);
+    let timeout_duration = Duration::from_secs(timeouts::REPLICATE_TIMEOUT_SECONDS);
 
     loop {
         // Check if stop was requested before each polling iteration
@@ -166,7 +167,7 @@ pub async fn invoke_replicate_tts(
 
         // Check for timeout
         if start_time.elapsed() > timeout_duration {
-            let err_msg = format!("Replicate prediction timed out after {} seconds (prediction ID: {})", REPLICATE_TIMEOUT_SECONDS, initial_data.id);
+            let err_msg = format!("Replicate prediction timed out after {} seconds (prediction ID: {})", timeouts::REPLICATE_TIMEOUT_SECONDS, initial_data.id);
             error!("{}", err_msg);
             return Err(err_msg);
         }
