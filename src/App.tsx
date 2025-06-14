@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
+import { VoiceProvider } from "@/contexts/VoiceContext";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { notificationService } from "@/lib/notifications";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
@@ -2695,301 +2696,307 @@ function App() {
   }, [conversation]);
 
   return (
-    <main className="h-screen flex flex-col">
-      {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
-      <ClickVisualizer />
-      <KeyPressOverlay />
-      <CommandOverlay />
+    <VoiceProvider>
+      <main className="h-screen flex flex-col">
+        {/* Click Visualizer - overlays the entire app to show click indicators (from tools2) */}
+        <ClickVisualizer />
+        <KeyPressOverlay />
+        <CommandOverlay />
 
-      <div className="w-screen h-screen bg-background text-foreground">
-        <div className="container mx-auto p-2 h-full flex flex-col">
-          {/* Header */}
-          <header className="flex items-center justify-between py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1">
-                <DogIcon size={16} className="text-blue-500" />
-                <span className="text-sm font-semibold">Juno AI</span>
+        <div className="w-screen h-screen bg-background text-foreground">
+          <div className="container mx-auto p-2 h-full flex flex-col">
+            {/* Header */}
+            <header className="flex items-center justify-between py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+              <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
-                  <div
-                    className={cn(
-                      "w-1.5 h-1.5 rounded-full",
-                      serverStatus === "connected"
-                        ? "bg-green-500"
-                        : serverStatus === "error"
-                        ? "bg-red-500"
-                        : "bg-yellow-500"
-                    )}
-                  />
-                  {isProcessing && (
-                    <div className="text-xs text-muted-foreground">
-                      <AgentExecutionProgressIndicator
-                        compact
-                        className="text-muted-foreground"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Voice Status Indicator - only show in chat view */}
-            {currentView === "chat" && (
-              <div className="flex-1 flex justify-center mx-2">
-                <VoiceStatusIndicator
-                  variant="compact"
-                  className="max-w-xs"
-                  showText={false}
-                />
-              </div>
-            )}
-
-            <div className="flex items-center gap-1">
-              {/* Back Button - show for devtools, permissions views */}
-              {(currentView === "devtools" ||
-                currentView === "permissions") && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentView("chat")}
-                  title="Back to Chat"
-                  className="h-7 w-7 p-0"
-                >
-                  <ArrowLeft size={14} />
-                </Button>
-              )}
-              {/* Toggle Dev Panel Button - only show in chat view */}
-              {currentView === "chat" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
-                  title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
-                  className="h-7 w-7 p-0"
-                >
-                  {isDevPanelOpen ? (
-                    <PanelLeftClose size={14} />
-                  ) : (
-                    <PanelLeftOpen size={14} />
-                  )}
-                </Button>
-              )}
-            </div>
-          </header>
-
-          {/* Main Content Area - Conditional based on current view */}
-          {currentView === "devtools" ? (
-            <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full p-2">
-                <h2 className="text-sm font-semibold mb-2 border-b pb-1">
-                  Developer Tools & Logs
-                </h2>
-                <DevToolsPanel />
-              </ScrollArea>
-            </div>
-          ) : currentView === "permissions" ? (
-            <div className="flex-grow rounded-lg border overflow-hidden">
-              <ScrollArea className="h-full w-full p-2">
-                <PermissionsFlow
-                  onComplete={() => {
-                    setShowPermissionsFlow(false);
-                    setCurrentView("chat");
-                  }}
-                  onSkip={() => {
-                    setShowPermissionsFlow(false);
-                    setCurrentView("chat");
-                  }}
-                  showSkipOption={true}
-                  className="max-w-4xl mx-auto"
-                />
-              </ScrollArea>
-            </div>
-          ) : (
-            <ResizablePanelGroup
-              direction="horizontal"
-              className="flex-grow rounded-lg border overflow-hidden"
-            >
-              {/* Chat Panel */}
-              <ResizablePanel
-                defaultSize={isDevPanelOpen ? 50 : 100}
-                minSize={30}
-              >
-                <div className="flex flex-col h-full p-2">
-                  {/* Conversation Area */}
-                  <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4">
-                    {conversation.length === 0 ? (
-                      /* Compact welcome message when conversation is empty */
-                      <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">
-                        <div className="space-y-1">
-                          <DogIcon
-                            size={16}
-                            className="text-blue-500 mx-auto"
-                          />
-                          <div>
-                            <h2 className="text-sm font-semibold">Juno AI</h2>
-                            <p className="text-xs text-muted-foreground">
-                              AI desktop assistant
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Compact Example Prompts */}
-                        <ExamplePrompts
-                          onPromptSelect={handleExamplePromptSelect}
+                  <DogIcon size={16} className="text-blue-500" />
+                  <span className="text-sm font-semibold">Juno AI</span>
+                  <div className="flex items-center gap-1">
+                    <div
+                      className={cn(
+                        "w-1.5 h-1.5 rounded-full",
+                        serverStatus === "connected"
+                          ? "bg-green-500"
+                          : serverStatus === "error"
+                          ? "bg-red-500"
+                          : "bg-yellow-500"
+                      )}
+                    />
+                    {isProcessing && (
+                      <div className="text-xs text-muted-foreground">
+                        <AgentExecutionProgressIndicator
+                          compact
+                          className="text-muted-foreground"
                         />
                       </div>
-                    ) : (
-                      conversation.map((msg, index) => {
-                        const previousMsg =
-                          index > 0 ? conversation[index - 1] : null;
-                        const showTimestamp = shouldShowTimestamp(
-                          msg,
-                          previousMsg
-                        );
-
-                        return (
-                          <div
-                            key={`msg-container-${index}-${
-                              msg.timestamp || Date.now()
-                            }`}
-                          >
-                            {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
-                            {showTimestamp && msg.timestamp && (
-                              <div className="flex justify-center my-4">
-                                <span
-                                  className="text-xs text-muted-foreground bg-background px-3 py-1 border rounded-full shadow-sm cursor-default"
-                                  title={formatFullTimestamp(msg.timestamp)}
-                                >
-                                  {formatMessageTimestamp(msg.timestamp)}
-                                </span>
-                              </div>
-                            )}
-
-                            {renderChatMessage(
-                              msg,
-                              index,
-                              copyingMessageId,
-                              savingMessageId,
-                              handleCopyResponse,
-                              handleSaveResponse
-                            )}
-                          </div>
-                        );
-                      })
                     )}
-                    <div ref={conversationEndRef} />
-                  </ScrollArea>
-
-                  {/* Input Form */}
-                  <AIInput onSubmit={isProcessing ? handleStop : handleSubmit}>
-                    <AIInputTextarea
-                      name="message"
-                      placeholder={
-                        isProcessing
-                          ? "Processing..."
-                          : "What would you like to know?"
-                      }
-                      value={query}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        setQuery(e.target.value)
-                      }
-                      disabled={isProcessing || serverStatus !== "connected"}
-                      minHeight={48}
-                      maxHeight={164}
-                    />
-                    <AIInputToolbar>
-                      <AIInputTools>
-                        <AIInputButton
-                          onClick={startNewChat}
-                          disabled={isProcessing}
-                          title="Start new agent chat"
-                        >
-                          <Plus size={18} />
-                          New Chat
-                        </AIInputButton>
-                        <AIInputButton
-                          onClick={clearConversation}
-                          disabled={isProcessing}
-                          title="Clear conversation history"
-                        >
-                          <Trash2 size={18} />
-                          Clear
-                        </AIInputButton>
-                      </AIInputTools>
-                      <AIInputSubmit
-                        disabled={
-                          !isProcessing &&
-                          (serverStatus !== "connected" || !query.trim())
-                        }
-                        variant={isProcessing ? "destructive" : "default"}
-                        title={
-                          isProcessing ? "Stop all operations" : "Submit query"
-                        }
-                      >
-                        {isProcessing ? (
-                          <Square size={18} />
-                        ) : (
-                          <Send size={18} />
-                        )}
-                      </AIInputSubmit>
-                    </AIInputToolbar>
-                  </AIInput>
+                  </div>
                 </div>
-              </ResizablePanel>
+              </div>
 
-              {/* Conditionally render the resizable handle and dev panel based on isDevPanelOpen */}
-              {isDevPanelOpen && (
-                <>
-                  {/* Resizable Handle */}
-                  <ResizableHandle withHandle />
-
-                  {/* Dev Tools & Logs Panel */}
-                  <ResizablePanel defaultSize={50} minSize={25}>
-                    <ScrollArea className="h-full w-full p-2">
-                      {/* Title (replaces CardHeader) */}
-                      <h2 className="text-sm font-semibold mb-2 border-b pb-1">
-                        Developer Tools & Logs
-                      </h2>
-                      {/* DevToolsPanel Component */}
-                      <div className="border-b pb-2 mb-2">
-                        <DevToolsPanel />
-                      </div>
-                      {/* Logs Area */}
-                      <div className="flex-grow">{/* Logs Area */}</div>
-                    </ScrollArea>
-                  </ResizablePanel>
-                </>
+              {/* Voice Status Indicator - only show in chat view */}
+              {currentView === "chat" && (
+                <div className="flex-1 flex justify-center mx-2">
+                  <VoiceStatusIndicator
+                    variant="compact"
+                    className="max-w-xs"
+                    showText={false}
+                  />
+                </div>
               )}
-            </ResizablePanelGroup>
-          )}
+
+              <div className="flex items-center gap-1">
+                {/* Back Button - show for devtools, permissions views */}
+                {(currentView === "devtools" ||
+                  currentView === "permissions") && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentView("chat")}
+                    title="Back to Chat"
+                    className="h-7 w-7 p-0"
+                  >
+                    <ArrowLeft size={14} />
+                  </Button>
+                )}
+                {/* Toggle Dev Panel Button - only show in chat view */}
+                {currentView === "chat" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsDevPanelOpen(!isDevPanelOpen)}
+                    title={isDevPanelOpen ? "Hide Dev Panel" : "Show Dev Panel"}
+                    className="h-7 w-7 p-0"
+                  >
+                    {isDevPanelOpen ? (
+                      <PanelLeftClose size={14} />
+                    ) : (
+                      <PanelLeftOpen size={14} />
+                    )}
+                  </Button>
+                )}
+              </div>
+            </header>
+
+            {/* Main Content Area - Conditional based on current view */}
+            {currentView === "devtools" ? (
+              <div className="flex-grow rounded-lg border overflow-hidden">
+                <ScrollArea className="h-full w-full p-2">
+                  <h2 className="text-sm font-semibold mb-2 border-b pb-1">
+                    Developer Tools & Logs
+                  </h2>
+                  <DevToolsPanel />
+                </ScrollArea>
+              </div>
+            ) : currentView === "permissions" ? (
+              <div className="flex-grow rounded-lg border overflow-hidden">
+                <ScrollArea className="h-full w-full p-2">
+                  <PermissionsFlow
+                    onComplete={() => {
+                      setShowPermissionsFlow(false);
+                      setCurrentView("chat");
+                    }}
+                    onSkip={() => {
+                      setShowPermissionsFlow(false);
+                      setCurrentView("chat");
+                    }}
+                    showSkipOption={true}
+                    className="max-w-4xl mx-auto"
+                  />
+                </ScrollArea>
+              </div>
+            ) : (
+              <ResizablePanelGroup
+                direction="horizontal"
+                className="flex-grow rounded-lg border overflow-hidden"
+              >
+                {/* Chat Panel */}
+                <ResizablePanel
+                  defaultSize={isDevPanelOpen ? 50 : 100}
+                  minSize={30}
+                >
+                  <div className="flex flex-col h-full p-2">
+                    {/* Conversation Area */}
+                    <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4">
+                      {conversation.length === 0 ? (
+                        /* Compact welcome message when conversation is empty */
+                        <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">
+                          <div className="space-y-1">
+                            <DogIcon
+                              size={16}
+                              className="text-blue-500 mx-auto"
+                            />
+                            <div>
+                              <h2 className="text-sm font-semibold">Juno AI</h2>
+                              <p className="text-xs text-muted-foreground">
+                                AI desktop assistant
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Compact Example Prompts */}
+                          <ExamplePrompts
+                            onPromptSelect={handleExamplePromptSelect}
+                          />
+                        </div>
+                      ) : (
+                        conversation.map((msg, index) => {
+                          const previousMsg =
+                            index > 0 ? conversation[index - 1] : null;
+                          const showTimestamp = shouldShowTimestamp(
+                            msg,
+                            previousMsg
+                          );
+
+                          return (
+                            <div
+                              key={`msg-container-${index}-${
+                                msg.timestamp || Date.now()
+                              }`}
+                            >
+                              {/* Timestamp header - show when needed, similar to Slack/Apple Messages */}
+                              {showTimestamp && msg.timestamp && (
+                                <div className="flex justify-center my-4">
+                                  <span
+                                    className="text-xs text-muted-foreground bg-background px-3 py-1 border rounded-full shadow-sm cursor-default"
+                                    title={formatFullTimestamp(msg.timestamp)}
+                                  >
+                                    {formatMessageTimestamp(msg.timestamp)}
+                                  </span>
+                                </div>
+                              )}
+
+                              {renderChatMessage(
+                                msg,
+                                index,
+                                copyingMessageId,
+                                savingMessageId,
+                                handleCopyResponse,
+                                handleSaveResponse
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                      <div ref={conversationEndRef} />
+                    </ScrollArea>
+
+                    {/* Input Form */}
+                    <AIInput
+                      onSubmit={isProcessing ? handleStop : handleSubmit}
+                    >
+                      <AIInputTextarea
+                        name="message"
+                        placeholder={
+                          isProcessing
+                            ? "Processing..."
+                            : "What would you like to know?"
+                        }
+                        value={query}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                          setQuery(e.target.value)
+                        }
+                        disabled={isProcessing || serverStatus !== "connected"}
+                        minHeight={48}
+                        maxHeight={164}
+                      />
+                      <AIInputToolbar>
+                        <AIInputTools>
+                          <AIInputButton
+                            onClick={startNewChat}
+                            disabled={isProcessing}
+                            title="Start new agent chat"
+                          >
+                            <Plus size={18} />
+                            New Chat
+                          </AIInputButton>
+                          <AIInputButton
+                            onClick={clearConversation}
+                            disabled={isProcessing}
+                            title="Clear conversation history"
+                          >
+                            <Trash2 size={18} />
+                            Clear
+                          </AIInputButton>
+                        </AIInputTools>
+                        <AIInputSubmit
+                          disabled={
+                            !isProcessing &&
+                            (serverStatus !== "connected" || !query.trim())
+                          }
+                          variant={isProcessing ? "destructive" : "default"}
+                          title={
+                            isProcessing
+                              ? "Stop all operations"
+                              : "Submit query"
+                          }
+                        >
+                          {isProcessing ? (
+                            <Square size={18} />
+                          ) : (
+                            <Send size={18} />
+                          )}
+                        </AIInputSubmit>
+                      </AIInputToolbar>
+                    </AIInput>
+                  </div>
+                </ResizablePanel>
+
+                {/* Conditionally render the resizable handle and dev panel based on isDevPanelOpen */}
+                {isDevPanelOpen && (
+                  <>
+                    {/* Resizable Handle */}
+                    <ResizableHandle withHandle />
+
+                    {/* Dev Tools & Logs Panel */}
+                    <ResizablePanel defaultSize={50} minSize={25}>
+                      <ScrollArea className="h-full w-full p-2">
+                        {/* Title (replaces CardHeader) */}
+                        <h2 className="text-sm font-semibold mb-2 border-b pb-1">
+                          Developer Tools & Logs
+                        </h2>
+                        {/* DevToolsPanel Component */}
+                        <div className="border-b pb-2 mb-2">
+                          <DevToolsPanel />
+                        </div>
+                        {/* Logs Area */}
+                        <div className="flex-grow">{/* Logs Area */}</div>
+                      </ScrollArea>
+                    </ResizablePanel>
+                  </>
+                )}
+              </ResizablePanelGroup>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Enhanced modal system */}
-      {renderModal()}
+        {/* Enhanced modal system */}
+        {renderModal()}
 
-      {/* Update check loading indicator */}
-      {isCheckingUpdate && (
-        <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg">
-          Checking for updates...
-        </div>
-      )}
+        {/* Update check loading indicator */}
+        {isCheckingUpdate && (
+          <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg">
+            Checking for updates...
+          </div>
+        )}
 
-      {/* Version display in bottom left corner */}
-      {appVersion && (
-        <div className="fixed bottom-2 left-2 text-xs text-muted-foreground/50 pointer-events-none select-none">
-          {appVersion}
-        </div>
-      )}
+        {/* Version display in bottom left corner */}
+        {appVersion && (
+          <div className="fixed bottom-2 left-2 text-xs text-muted-foreground/50 pointer-events-none select-none">
+            {appVersion}
+          </div>
+        )}
 
-      {/* Toast notifications */}
-      <Toaster
-        position="bottom-right"
-        expand={true}
-        richColors={true}
-        closeButton={true}
-        duration={5000}
-      />
-    </main>
+        {/* Toast notifications */}
+        <Toaster
+          position="bottom-right"
+          expand={true}
+          richColors={true}
+          closeButton={true}
+          duration={5000}
+        />
+      </main>
+    </VoiceProvider>
   );
 }
 
