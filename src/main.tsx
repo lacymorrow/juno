@@ -21,7 +21,14 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Route path="/onboarding" element={<OnboardingWindow />} />
         </Routes>
       </BrowserRouter>
-      <Toaster />
+      {/* Toast notifications */}
+      <Toaster
+        position="bottom-right"
+        expand={true}
+        richColors={true}
+        closeButton={true}
+        duration={5000}
+      />
     </>
   </React.StrictMode>
 );

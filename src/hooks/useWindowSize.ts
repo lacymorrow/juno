@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import { LogicalSize, Window } from '@tauri-apps/api/window';
 
 interface WindowSizeConfig {

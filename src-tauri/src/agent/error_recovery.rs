@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use tracing::{warn, info, debug, error};
+use crate::constants::error_recovery;
 
 use crate::agent::core::{AgentError, ToolCall, ToolResult};
 
@@ -58,13 +59,13 @@ pub struct RecoveryConfig {
 impl Default for RecoveryConfig {
     fn default() -> Self {
         Self {
-            max_retries: 3,
-            base_retry_delay: Duration::from_millis(500),
-            max_retry_delay: Duration::from_secs(10),
+            max_retries: error_recovery::DEFAULT_MAX_RETRIES,
+            base_retry_delay: Duration::from_millis(error_recovery::DEFAULT_BASE_RETRY_DELAY_MS),
+            max_retry_delay: Duration::from_millis(error_recovery::DEFAULT_MAX_RETRY_DELAY_MS),
             enable_alternative_methods: true,
             enable_llm_recovery: true,
             enable_user_escalation: false, // Default to false for autonomous operation
-            timeout_threshold: Duration::from_secs(30),
+            timeout_threshold: Duration::from_millis(error_recovery::DEFAULT_TIMEOUT_THRESHOLD_MS),
         }
     }
 }
@@ -120,7 +121,7 @@ impl ErrorRecoveryManager {
         self.strategy_mappings.insert(
             ErrorPattern::ElementNotFound,
             vec![
-                RecoveryStrategy::WaitAndRetry(Duration::from_millis(1000)),
+                RecoveryStrategy::WaitAndRetry(Duration::from_millis(error_recovery::ELEMENT_NOT_FOUND_DELAY_MS)),
                 RecoveryStrategy::RefreshContext,
                 RecoveryStrategy::AlternativeMethod,
                 RecoveryStrategy::AdjustParameters,
@@ -131,7 +132,7 @@ impl ErrorRecoveryManager {
         self.strategy_mappings.insert(
             ErrorPattern::NetworkError,
             vec![
-                RecoveryStrategy::WaitAndRetry(Duration::from_secs(2)),
+                RecoveryStrategy::WaitAndRetry(Duration::from_millis(error_recovery::NETWORK_ERROR_DELAY_MS)),
                 RecoveryStrategy::Retry,
                 RecoveryStrategy::FallbackTool,
             ]
@@ -152,7 +153,7 @@ impl ErrorRecoveryManager {
             ErrorPattern::Timeout,
             vec![
                 RecoveryStrategy::AdjustParameters,
-                RecoveryStrategy::WaitAndRetry(Duration::from_secs(5)),
+                RecoveryStrategy::WaitAndRetry(Duration::from_millis(error_recovery::TIMEOUT_RECOVERY_DELAY_MS)),
                 RecoveryStrategy::AlternativeMethod,
             ]
         );
@@ -161,7 +162,7 @@ impl ErrorRecoveryManager {
         self.strategy_mappings.insert(
             ErrorPattern::LLMRateLimit,
             vec![
-                RecoveryStrategy::WaitAndRetry(Duration::from_secs(60)),
+                RecoveryStrategy::WaitAndRetry(Duration::from_millis(error_recovery::RATE_LIMIT_BACKOFF_MS)),
                 RecoveryStrategy::FallbackTool,
             ]
         );
@@ -181,7 +182,7 @@ impl ErrorRecoveryManager {
             ErrorPattern::ApplicationNotRunning,
             vec![
                 RecoveryStrategy::AlternativeMethod, // This would start the app
-                RecoveryStrategy::WaitAndRetry(Duration::from_secs(2)),
+                RecoveryStrategy::WaitAndRetry(Duration::from_millis(error_recovery::NETWORK_ERROR_DELAY_MS)),
                 RecoveryStrategy::EscalateToUser,
             ]
         );
