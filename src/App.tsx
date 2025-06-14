@@ -10,7 +10,6 @@ import {
   type ModalType,
   type FeedbackData,
   type UpdateInfo,
-  type ChatExport,
 } from "@/components/ModalSystem";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
 import { isJsxContent } from "@/components/ui/jsx-message-renderer";
@@ -221,8 +220,6 @@ function App() {
   });
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
 
   // Copy and save operation state
   const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
@@ -850,231 +847,6 @@ function App() {
       ]);
     } finally {
       setIsCheckingUpdate(false);
-    }
-  };
-
-  // Install update implementation - simplified version using backend
-  const handleInstallUpdate = async () => {
-    try {
-      console.log("🚀 Installing update...");
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content:
-            "🚀 Installing update... The application will restart automatically.",
-          timestamp: Date.now(),
-        },
-      ]);
-
-      await invoke("install_update");
-    } catch (error) {
-      console.error("❌ Failed to install update:", error);
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Failed to install update: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    }
-  };
-
-  // Chat export implementation - simplified version using backend save dialog
-  const handleExportChat = async () => {
-    if (conversation.length === 0) {
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: "No conversation to export.",
-          timestamp: Date.now(),
-        },
-      ]);
-      return;
-    }
-
-    setIsExporting(true);
-    try {
-      const exportData: ChatExport = {
-        version: "1.0",
-        exported_at: new Date().toISOString(),
-        conversation: conversation.filter((msg) => msg.role !== "system"), // Exclude system messages
-        metadata: {
-          total_messages: conversation.length,
-          export_type: "filtered",
-        },
-      };
-
-      // Use backend command to handle file save dialog and writing
-      const result = (await invoke("save_chat_export", {
-        data: JSON.stringify(exportData, null, 2),
-      })) as { success: boolean; path?: string; error?: string };
-
-      if (result.success && result.path) {
-        setConversation((prev) => [
-          ...prev,
-          {
-            role: "system",
-            content: `✅ Chat exported successfully to: ${result.path}`,
-            timestamp: Date.now(),
-          },
-        ]);
-        console.log("✅ Chat exported successfully to:", result.path);
-      } else {
-        throw new Error(result.error || "Export failed");
-      }
-    } catch (error) {
-      console.error("❌ Failed to export chat:", error);
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Failed to export chat: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    } finally {
-      setIsExporting(false);
-      setActiveModal(null);
-    }
-  };
-
-  // Chat import implementation - simplified version using backend open dialog
-  const handleImportChat = async () => {
-    setIsImporting(true);
-    try {
-      // Use backend command to handle file open dialog and reading
-      const result = (await invoke("load_chat_import")) as {
-        success: boolean;
-        data?: string;
-        error?: string;
-        messageCount?: number;
-      };
-
-      if (result.success && result.data) {
-        const importData: ChatExport = JSON.parse(result.data);
-
-        // Validate import format
-        if (
-          !importData.conversation ||
-          !Array.isArray(importData.conversation)
-        ) {
-          throw new Error("Invalid chat export format");
-        }
-
-        // Confirm import with user
-        const confirmImport = window.confirm(
-          `Import ${
-            result.messageCount || importData.conversation.length
-          } messages? This will replace your current conversation.`
-        );
-
-        if (confirmImport) {
-          // Add timestamps to imported messages if missing
-          const importedMessages = importData.conversation.map((msg) => ({
-            ...msg,
-            timestamp: msg.timestamp || Date.now(),
-          }));
-
-          setConversation(importedMessages);
-
-          setConversation((prev) => [
-            ...prev,
-            {
-              role: "system",
-              content: `✅ Chat imported successfully. Loaded ${importedMessages.length} messages.`,
-              timestamp: Date.now(),
-            },
-          ]);
-          console.log("✅ Chat imported successfully:", importData);
-        }
-      } else {
-        if (result.error && !result.error.includes("cancelled")) {
-          throw new Error(result.error);
-        }
-        // User cancelled - no error needed
-      }
-    } catch (error) {
-      console.error("❌ Failed to import chat:", error);
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Failed to import chat: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    } finally {
-      setIsImporting(false);
-      setActiveModal(null);
-    }
-  };
-
-  // Feedback submission implementation
-  const handleSubmitFeedback = async () => {
-    if (!feedbackData.title.trim() || !feedbackData.description.trim()) {
-      alert("Please fill in both title and description fields.");
-      return;
-    }
-
-    try {
-      console.log("📝 Submitting feedback:", feedbackData);
-
-      // Create GitHub issue URL or mailto link for feedback
-      if (feedbackData.type === "issue") {
-        const title = encodeURIComponent(feedbackData.title);
-        const body = encodeURIComponent(
-          `**Priority:** ${feedbackData.priority}\n\n**Description:**\n${
-            feedbackData.description
-          }\n\n**Contact:** ${feedbackData.email || "Not provided"}`
-        );
-        const githubUrl = `https://github.com/lacymorrow/juno/issues/new?title=${title}&body=${body}`;
-
-        // Open GitHub issues page
-        await invoke("open_url", { url: githubUrl });
-      } else {
-        // For general feedback, create mailto link
-        const subject = encodeURIComponent(
-          `Juno AI Feedback: ${feedbackData.title}`
-        );
-        const body = encodeURIComponent(
-          `Priority: ${feedbackData.priority}\n\nDescription:\n${feedbackData.description}`
-        );
-        const mailtoUrl = `mailto:feedback@juno-ai.com?subject=${subject}&body=${body}`;
-
-        await invoke("open_url", { url: mailtoUrl });
-      }
-
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: "✅ Feedback form opened. Thank you for your input!",
-          timestamp: Date.now(),
-        },
-      ]);
-
-      // Reset form and close modal
-      setFeedbackData({
-        type: "general",
-        title: "",
-        description: "",
-        email: "",
-        priority: "medium",
-      });
-      setActiveModal(null);
-    } catch (error) {
-      console.error("❌ Failed to submit feedback:", error);
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "system",
-          content: `Failed to open feedback form: ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
     }
   };
 
@@ -2341,8 +2113,8 @@ function App() {
           onFeedbackDataChange={handleFeedbackDataChange}
           updateInfo={updateInfo}
           conversation={conversation}
-          isExporting={isExporting}
-          isImporting={isImporting}
+          isExporting={false}
+          isImporting={false}
           keyboardShortcuts={keyboardShortcuts}
           onUpdateConversation={handleUpdateConversation}
           onAddSystemMessage={handleAddSystemMessage}
@@ -2361,15 +2133,6 @@ function App() {
             {appVersion}
           </div>
         )}
-
-        {/* Toast notifications */}
-        <Toaster
-          position="bottom-right"
-          expand={true}
-          richColors={true}
-          closeButton={true}
-          duration={5000}
-        />
       </main>
     </VoiceProvider>
   );
