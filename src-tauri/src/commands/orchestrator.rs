@@ -46,35 +46,14 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
 async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
     // Add essential MCP servers that provide intelligent capabilities
     let default_servers = vec![
-        // Core filesystem operations
+        // Core filesystem operations (this package exists)
         MCPServerConfig::new(
             "filesystem".to_string(),
             "npx".to_string(),
             vec!["@modelcontextprotocol/server-filesystem".to_string(), "/Users".to_string()]
         ).with_description("Secure file system operations and management".to_string()),
 
-        // Web content fetching and processing
-        MCPServerConfig::new(
-            "web-fetch".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-fetch".to_string()]
-        ).with_description("Web content fetching and conversion for efficient LLM usage".to_string()),
-
-        // Persistent memory and knowledge management
-        MCPServerConfig::new(
-            "memory".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-memory".to_string()]
-        ).with_description("Knowledge graph-based persistent memory system".to_string()),
-
-        // Time and scheduling capabilities
-        MCPServerConfig::new(
-            "time".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-time".to_string()]
-        ).with_description("Time zones, scheduling, and calendar operations".to_string()),
-
-        // Everything server for comprehensive testing and development
+        // Everything server for comprehensive testing and development (confirmed to exist)
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "everything".to_string(),
@@ -89,33 +68,40 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
             max_retries: 5,
         },
 
-        // Git repository operations
+        // Memory and sequential thinking (confirmed to exist)
         MCPServerConfig::new(
-            "git".to_string(),
+            "memory".to_string(),
             "npx".to_string(),
-            vec!["@modelcontextprotocol/server-git".to_string()]
-        ).with_description("Git repository management and version control".to_string()),
+            vec!["@modelcontextprotocol/server-memory".to_string()]
+        ).with_description("Knowledge graph-based persistent memory system".to_string()),
 
-        // SQLite for local data storage and analysis
+        // Sequential thinking for problem solving (confirmed to exist)
         MCPServerConfig::new(
-            "sqlite".to_string(),
+            "sequential-thinking".to_string(),
             "npx".to_string(),
-            vec!["mcp-server-sqlite".to_string(), "--db-path".to_string(), "./juno-agent-data.db".to_string()]
-        ).with_description("Local SQLite database for structured data storage and queries".to_string()),
+            vec!["@modelcontextprotocol/server-sequential-thinking".to_string()]
+        ).with_description("Sequential thinking and problem-solving capabilities".to_string()),
 
-        // Calculator for mathematical operations
+        // Brave search integration (confirmed to exist)
         MCPServerConfig::new(
-            "calculator".to_string(),
+            "brave-search".to_string(),
             "npx".to_string(),
-            vec!["calculator-mcp".to_string()]
-        ).with_description("Mathematical calculations and computations".to_string()),
+            vec!["@modelcontextprotocol/server-brave-search".to_string()]
+        ).with_description("Web search capabilities via Brave Search API".to_string()),
 
-        // Weather information
+        // Google Maps integration (confirmed to exist)  
         MCPServerConfig::new(
-            "weather".to_string(),
+            "google-maps".to_string(),
             "npx".to_string(),
-            vec!["mcp-weather".to_string()]
-        ).with_description("Weather information and forecasts".to_string()),
+            vec!["@modelcontextprotocol/server-google-maps".to_string()]
+        ).with_description("Location services and mapping via Google Maps API".to_string()),
+
+        // PostgreSQL integration (confirmed to exist)
+        MCPServerConfig::new(
+            "postgres".to_string(),
+            "npx".to_string(),
+            vec!["@modelcontextprotocol/server-postgres".to_string()]
+        ).with_description("PostgreSQL database integration and querying".to_string()),
     ];
 
     tracing::info!("Initializing {} default MCP servers...", default_servers.len());
@@ -125,7 +111,7 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
             tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
 
             // Continue for optional servers that might not be available
-            if config.name == "everything" || config.name == "weather" || config.name == "calculator" {
+            if config.name == "everything" || config.name == "brave-search" || config.name == "google-maps" {
                 tracing::info!("Continuing without optional MCP server '{}' - it may not be available", config.name);
                 continue;
             }

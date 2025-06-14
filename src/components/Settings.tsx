@@ -2034,9 +2034,9 @@ const Settings: React.FC<SettingsProps> = ({
     "args": ["@modelcontextprotocol/server-filesystem", "/Users/username/Documents"],
     "env": {}
   },
-  "sqlite": {
+  "everything": {
     "command": "npx",
-    "args": ["@modelcontextprotocol/server-sqlite", "/path/to/database.db"],
+    "args": ["@modelcontextprotocol/server-everything"],
     "env": {}
   }
 }`}
@@ -2044,7 +2044,7 @@ const Settings: React.FC<SettingsProps> = ({
             />
             <div className="text-xs text-muted-foreground space-y-1">
               <p>
-                • Server name is the JSON key (e.g., "filesystem", "sqlite")
+                • Server name is the JSON key (e.g., "filesystem", "everything")
               </p>
               <p>
                 • Required field: <code>command</code>
@@ -2134,12 +2134,12 @@ const Settings: React.FC<SettingsProps> = ({
                   @modelcontextprotocol/server-filesystem /path
                 </div>
                 <div>
-                  <strong>SQLite:</strong> npx
-                  @modelcontextprotocol/server-sqlite /path/to/db.sqlite
+                  <strong>Everything Server:</strong> npx
+                  @modelcontextprotocol/server-everything
                 </div>
                 <div>
-                  <strong>Git:</strong> npx @modelcontextprotocol/server-git
-                  /path/to/repo
+                  <strong>Memory:</strong> npx
+                  @modelcontextprotocol/server-memory
                 </div>
                 <div>
                   <strong>Brave Search:</strong> npx

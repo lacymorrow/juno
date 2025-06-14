@@ -52,16 +52,20 @@ Juno now initializes with these intelligent MCP servers by default:
 
 ### Core Intelligence Servers
 - **filesystem**: Secure file operations across the entire system
-- **web-fetch**: Web content fetching and conversion for LLM usage
+- **everything**: Comprehensive testing and development server with all MCP features
 - **memory**: Persistent knowledge graph for context retention
-- **time**: Time zones, scheduling, and calendar operations
-- **git**: Git repository management and version control
+- **sequential-thinking**: Advanced problem-solving capabilities
 
-### Optional Enhancement Servers
-- **sqlite**: Local database for structured data storage
-- **calculator**: Mathematical calculations and computations
-- **weather**: Weather information and forecasts
-- **everything**: Comprehensive testing and development server
+### Working Integration Servers
+- **brave-search**: Web search capabilities via Brave Search API
+- **google-maps**: Location services and mapping via Google Maps API
+- **postgres**: PostgreSQL database integration and querying
+
+### Optional Enhancement Servers (Available via npm)
+- **server-postgres**: PostgreSQL database interactions
+- **server-brave-search**: Brave Search API integration
+- **server-google-maps**: Google Maps integration
+- **server-sequential-thinking**: Sequential thinking and problem solving
 
 ## Available MCP Server Categories
 
@@ -102,16 +106,16 @@ Juno now initializes with these intelligent MCP servers by default:
 ```json
 {
   "mcpServers": {
-    "tavily-search": {
+    "brave-search": {
       "command": "npx",
-      "args": ["tavily-mcp-server"],
+      "args": ["@modelcontextprotocol/server-brave-search"],
       "env": {
-        "TAVILY_API_KEY": "your-api-key"
+        "BRAVE_SEARCH_API_KEY": "your-api-key"
       }
     },
-    "web-fetch": {
+    "everything": {
       "command": "npx",
-      "args": ["@modelcontextprotocol/server-fetch"]
+      "args": ["@modelcontextprotocol/server-everything"]
     }
   }
 }
@@ -121,16 +125,13 @@ Juno now initializes with these intelligent MCP servers by default:
 ```json
 {
   "mcpServers": {
-    "github": {
+    "filesystem": {
       "command": "npx",
-      "args": ["@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "your-token"
-      }
+      "args": ["@modelcontextprotocol/server-filesystem", "/path/to/project"]
     },
-    "code-executor": {
+    "sequential-thinking": {
       "command": "npx",
-      "args": ["code-executor-mcp"]
+      "args": ["@modelcontextprotocol/server-sequential-thinking"]
     }
   }
 }
