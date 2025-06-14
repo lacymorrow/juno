@@ -5,13 +5,14 @@ import App from "./App";
 import { FloatingBar } from "./components/FloatingBar";
 import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import { Toaster } from "./components/ui/sonner";
+import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import "./styles/globals.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <>
+    <VoiceProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<App />} />
@@ -29,6 +30,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         closeButton={true}
         duration={5000}
       />
-    </>
+    </VoiceProvider>
   </React.StrictMode>
 );

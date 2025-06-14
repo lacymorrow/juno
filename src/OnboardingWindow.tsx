@@ -2,7 +2,6 @@ import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
-import { Toaster } from "sonner";
 
 export default function OnboardingWindow() {
   const [permissionsGranted, setPermissionsGranted] = useState(false);
@@ -90,12 +89,10 @@ export default function OnboardingWindow() {
   }
 
   return (
-    <>
-      <OnboardingFlow
-        onComplete={handleOnboardingComplete}
-        onSkip={handleOnboardingSkip}
-        permissionsAlreadyGranted={permissionsGranted}
-      />
-    </>
+    <OnboardingFlow
+      onComplete={handleOnboardingComplete}
+      onSkip={handleOnboardingSkip}
+      permissionsAlreadyGranted={permissionsGranted}
+    />
   );
 }
