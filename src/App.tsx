@@ -1,8 +1,17 @@
 import { AppHeader, type AppView } from "@/components/AppHeader";
-import { ChatMessageComponent, type ChatMessage } from "@/components/ChatMessage";
+import {
+  ChatMessageComponent,
+  type ChatMessage,
+} from "@/components/ChatMessage";
 import DevToolsPanel from "@/components/DevToolsPanel";
 import { ExamplePrompts } from "@/components/ExamplePrompts";
-import { ModalSystem, type ModalType, type FeedbackData, type UpdateInfo, type ChatExport } from "@/components/ModalSystem";
+import {
+  ModalSystem,
+  type ModalType,
+  type FeedbackData,
+  type UpdateInfo,
+  type ChatExport,
+} from "@/components/ModalSystem";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
 import { isJsxContent } from "@/components/ui/jsx-message-renderer";
 import {
@@ -27,13 +36,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  DogIcon,
-  Plus,
-  Send,
-  Square,
-  Trash2,
-} from "lucide-react";
+import { DogIcon, Plus, Send, Square, Trash2 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster, toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
@@ -43,7 +46,6 @@ import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import ToolApprovalModal from "./components/ToolApprovalModal";
 import "./styles/globals.css";
-
 
 // Type for the result from submit_query
 type SubmitQueryResult = {
@@ -127,7 +129,6 @@ interface AgentEventTauri {
 }
 // --- End Agent Event Types ---
 
-
 // Simple debounce function
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -193,7 +194,9 @@ function App() {
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [serverStatus, setServerStatus] = useState<"connected" | "error" | "connecting">("connecting");
+  const [serverStatus, setServerStatus] = useState<
+    "connected" | "error" | "connecting"
+  >("connecting");
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
@@ -1566,7 +1569,7 @@ function App() {
       streamTextListener.then((unlistenFn) => unlistenFn());
       streamEndListener.then((unlistenFn) => unlistenFn());
     };
-  }, [throttledAutoScroll]); // Empty dependency array, so it runs once on mount and cleans up on unmount
+  }, [throttledAutoScroll]); // Include throttledAutoScroll in dependency array
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -2014,17 +2017,40 @@ function App() {
     };
   }, [conversation]);
 
+  // Improved auto-scroll function
+  const autoScrollToBottom = useCallback(
+    (forceScroll = false) => {
+      if (!conversationEndRef.current) return;
+
+      // Don't auto-scroll if user has scrolled up, unless forced
+      if (userHasScrolledUp && !forceScroll) return;
+
+      // Smooth scroll to bottom
+      conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
+      setLastScrollTime(Date.now());
+    },
+    [userHasScrolledUp]
+  );
+
+  // Throttled scroll function for streaming (limits frequency)
+  const throttledAutoScroll = useCallback(
+    debounce(() => autoScrollToBottom(), 200), // Only scroll every 200ms during streaming
+    [autoScrollToBottom]
+  );
+
   // Add scroll detection
   const handleScroll = useCallback(() => {
-    const scrollElement = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    const scrollElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    );
     if (!scrollElement) return;
 
     const { scrollTop, scrollHeight, clientHeight } = scrollElement;
     const scrollBottom = scrollHeight - scrollTop - clientHeight;
-    
+
     // Consider user at bottom if within 100px of bottom
     const isNearBottom = scrollBottom < 100;
-    
+
     // Update user scroll state
     if (!isNearBottom && Date.now() - lastScrollTime > 500) {
       // User scrolled up and it's been more than 500ms since last auto-scroll
@@ -2035,31 +2061,15 @@ function App() {
     }
   }, [lastScrollTime]);
 
-  // Improved auto-scroll function
-  const autoScrollToBottom = useCallback((forceScroll = false) => {
-    if (!conversationEndRef.current) return;
-    
-    // Don't auto-scroll if user has scrolled up, unless forced
-    if (userHasScrolledUp && !forceScroll) return;
-
-    // Smooth scroll to bottom
-    conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
-    setLastScrollTime(Date.now());
-  }, [userHasScrolledUp]);
-
-  // Throttled scroll function for streaming (limits frequency)
-  const throttledAutoScroll = useCallback(
-    debounce(() => autoScrollToBottom(), 200), // Only scroll every 200ms during streaming
-    [autoScrollToBottom]
-  );
-
   // Add scroll event listener to detect user scroll behavior
   useEffect(() => {
-    const scrollElement = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    const scrollElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    );
     if (!scrollElement) return;
 
-    scrollElement.addEventListener('scroll', handleScroll);
-    return () => scrollElement.removeEventListener('scroll', handleScroll);
+    scrollElement.addEventListener("scroll", handleScroll);
+    return () => scrollElement.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
 
   return (
@@ -2124,7 +2134,10 @@ function App() {
                 >
                   <div className="flex flex-col h-full p-2">
                     {/* Conversation Area */}
-                    <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4" ref={scrollAreaRef}>
+                    <ScrollArea
+                      className="flex-1 min-h-0 mb-2 -mr-4 pr-4"
+                      ref={scrollAreaRef}
+                    >
                       {conversation.length === 0 ? (
                         /* Compact welcome message when conversation is empty */
                         <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">
