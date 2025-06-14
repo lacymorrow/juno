@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, error, debug, warn};
 use crate::state::{AppState, AgentTriggerMode};
-use crate::constants::monitor_sessions;
+use crate::constants::{monitor_sessions, events};
 
 // Configuration constants
 // const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
@@ -193,7 +193,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         // When threshold is reached, we want to stop the transcription so the final result
         // gets processed by the voice-transcription:final-result handler, which will
         // send the transcribed text to the agent for processing
-        if let Err(e) = app_handle.emit("agent-transcription-stop", ()) {
+        if let Err(e) = app_handle.emit(events::AGENT_TRANSCRIPTION_STOP, ()) {
             error!("[AgentMonitor] Failed to emit agent-transcription-stop: {}", e);
         }
     } else if agent_started {
@@ -203,7 +203,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         );
 
         // If released before threshold, cancel the agent
-        if let Err(e) = app_handle.emit("agent-cancel", ()) {
+        if let Err(e) = app_handle.emit(events::AGENT_CANCEL, ()) {
             error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
         }
     } else {
@@ -235,7 +235,7 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
             if state.check_and_start_agent() {
                 info!("[AgentMonitor] Background task detected agent should start - emitting agent-transcription-start");
                 // Emit event to start agent
-                if let Err(e) = app_handle.emit("agent-transcription-start", ()) {
+                if let Err(e) = app_handle.emit(events::AGENT_TRANSCRIPTION_START, ()) {
                     error!("[AgentMonitor] Failed to emit agent-transcription-start: {}", e);
                 } else {
                     info!("[AgentMonitor] Successfully emitted agent-transcription-start event");
@@ -245,21 +245,21 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
             // Check if we should reach threshold
             if state.check_and_reach_threshold() {
                 // Emit event for threshold reached
-                if let Err(e) = app_handle.emit("agent-committed", ()) {
+                if let Err(e) = app_handle.emit(events::AGENT_COMMITTED, ()) {
                     error!("[AgentMonitor] Failed to emit agent-committed: {}", e);
                 }
             }
 
             // Check for timeouts
             if state.check_agent_timeout() {
-                if let Err(e) = app_handle.emit("agent-force-stop", ()) {
+                if let Err(e) = app_handle.emit(events::AGENT_FORCE_STOP, ()) {
                     error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
                 }
             }
 
             // Check for stuck state cleanup
             if state.should_force_cleanup() {
-                if let Err(e) = app_handle.emit("agent-force-cleanup", ()) {
+                if let Err(e) = app_handle.emit(events::AGENT_FORCE_CLEANUP, ()) {
                     error!("[AgentMonitor] Failed to emit agent-force-cleanup: {}", e);
                 }
             }

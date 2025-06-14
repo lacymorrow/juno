@@ -4,12 +4,13 @@ use tauri::{AppHandle, State, Emitter, Manager};
 use crate::state::AppState;
 use tracing::{info, error};
 use crate::utils::coordinates;
+use crate::constants::{timeouts, events};
 use super::send_dev_tool_notification;
 
 // Helper function to create a visual indicator for mouse clicks
 fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> Result<(), String> {
     // Send an event to the frontend to display a visual indicator
-    app.emit("click-visualization", (x, y, color))
+    app.emit(events::CLICK_VISUALIZATION, (x, y, color))
         .map_err(|e| format!("Failed to emit click visualization event: {}", e))?;
     Ok(())
 }
@@ -22,7 +23,7 @@ async fn ensure_main_window_focus(app: &AppHandle) -> Result<(), String> {
             // Don't fail the operation, just log the warning
         }
         // Small delay to ensure focus is established
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MOUSE_MICRO_DELAY_MS)).await;
     }
     Ok(())
 }
@@ -112,7 +113,7 @@ pub(crate) async fn qa_test_click_series(
         info!("[QA_TOOL] Series test {}/{}: {} click at ({}, {})",
             i+1, positions.len(), click_type, x, y);
         if i > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::DOUBLE_CLICK_DELAY_MS)).await;
         }
         match qa_test_click(app.clone(), state.clone(), *x, *y, click_type.clone()).await {
             Ok(result) => results.push(result),
@@ -155,7 +156,7 @@ pub(crate) async fn qa_test_coordinate_transformation(
     if let Err(e) = &move_result {
         error!("[QA_TOOL] Failed to move mouse to calculated screen coordinates: {}", e);
     } else {
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MOUSE_ACTION_DELAY_MS)).await;
     }
     let actual_cursor_pos = dev_get_cursor_position(app.clone(), state.clone()).await;
     let (actual_screen_x, actual_screen_y) = match actual_cursor_pos {
@@ -187,11 +188,11 @@ pub(crate) async fn qa_test_coordinate_transformation(
     if let Err(e) = create_click_visualization(&app, x, y, "#00FF00") { // Original Scaled (Green)
         error!("[QA_TOOL] Failed to create visualization for original scaled: {}", e);
     }
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MOUSE_CLICK_DELAY_MS)).await;
     if let Err(e) = create_click_visualization(&app, back_to_scaled_x, back_to_scaled_y, "#0000FF") { // Round-tripped Scaled (Blue)
         error!("[QA_TOOL] Failed to create visualization for round-tripped scaled: {}", e);
     }
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MOUSE_CLICK_DELAY_MS)).await;
     if let Err(e) = create_click_visualization(&app, actual_scaled_x, actual_scaled_y, "#FF0000") { // Actual Scaled (Red)
         error!("[QA_TOOL] Failed to create visualization for actual scaled: {}", e);
     }
@@ -234,7 +235,7 @@ pub(crate) async fn qa_test_click_visualization(
         let x = center_x + radius * angle.cos();
         let y = center_y + radius * angle.sin();
         if i > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MOUSE_SEQUENCE_DELAY_MS)).await;
         }
         match create_click_visualization(&app, x, y, color) {
             Ok(_) => results.push(serde_json::json!({"position": {"x": x, "y": y}, "color": color, "success": true})),
