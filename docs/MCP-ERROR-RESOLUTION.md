@@ -22,16 +22,21 @@ The application was configured with default MCP servers that referenced npm pack
 
 The default MCP server configuration has been updated to use only **verified working packages**:
 
-#### ✅ Working MCP Servers Now Configured:
+#### ✅ Working MCP Servers Now Configured (No API Keys Required)
+
 - `@modelcontextprotocol/server-filesystem` - File system operations
 - `@modelcontextprotocol/server-everything` - Comprehensive testing server
 - `@modelcontextprotocol/server-memory` - Knowledge graph memory
 - `@modelcontextprotocol/server-sequential-thinking` - Problem solving
-- `@modelcontextprotocol/server-brave-search` - Web search (requires API key)
-- `@modelcontextprotocol/server-google-maps` - Mapping (requires API key)
-- `@modelcontextprotocol/server-postgres` - Database integration
 
-#### ❌ Removed Non-Working Packages:
+#### 🔑 Available But Not Included (Require API Keys)
+
+- `@modelcontextprotocol/server-brave-search` - Web search (requires BRAVE_SEARCH_API_KEY)
+- `@modelcontextprotocol/server-google-maps` - Mapping (requires GOOGLE_MAPS_API_KEY)
+- `@modelcontextprotocol/server-postgres` - Database integration (requires POSTGRES_CONNECTION_STRING)
+
+#### ❌ Removed Non-Working Packages
+
 - `@modelcontextprotocol/server-time`
 - `@modelcontextprotocol/server-git`
 - `@modelcontextprotocol/server-fetch`
@@ -42,16 +47,19 @@ The default MCP server configuration has been updated to use only **verified wor
 ### 2. Updated Documentation
 
 **Files Updated**:
+
 - `docs/AGENT-ENHANCEMENT.md` - Updated examples to use working packages
 - `docs/MCP-SERVER-GUIDE.md` - Comprehensive guide already existed with correct information
 
 ### 3. Updated UI Components
 
 **Files Updated**:
+
 - `src/components/Settings.tsx` - Fixed MCP server examples in settings UI
 - `src/components/settings/sections/NetworkSettings.tsx` - Updated common server examples
 
 **Changes Made**:
+
 - Removed references to `@modelcontextprotocol/server-sqlite`
 - Removed references to `@modelcontextprotocol/server-git`
 - Added working alternatives like `@modelcontextprotocol/server-everything` and `@modelcontextprotocol/server-memory`
@@ -93,17 +101,20 @@ npx @modelcontextprotocol/server-filesystem --help
 
 ## Alternative Solutions for Removed Functionality
 
-### For SQLite Functionality:
+### For SQLite Functionality
+
 - Use the PostgreSQL server with a local PostgreSQL instance
 - Create a custom MCP server for SQLite using the MCP SDK
 - Use filesystem server to read/write SQLite files directly
 
-### For Git Functionality:
+### For Git Functionality
+
 - Use filesystem server to access git repositories
 - Implement git operations through the system shell
 - Create a custom git MCP server
 
-### For Time/Weather Functionality:
+### For Time/Weather Functionality
+
 - Use `@modelcontextprotocol/server-sequential-thinking` for time-based reasoning
 - Use `@modelcontextprotocol/server-brave-search` to search for weather information
 - Access system time through built-in functions
@@ -111,6 +122,7 @@ npx @modelcontextprotocol/server-filesystem --help
 ## Best Practices
 
 1. **Always verify package existence** before adding MCP servers:
+
    ```bash
    npm view @modelcontextprotocol/server-name versions
    ```
@@ -118,7 +130,7 @@ npx @modelcontextprotocol/server-filesystem --help
 2. **Test servers individually** before adding to production configuration
 
 3. **Use the official MCP server repository** as the source of truth:
-   https://github.com/modelcontextprotocol/servers
+   <https://github.com/modelcontextprotocol/servers>
 
 4. **Start with basic servers** (`everything`, `filesystem`) before adding specialized ones
 
