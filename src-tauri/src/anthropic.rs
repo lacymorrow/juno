@@ -559,7 +559,22 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx).await
+            
+            // Execute the specialist agent task with proper error handling
+            match execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx).await {
+                Ok(result) => Ok(result),
+                Err(error_msg) => {
+                    // Convert any specialist agent error into a proper error response
+                    // This ensures that delegation tool failures are handled gracefully
+                    log::warn!("Browser agent delegation failed: {}", error_msg);
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "agent_type": "browser",
+                        "error": error_msg,
+                        "message": format!("Browser agent failed: {}", error_msg)
+                    }))
+                }
+            }
         }
     };
     orchestrator_provider.register_async_tool(browser_delegation_def, browser_executor).await;
@@ -593,7 +608,22 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx).await
+            
+            // Execute the specialist agent task with proper error handling
+            match execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx).await {
+                Ok(result) => Ok(result),
+                Err(error_msg) => {
+                    // Convert any specialist agent error into a proper error response
+                    // This ensures that delegation tool failures are handled gracefully
+                    log::warn!("Desktop agent delegation failed: {}", error_msg);
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "agent_type": "desktop",
+                        "error": error_msg,
+                        "message": format!("Desktop agent failed: {}", error_msg)
+                    }))
+                }
+            }
         }
     };
     orchestrator_provider.register_async_tool(desktop_delegation_def, desktop_executor).await;
@@ -627,7 +657,22 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            execute_specialized_agent_task(provider, "file", input, handle, cancel_rx).await
+            
+            // Execute the specialist agent task with proper error handling
+            match execute_specialized_agent_task(provider, "file", input, handle, cancel_rx).await {
+                Ok(result) => Ok(result),
+                Err(error_msg) => {
+                    // Convert any specialist agent error into a proper error response
+                    // This ensures that delegation tool failures are handled gracefully
+                    log::warn!("File agent delegation failed: {}", error_msg);
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "agent_type": "file",
+                        "error": error_msg,
+                        "message": format!("File agent failed: {}", error_msg)
+                    }))
+                }
+            }
         }
     };
     orchestrator_provider.register_async_tool(file_delegation_def, file_executor).await;
@@ -650,7 +695,13 @@ async fn execute_specialized_agent_task(
     info!("Executing {} agent task: {}", agent_type, task);
 
     // Create a simple memory manager for the specialized agent
-    let specialist_memory = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+    let mut specialist_memory = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+
+    // Clean up any orphaned tool calls that might exist from previous failed executions
+    // This provides additional safety against conversation state issues
+    if let Err(e) = specialist_memory.clean_orphaned_tool_calls().await {
+        log::warn!("Failed to clean orphaned tool calls for {} agent: {}", agent_type, e);
+    }
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type);
@@ -705,8 +756,30 @@ async fn execute_specialized_agent_task(
             }
         }
         Err(e) => {
-            error!("Specialist {} agent failed: {}", agent_type, e);
-            Err(format!("{} agent failed: {}", agent_type, e))
+            // Enhanced error handling for different types of failures
+            let error_msg = match &e {
+                AgentError::Terminated => {
+                    format!("{} agent was cancelled or terminated", agent_type)
+                }
+                AgentError::MaxStepsReached => {
+                    format!("{} agent reached maximum steps", agent_type)
+                }
+                AgentError::LlmError(msg) if msg.contains("Tool calls without results") => {
+                    format!("{} agent failed due to timeout - some tool operations did not complete within the time limit", agent_type)
+                }
+                AgentError::LlmError(msg) if msg.contains("timed out") => {
+                    format!("{} agent failed due to timeout - operation exceeded time limit", agent_type)
+                }
+                AgentError::ToolError(msg) if msg.contains("timed out") => {
+                    format!("{} agent failed due to tool timeout: {}", agent_type, msg)
+                }
+                _ => {
+                    format!("{} agent failed: {}", agent_type, e)
+                }
+            };
+
+            error!("Specialist {} agent failed: {}", agent_type, error_msg);
+            Err(error_msg)
         }
     }
 }
