@@ -55,6 +55,17 @@ impl BrowserController {
     async fn try_connect_to_existing_browser(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("Attempting to connect to existing browser via CDP...");
 
+        // First check if Chrome is running and if remote debugging is enabled
+        if !Self::is_chrome_running().await {
+            log::info!("Chrome is not running, skipping CDP connection attempt");
+            return Err(AgentError::ToolError("Chrome not running".to_string()));
+        }
+
+        if !Self::is_remote_debugging_enabled().await {
+            log::info!("Chrome is running but remote debugging is not enabled");
+            return Err(AgentError::ToolError("Remote debugging not enabled".to_string()));
+        }
+
         // Common CDP endpoints to try (using constants)
         let cdp_endpoints = chrome_debug_urls::get_all_urls();
 
@@ -63,7 +74,7 @@ impl BrowserController {
 
             // Use a shorter timeout for CDP connection attempts
             match tokio::time::timeout(
-                std::time::Duration::from_secs(3),
+                std::time::Duration::from_secs(5), // Increased from 3 to 5 seconds
                 playwright.chromium().connect_over_cdp_builder(endpoint).connect_over_cdp()
             ).await {
                 Ok(Ok(browser)) => {
@@ -115,9 +126,60 @@ impl BrowserController {
         Err(AgentError::ToolError("No existing browser instance found via CDP".to_string()))
     }
 
+    /// Check if remote debugging is enabled on the running Chrome instance
+    async fn is_remote_debugging_enabled() -> bool {
+        // Try to make a simple HTTP request to the primary Chrome debugging port
+        let debug_url = chrome_debug_urls::PRIMARY;
+        let version_url = format!("{}/json/version", debug_url);
+        
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            reqwest::get(&version_url)
+        ).await {
+            Ok(Ok(response)) => {
+                if response.status().is_success() {
+                    log::info!("Remote debugging is enabled on {}", debug_url);
+                    return true;
+                }
+            },
+            Ok(Err(e)) => {
+                log::debug!("Failed to connect to remote debugging port: {}", e);
+            },
+            Err(_) => {
+                log::debug!("Timeout connecting to remote debugging port");
+            }
+        }
+        
+        // Try alternative ports
+        for endpoint in [chrome_debug_urls::ALTERNATIVE_1, chrome_debug_urls::ALTERNATIVE_2] {
+            let version_url = format!("{}/json/version", endpoint);
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                reqwest::get(&version_url)
+            ).await {
+                Ok(Ok(response)) => {
+                    if response.status().is_success() {
+                        log::info!("Remote debugging is enabled on {}", endpoint);
+                        return true;
+                    }
+                },
+                _ => {} // Continue to next port
+            }
+        }
+        
+        log::debug!("Remote debugging is not available on any standard ports");
+        false
+    }
+
     /// Strategy 2: Launch browser with persistent user profile
     async fn try_launch_with_user_profile(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("Attempting to launch browser with user profile...");
+
+        // First, check if Chrome is already running - if so, skip this strategy
+        if Self::is_chrome_running().await {
+            log::info!("Chrome is already running, skipping user profile launch to avoid SingletonLock conflict");
+            return Err(AgentError::ToolError("Chrome already running - avoiding profile conflict".to_string()));
+        }
 
         // Detect user profile directory based on OS and browser
         let user_data_dir = Self::detect_user_profile_directory()?;
@@ -135,6 +197,7 @@ impl BrowserController {
             "--no-first-run".to_string(),
             "--no-default-browser-check".to_string(),
             "--disable-component-update".to_string(), // Prevent update checks slowing startup
+            "--remote-debugging-port=9222".to_string(), // Enable remote debugging for future CDP connections
         ];
         let launcher = chromium.persistent_context_launcher(user_data_path)
             .headless(false)
@@ -186,9 +249,65 @@ impl BrowserController {
             },
             Err(e) => {
                 log::warn!("Failed to launch with user profile: {}", e);
+                // Check if this is a SingletonLock error
+                if e.to_string().contains("SingletonLock") || e.to_string().contains("profile directory") {
+                    log::info!("Profile conflict detected - Chrome may be running. Consider using fresh instance.");
+                }
                 Err(AgentError::ToolError(format!("Persistent profile launch failed: {}", e)))
             }
         }
+    }
+
+    /// Check if Chrome is already running on this system
+    async fn is_chrome_running() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            // Use pgrep to check for Chrome processes
+            let output = tokio::process::Command::new("pgrep")
+                .arg("-f")
+                .arg("Google Chrome")
+                .output()
+                .await;
+            
+            if let Ok(output) = output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let running = !stdout.trim().is_empty();
+                if running {
+                    log::info!("Chrome processes detected: {}", stdout.trim());
+                }
+                return running;
+            }
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            let output = tokio::process::Command::new("tasklist")
+                .arg("/FI")
+                .arg("IMAGENAME eq chrome.exe")
+                .output()
+                .await;
+                
+            if let Ok(output) = output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return stdout.contains("chrome.exe");
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            let output = tokio::process::Command::new("pgrep")
+                .arg("-f")
+                .arg("chrome")
+                .output()
+                .await;
+                
+            if let Ok(output) = output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return !stdout.trim().is_empty();
+            }
+        }
+        
+        false
     }
 
     /// Strategy 3: Launch fresh browser instance (current behavior)
@@ -241,20 +360,22 @@ impl BrowserController {
             return Err(AgentError::ToolError("Chromium executable not found. Set CHROMIUM_EXECUTABLE_PATH env var or ensure Chrome is installed in /Applications.".to_string()));
         }
 
-        // Configure the launcher with more resilient options - fewer options to reduce potential conflicts
-        // On macOS, minimizing launch args can help with stability
+        // Configure the launcher with more resilient options and enable remote debugging
         let args = vec![
             "--no-first-run".to_string(),
             "--no-default-browser-check".to_string(),
             "--no-sandbox".to_string(),
+            "--remote-debugging-port=9222".to_string(), // Enable remote debugging for future connections
+            "--disable-web-security".to_string(), // Reduce security restrictions for automation
+            "--disable-features=VizDisplayCompositor".to_string(), // Improve stability
         ];
 
         launcher = launcher
             .headless(false)
             .args(&args)
-            .timeout(90000.0); // Increase timeout to 90 seconds
+            .timeout(60000.0); // Reduce timeout to 60 seconds from 90
 
-        log::info!("Launching browser with 90 second timeout and simplified arguments...");
+        log::info!("Launching browser with 60 second timeout and remote debugging enabled...");
 
         let browser = match launcher.launch().await {
             Ok(browser) => {
@@ -271,10 +392,15 @@ impl BrowserController {
                     launcher = launcher.executable(path);
                 }
 
-                // Try with absolute minimum arguments
+                // Try with absolute minimum arguments but keep remote debugging
+                let minimal_args = vec![
+                    "--remote-debugging-port=9222".to_string(),
+                ];
+
                 launcher = launcher
                     .headless(false)
-                    .timeout(90000.0);
+                    .args(&minimal_args)
+                    .timeout(60000.0);
 
                 log::info!("Retrying browser launch with minimal configuration...");
                 launcher.launch().await
