@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use tauri::{AppHandle, State};
 use tracing::{error, info, warn};
 use chrono;
+use crate::constants::timeouts;
 
 use crate::state::AppState;
 use crate::agent::tools::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
@@ -208,7 +209,7 @@ pub async fn test_mcp_server_connection(
             info!("Test server added successfully");
 
             // Wait a moment for the server to start
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(timeouts::MCP_SERVER_STARTUP_DELAY_MS)).await;
 
             // Check the status
             let statuses = test_manager.get_server_statuses().await;
@@ -347,13 +348,13 @@ pub async fn restart_mcp_server_with_diagnostics(
     }
 
     // Wait a moment
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(timeouts::MCP_SERVER_STARTUP_DELAY_MS)).await;
 
     // Try to start the server
     match manager_guard.start_server(&server_id).await {
         Ok(_) => {
             // Wait for startup
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(timeouts::MCP_SERVER_RESTART_DELAY_MS)).await;
 
             // Check final status
             let statuses = manager_guard.get_server_statuses().await;

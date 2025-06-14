@@ -5,6 +5,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
+use crate::constants::{timeouts, events};
 
 // Bar states that match the frontend
 #[derive(Debug, Clone, PartialEq)]
@@ -137,7 +138,7 @@ impl FloatingBarManager {
         // After animation, transition to input
         let app_handle = self.app_handle.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(300)).await;
+            sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
                 manager.set_state(BarState::Input).await;
@@ -174,7 +175,7 @@ impl FloatingBarManager {
                 // After animation, transition to input (if no other transitions happened)
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(300)).await;
+                    sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
 
@@ -214,7 +215,7 @@ impl FloatingBarManager {
             // After animation, return to default (if no other transitions happened)
             let app_handle = self.app_handle.clone();
             tokio::spawn(async move {
-                sleep(Duration::from_millis(300)).await;
+                sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                 if let Some(manager) = get_bar_manager(&app_handle).await {
                     let mut manager = manager.lock().await;
 
@@ -264,7 +265,7 @@ impl FloatingBarManager {
         let app_handle = self.app_handle.clone();
         let query_for_agent = query.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(600)).await;
+            sleep(Duration::from_millis(timeouts::UI_SLIDE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
 
@@ -318,7 +319,7 @@ impl FloatingBarManager {
 
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(300)).await;
+                    sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
 
@@ -342,7 +343,7 @@ impl FloatingBarManager {
 
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(3000)).await;
+                    sleep(Duration::from_millis(timeouts::UI_NOTIFICATION_DISPLAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
 

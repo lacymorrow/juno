@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ComponentType } from 'react';
+import { ComponentType, ReactNode } from 'react';
 
 // Mock Tauri API
 vi.mock('@tauri-apps/api/core', () => ({
@@ -32,6 +32,29 @@ vi.mock('lucide-react', () => ({
 // Mock the utils
 vi.mock('@/lib/utils', () => ({
   cn: (...classes: any[]) => classes.filter(Boolean).join(' '),
+}));
+
+// Mock VoiceContext
+const mockVoiceContext = {
+  voiceState: {
+    mode: 'idle' as const,
+    isListening: false,
+    isTranscribing: false,
+    isSpeaking: false,
+    audioLevel: 0,
+  },
+  agentState: {
+    status: 'idle' as const,
+  },
+  recentMessages: [],
+  addMessage: vi.fn(),
+  clearError: vi.fn(),
+  resetTranscription: vi.fn(),
+};
+
+vi.mock('@/contexts/VoiceContext', () => ({
+  useVoiceState: () => mockVoiceContext.voiceState,
+  VoiceProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
 // Dynamic import for the component to test
