@@ -306,20 +306,3 @@ export function VoiceStatusIndicator({
     </div>
   );
 }
-
-// Hook for other components to access voice state
-export function useVoiceState() {
-  const [voiceState, setVoiceState] = useState<VoiceState>({
-    mode: "idle",
-    isListening: false,
-    isTranscribing: false,
-    isSpeaking: false,
-  });
-
-  // NOTE: Removed duplicate event listeners to prevent race conditions
-  // The main VoiceStatusIndicator component already handles these events
-  // This hook should be refactored to share state via context instead
-  // For now, returning a basic state to prevent crashes
-
-  return voiceState;
-}
