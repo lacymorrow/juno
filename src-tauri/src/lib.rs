@@ -13,8 +13,6 @@ use tauri::{
     AppHandle, // Keep AppHandle
     Emitter, // Import Emitter trait for .emit()
     Listener, // Added Listener for .listen()
-    WebviewWindow,
-    Wry,
 };
 use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
