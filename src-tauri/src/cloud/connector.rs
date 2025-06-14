@@ -15,7 +15,6 @@ use serde_json::json;
 
 use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
-    ConnectionState as CloudConnectionState, ResponseStatus, ResponseData,
 };
 use crate::constants::{permission_types, cloud_networking};
 

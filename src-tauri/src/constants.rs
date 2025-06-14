@@ -187,8 +187,6 @@ pub mod provider_names {
 }
 
 pub mod error_recovery {
-    use std::time::Duration;
-
     // Recovery attempt delays
     pub const ELEMENT_NOT_FOUND_DELAY_MS: u64 = 1000;
     pub const NETWORK_ERROR_DELAY_MS: u64 = 2000;
@@ -446,7 +444,7 @@ pub mod api_endpoints {
     pub const LOCALHOST_MCP_SERVER: &str = "http://localhost:8080";
     pub const WEBSOCKET_LOCALHOST: &str = "ws://localhost:8080";
 
-    // Additional API endpoints  
+    // Additional API endpoints
     pub const ELEVENLABS_TTS_BASE: &str = "https://api.elevenlabs.io/v1/text-to-speech";
     pub const REPLICATE_API_BASE: &str = "https://api.replicate.com";
     pub const JUNO_CLOUD_WEBSOCKET: &str = "wss://juno-cloud-backend.fly.dev/ws";
