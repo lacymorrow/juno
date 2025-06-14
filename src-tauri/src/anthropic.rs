@@ -139,7 +139,7 @@ pub async fn submit_query(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-    const MAX_ITERATIONS: u32 = 15;
+    const MAX_ITERATIONS: u32 = 30;
     state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
     info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
 
@@ -348,10 +348,10 @@ pub async fn submit_query(
     let mut final_response = match agent_result {
         Ok(message) => {
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
-            
+
             // Check if there's stored spoken content from a dual content finish
             let spoken_content = state.get_last_spoken_content();
-            
+
             SubmitQueryResult {
                 text: message.clone(),
                 spoken_text: spoken_content, // Use stored spoken content if available
@@ -398,10 +398,10 @@ pub async fn submit_query(
     // --- Generate TTS Audio ---
     // Use spoken_text if available, otherwise fall back to text
     let tts_content = final_response.spoken_text.as_ref().unwrap_or(&final_response.text).clone();
-    
+
     // Clear spoken content from app state now that we've used it
     state.clear_last_spoken_content();
-    
+
     let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone()).await {
         Ok(audio_result) => {
             if audio_result != "TTS_DISABLED_BY_SETTING" {
