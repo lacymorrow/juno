@@ -36,12 +36,12 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_messages: 100,
-            max_tokens: 32000, // Conservative estimate for context window
-            min_messages_to_keep: 10,
+            max_messages: 150,
+            max_tokens: 180000, // Stay under Anthropic's 200K limit with safety margin
+            min_messages_to_keep: 20,
             auto_prune: true,
             enable_summarization: true,
-            summarization_batch_size: 10,
+            summarization_batch_size: 15,
             enable_metrics: true,
             enable_summary_cache: true,
         }

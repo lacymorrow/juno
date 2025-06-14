@@ -279,7 +279,8 @@ pub mod categories {
         "clear_conversation_memory",
         "clean_orphaned_tool_calls",
         "get_conversation_messages",
-        "get_last_n_messages"
+        "get_last_n_messages",
+        "prune_conversation_memory"
     ];
 
     /// Mouse interaction commands

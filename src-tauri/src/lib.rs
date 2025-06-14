@@ -706,9 +706,10 @@ pub fn run() {
             // Memory Management Commands
             get_memory_status,
             clear_conversation_memory,
-            clean_orphaned_tool_calls,
-            get_conversation_messages,
-            get_last_n_messages,
+                    clean_orphaned_tool_calls,
+        get_conversation_messages,
+        get_last_n_messages,
+        prune_conversation_memory,
             anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection
@@ -1886,6 +1887,8 @@ pub fn run() {
                     let app_handle_clone = app_handle_for_listener.clone();
                     let text_for_spawn = extracted_text.clone();
                     tauri::async_runtime::spawn(async move {
+                        let app_state = app_handle_clone.state::<state::AppState>();
+
                         if let Some(text) = text_for_spawn {
                             let trimmed_text = text.trim();
                             if !trimmed_text.is_empty() {

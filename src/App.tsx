@@ -28,14 +28,19 @@ import {
 } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
+import { StreamingStructuredMessage } from "@/components/StreamingStructuredMessage";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { notificationService } from "@/lib/notifications";
-import { 
-  parseStructuredResponse, 
-  hasStructuredContent, 
-  getRenderContent, 
-  type StructuredResponse 
+import {
+  parseStructuredResponse,
+  hasStructuredContent,
+  getRenderContent,
+  type StructuredResponse,
 } from "@/lib/structured-response-parser";
+import {
+  StreamingStructuredParser,
+  type StreamingSections,
+} from "@/lib/streaming-structured-parser";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
 import { cn } from "@/lib/utils";
 import { getVersion } from "@tauri-apps/api/app";
@@ -77,7 +82,8 @@ type ChatMessage = {
   isJsx?: boolean; // Flag to indicate if content should be rendered as JSX
   isStructured?: boolean; // Flag to indicate if content has structured format
   structuredContent?: StructuredResponse; // Parsed structured content
-  renderType?: 'jsx' | 'markdown' | 'text'; // Determined render type
+  streamingSections?: StreamingSections; // Real-time streaming sections
+  renderType?: "jsx" | "markdown" | "text"; // Determined render type
   speechText?: string; // Text optimized for TTS
   screenshot_base64?: string; // Optional base64 screenshot data
   tool_name?: string;
@@ -335,15 +341,25 @@ function renderChatMessage(
             <span>✓</span>
             <span>Task completed successfully</span>
           </span>
+        ) : msg.role === "assistant" && msg.isStreaming ? (
+          // Handle streaming structured content
+          msg.streamingSections ? (
+            <StreamingStructuredMessage
+              sections={msg.streamingSections}
+              isStreaming={true}
+            />
+          ) : (
+            <AIResponse>{msg.content}</AIResponse>
+          )
         ) : msg.role === "assistant" && !msg.isStreaming ? (
           // Handle structured content for completed assistant messages
           (() => {
             if (msg.isStructured && msg.structuredContent) {
               const renderContent = getRenderContent(msg.structuredContent);
-              
-              if (renderContent.type === 'jsx') {
+
+              if (renderContent.type === "jsx") {
                 return <JsxMessageRenderer jsx={renderContent.content} />;
-              } else if (renderContent.type === 'markdown') {
+              } else if (renderContent.type === "markdown") {
                 return <AIResponse>{renderContent.content}</AIResponse>;
               } else {
                 return <AIResponse>{renderContent.content}</AIResponse>;
@@ -514,6 +530,11 @@ function App() {
   const [copyingMessageId, setCopyingMessageId] = useState<string | null>(null);
   const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
 
+  // Streaming structured response state
+  const [streamingParsers, setStreamingParsers] = useState<
+    Map<string, StreamingStructuredParser>
+  >(new Map());
+
   // Onboarding state
   const [_showOnboarding, _setShowOnboarding] = useState(false);
   const [_onboardingChecked, _setOnboardingChecked] = useState(false);
@@ -674,17 +695,17 @@ function App() {
         // and this isn't a duplicate of a recently streamed message
         if (!hasStreamingMessage && !isRecentlyStreamed) {
           console.log("Adding assistant message from backend response");
-          
+
           // Parse structured content
           const parsedContent = parseStructuredResponse(response.text);
           const isStructuredResponse = parsedContent.hasStructuredContent;
-          
+
           let assistantMessage: ChatMessage;
-          
+
           if (isStructuredResponse) {
             // Handle structured response
             const renderContent = getRenderContent(parsedContent);
-            
+
             assistantMessage = {
               role: "assistant",
               content: response.text, // Keep original content
@@ -692,7 +713,7 @@ function App() {
               structuredContent: parsedContent,
               renderType: renderContent.type,
               speechText: renderContent.speechText,
-              isJsx: renderContent.type === 'jsx',
+              isJsx: renderContent.type === "jsx",
               screenshot_base64: response.screenshot_base64,
               timestamp: Date.now(),
             };
@@ -1794,13 +1815,17 @@ function App() {
     );
   };
 
-  // Listen for streaming events
+  // Listen for streaming events with structured parsing
   useEffect(() => {
     const streamStartListener = listen<StreamStartEvent>(
       "agent-stream-start",
       (event) => {
         console.log("Stream started:", event.payload);
         const { message_id } = event.payload;
+
+        // Initialize streaming parser for this message
+        const parser = new StreamingStructuredParser();
+        setStreamingParsers((prev) => new Map(prev.set(message_id, parser)));
 
         // Create a new streaming assistant message
         const streamingMessage: ChatMessage = {
@@ -1821,13 +1846,59 @@ function App() {
         console.log("Stream text chunk:", event.payload);
         const { chunk, message_id } = event.payload;
 
-        // Update the streaming message with the new chunk
+        // Get the parser for this message
+        const parser = streamingParsers.get(message_id || "");
+        if (!parser) {
+          console.warn("No parser found for message:", message_id);
+          return;
+        }
+
+        // Process the chunk through the parser
+        const sections = parser.addChunk(chunk);
+
+        // Update the streaming message with parsed sections
         setConversation((prev) =>
           prev.map((msg) => {
             if (msg.messageId === message_id && msg.isStreaming) {
+              // Determine the render content based on what's available
+              let renderContent = "";
+              let renderType: "jsx" | "markdown" | "text" = "text";
+              let speechText = "";
+              let isStructured = false;
+
+              if (sections.hasStructuredContent) {
+                isStructured = true;
+                // Priority: visual > markdown > speech > default
+                if (sections.visual.content.trim()) {
+                  renderContent = sections.visual.content;
+                  renderType = "jsx";
+                } else if (sections.markdown.content.trim()) {
+                  renderContent = sections.markdown.content;
+                  renderType = "markdown";
+                } else if (sections.speech.content.trim()) {
+                  renderContent = sections.speech.content;
+                  renderType = "text";
+                } else {
+                  renderContent = sections.default.content;
+                  renderType = "text";
+                }
+                speechText =
+                  sections.speech.content || sections.default.content;
+              } else {
+                // No structured content yet, use raw content
+                renderContent = msg.content + chunk;
+                renderType = isJsxContent(renderContent) ? "jsx" : "text";
+                speechText = renderContent;
+              }
+
               return {
                 ...msg,
-                content: msg.content + chunk,
+                content: msg.content + chunk, // Keep building raw content
+                isStructured,
+                streamingSections: sections, // Store sections for real-time display
+                renderType,
+                speechText,
+                isJsx: renderType === "jsx",
               };
             }
             return msg;
@@ -1847,26 +1918,63 @@ function App() {
         console.log("Stream ended:", event.payload);
         const { message_id, complete_text } = event.payload;
 
+        // Get the parser for this message
+        const parser = streamingParsers.get(message_id || "");
+        let finalSections: StreamingSections | null = null;
+
+        if (parser) {
+          finalSections = parser.finalize();
+          // Clean up the parser
+          setStreamingParsers((prev) => {
+            const newMap = new Map(prev);
+            newMap.delete(message_id || "");
+            return newMap;
+          });
+        }
+
         // Finalize the streaming message
         setConversation((prev) =>
           prev.map((msg) => {
             if (msg.messageId === message_id && msg.isStreaming) {
-              // Parse structured content
-              const parsedContent = parseStructuredResponse(complete_text);
-              const isStructuredResponse = parsedContent.hasStructuredContent;
-              
-              if (isStructuredResponse) {
+              if (finalSections && finalSections.hasStructuredContent) {
                 // Handle structured response
-                const renderContent = getRenderContent(parsedContent);
-                
+                let renderContent = "";
+                let renderType: "jsx" | "markdown" | "text" = "text";
+                let speechText =
+                  finalSections.speech.content || finalSections.default.content;
+
+                // Priority: visual > markdown > speech > default
+                if (finalSections.visual.content.trim()) {
+                  renderContent = finalSections.visual.content;
+                  renderType = "jsx";
+                } else if (finalSections.markdown.content.trim()) {
+                  renderContent = finalSections.markdown.content;
+                  renderType = "markdown";
+                } else if (finalSections.speech.content.trim()) {
+                  renderContent = finalSections.speech.content;
+                  renderType = "text";
+                } else {
+                  renderContent = finalSections.default.content;
+                  renderType = "text";
+                }
+
+                // Create structured content object
+                const structuredContent: StructuredResponse = {
+                  hasStructuredContent: true,
+                  markdown: { content: finalSections.markdown.content },
+                  visual: { content: finalSections.visual.content },
+                  speech: { content: finalSections.speech.content },
+                  originalContent: complete_text,
+                };
+
                 return {
                   ...msg,
-                  content: complete_text, // Keep original content
+                  content: complete_text,
                   isStructured: true,
-                  structuredContent: parsedContent,
-                  renderType: renderContent.type,
-                  speechText: renderContent.speechText,
-                  isJsx: renderContent.type === 'jsx',
+                  structuredContent,
+                  renderType,
+                  speechText,
+                  isJsx: renderType === "jsx",
                   isStreaming: false,
                 };
               } else {
@@ -1874,7 +1982,7 @@ function App() {
                 return {
                   ...msg,
                   content: complete_text,
-                  isJsx: isJsxContent(complete_text), // Auto-detect JSX in completed stream
+                  isJsx: isJsxContent(complete_text),
                   isStreaming: false,
                 };
               }
@@ -1893,7 +2001,7 @@ function App() {
       streamTextListener.then((unlistenFn) => unlistenFn());
       streamEndListener.then((unlistenFn) => unlistenFn());
     };
-  }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
+  }, [streamingParsers]); // Include streamingParsers in dependency array
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
