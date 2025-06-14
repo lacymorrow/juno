@@ -81,27 +81,6 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
             "npx".to_string(),
             vec!["@modelcontextprotocol/server-sequential-thinking".to_string()]
         ).with_description("Sequential thinking and problem-solving capabilities".to_string()),
-
-        // Brave search integration (confirmed to exist)
-        MCPServerConfig::new(
-            "brave-search".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-brave-search".to_string()]
-        ).with_description("Web search capabilities via Brave Search API".to_string()),
-
-        // Google Maps integration (confirmed to exist)  
-        MCPServerConfig::new(
-            "google-maps".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-google-maps".to_string()]
-        ).with_description("Location services and mapping via Google Maps API".to_string()),
-
-        // PostgreSQL integration (confirmed to exist)
-        MCPServerConfig::new(
-            "postgres".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-postgres".to_string()]
-        ).with_description("PostgreSQL database integration and querying".to_string()),
     ];
 
     tracing::info!("Initializing {} default MCP servers...", default_servers.len());
@@ -111,7 +90,7 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
             tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
 
             // Continue for optional servers that might not be available
-            if config.name == "everything" || config.name == "brave-search" || config.name == "google-maps" {
+            if config.name == "everything" {
                 tracing::info!("Continuing without optional MCP server '{}' - it may not be available", config.name);
                 continue;
             }

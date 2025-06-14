@@ -164,7 +164,6 @@ interface AgentEventTauri {
 // --- End Agent Event Types ---
 
 // Type for view state
-type AppView = "chat" | "devtools" | "permissions";
 
 // New modal types for enhanced functionality
 type ModalType = "help" | "feedback" | "export" | "import" | "update" | null;
@@ -451,11 +450,12 @@ function renderChatMessage(
 
 function App() {
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [serverConfig, setServerConfig] = useState<any>(null);
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [serverStatus, setServerStatus] = useState<"connected" | "error" | "connecting">("connecting");
+  const [serverStatus, setServerStatus] = useState<
+    "connected" | "error" | "connecting"
+  >("connecting");
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
@@ -504,6 +504,12 @@ function App() {
   const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
   const [lastScrollTime, setLastScrollTime] = useState(0);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // App view and panel state
+  const [currentView, setCurrentView] = useState<
+    "chat" | "devtools" | "permissions"
+  >("chat");
+  const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -2707,15 +2713,17 @@ function App() {
 
   // Add scroll detection
   const handleScroll = useCallback(() => {
-    const scrollElement = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    const scrollElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    );
     if (!scrollElement) return;
 
     const { scrollTop, scrollHeight, clientHeight } = scrollElement;
     const scrollBottom = scrollHeight - scrollTop - clientHeight;
-    
+
     // Consider user at bottom if within 100px of bottom
     const isNearBottom = scrollBottom < 100;
-    
+
     // Update user scroll state
     if (!isNearBottom && Date.now() - lastScrollTime > 500) {
       // User scrolled up and it's been more than 500ms since last auto-scroll
@@ -2727,16 +2735,19 @@ function App() {
   }, [lastScrollTime]);
 
   // Improved auto-scroll function
-  const autoScrollToBottom = useCallback((forceScroll = false) => {
-    if (!conversationEndRef.current) return;
-    
-    // Don't auto-scroll if user has scrolled up, unless forced
-    if (userHasScrolledUp && !forceScroll) return;
+  const autoScrollToBottom = useCallback(
+    (forceScroll = false) => {
+      if (!conversationEndRef.current) return;
 
-    // Smooth scroll to bottom
-    conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
-    setLastScrollTime(Date.now());
-  }, [userHasScrolledUp]);
+      // Don't auto-scroll if user has scrolled up, unless forced
+      if (userHasScrolledUp && !forceScroll) return;
+
+      // Smooth scroll to bottom
+      conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
+      setLastScrollTime(Date.now());
+    },
+    [userHasScrolledUp]
+  );
 
   // Throttled scroll function for streaming (limits frequency)
   const throttledAutoScroll = useCallback(
@@ -2746,11 +2757,13 @@ function App() {
 
   // Add scroll event listener to detect user scroll behavior
   useEffect(() => {
-    const scrollElement = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    const scrollElement = scrollAreaRef.current?.querySelector(
+      "[data-radix-scroll-area-viewport]"
+    );
     if (!scrollElement) return;
 
-    scrollElement.addEventListener('scroll', handleScroll);
-    return () => scrollElement.removeEventListener('scroll', handleScroll);
+    scrollElement.addEventListener("scroll", handleScroll);
+    return () => scrollElement.removeEventListener("scroll", handleScroll);
   }, [handleScroll]);
 
   return (
@@ -2878,7 +2891,10 @@ function App() {
                 >
                   <div className="flex flex-col h-full p-2">
                     {/* Conversation Area */}
-                    <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4" ref={scrollAreaRef}>
+                    <ScrollArea
+                      className="flex-1 min-h-0 mb-2 -mr-4 pr-4"
+                      ref={scrollAreaRef}
+                    >
                       {conversation.length === 0 ? (
                         /* Compact welcome message when conversation is empty */
                         <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">

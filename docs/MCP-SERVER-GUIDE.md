@@ -23,33 +23,40 @@ We've updated the default configuration to use only verified, working MCP server
 1. **@modelcontextprotocol/server-everything**
    - Comprehensive testing server with all MCP features
    - Perfect for testing and development
+
    ```bash
    npx @modelcontextprotocol/server-everything
    ```
 
 2. **@modelcontextprotocol/server-filesystem**
    - Secure file operations
+
    ```bash
    npx @modelcontextprotocol/server-filesystem /Users
    ```
 
 3. **@modelcontextprotocol/server-memory**
    - Persistent knowledge graph
+
    ```bash
    npx @modelcontextprotocol/server-memory
    ```
 
 4. **@modelcontextprotocol/server-sequential-thinking**
    - Problem-solving capabilities
+
    ```bash
    npx @modelcontextprotocol/server-sequential-thinking
    ```
 
-### Integration Servers (Require API Keys)
+### Available Integration Servers (Require API Keys - Not Included by Default)
+
+These servers are available but not included in the default configuration because they require API keys:
 
 5. **@modelcontextprotocol/server-brave-search**
    - Web search capabilities
    - Requires: `BRAVE_SEARCH_API_KEY`
+
    ```bash
    npx @modelcontextprotocol/server-brave-search
    ```
@@ -57,6 +64,7 @@ We've updated the default configuration to use only verified, working MCP server
 6. **@modelcontextprotocol/server-google-maps**
    - Location and mapping services
    - Requires: `GOOGLE_MAPS_API_KEY`
+
    ```bash
    npx @modelcontextprotocol/server-google-maps
    ```
@@ -64,16 +72,19 @@ We've updated the default configuration to use only verified, working MCP server
 7. **@modelcontextprotocol/server-postgres**
    - PostgreSQL database integration
    - Requires: `POSTGRES_CONNECTION_STRING`
+
    ```bash
    npx @modelcontextprotocol/server-postgres
    ```
+
+**Note:** These servers have been removed from the default configuration to ensure Juno works out-of-the-box without requiring API keys. You can manually add them if you have the required credentials.
 
 ## Removed Non-Working Servers
 
 These servers were removed because they don't exist on npm:
 
 - ❌ `@modelcontextprotocol/server-time`
-- ❌ `@modelcontextprotocol/server-git` 
+- ❌ `@modelcontextprotocol/server-git`
 - ❌ `@modelcontextprotocol/server-fetch`
 - ❌ `mcp-server-sqlite`
 - ❌ `calculator-mcp`
@@ -82,6 +93,7 @@ These servers were removed because they don't exist on npm:
 ## Configuration Examples
 
 ### Minimal Working Configuration
+
 ```json
 {
   "mcpServers": {
@@ -98,6 +110,7 @@ These servers were removed because they don't exist on npm:
 ```
 
 ### Enhanced Configuration with API Keys
+
 ```json
 {
   "mcpServers": {
@@ -131,38 +144,45 @@ These servers were removed because they don't exist on npm:
 
 If you need functionality similar to the removed servers, try these community alternatives:
 
-### For SQLite functionality:
+### For SQLite functionality
+
 - Custom local server using Python/Node.js
 - Use postgres server with local PostgreSQL
 
-### For Weather functionality:
+### For Weather functionality
+
 - Use brave-search to find weather information
 - Custom weather server using OpenWeatherMap API
 
-### For Git functionality:
+### For Git functionality
+
 - Use filesystem server to access git repositories
 - Custom git server implementation
 
-### For Time functionality:
+### For Time functionality
+
 - Use sequential-thinking server for time-based reasoning
 - Built-in system time functions
 
 ## Troubleshooting
 
-### If servers still fail to start:
+### If servers still fail to start
 
 1. **Check Node.js installation:**
+
    ```bash
    node --version
    npm --version
    ```
 
 2. **Clear npm cache:**
+
    ```bash
    npm cache clean --force
    ```
 
 3. **Test individual servers:**
+
    ```bash
    npx @modelcontextprotocol/server-everything --help
    ```
@@ -171,7 +191,7 @@ If you need functionality similar to the removed servers, try these community al
    - Ensure access to npmjs.org
    - Check firewall settings
 
-### Common Error Messages:
+### Common Error Messages
 
 - **"404 Not Found"**: Package doesn't exist - use working alternatives
 - **"ENOTFOUND"**: Network issue - check internet connection
@@ -181,17 +201,20 @@ If you need functionality similar to the removed servers, try these community al
 ## Getting API Keys
 
 ### Brave Search API
-1. Go to https://brave.com/search/api/
+
+1. Go to <https://brave.com/search/api/>
 2. Sign up for an account
 3. Get your API key from the dashboard
 
 ### Google Maps API
-1. Go to https://console.cloud.google.com/
+
+1. Go to <https://console.cloud.google.com/>
 2. Create a new project or select existing
 3. Enable Maps JavaScript API
 4. Create credentials (API Key)
 
 ### PostgreSQL
+
 - For local: `postgresql://user:password@localhost:5432/database`
 - For cloud: Get connection string from your provider
 
@@ -207,9 +230,9 @@ If you need functionality similar to the removed servers, try these community al
 
 The MCP ecosystem is rapidly evolving. For the latest servers:
 
-1. Check the official repository: https://github.com/modelcontextprotocol/servers
-2. Browse npm packages: https://www.npmjs.com/search?q=mcp
-3. Follow MCP documentation: https://modelcontextprotocol.io/
+1. Check the official repository: <https://github.com/modelcontextprotocol/servers>
+2. Browse npm packages: <https://www.npmjs.com/search?q=mcp>
+3. Follow MCP documentation: <https://modelcontextprotocol.io/>
 
 ## Support
 
