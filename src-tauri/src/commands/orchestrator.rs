@@ -44,64 +44,130 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
 
 /// Initialize default MCP servers for common tools
 async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
-    // Add common MCP servers that would be useful for orchestration
+    // Add essential MCP servers that provide intelligent capabilities
     let default_servers = vec![
+        // Core filesystem operations
         MCPServerConfig::new(
-            "file-operations".to_string(),
+            "filesystem".to_string(),
             "npx".to_string(),
-            vec!["@modelcontextprotocol/server-filesystem".to_string(), "~/Documents".to_string()]
-        ).with_description("File system operations and management".to_string()),
+            vec!["@modelcontextprotocol/server-filesystem".to_string(), "/Users".to_string()]
+        ).with_description("Secure file system operations and management".to_string()),
 
+        // Web content fetching and processing
         MCPServerConfig::new(
-            "web-browser".to_string(),
+            "web-fetch".to_string(),
             "npx".to_string(),
-            vec!["@modelcontextprotocol/server-puppeteer".to_string()]
-        ).with_description("Web browser automation and scraping".to_string()),
+            vec!["@modelcontextprotocol/server-fetch".to_string()]
+        ).with_description("Web content fetching and conversion for efficient LLM usage".to_string()),
 
-        // Note: @modelcontextprotocol/server-system-info package does not exist
-        // Alternative: Use a custom system info server or the everything server
+        // Persistent memory and knowledge management
+        MCPServerConfig::new(
+            "memory".to_string(),
+            "npx".to_string(),
+            vec!["@modelcontextprotocol/server-memory".to_string()]
+        ).with_description("Knowledge graph-based persistent memory system".to_string()),
+
+        // Time and scheduling capabilities
+        MCPServerConfig::new(
+            "time".to_string(),
+            "npx".to_string(),
+            vec!["@modelcontextprotocol/server-time".to_string()]
+        ).with_description("Time zones, scheduling, and calendar operations".to_string()),
+
+        // Everything server for comprehensive testing and development
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "everything".to_string(),
-            description: Some("Everything MCP server with system tools and comprehensive features".to_string()),
+            description: Some("Reference server with comprehensive MCP features for testing".to_string()),
             command: "npx".to_string(),
             args: vec!["@modelcontextprotocol/server-everything".to_string()],
             working_directory: None,
             environment_variables: std::collections::HashMap::new(),
             enabled: true,
             auto_start: true,
-            timeout_seconds: 45, // Longer timeout for complex server
+            timeout_seconds: 45,
             max_retries: 5,
         },
+
+        // Git repository operations
+        MCPServerConfig::new(
+            "git".to_string(),
+            "npx".to_string(),
+            vec!["@modelcontextprotocol/server-git".to_string()]
+        ).with_description("Git repository management and version control".to_string()),
+
+        // SQLite for local data storage and analysis
+        MCPServerConfig::new(
+            "sqlite".to_string(),
+            "npx".to_string(),
+            vec!["mcp-server-sqlite".to_string(), "--db-path", "./juno-agent-data.db".to_string()]
+        ).with_description("Local SQLite database for structured data storage and queries".to_string()),
+
+        // Calculator for mathematical operations
+        MCPServerConfig::new(
+            "calculator".to_string(),
+            "npx".to_string(),
+            vec!["calculator-mcp".to_string()]
+        ).with_description("Mathematical calculations and computations".to_string()),
+
+        // Weather information
+        MCPServerConfig::new(
+            "weather".to_string(),
+            "npx".to_string(),
+            vec!["mcp-weather".to_string()]
+        ).with_description("Weather information and forecasts".to_string()),
     ];
+
+    tracing::info!("Initializing {} default MCP servers...", default_servers.len());
 
     for config in default_servers {
         if let Err(e) = mcp_manager.add_server(config.clone()).await {
             tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
 
-            // For the everything server, try to continue without it if it fails
-            if config.name == "everything" {
-                tracing::info!("Continuing without everything MCP server - it may not be available");
+            // Continue for optional servers that might not be available
+            if config.name == "everything" || config.name == "weather" || config.name == "calculator" {
+                tracing::info!("Continuing without optional MCP server '{}' - it may not be available", config.name);
                 continue;
             }
+        } else {
+            tracing::info!("Successfully added MCP server '{}'", config.name);
         }
     }
 
     // Start all enabled servers with staggered startup to avoid overwhelming npm
     let configs = mcp_manager.get_server_configs().await;
+    tracing::info!("Starting {} MCP servers...", configs.len());
+    
     for (i, config) in configs.iter().enumerate() {
         if config.enabled && config.auto_start {
-            // Add a small delay between server starts
+            // Add a small delay between server starts to prevent npm conflicts
             if i > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
             }
 
-            if let Err(e) = mcp_manager.start_server(&config.id).await {
-                tracing::warn!("Failed to start MCP server '{}': {}", config.name, e);
+            match mcp_manager.start_server(&config.id).await {
+                Ok(_) => {
+                    tracing::info!("Successfully started MCP server '{}'", config.name);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start MCP server '{}': {}", config.name, e);
+                    
+                    // For critical servers, we might want to retry
+                    if config.name == "filesystem" || config.name == "memory" {
+                        tracing::info!("Retrying critical MCP server '{}'...", config.name);
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        if let Err(retry_err) = mcp_manager.start_server(&config.id).await {
+                            tracing::error!("Retry failed for critical MCP server '{}': {}", config.name, retry_err);
+                        } else {
+                            tracing::info!("Successfully started MCP server '{}' on retry", config.name);
+                        }
+                    }
+                }
             }
         }
     }
 
+    tracing::info!("MCP server initialization complete");
     Ok(())
 }
 
