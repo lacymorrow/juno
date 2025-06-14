@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::time::Duration;
+use crate::constants::{timeouts, macos_system};
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::permissions::{
     check_accessibility_permissions,
@@ -137,7 +138,7 @@ pub async fn request_accessibility_permission() -> Result<bool, String> {
                     info!("Accessibility permissions prompt shown to user");
 
                     // Wait a moment and check again without prompt
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
 
                     match check_accessibility_permissions(false) {
                         Ok(now_granted) => {
@@ -189,7 +190,7 @@ pub async fn request_accessibility_permission_with_auto_redirect(auto_open_setti
                     info!("Accessibility permissions prompt shown to user with auto-redirect");
 
                     // Wait a moment and check again
-                    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::SCREEN_RECORDING_CHECK_DELAY_MS)).await;
 
                     match check_accessibility_permissions_with_auto_redirect(false, false) {
                         Ok(now_granted) => {
@@ -628,7 +629,7 @@ async fn test_screen_recording_access() -> Result<bool, String> {
         use std::time::Duration;
 
         // Try to take a screenshot using the Desktop API
-        let result = tokio::time::timeout(Duration::from_secs(5), async {
+        let result = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_CHECK_TIMEOUT_MS), async {
             // Try creating a minimal Desktop instance just for screenshot test
             match Desktop::new(false, false) {
                 Ok(desktop) => {
@@ -681,7 +682,7 @@ pub async fn request_microphone_permission() -> Result<bool, String> {
             info!("Successfully triggered microphone permission dialog");
 
             // Wait a moment for user to interact with the dialog
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+            tokio::time::sleep(Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
 
             // Check if permission was granted
             match test_microphone_access().await {
@@ -725,7 +726,7 @@ async fn trigger_microphone_permission_dialog() -> bool {
 
         // Try to trigger microphone permission using a simple audio recording test
         // This should cause macOS to show the permission dialog if not already granted
-        let result = tokio::time::timeout(Duration::from_secs(3), async {
+        let result = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS), async {
             // Use osascript to trigger microphone access which should show the permission dialog
             let output = Command::new("osascript")
                 .args(&[
@@ -781,7 +782,7 @@ async fn open_microphone_system_settings() -> Result<(), String> {
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+            .args(&[macos_system::MICROPHONE_PRIVACY_URL])
             .status();
 
         match result {
@@ -869,7 +870,7 @@ async fn open_screen_recording_system_settings() -> Result<(), String> {
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+            .args(&[macos_system::SCREEN_RECORDING_PRIVACY_URL])
             .status();
 
         match result {
@@ -949,7 +950,7 @@ async fn open_input_monitoring_system_settings() -> Result<(), String> {
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
+            .args(&[macos_system::INPUT_MONITORING_PRIVACY_URL])
             .status();
 
         match result {
@@ -1043,7 +1044,7 @@ async fn test_microphone_access() -> Result<bool, String> {
         }
 
         // Fallback to original detection methods with improved error handling
-        let audio_devices_detected = tokio::time::timeout(Duration::from_secs(3), async {
+        let audio_devices_detected = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS), async {
             // Try to query audio input devices using system_profiler
             let output = Command::new("system_profiler")
                 .args(&["SPAudioDataType", "-json"])
@@ -1344,7 +1345,7 @@ async fn check_audio_devices_system() -> serde_json::Value {
     {
         use std::time::Duration;
 
-        let system_audio_check = tokio::time::timeout(Duration::from_secs(3), async {
+        let system_audio_check = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS), async {
             let output = Command::new("system_profiler")
                 .args(&["SPAudioDataType", "-json"])
                 .output();

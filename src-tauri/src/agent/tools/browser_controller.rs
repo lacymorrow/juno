@@ -8,8 +8,7 @@ use std::path::PathBuf;
 use std::env;
 
 use crate::agent::structs::{AgentError, ToolResult};
-use crate::constants::chrome_debug_urls;
-use crate::constants::timeouts;
+use crate::constants::{chrome_debug_urls, timeouts, shell_commands};
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
@@ -322,7 +321,7 @@ impl BrowserController {
             .filter(|p| p.exists())
             .or_else(|| {
                 let common_paths = [
-                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                    shell_commands::CHROME_BINARY_MACOS,
                     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
                     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
                     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -561,7 +560,7 @@ impl BrowserController {
         #[cfg(target_os = "macos")]
         {
             let browsers = [
-                ("chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+                ("chrome", shell_commands::CHROME_BINARY_MACOS),
                 ("msedge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
                 ("chrome", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
                 ("chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"),
