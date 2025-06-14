@@ -92,7 +92,7 @@ pub async fn set_keyboard_shortcuts(
     for (i, (name1, shortcut1)) in shortcut_pairs.iter().enumerate() {
         for (name2, shortcut2) in shortcut_pairs.iter().skip(i + 1) {
             if shortcut1.to_lowercase().replace(" ", "") == shortcut2.to_lowercase().replace(" ", "") {
-                return Err(format!("Shortcuts '{}' and '{}' cannot have the same value: '{}'", 
+                return Err(format!("Shortcuts '{}' and '{}' cannot have the same value: '{}'",
                     get_shortcut_display_name_for_validation(name1),
                     get_shortcut_display_name_for_validation(name2),
                     shortcut1
@@ -221,9 +221,9 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
     // Check for potentially problematic shortcuts with enhanced platform-specific detection
     let lower_shortcut = shortcut.to_lowercase().replace(" ", "");
-    
+
     // Enhanced system shortcuts detection with platform awareness
-    let mut system_shortcuts = vec![
+    let system_shortcuts = vec![
         ("cmd+q", "Quit application", true),        // Critical on macOS
         ("ctrl+q", "Quit application", false),      // Critical on Linux/Windows
         ("cmd+w", "Close window", true),            // Critical on macOS
@@ -266,7 +266,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
     // Check current platform for more specific warnings
     let is_macos = cfg!(target_os = "macos");
-    
+
     for (system_shortcut, description, is_macos_specific) in &system_shortcuts {
         if lower_shortcut == system_shortcut.replace(" ", "") {
             // Provide platform-specific warnings
@@ -284,7 +284,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
     // Enhanced standalone key validation with more specific guidance
     if !shortcut.contains('+') {
         let single_key = shortcut.to_lowercase();
-        
+
         // Expanded list of allowed standalone keys
         let allowed_standalone = [
             "escape", "esc",
@@ -293,7 +293,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
             "home", "end", "pageup", "pagedown", "insert", "delete",
             "printscreen", "print", "scrolllock", "pause"
         ];
-        
+
         if !allowed_standalone.contains(&single_key.as_str()) {
             // Provide more specific guidance based on key type
             if single_key.len() == 1 && single_key.chars().next().unwrap().is_alphabetic() {
@@ -323,7 +323,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
             "shift" => "shift",
             _ => modifier,
         };
-        
+
         if !seen_modifiers.insert(normalized_modifier) {
             return Err(format!("Duplicate modifier '{}' in shortcut '{}'. Each modifier should only appear once.", modifier, shortcut));
         }
@@ -340,27 +340,27 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 /// Check for conflicts between shortcuts
 fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state::KeyboardShortcuts, exclude_key: Option<&str>) -> Result<(), String> {
     let normalized_new = new_shortcut.to_lowercase().replace(" ", "");
-    
+
     let shortcuts_to_check = [
         ("agent_mode_toggle", &current_shortcuts.agent_mode_toggle),
         ("dictation_input", &current_shortcuts.dictation_input),
         ("stop_current_task", &current_shortcuts.stop_current_task),
         ("open_settings", &current_shortcuts.open_settings),
     ];
-    
+
     for (key, existing_shortcut) in &shortcuts_to_check {
         if let Some(exclude) = exclude_key {
             if *key == exclude {
                 continue; // Skip the one we're currently editing
             }
         }
-        
+
         let normalized_existing = existing_shortcut.to_lowercase().replace(" ", "");
         if normalized_new == normalized_existing {
             return Err(format!("Shortcut '{}' is already assigned to '{}'", new_shortcut, get_shortcut_display_name_for_validation(key)));
         }
     }
-    
+
     Ok(())
 }
 
@@ -378,10 +378,10 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
 /// Register the escape key for cancellation (only when something can be cancelled)
 pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    
+
     // Increment the user count
     let user_count = ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst) + 1;
-    
+
     // Only register if not already registered
     if !ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
         let escape_shortcut = Shortcut::new(None, Code::Escape);
@@ -400,17 +400,17 @@ pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), St
     } else {
         info!("Escape key already registered, increased user count to: {}", user_count);
     }
-    
+
     Ok(())
 }
 
 /// Unregister the escape key (when nothing needs to be cancelled)
 pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    
+
     // Decrement the user count
     let user_count = ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
-    
+
     // Only unregister if no more users and currently registered
     if user_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
         let escape_shortcut = Shortcut::new(None, Code::Escape);
@@ -429,7 +429,7 @@ pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), 
     } else {
         info!("Escape key still has {} users, keeping registered", user_count);
     }
-    
+
     Ok(())
 }
 
@@ -461,7 +461,7 @@ pub async fn get_escape_key_status() -> Result<serde_json::Value, String> {
             format!("ERROR: {} users but not registered", user_count)
         }
     };
-    
+
     Ok(serde_json::json!({
         "escape_key_registered": is_registered,
         "user_count": user_count,
@@ -608,7 +608,7 @@ pub async fn get_shortcut_suggestions(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     let is_macos = cfg!(target_os = "macos");
-    
+
     // Get current shortcuts to avoid suggesting conflicts
     let current_shortcuts = {
         let shortcuts = state.keyboard_shortcuts.lock()
@@ -730,7 +730,7 @@ pub async fn get_shortcut_suggestions(
 #[tauri::command]
 pub async fn get_shortcut_best_practices() -> Result<serde_json::Value, String> {
     let is_macos = cfg!(target_os = "macos");
-    
+
     let best_practices = serde_json::json!({
         "platform": if is_macos { "macOS" } else { "Windows/Linux" },
         "recommendations": {
