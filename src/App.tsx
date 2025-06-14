@@ -190,7 +190,6 @@ function formatFullTimestamp(timestamp: number): string {
 
 function App() {
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [serverConfig, setServerConfig] = useState<any>(null);
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);

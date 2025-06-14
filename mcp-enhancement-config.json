@@ -1,144 +1,48 @@
 {
   "mcpServers": {
-    "web-search": {
-      "command": "npx",
-      "args": ["@modelcontextprotocol/server-fetch"],
-      "description": "Web content fetching and search capabilities"
-    },
     "filesystem": {
       "command": "npx", 
       "args": ["@modelcontextprotocol/server-filesystem", "/Users"],
       "description": "Secure file operations across the system"
     },
-    "github": {
+    "everything": {
       "command": "npx",
-      "args": ["@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
-      },
-      "description": "GitHub repository management and code analysis"
+      "args": ["@modelcontextprotocol/server-everything"],
+      "description": "Comprehensive testing and development server with all MCP features"
     },
     "memory": {
       "command": "npx",
       "args": ["@modelcontextprotocol/server-memory"],
       "description": "Persistent knowledge graph for context retention"
     },
-    "time": {
+    "sequential-thinking": {
       "command": "npx",
-      "args": ["@modelcontextprotocol/server-time"],
-      "description": "Time zones, scheduling, and calendar operations"
+      "args": ["@modelcontextprotocol/server-sequential-thinking"],
+      "description": "Sequential thinking and problem-solving capabilities"
     },
-    "sqlite": {
+    "brave-search": {
       "command": "npx",
-      "args": ["mcp-server-sqlite", "--db-path", "./agent-data.db"],
-      "description": "Local database for structured data storage"
-    },
-    "openai": {
-      "command": "npx",
-      "args": ["any-chat-completions-mcp"],
+      "args": ["@modelcontextprotocol/server-brave-search"],
       "env": {
-        "OPENAI_API_KEY": ""
+        "BRAVE_SEARCH_API_KEY": ""
       },
-      "description": "Access to additional AI models for specialized tasks"
+      "description": "Web search capabilities via Brave Search API"
     },
-    "tavily-search": {
+    "google-maps": {
       "command": "npx",
-      "args": ["tavily-mcp-server"],
+      "args": ["@modelcontextprotocol/server-google-maps"],
       "env": {
-        "TAVILY_API_KEY": ""
+        "GOOGLE_MAPS_API_KEY": ""
       },
-      "description": "Advanced web search optimized for AI agents"
-    },
-    "firecrawl": {
-      "command": "npx", 
-      "args": ["firecrawl-mcp"],
-      "env": {
-        "FIRECRAWL_API_KEY": ""
-      },
-      "description": "Extract structured data from websites"
+      "description": "Location services and mapping via Google Maps API"
     },
     "postgres": {
       "command": "npx",
-      "args": ["postgres-mcp-server"],
+      "args": ["@modelcontextprotocol/server-postgres"],
       "env": {
         "POSTGRES_CONNECTION_STRING": ""
       },
       "description": "PostgreSQL database integration"
-    },
-    "notion": {
-      "command": "npx",
-      "args": ["notion-mcp"],
-      "env": {
-        "NOTION_API_KEY": ""
-      },
-      "description": "Notion workspace integration for knowledge management"
-    },
-    "slack": {
-      "command": "npx",
-      "args": ["slack-mcp"],
-      "env": {
-        "SLACK_BOT_TOKEN": "",
-        "SLACK_APP_TOKEN": ""
-      },
-      "description": "Slack workspace integration for communication"
-    },
-    "gmail": {
-      "command": "npx",
-      "args": ["gmail-mcp"],
-      "env": {
-        "GOOGLE_CLIENT_ID": "",
-        "GOOGLE_CLIENT_SECRET": "",
-        "GOOGLE_REFRESH_TOKEN": ""
-      },
-      "description": "Gmail integration for email management"
-    },
-    "linear": {
-      "command": "npx",
-      "args": ["linear-mcp"],
-      "env": {
-        "LINEAR_API_KEY": ""
-      },
-      "description": "Linear project management integration"
-    },
-    "youtube": {
-      "command": "npx",
-      "args": ["youtube-transcript-mcp"],
-      "description": "YouTube video transcript extraction"
-    },
-    "weather": {
-      "command": "npx",
-      "args": ["mcp-weather"],
-      "description": "Weather information and forecasts"
-    },
-    "calculator": {
-      "command": "npx",
-      "args": ["calculator-mcp"],
-      "description": "Mathematical calculations and computations"
-    },
-    "docker": {
-      "command": "npx",
-      "args": ["docker-mcp"],
-      "description": "Docker container management"
-    },
-    "aws": {
-      "command": "npx",
-      "args": ["aws-mcp-server"],
-      "env": {
-        "AWS_ACCESS_KEY_ID": "",
-        "AWS_SECRET_ACCESS_KEY": "",
-        "AWS_REGION": "us-west-2"
-      },
-      "description": "AWS resource management and operations"
-    },
-    "anthropic-computer-use": {
-      "command": "npx",
-      "args": ["@anthropic-ai/mcp-server-computer-use"],
-      "description": "Additional computer use capabilities"
-    },
-    "code-executor": {
-      "command": "npx",
-      "args": ["code-executor-mcp"],
-      "description": "Safe code execution in isolated environments"
     }
   },
   "configuration": {
