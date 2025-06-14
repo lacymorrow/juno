@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { LogicalSize, Window } from "@tauri-apps/api/window";
+import { Window } from "@tauri-apps/api/window";
 import {
   AlertCircle,
   Brain,
@@ -13,21 +13,34 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
 import { useInvoke } from "@/hooks/useInvoke";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useWindowSize } from "@/hooks/useWindowSize";
-import type { BarState, BarStateData, FloatingBarConfig, WindowConfig } from "@/types/floating-bar";
+import type {
+  BarState,
+  BarStateData,
+  FloatingBarConfig,
+  WindowConfig,
+} from "@/types/floating-bar";
 import { FLOATING_BAR_DIMENSIONS } from "@/types/floating-bar";
 
 // Get default window dimensions from tauri.conf.json
 const floatingBarConfig = tauriConfig.app.windows.find(
   (window: WindowConfig) => window.label === "floating-bar"
 );
-const DEFAULT_WIDTH = floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
-const DEFAULT_HEIGHT = floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
+const DEFAULT_WIDTH =
+  floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
+const DEFAULT_HEIGHT =
+  floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
 const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
 const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
 
@@ -86,11 +99,11 @@ export function FloatingBar() {
   // Update window size based on bar state
   useEffect(() => {
     const isCompact = ["default", "finishing"].includes(barState);
-    
+
     const targetSize = isCompact
       ? { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }
       : { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
-    
+
     resizeWindow(targetSize);
   }, [barState, resizeWindow]);
 
@@ -203,18 +216,24 @@ export function FloatingBar() {
     await invokeCommand("floating_bar_input_blur");
   }, [invokeCommand]);
 
-  const handleInputChange = useCallback(async (value: string) => {
-    setInputValue(value);
-    await invokeCommand("floating_bar_input_change", { value });
-  }, [invokeCommand]);
+  const handleInputChange = useCallback(
+    async (value: string) => {
+      setInputValue(value);
+      await invokeCommand("floating_bar_input_change", { value });
+    },
+    [invokeCommand]
+  );
 
-  const handleSubmit = useCallback(async (e: FormEvent) => {
-    e.preventDefault();
-    const query = inputValue.trim();
-    if (!query) return;
+  const handleSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      const query = inputValue.trim();
+      if (!query) return;
 
-    await invokeCommand("floating_bar_submit", { query });
-  }, [inputValue, invokeCommand]);
+      await invokeCommand("floating_bar_submit", { query });
+    },
+    [inputValue, invokeCommand]
+  );
 
   // Get main icon based on enhanced state
   const getMainIcon = () => {

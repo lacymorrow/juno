@@ -17,7 +17,7 @@ use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
     ConnectionState as CloudConnectionState, ResponseStatus, ResponseData,
 };
-use crate::constants::permission_types;
+use crate::constants::{permission_types, cloud_networking};
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -413,8 +413,8 @@ impl ProductionCloudConnector {
     /// Main connector loop
     async fn run_connector_loop(&self) {
         let mut retry_count = 0u32;
-        let max_retries = 10;
-        let base_delay = Duration::from_secs(2);
+        let max_retries = cloud_networking::MAX_CONNECTION_RETRIES;
+        let base_delay = Duration::from_millis(cloud_networking::BASE_RETRY_DELAY_MS);
 
         loop {
             // Check if we should connect
@@ -445,14 +445,14 @@ impl ProductionCloudConnector {
                         self.set_connection_state(ConnectorState::Reconnecting(retry_count)).await;
 
                         // Exponential backoff
-                        let delay = base_delay * 2_u32.pow(retry_count.min(5));
+                        let delay = base_delay * cloud_networking::BACKOFF_MULTIPLIER.pow(retry_count.min(cloud_networking::MAX_BACKOFF_EXPONENT));
                         info!("Retrying connection in {:?}", delay);
                         tokio::time::sleep(delay).await;
                     }
                 }
             } else {
                 // Wait before checking again
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(Duration::from_millis(cloud_networking::CONNECTION_CHECK_INTERVAL_MS)).await;
             }
         }
     }

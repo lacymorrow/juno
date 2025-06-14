@@ -1,10 +1,84 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, Listener};
+use tauri::{AppHandle, Emitter, Manager, Listener, State};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, info};
 use uuid::Uuid;
+use serde::{Deserialize, Serialize};
+use crate::constants::{timeouts, events};
+use crate::state::AppState;
+
+// Floating bar configuration structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FloatingBarConfig {
+    pub show_voice_indicator: bool,
+    pub enable_animations: bool,
+    pub auto_hide: bool,
+    pub auto_hide_delay: u32,
+    pub opacity: f32,
+}
+
+impl Default for FloatingBarConfig {
+    fn default() -> Self {
+        Self {
+            show_voice_indicator: true,
+            enable_animations: true,
+            auto_hide: false,
+            auto_hide_delay: 3000,
+            opacity: 0.95,
+        }
+    }
+}
+
+impl FloatingBarConfig {
+    /// Get configuration file path
+    fn get_config_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
+        let config_dir = app_handle
+            .path()
+            .app_config_dir()
+            .map_err(|e| format!("Failed to get app config directory: {}", e))?;
+
+        std::fs::create_dir_all(&config_dir)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+
+        Ok(config_dir.join("floating_bar_config.json"))
+    }
+
+    /// Save configuration to file
+    pub async fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let config_path = Self::get_config_path(app_handle)?;
+        let config_json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+        tokio::fs::write(&config_path, config_json)
+            .await
+            .map_err(|e| format!("Failed to write config file: {}", e))?;
+
+        debug!("Floating bar configuration saved to: {:?}", config_path);
+        Ok(())
+    }
+
+    /// Load configuration from file
+    pub async fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let config_path = Self::get_config_path(app_handle)?;
+
+        if !config_path.exists() {
+            debug!("Config file not found, using defaults: {:?}", config_path);
+            return Ok(Self::default());
+        }
+
+        let config_content = tokio::fs::read_to_string(&config_path)
+            .await
+            .map_err(|e| format!("Failed to read config file: {}", e))?;
+
+        let config: Self = serde_json::from_str(&config_content)
+            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+
+        debug!("Floating bar configuration loaded from: {:?}", config_path);
+        Ok(config)
+    }
+}
 
 // Bar states that match the frontend
 #[derive(Debug, Clone, PartialEq)]
@@ -137,7 +211,7 @@ impl FloatingBarManager {
         // After animation, transition to input
         let app_handle = self.app_handle.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(300)).await;
+            sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
                 manager.set_state(BarState::Input).await;
@@ -174,7 +248,7 @@ impl FloatingBarManager {
                 // After animation, transition to input (if no other transitions happened)
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(300)).await;
+                    sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
 
@@ -214,7 +288,7 @@ impl FloatingBarManager {
             // After animation, return to default (if no other transitions happened)
             let app_handle = self.app_handle.clone();
             tokio::spawn(async move {
-                sleep(Duration::from_millis(300)).await;
+                sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                 if let Some(manager) = get_bar_manager(&app_handle).await {
                     let mut manager = manager.lock().await;
 
@@ -264,7 +338,7 @@ impl FloatingBarManager {
         let app_handle = self.app_handle.clone();
         let query_for_agent = query.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(600)).await;
+            sleep(Duration::from_millis(timeouts::UI_SLIDE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
 
@@ -318,7 +392,7 @@ impl FloatingBarManager {
 
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(300)).await;
+                    sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
 
@@ -342,7 +416,7 @@ impl FloatingBarManager {
 
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(3000)).await;
+                    sleep(Duration::from_millis(timeouts::UI_NOTIFICATION_DISPLAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
 
@@ -734,4 +808,44 @@ pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
             error!("Failed to handle agent cancelled: {}", e);
         }
     }
+}
+
+// Configuration commands
+
+/// Get the current floating bar configuration
+#[tauri::command]
+pub async fn get_floating_bar_config(
+    app_handle: AppHandle,
+) -> Result<FloatingBarConfig, String> {
+    info!("Getting floating bar configuration");
+
+    match FloatingBarConfig::load(&app_handle).await {
+        Ok(config) => {
+            debug!("Successfully loaded floating bar config: {:?}", config);
+            Ok(config)
+        },
+        Err(e) => {
+            warn!("Failed to load floating bar config, using defaults: {}", e);
+            Ok(FloatingBarConfig::default())
+        }
+    }
+}
+
+/// Set the floating bar configuration
+#[tauri::command]
+pub async fn set_floating_bar_config(
+    app_handle: AppHandle,
+    config: FloatingBarConfig,
+) -> Result<(), String> {
+    info!("Setting floating bar configuration: {:?}", config);
+
+    config.save(&app_handle).await?;
+
+    // Emit event to notify frontend of config change
+    if let Err(e) = app_handle.emit("floating-bar-config-changed", &config) {
+        warn!("Failed to emit config change event: {}", e);
+    }
+
+    info!("Floating bar configuration updated successfully");
+    Ok(())
 }

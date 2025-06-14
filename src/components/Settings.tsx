@@ -147,7 +147,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
   const [validationMessage, setValidationMessage] = useState<string>("");
   const [validationError, setValidationError] = useState<string>("");
   const [pressedKeys, setPressedKeys] = useState<string[]>([]);
-  const [captureTimeout, setCaptureTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [captureTimeout, setCaptureTimeout] = useState<NodeJS.Timeout | null>(
+    null
+  );
 
   // Update current value when prop changes
   useEffect(() => {
@@ -166,25 +168,30 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
   }, [captureTimeout]);
 
   // Validation function with debouncing
-  const validateShortcut = useCallback(async (shortcutValue: string) => {
-    if (!shortcutValue.trim()) {
-      setValidationMessage("Enter a shortcut combination");
-      setValidationError("");
-      return;
-    }
+  const validateShortcut = useCallback(
+    async (shortcutValue: string) => {
+      if (!shortcutValue.trim()) {
+        setValidationMessage("Enter a shortcut combination");
+        setValidationError("");
+        return;
+      }
 
-    try {
-      const result = await invoke<string>("validate_keyboard_shortcut", {
-        shortcutValue: shortcutValue,
-        shortcutName: shortcutName,
-      });
-      setValidationMessage(result);
-      setValidationError("");
-    } catch (error) {
-      setValidationError(typeof error === 'string' ? error : 'Invalid shortcut');
-      setValidationMessage("");
-    }
-  }, [shortcutName]);
+      try {
+        const result = await invoke<string>("validate_keyboard_shortcut", {
+          shortcutValue: shortcutValue,
+          shortcutName: shortcutName,
+        });
+        setValidationMessage(result);
+        setValidationError("");
+      } catch (error) {
+        setValidationError(
+          typeof error === "string" ? error : "Invalid shortcut"
+        );
+        setValidationMessage("");
+      }
+    },
+    [shortcutName]
+  );
 
   // Debounced validation
   useEffect(() => {
@@ -196,142 +203,158 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     }
   }, [currentValue, isEditing, validateShortcut]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!isCapturing) return;
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!isCapturing) return;
 
-    e.preventDefault();
-    e.stopPropagation();
+      e.preventDefault();
+      e.stopPropagation();
 
-    // Clear any existing timeout
-    if (captureTimeout) {
-      clearTimeout(captureTimeout);
-    }
-
-    const modifiers: string[] = [];
-    
-    // Detect modifiers with platform-aware naming
-    if (e.ctrlKey || e.metaKey) {
-      if (e.metaKey) {
-        modifiers.push("Cmd");
-      } else {
-        modifiers.push("Ctrl");
+      // Clear any existing timeout
+      if (captureTimeout) {
+        clearTimeout(captureTimeout);
       }
-    }
-    if (e.altKey) {
-      // Use Option on macOS for better UX
-      modifiers.push(navigator.platform.toLowerCase().includes('mac') ? "Option" : "Alt");
-    }
-    if (e.shiftKey) modifiers.push("Shift");
 
-    let key = "";
-    
-    // Enhanced key detection with better special key handling
-    switch (e.code) {
-      case "Space":
-        key = "Space";
-        break;
-      case "Escape":
-        key = "Escape";
-        break;
-      case "Enter":
-        key = "Enter";
-        break;
-      case "Tab":
-        key = "Tab";
-        break;
-      case "Backspace":
-        key = "Backspace";
-        break;
-      case "Delete":
-        key = "Delete";
-        break;
-      case "Home":
-        key = "Home";
-        break;
-      case "End":
-        key = "End";
-        break;
-      case "PageUp":
-        key = "PageUp";
-        break;
-      case "PageDown":
-        key = "PageDown";
-        break;
-      case "Insert":
-        key = "Insert";
-        break;
-      case "ArrowUp":
-        key = "Up";
-        break;
-      case "ArrowDown":
-        key = "Down";
-        break;
-      case "ArrowLeft":
-        key = "Left";
-        break;
-      case "ArrowRight":
-        key = "Right";
-        break;
-      case "PrintScreen":
-        key = "PrintScreen";
-        break;
-      case "ScrollLock":
-        key = "ScrollLock";
-        break;
-      case "Pause":
-        key = "Pause";
-        break;
-      case "CapsLock":
-        key = "CapsLock";
-        break;
-      case "NumLock":
-        key = "NumLock";
-        break;
-      default:
-        // Function keys (including extended range)
-        if (e.code.startsWith("F") && e.code.length <= 3) {
-          key = e.code;
-        }
-        // Number keys
-        else if (e.code.startsWith("Digit")) {
-          key = e.code.replace("Digit", "");
-        }
-        // Letter keys
-        else if (e.code.startsWith("Key")) {
-          key = e.code.replace("Key", "");
-        }
-        // Numpad keys
-        else if (e.code.startsWith("Numpad")) {
-          key = "Numpad" + e.code.replace("Numpad", "");
-        }
-        // Punctuation and special characters
-        else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          key = e.key;
-        }
-        // Fallback to the key name for other special keys
-        else if (e.key && e.key !== "Control" && e.key !== "Alt" && e.key !== "Shift" && e.key !== "Meta") {
-          key = e.key;
-        }
-        break;
-    }
+      const modifiers: string[] = [];
 
-    if (key) {
-      const allKeys = [...modifiers, key];
-      setPressedKeys(allKeys);
-      
-      const shortcutString = allKeys.join("+");
-      setCurrentValue(shortcutString);
-      
-      // Auto-finish capture with longer delay for complex combinations
-      const delay = modifiers.length >= 2 ? 800 : 500;
-      const newTimeout = setTimeout(() => {
-        setIsCapturing(false);
-        setPressedKeys([]);
-        setCaptureTimeout(null);
-      }, delay);
-      setCaptureTimeout(newTimeout);
-    }
-  }, [isCapturing, captureTimeout]);
+      // Detect modifiers with platform-aware naming
+      if (e.ctrlKey || e.metaKey) {
+        if (e.metaKey) {
+          modifiers.push("Cmd");
+        } else {
+          modifiers.push("Ctrl");
+        }
+      }
+      if (e.altKey) {
+        // Use Option on macOS for better UX
+        modifiers.push(
+          navigator.platform.toLowerCase().includes("mac") ? "Option" : "Alt"
+        );
+      }
+      if (e.shiftKey) modifiers.push("Shift");
+
+      let key = "";
+
+      // Enhanced key detection with better special key handling
+      switch (e.code) {
+        case "Space":
+          key = "Space";
+          break;
+        case "Escape":
+          key = "Escape";
+          break;
+        case "Enter":
+          key = "Enter";
+          break;
+        case "Tab":
+          key = "Tab";
+          break;
+        case "Backspace":
+          key = "Backspace";
+          break;
+        case "Delete":
+          key = "Delete";
+          break;
+        case "Home":
+          key = "Home";
+          break;
+        case "End":
+          key = "End";
+          break;
+        case "PageUp":
+          key = "PageUp";
+          break;
+        case "PageDown":
+          key = "PageDown";
+          break;
+        case "Insert":
+          key = "Insert";
+          break;
+        case "ArrowUp":
+          key = "Up";
+          break;
+        case "ArrowDown":
+          key = "Down";
+          break;
+        case "ArrowLeft":
+          key = "Left";
+          break;
+        case "ArrowRight":
+          key = "Right";
+          break;
+        case "PrintScreen":
+          key = "PrintScreen";
+          break;
+        case "ScrollLock":
+          key = "ScrollLock";
+          break;
+        case "Pause":
+          key = "Pause";
+          break;
+        case "CapsLock":
+          key = "CapsLock";
+          break;
+        case "NumLock":
+          key = "NumLock";
+          break;
+        default:
+          // Function keys (including extended range)
+          if (e.code.startsWith("F") && e.code.length <= 3) {
+            key = e.code;
+          }
+          // Number keys
+          else if (e.code.startsWith("Digit")) {
+            key = e.code.replace("Digit", "");
+          }
+          // Letter keys
+          else if (e.code.startsWith("Key")) {
+            key = e.code.replace("Key", "");
+          }
+          // Numpad keys
+          else if (e.code.startsWith("Numpad")) {
+            key = "Numpad" + e.code.replace("Numpad", "");
+          }
+          // Punctuation and special characters
+          else if (
+            e.key.length === 1 &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !e.altKey
+          ) {
+            key = e.key;
+          }
+          // Fallback to the key name for other special keys
+          else if (
+            e.key &&
+            e.key !== "Control" &&
+            e.key !== "Alt" &&
+            e.key !== "Shift" &&
+            e.key !== "Meta"
+          ) {
+            key = e.key;
+          }
+          break;
+      }
+
+      if (key) {
+        const allKeys = [...modifiers, key];
+        setPressedKeys(allKeys);
+
+        const shortcutString = allKeys.join("+");
+        setCurrentValue(shortcutString);
+
+        // Auto-finish capture with longer delay for complex combinations
+        const delay = modifiers.length >= 2 ? 800 : 500;
+        const newTimeout = setTimeout(() => {
+          setIsCapturing(false);
+          setPressedKeys([]);
+          setCaptureTimeout(null);
+        }, delay);
+        setCaptureTimeout(newTimeout);
+      }
+    },
+    [isCapturing, captureTimeout]
+  );
 
   const handleStartCapture = () => {
     setIsCapturing(true);
@@ -339,7 +362,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     setCurrentValue("");
     setValidationMessage("Press the key combination you want to use...");
     setValidationError("");
-    
+
     // Auto-cancel capture after 10 seconds to prevent UI getting stuck
     const cancelTimeout = setTimeout(() => {
       setIsCapturing(false);
@@ -396,10 +419,10 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
 
   // Get platform-appropriate example
   const getExampleShortcut = () => {
-    const isMac = navigator.platform.toLowerCase().includes('mac');
-    if (shortcutName === 'agent_mode_toggle') {
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    if (shortcutName === "agent_mode_toggle") {
       return isMac ? "Option+D" : "Alt+D";
-    } else if (shortcutName === 'dictation_input') {
+    } else if (shortcutName === "dictation_input") {
       return isMac ? "Option+Space" : "Alt+Space";
     }
     return isMac ? "Cmd+K" : "Ctrl+K";
@@ -416,7 +439,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             </kbd>
             <span className="text-sm text-muted-foreground">{description}</span>
           </div>
-          <Badge variant="secondary" className="text-xs">System</Badge>
+          <Badge variant="secondary" className="text-xs">
+            System
+          </Badge>
         </div>
       </div>
     );
@@ -431,10 +456,15 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             {/* Key capture area with enhanced feedback */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Label className="text-sm font-medium">Shortcut combination:</Label>
+                <Label className="text-sm font-medium">
+                  Shortcut combination:
+                </Label>
                 {isCapturing && (
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs animate-pulse bg-blue-50 border-blue-200">
+                    <Badge
+                      variant="outline"
+                      className="text-xs animate-pulse bg-blue-50 border-blue-200"
+                    >
                       🎯 Listening...
                     </Badge>
                     <button
@@ -446,18 +476,22 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                   </div>
                 )}
               </div>
-              <div 
+              <div
                 className={cn(
                   "min-h-[50px] p-3 border-2 border-dashed rounded-lg flex items-center gap-2 cursor-pointer transition-all duration-200",
-                  isCapturing 
-                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 shadow-sm" 
+                  isCapturing
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20 shadow-sm"
                     : "border-muted-foreground/30 hover:border-muted-foreground/50 hover:bg-muted/50"
                 )}
                 onClick={!isCapturing ? handleStartCapture : undefined}
                 onKeyDown={handleKeyDown}
                 tabIndex={0}
                 role="button"
-                aria-label={isCapturing ? "Press keys to capture shortcut" : "Click to start capturing shortcut"}
+                aria-label={
+                  isCapturing
+                    ? "Press keys to capture shortcut"
+                    : "Click to start capturing shortcut"
+                }
               >
                 {pressedKeys.length > 0 ? (
                   <div className="flex items-center gap-1 flex-wrap">
@@ -467,7 +501,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                           {key}
                         </kbd>
                         {index < pressedKeys.length - 1 && (
-                          <span className="text-muted-foreground font-medium">+</span>
+                          <span className="text-muted-foreground font-medium">
+                            +
+                          </span>
                         )}
                       </span>
                     ))}
@@ -480,10 +516,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Keyboard className="h-4 w-4" />
                     <span className="text-sm">
-                      {isCapturing 
-                        ? "Press the keys you want to use..." 
-                        : `Click here to capture shortcut (e.g., ${getExampleShortcut()})`
-                      }
+                      {isCapturing
+                        ? "Press the keys you want to use..."
+                        : `Click here to capture shortcut (e.g., ${getExampleShortcut()})`}
                     </span>
                   </div>
                 )}
@@ -501,18 +536,21 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                 disabled={isCapturing}
               />
               <div className="text-xs text-muted-foreground">
-                Tip: Use modifiers like Alt, Ctrl, Cmd, Shift combined with letters or function keys
+                Tip: Use modifiers like Alt, Ctrl, Cmd, Shift combined with
+                letters or function keys
               </div>
             </div>
 
             {/* Enhanced validation feedback */}
             {(validationMessage || validationError) && (
-              <div className={cn(
-                "flex items-start gap-2 text-sm p-3 rounded-md border",
-                validationError 
-                  ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800 dark:text-red-400" 
-                  : "text-green-700 bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800 dark:text-green-400"
-              )}>
+              <div
+                className={cn(
+                  "flex items-start gap-2 text-sm p-3 rounded-md border",
+                  validationError
+                    ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800 dark:text-red-400"
+                    : "text-green-700 bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800 dark:text-green-400"
+                )}
+              >
                 <div className="flex-shrink-0 mt-0.5">
                   {validationError ? (
                     <AlertTriangle className="h-4 w-4" />
@@ -524,7 +562,8 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                   <span>{validationError || validationMessage}</span>
                   {validationError && validationError.includes("conflicts") && (
                     <div className="mt-1 text-xs opacity-75">
-                      Consider using a different key combination to avoid conflicts.
+                      Consider using a different key combination to avoid
+                      conflicts.
                     </div>
                   )}
                 </div>
@@ -536,7 +575,12 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={isLoading || !!validationError || !currentValue.trim() || isCapturing}
+                disabled={
+                  isLoading ||
+                  !!validationError ||
+                  !currentValue.trim() ||
+                  isCapturing
+                }
                 className="flex items-center gap-2"
               >
                 <Save className="h-4 w-4" />
@@ -568,7 +612,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
               <kbd className="px-2 py-1 bg-muted rounded text-sm min-w-[80px] text-center font-mono">
                 {value || "Not set"}
               </kbd>
-              <span className="text-sm text-muted-foreground">{description}</span>
+              <span className="text-sm text-muted-foreground">
+                {description}
+              </span>
             </div>
             <Button
               size="sm"
@@ -866,7 +912,7 @@ const Settings: React.FC<SettingsProps> = ({
     if (!status) {
       return <Badge variant="outline">Disconnected</Badge>;
     }
-    
+
     if (status.Connected !== undefined) {
       return (
         <Badge variant="default" className="bg-green-500">
@@ -889,7 +935,7 @@ const Settings: React.FC<SettingsProps> = ({
     if (!status) {
       return <Square className="h-4 w-4 text-gray-400" />;
     }
-    
+
     if (status.Connected !== undefined) {
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     } else if (status.Connecting !== undefined) {
@@ -1508,7 +1554,10 @@ const Settings: React.FC<SettingsProps> = ({
                     <div className="flex items-center gap-2">
                       <span>{provider.name}</span>
                       {provider.computer_use_supported && (
-                        <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                        <Badge
+                          variant="secondary"
+                          className="text-xs bg-blue-100 text-blue-800"
+                        >
                           Computer Use
                         </Badge>
                       )}
@@ -1525,7 +1574,9 @@ const Settings: React.FC<SettingsProps> = ({
                 {currentProvider.computer_use_supported && (
                   <div className="flex items-center gap-2 text-sm">
                     <CheckCircle className="h-4 w-4 text-green-600" />
-                    <span className="text-green-700">Computer use capabilities available</span>
+                    <span className="text-green-700">
+                      Computer use capabilities available
+                    </span>
                   </div>
                 )}
               </div>
@@ -1575,20 +1626,25 @@ const Settings: React.FC<SettingsProps> = ({
                       {currentProvider?.model_info ? (
                         <>
                           {/* Computer Use Models */}
-                          {currentProvider.model_info.filter(model => model.supports_computer_use).length > 0 && (
+                          {currentProvider.model_info.filter(
+                            (model) => model.supports_computer_use
+                          ).length > 0 && (
                             <>
                               <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-blue-50 border-b">
                                 Computer Use Models
                               </div>
                               {currentProvider.model_info
-                                .filter(model => model.supports_computer_use)
+                                .filter((model) => model.supports_computer_use)
                                 .map((model) => (
                                   <SelectItem key={model.id} value={model.id}>
                                     <div className="flex items-center gap-2">
                                       <span>🖥️</span>
                                       <span>{model.name}</span>
                                       {model.is_recommended && (
-                                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                        <Badge
+                                          variant="outline"
+                                          className="text-xs bg-green-50 text-green-700 border-green-200"
+                                        >
                                           Recommended
                                         </Badge>
                                       )}
@@ -1597,22 +1653,27 @@ const Settings: React.FC<SettingsProps> = ({
                                 ))}
                             </>
                           )}
-                          
+
                           {/* General Chat Models */}
-                          {currentProvider.model_info.filter(model => !model.supports_computer_use).length > 0 && (
+                          {currentProvider.model_info.filter(
+                            (model) => !model.supports_computer_use
+                          ).length > 0 && (
                             <>
                               <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-gray-50 border-b">
                                 General Chat Models
                               </div>
                               {currentProvider.model_info
-                                .filter(model => !model.supports_computer_use)
+                                .filter((model) => !model.supports_computer_use)
                                 .map((model) => (
                                   <SelectItem key={model.id} value={model.id}>
                                     <div className="flex items-center gap-2">
                                       <span>💬</span>
                                       <span>{model.name}</span>
                                       {model.is_recommended && (
-                                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                        <Badge
+                                          variant="outline"
+                                          className="text-xs bg-green-50 text-green-700 border-green-200"
+                                        >
                                           Recommended
                                         </Badge>
                                       )}
@@ -1639,7 +1700,9 @@ const Settings: React.FC<SettingsProps> = ({
                   {formData.model && currentProvider?.model_info && (
                     <div className="text-xs text-muted-foreground">
                       {(() => {
-                        const selectedModel = currentProvider.model_info.find(m => m.id === formData.model);
+                        const selectedModel = currentProvider.model_info.find(
+                          (m) => m.id === formData.model
+                        );
                         if (selectedModel?.supports_computer_use) {
                           return "✅ This model supports computer use automation";
                         } else {
@@ -2034,9 +2097,9 @@ const Settings: React.FC<SettingsProps> = ({
     "args": ["@modelcontextprotocol/server-filesystem", "/Users/username/Documents"],
     "env": {}
   },
-  "sqlite": {
+  "everything": {
     "command": "npx",
-    "args": ["@modelcontextprotocol/server-sqlite", "/path/to/database.db"],
+    "args": ["@modelcontextprotocol/server-everything"],
     "env": {}
   }
 }`}
@@ -2044,7 +2107,7 @@ const Settings: React.FC<SettingsProps> = ({
             />
             <div className="text-xs text-muted-foreground space-y-1">
               <p>
-                • Server name is the JSON key (e.g., "filesystem", "sqlite")
+                • Server name is the JSON key (e.g., "filesystem", "everything")
               </p>
               <p>
                 • Required field: <code>command</code>
@@ -2134,16 +2197,16 @@ const Settings: React.FC<SettingsProps> = ({
                   @modelcontextprotocol/server-filesystem /path
                 </div>
                 <div>
-                  <strong>SQLite:</strong> npx
-                  @modelcontextprotocol/server-sqlite /path/to/db.sqlite
+                  <strong>Everything Server:</strong> npx
+                  @modelcontextprotocol/server-everything
                 </div>
                 <div>
-                  <strong>Git:</strong> npx @modelcontextprotocol/server-git
-                  /path/to/repo
+                  <strong>Memory:</strong> npx
+                  @modelcontextprotocol/server-memory
                 </div>
                 <div>
-                  <strong>Brave Search:</strong> npx
-                  @modelcontextprotocol/server-brave-search
+                  <strong>Sequential Thinking:</strong> npx
+                  @modelcontextprotocol/server-sequential-thinking
                 </div>
               </div>
               <a

@@ -114,6 +114,163 @@ pub mod tool_names {
     pub const ACTION_KEY: &str = "key";
     pub const ACTION_SCROLL: &str = "scroll";
     pub const ACTION_WAIT: &str = "wait";
+
+    // Extended computer use actions
+    pub const ACTION_LEFT_CLICK: &str = "left_click";
+    pub const ACTION_RIGHT_CLICK: &str = "right_click";
+    pub const ACTION_MIDDLE_CLICK: &str = "middle_click";
+    pub const ACTION_DOUBLE_CLICK: &str = "double_click";
+    pub const ACTION_TRIPLE_CLICK: &str = "triple_click";
+    pub const ACTION_LEFT_CLICK_DRAG: &str = "left_click_drag";
+    pub const ACTION_MOUSE_MOVE: &str = "mouse_move";
+    pub const ACTION_HOLD_KEY: &str = "hold_key";
+}
+
+pub mod http_headers {
+    pub const CONTENT_TYPE: &str = "Content-Type";
+    pub const X_API_KEY: &str = "x-api-key";
+    pub const APPLICATION_JSON: &str = "application/json";
+    pub const AUTHORIZATION: &str = "Authorization";
+    pub const USER_AGENT: &str = "User-Agent";
+}
+
+pub mod browser_js {
+    pub const QUERY_SELECTOR_ALL: &str = "document.querySelectorAll";
+    pub const QUERY_SELECTOR: &str = "document.querySelector";
+    pub const TEXT_CONTENT: &str = "textContent";
+    pub const GET_ATTRIBUTE: &str = "getAttribute";
+    pub const CLICK: &str = "click";
+    pub const FOCUS: &str = "focus";
+}
+
+pub mod anthropic_content_types {
+    pub const MESSAGE_START: &str = "message_start";
+    pub const CONTENT_BLOCK_START: &str = "content_block_start";
+    pub const CONTENT_BLOCK_DELTA: &str = "content_block_delta";
+    pub const CONTENT_BLOCK_STOP: &str = "content_block_stop";
+    pub const TEXT_DELTA: &str = "text_delta";
+    pub const INPUT_JSON_DELTA: &str = "input_json_delta";
+    pub const TOOL_USE: &str = "tool_use";
+    pub const TOOL_RESULT: &str = "tool_result";
+    pub const TEXT: &str = "text";
+}
+
+pub mod chrome_flags {
+    pub const REMOTE_DEBUG_PORT_FLAG: &str = "--remote-debugging-port=9222";
+    pub const HEADLESS_FLAG: &str = "--headless";
+    pub const NO_SANDBOX_FLAG: &str = "--no-sandbox";
+    pub const DISABLE_GPU_FLAG: &str = "--disable-gpu";
+    pub const DISABLE_DEV_SHM_FLAG: &str = "--disable-dev-shm-usage";
+}
+
+pub mod common_files {
+    pub const PACKAGE_JSON: &str = "package.json";
+    pub const CARGO_TOML: &str = "Cargo.toml";
+    pub const REQUIREMENTS_TXT: &str = "requirements.txt";
+    pub const COMPOSER_JSON: &str = "composer.json";
+    pub const README_MD: &str = "README.md";
+    pub const README_TXT: &str = "README.txt";
+    pub const TSCONFIG_JSON: &str = "tsconfig.json";
+    pub const MAIN_PY: &str = "main.py";
+    pub const INDEX_JS: &str = "index.js";
+    pub const MAIN_RS: &str = "main.rs";
+    pub const APP_TSX: &str = "App.tsx";
+}
+
+pub mod provider_names {
+    pub const ANTHROPIC: &str = "anthropic";
+    pub const OPENAI: &str = "openai";
+    pub const GEMINI: &str = "gemini";
+    pub const ELEVENLABS: &str = "elevenlabs";
+    pub const REPLICATE: &str = "replicate";
+    pub const SYSTEM: &str = "system";
+}
+
+pub mod error_recovery {
+    use std::time::Duration;
+
+    // Recovery attempt delays
+    pub const ELEMENT_NOT_FOUND_DELAY_MS: u64 = 1000;
+    pub const NETWORK_ERROR_DELAY_MS: u64 = 2000;
+    pub const TIMEOUT_RECOVERY_DELAY_MS: u64 = 5000;
+    pub const RATE_LIMIT_BACKOFF_MS: u64 = 60000;
+    pub const BROWSER_NOT_READY_DELAY_MS: u64 = 3000;
+
+    // Default recovery configuration
+    pub const DEFAULT_MAX_RETRIES: usize = 3;
+    pub const DEFAULT_BASE_RETRY_DELAY_MS: u64 = 500;
+    pub const DEFAULT_MAX_RETRY_DELAY_MS: u64 = 10000;
+    pub const DEFAULT_TIMEOUT_THRESHOLD_MS: u64 = 30000;
+
+    // Exponential backoff parameters
+    pub const BACKOFF_MULTIPLIER: u32 = 2;
+    pub const MAX_BACKOFF_EXPONENT: u32 = 5;
+}
+
+pub mod cloud_networking {
+    // Connection retry parameters
+    pub const MAX_CONNECTION_RETRIES: u32 = 10;
+    pub const BASE_RETRY_DELAY_MS: u64 = 2000;
+    pub const CONNECTION_CHECK_INTERVAL_MS: u64 = 5000;
+    pub const WATCHDOG_TIMEOUT_MS: u64 = 60000;
+    pub const MAX_RETRY_INTERVAL_MS: u64 = 300000; // 5 minutes
+
+    // Heartbeat and status intervals
+    pub const HEARTBEAT_SEND_INTERVAL_MS: u64 = 30000;
+    pub const STATUS_CHECK_INTERVAL_MS: u64 = 30000;
+    pub const RECONNECTION_DELAY_MS: u64 = 5000;
+
+    // Exponential backoff limits
+    pub const BACKOFF_MULTIPLIER: u32 = 2;
+    pub const MAX_BACKOFF_EXPONENT: u32 = 5;
+}
+
+pub mod macos_system {
+    // System Preferences URLs
+    pub const MICROPHONE_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+    pub const SCREEN_RECORDING_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+    pub const INPUT_MONITORING_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
+    pub const ACCESSIBILITY_PRIVACY_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+
+    // Bundle identifiers and application paths
+    pub const SYSTEM_PREFERENCES_BUNDLE: &str = "com.apple.systempreferences";
+    pub const SYSTEM_SETTINGS_BUNDLE: &str = "com.apple.systemsettings";
+    pub const SECURITY_PREFPANE_PATH: &str = "/System/Library/PreferencePanes/Security.prefPane";
+
+    // Command flags
+    pub const BUNDLE_FLAG: &str = "-b";
+    pub const OPEN_COMMAND: &str = "open";
+    pub const OSASCRIPT_COMMAND: &str = "osascript";
+
+    // Permission descriptions
+    pub const ACCESSIBILITY_GRANTED_MSG: &str = "Accessibility permission is granted";
+    pub const SCREEN_RECORDING_GRANTED_MSG: &str = "Screen recording permission is granted";
+    pub const MICROPHONE_GRANTED_MSG: &str = "Microphone permission is granted";
+}
+
+pub mod javascript_templates {
+    // DOM query methods
+    pub const QUERY_ALL_TEMPLATE: &str = "document.querySelectorAll('{}')";
+    pub const QUERY_SINGLE_TEMPLATE: &str = "document.querySelector('{}')";
+    pub const GET_TEXT_CONTENT: &str = ".textContent";
+    pub const GET_INNER_TEXT: &str = ".innerText";
+    pub const GET_VALUE: &str = ".value";
+
+    // Element interaction
+    pub const CLICK_ELEMENT: &str = ".click()";
+    pub const FOCUS_ELEMENT: &str = ".focus()";
+    pub const SCROLL_INTO_VIEW: &str = ".scrollIntoView()";
+
+    // Attribute and style access
+    pub const GET_ATTRIBUTE_TEMPLATE: &str = ".getAttribute('{}')";
+    pub const SET_ATTRIBUTE_TEMPLATE: &str = ".setAttribute('{}', '{}')";
+    pub const GET_STYLE_TEMPLATE: &str = ".style.{}";
+
+    // Common selectors
+    pub const BUTTON_SELECTOR: &str = "button";
+    pub const INPUT_SELECTOR: &str = "input";
+    pub const LINK_SELECTOR: &str = "a";
+    pub const FORM_SELECTOR: &str = "form";
 }
 
 pub mod window_labels {
@@ -204,6 +361,32 @@ pub mod timeouts {
     pub const UI_SLIDE_DELAY_MS: u64 = 600;
     pub const UI_NOTIFICATION_DISPLAY_MS: u64 = 3000;
 
+    // Permission and system operation timeouts
+    pub const PERMISSION_CHECK_DELAY_MS: u64 = 1000;
+    pub const SCREEN_RECORDING_CHECK_DELAY_MS: u64 = 2000;
+    pub const SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS: u64 = 3000;
+    pub const SYSTEM_SETTINGS_CHECK_TIMEOUT_MS: u64 = 5000;
+
+    // MCP and server startup delays
+    pub const MCP_SERVER_STARTUP_DELAY_MS: u64 = 500;
+    pub const MCP_SERVER_RESTART_DELAY_MS: u64 = 1000;
+
+    // Cloud and network intervals
+    pub const CLOUD_RETRY_BASE_DELAY_MS: u64 = 2000;
+    pub const CLOUD_HEARTBEAT_INTERVAL_MS: u64 = 30000;
+    pub const CLOUD_STATUS_INTERVAL_MS: u64 = 30000;
+    pub const CLOUD_RECONNECT_DELAY_MS: u64 = 5000;
+    pub const CLOUD_WATCHDOG_INTERVAL_MS: u64 = 60000;
+
+    // TTS processing delays
+    pub const TTS_PROCESSING_DELAY_MS: u64 = 1000;
+
+    // Browser automation delays
+    pub const BROWSER_PAGE_LOAD_DELAY_MS: u64 = 1000;
+
+    // Shell command delays
+    pub const SHELL_COMMAND_DELAY_MS: u64 = 10;
+
     // Buffer and audio timeouts
     pub const PARTIAL_BUFFER_DURATION_MS: u64 = 1500;
     pub const FINAL_BUFFER_DURATION_MS: u64 = 5000;
@@ -262,6 +445,56 @@ pub mod api_endpoints {
     pub const LOCALHOST_CHROME_DEBUG: &str = "http://localhost:9222";
     pub const LOCALHOST_MCP_SERVER: &str = "http://localhost:8080";
     pub const WEBSOCKET_LOCALHOST: &str = "ws://localhost:8080";
+
+    // Additional API endpoints  
+    pub const ELEVENLABS_TTS_BASE: &str = "https://api.elevenlabs.io/v1/text-to-speech";
+    pub const REPLICATE_API_BASE: &str = "https://api.replicate.com";
+    pub const JUNO_CLOUD_WEBSOCKET: &str = "wss://juno-cloud-backend.fly.dev/ws";
+
+    // Development URLs
+    pub const DEV_SERVER_BASE: &str = "http://localhost:1420";
+    pub const HMR_WEBSOCKET: &str = "ws://localhost:1421";
+}
+
+pub mod shell_commands {
+    // Common shell commands
+    pub const OPEN: &str = "open";
+    pub const OSASCRIPT: &str = "osascript";
+    pub const KILLALL: &str = "killall";
+    pub const PS: &str = "ps";
+    pub const GREP: &str = "grep";
+    pub const CURL: &str = "curl";
+    pub const WHICH: &str = "which";
+
+    // Command line flags
+    pub const BACKGROUND_FLAG: &str = "&";
+    pub const QUIET_FLAG: &str = "-q";
+    pub const VERBOSE_FLAG: &str = "-v";
+    pub const FORCE_FLAG: &str = "-f";
+    pub const RECURSIVE_FLAG: &str = "-r";
+
+    // Chrome and browser commands
+    pub const CHROME_BINARY_MACOS: &str = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    pub const CHROMIUM_BINARY_MACOS: &str = "/Applications/Chromium.app/Contents/MacOS/Chromium";
+}
+
+pub mod file_patterns {
+    // Log and temporary file patterns
+    pub const LOG_EXTENSION: &str = ".log";
+    pub const TMP_EXTENSION: &str = ".tmp";
+    pub const CACHE_EXTENSION: &str = ".cache";
+    pub const BACKUP_EXTENSION: &str = ".backup";
+
+    // Common file prefixes
+    pub const LOG_PREFIX: &str = "juno_";
+    pub const SCREENSHOT_PREFIX: &str = "screenshot_";
+    pub const TEMP_PREFIX: &str = "temp_";
+
+    // Directory names
+    pub const LOGS_DIR: &str = "logs";
+    pub const CACHE_DIR: &str = "cache";
+    pub const CONFIG_DIR: &str = ".juno";
+    pub const SCREENSHOTS_DIR: &str = "screenshots";
 }
 
 pub mod error_codes {
@@ -858,5 +1091,222 @@ mod tests {
         assert_eq!(timeouts::MOUSE_ACTION_DELAY_MS, 100);
         assert_eq!(timeouts::MOUSE_SEQUENCE_DELAY_MS, 300);
         assert_eq!(timeouts::DOUBLE_CLICK_DELAY_MS, 500);
+    }
+
+    #[test]
+    fn test_extended_constants() {
+        // Test HTTP headers
+        assert_eq!(http_headers::CONTENT_TYPE, "Content-Type");
+        assert_eq!(http_headers::APPLICATION_JSON, "application/json");
+        assert_eq!(http_headers::X_API_KEY, "x-api-key");
+
+        // Test browser JS constants
+        assert_eq!(browser_js::QUERY_SELECTOR_ALL, "document.querySelectorAll");
+        assert_eq!(browser_js::QUERY_SELECTOR, "document.querySelector");
+        assert_eq!(browser_js::TEXT_CONTENT, "textContent");
+
+        // Test provider names
+        assert_eq!(provider_names::ANTHROPIC, "anthropic");
+        assert_eq!(provider_names::OPENAI, "openai");
+        assert_eq!(provider_names::SYSTEM, "system");
+
+        // Test anthropic content types
+        assert_eq!(anthropic_content_types::TOOL_USE, "tool_use");
+        assert_eq!(anthropic_content_types::TOOL_RESULT, "tool_result");
+        assert_eq!(anthropic_content_types::TEXT, "text");
+
+        // Test Chrome flags
+        assert_eq!(chrome_flags::REMOTE_DEBUG_PORT_FLAG, "--remote-debugging-port=9222");
+        assert_eq!(chrome_flags::HEADLESS_FLAG, "--headless");
+
+        // Test common files
+        assert_eq!(common_files::PACKAGE_JSON, "package.json");
+        assert_eq!(common_files::CARGO_TOML, "Cargo.toml");
+        assert_eq!(common_files::README_MD, "README.md");
+    }
+
+    #[test]
+    fn test_extended_timing_constants() {
+        // Test permission timing
+        assert_eq!(timeouts::PERMISSION_CHECK_DELAY_MS, 1000);
+        assert_eq!(timeouts::SCREEN_RECORDING_CHECK_DELAY_MS, 2000);
+        assert!(timeouts::PERMISSION_CHECK_DELAY_MS < timeouts::SCREEN_RECORDING_CHECK_DELAY_MS);
+
+        // Test cloud timing
+        assert_eq!(timeouts::CLOUD_RETRY_BASE_DELAY_MS, 2000);
+        assert_eq!(timeouts::CLOUD_HEARTBEAT_INTERVAL_MS, 30000);
+        assert_eq!(timeouts::CLOUD_STATUS_INTERVAL_MS, 30000);
+
+        // Test MCP timing
+        assert_eq!(timeouts::MCP_SERVER_STARTUP_DELAY_MS, 500);
+        assert_eq!(timeouts::MCP_SERVER_RESTART_DELAY_MS, 1000);
+        assert!(timeouts::MCP_SERVER_STARTUP_DELAY_MS < timeouts::MCP_SERVER_RESTART_DELAY_MS);
+    }
+
+    #[test]
+    fn test_computer_action_constants() {
+        // Test extended action names
+        assert_eq!(tool_names::ACTION_LEFT_CLICK, "left_click");
+        assert_eq!(tool_names::ACTION_RIGHT_CLICK, "right_click");
+        assert_eq!(tool_names::ACTION_DOUBLE_CLICK, "double_click");
+        assert_eq!(tool_names::ACTION_HOLD_KEY, "hold_key");
+
+        // Ensure no duplicate action names
+        use std::collections::HashSet;
+        let actions = vec![
+            tool_names::ACTION_SCREENSHOT,
+            tool_names::ACTION_CLICK,
+            tool_names::ACTION_LEFT_CLICK,
+            tool_names::ACTION_RIGHT_CLICK,
+            tool_names::ACTION_DOUBLE_CLICK,
+            tool_names::ACTION_TYPE,
+            tool_names::ACTION_KEY,
+            tool_names::ACTION_HOLD_KEY,
+            tool_names::ACTION_SCROLL,
+            tool_names::ACTION_WAIT,
+        ];
+
+        let unique_actions: HashSet<&str> = actions.iter().cloned().collect();
+        assert_eq!(actions.len(), unique_actions.len(), "Duplicate action names found");
+    }
+
+    #[test]
+    fn test_error_recovery_constants() {
+        // Test recovery delays
+        assert_eq!(error_recovery::ELEMENT_NOT_FOUND_DELAY_MS, 1000);
+        assert_eq!(error_recovery::NETWORK_ERROR_DELAY_MS, 2000);
+        assert_eq!(error_recovery::TIMEOUT_RECOVERY_DELAY_MS, 5000);
+        assert_eq!(error_recovery::RATE_LIMIT_BACKOFF_MS, 60000);
+
+        // Test default configuration
+        assert_eq!(error_recovery::DEFAULT_MAX_RETRIES, 3);
+        assert_eq!(error_recovery::DEFAULT_BASE_RETRY_DELAY_MS, 500);
+        assert_eq!(error_recovery::DEFAULT_MAX_RETRY_DELAY_MS, 10000);
+
+        // Test backoff parameters
+        assert_eq!(error_recovery::BACKOFF_MULTIPLIER, 2);
+        assert_eq!(error_recovery::MAX_BACKOFF_EXPONENT, 5);
+    }
+
+    #[test]
+    fn test_cloud_networking_constants() {
+        // Test connection parameters
+        assert_eq!(cloud_networking::MAX_CONNECTION_RETRIES, 10);
+        assert_eq!(cloud_networking::BASE_RETRY_DELAY_MS, 2000);
+        assert_eq!(cloud_networking::CONNECTION_CHECK_INTERVAL_MS, 5000);
+
+        // Test intervals
+        assert_eq!(cloud_networking::HEARTBEAT_SEND_INTERVAL_MS, 30000);
+        assert_eq!(cloud_networking::STATUS_CHECK_INTERVAL_MS, 30000);
+        assert_eq!(cloud_networking::RECONNECTION_DELAY_MS, 5000);
+
+        // Test backoff parameters
+        assert_eq!(cloud_networking::BACKOFF_MULTIPLIER, 2);
+        assert_eq!(cloud_networking::MAX_BACKOFF_EXPONENT, 5);
+
+        // Test reasonable timing hierarchy
+        assert!(cloud_networking::BASE_RETRY_DELAY_MS < cloud_networking::CONNECTION_CHECK_INTERVAL_MS);
+        assert!(cloud_networking::CONNECTION_CHECK_INTERVAL_MS < cloud_networking::HEARTBEAT_SEND_INTERVAL_MS);
+    }
+
+    #[test]
+    fn test_macos_system_constants() {
+        // Test privacy URLs
+        assert!(macos_system::MICROPHONE_PRIVACY_URL.contains("Privacy_Microphone"));
+        assert!(macos_system::SCREEN_RECORDING_PRIVACY_URL.contains("Privacy_ScreenCapture"));
+        assert!(macos_system::INPUT_MONITORING_PRIVACY_URL.contains("Privacy_ListenEvent"));
+        assert!(macos_system::ACCESSIBILITY_PRIVACY_URL.contains("Privacy_Accessibility"));
+
+        // Test bundle identifiers
+        assert_eq!(macos_system::SYSTEM_PREFERENCES_BUNDLE, "com.apple.systempreferences");
+        assert_eq!(macos_system::SYSTEM_SETTINGS_BUNDLE, "com.apple.systemsettings");
+
+        // Test commands
+        assert_eq!(macos_system::OPEN_COMMAND, "open");
+        assert_eq!(macos_system::OSASCRIPT_COMMAND, "osascript");
+        assert_eq!(macos_system::BUNDLE_FLAG, "-b");
+
+        // Test permission messages
+        assert!(macos_system::ACCESSIBILITY_GRANTED_MSG.contains("Accessibility"));
+        assert!(macos_system::SCREEN_RECORDING_GRANTED_MSG.contains("Screen recording"));
+        assert!(macos_system::MICROPHONE_GRANTED_MSG.contains("Microphone"));
+    }
+
+    #[test]
+    fn test_javascript_templates() {
+        // Test DOM query templates
+        assert_eq!(javascript_templates::QUERY_ALL_TEMPLATE, "document.querySelectorAll('{}')");
+        assert_eq!(javascript_templates::QUERY_SINGLE_TEMPLATE, "document.querySelector('{}')");
+
+        // Test element interaction
+        assert_eq!(javascript_templates::CLICK_ELEMENT, ".click()");
+        assert_eq!(javascript_templates::FOCUS_ELEMENT, ".focus()");
+        assert_eq!(javascript_templates::SCROLL_INTO_VIEW, ".scrollIntoView()");
+
+        // Test attribute access
+        assert_eq!(javascript_templates::GET_ATTRIBUTE_TEMPLATE, ".getAttribute('{}')");
+        assert_eq!(javascript_templates::SET_ATTRIBUTE_TEMPLATE, ".setAttribute('{}', '{}')");
+
+        // Test common selectors
+        assert_eq!(javascript_templates::BUTTON_SELECTOR, "button");
+        assert_eq!(javascript_templates::INPUT_SELECTOR, "input");
+        assert_eq!(javascript_templates::LINK_SELECTOR, "a");
+        assert_eq!(javascript_templates::FORM_SELECTOR, "form");
+    }
+
+    #[test]
+    fn test_shell_commands() {
+        // Test common commands
+        assert_eq!(shell_commands::OPEN, "open");
+        assert_eq!(shell_commands::OSASCRIPT, "osascript");
+        assert_eq!(shell_commands::KILLALL, "killall");
+        assert_eq!(shell_commands::GREP, "grep");
+
+        // Test flags
+        assert_eq!(shell_commands::BACKGROUND_FLAG, "&");
+        assert_eq!(shell_commands::QUIET_FLAG, "-q");
+        assert_eq!(shell_commands::VERBOSE_FLAG, "-v");
+        assert_eq!(shell_commands::FORCE_FLAG, "-f");
+
+        // Test browser paths
+        assert!(shell_commands::CHROME_BINARY_MACOS.contains("Google Chrome"));
+        assert!(shell_commands::CHROMIUM_BINARY_MACOS.contains("Chromium"));
+    }
+
+    #[test]
+    fn test_file_patterns() {
+        // Test extensions
+        assert_eq!(file_patterns::LOG_EXTENSION, ".log");
+        assert_eq!(file_patterns::TMP_EXTENSION, ".tmp");
+        assert_eq!(file_patterns::CACHE_EXTENSION, ".cache");
+        assert_eq!(file_patterns::BACKUP_EXTENSION, ".backup");
+
+        // Test prefixes
+        assert_eq!(file_patterns::LOG_PREFIX, "juno_");
+        assert_eq!(file_patterns::SCREENSHOT_PREFIX, "screenshot_");
+        assert_eq!(file_patterns::TEMP_PREFIX, "temp_");
+
+        // Test directories
+        assert_eq!(file_patterns::LOGS_DIR, "logs");
+        assert_eq!(file_patterns::CACHE_DIR, "cache");
+        assert_eq!(file_patterns::CONFIG_DIR, ".juno");
+        assert_eq!(file_patterns::SCREENSHOTS_DIR, "screenshots");
+    }
+
+    #[test]
+    fn test_extended_api_endpoints() {
+        // Test additional endpoints
+        assert!(api_endpoints::ELEVENLABS_TTS_BASE.starts_with("https://api.elevenlabs.io"));
+        assert!(api_endpoints::REPLICATE_API_BASE.starts_with("https://api.replicate.com"));
+        assert!(api_endpoints::JUNO_CLOUD_WEBSOCKET.starts_with("wss://"));
+
+        // Test development URLs
+        assert_eq!(api_endpoints::DEV_SERVER_BASE, "http://localhost:1420");
+        assert_eq!(api_endpoints::HMR_WEBSOCKET, "ws://localhost:1421");
+
+        // Ensure URLs are well-formed
+        assert!(!api_endpoints::ELEVENLABS_TTS_BASE.is_empty());
+        assert!(!api_endpoints::REPLICATE_API_BASE.is_empty());
+        assert!(!api_endpoints::JUNO_CLOUD_WEBSOCKET.is_empty());
     }
 }

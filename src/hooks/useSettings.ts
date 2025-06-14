@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
 import { KeyboardShortcuts } from "@/types/keyboard";
 import { AUDIO } from "@/lib/constants";
 import { useInvoke } from "@/hooks/useInvoke";
 import type {
   ProviderInfo,
   ProviderSettings,
-  ToolConfig,
   ToolCategory,
   MCPServerConfig,
   MCPServerStatus,
@@ -232,15 +232,14 @@ export function useSettings() {
   // Handler functions
   const handleTtsProviderChange = useCallback(async (newProvider: string) => {
     await invokeCommand(
-      "set_tts_provider_command", 
+      "set_tts_provider_command",
       { provider: newProvider },
       {
         showSuccessToast: true,
-        successMessage: `TTS provider set to: ${
-          newProvider === "off"
-            ? "Off"
-            : newProvider.charAt(0).toUpperCase() + newProvider.slice(1)
-        }`,
+        successMessage: `TTS provider set to: ${newProvider === "off"
+          ? "Off"
+          : newProvider.charAt(0).toUpperCase() + newProvider.slice(1)
+          }`,
         errorMessage: "Failed to set TTS provider"
       }
     );
@@ -323,7 +322,7 @@ export function useSettings() {
 
   const handleSoundEnabledChange = useCallback(async (enabled: boolean) => {
     await invokeCommand(
-      "set_sound_enabled", 
+      "set_sound_enabled",
       { enabled },
       {
         showSuccessToast: true,
@@ -336,7 +335,7 @@ export function useSettings() {
 
   const handlePerformanceMonitoringChange = useCallback(async (enabled: boolean) => {
     await invokeCommand(
-      "set_performance_monitoring", 
+      "set_performance_monitoring",
       { enabled },
       {
         showSuccessToast: true,
@@ -349,7 +348,7 @@ export function useSettings() {
 
   const handleAgentModeChange = useCallback(async (newMode: string) => {
     await invokeCommand(
-      "set_agent_mode", 
+      "set_agent_mode",
       { mode: newMode },
       {
         showSuccessToast: true,
