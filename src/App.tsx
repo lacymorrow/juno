@@ -190,7 +190,6 @@ function formatFullTimestamp(timestamp: number): string {
 
 function App() {
   const [appVersion, setAppVersion] = useState<string | null>(null);
-  const [serverConfig, setServerConfig] = useState<any>(null);
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
   const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -246,8 +245,15 @@ function App() {
   const [lastScrollTime, setLastScrollTime] = useState(0);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
+<<<<<<< HEAD
+  // App view and panel state
+  const [currentView, setCurrentView] = useState<
+    "chat" | "devtools" | "permissions"
+  >("chat");
+=======
   // Add missing view state variables
   const [currentView, setCurrentView] = useState<AppView>("chat");
+>>>>>>> main
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
 
   // Fetch app version dynamically
