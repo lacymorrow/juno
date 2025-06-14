@@ -139,7 +139,7 @@ pub async fn submit_query(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-    const MAX_ITERATIONS: u32 = 15;
+    const MAX_ITERATIONS: u32 = 30;
     state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
     info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
 
