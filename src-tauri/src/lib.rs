@@ -2514,6 +2514,58 @@ pub fn run() {
                 });
             });
 
+            // Listen for comprehensive agent-stop-all events (from stop button or emergency situations)
+            let app_handle_for_agent_stop_all = app.handle().clone();
+            app.listen("agent-stop-all", move |_event| {
+                info!("[Event] Received agent-stop-all event - performing comprehensive agent shutdown");
+
+                let app_handle_clone = app_handle_for_agent_stop_all.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Stop TTS immediately
+                    crate::tts::stop_speech();
+
+                    // Force stop voice transcription if available
+                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
+                        Some(controller_state) => {
+                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
+                                app_handle_clone.clone(),
+                                controller_state
+                            ).await;
+                        }
+                        None => {
+                            warn!("[Agent Stop All] Voice controller not available");
+                        }
+                    }
+
+                    // Force reset all monitoring states
+                    crate::agent_monitor::force_reset_agent_input_state().await;
+                    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+                    // Clean up app state
+                    let app_state = app_handle_clone.state::<crate::state::AppState>();
+                    app_state.signal_cancel();
+                    app_state.mark_agent_execution_finished();
+
+                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                        *dictation_active = false;
+                    }
+
+                    // Emit state updates
+                    let _ = app_handle_clone.emit("agent-active", false);
+                    let _ = app_handle_clone.emit("dictation-active", false);
+                    let _ = app_handle_clone.emit("tts-stop-requested", ());
+
+                    // Update floating bar
+                    crate::commands::floating_bar::handle_backend_response(
+                        &app_handle_clone,
+                        "Stopped",
+                        Some("All agent operations stopped.".to_string())
+                    ).await;
+
+                    info!("[Agent Stop All] Comprehensive agent shutdown completed");
+                });
+            });
+
             Ok(())
         });
 
