@@ -30,6 +30,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { notificationService } from "@/lib/notifications";
+import { 
+  parseStructuredResponse, 
+  hasStructuredContent, 
+  getRenderContent, 
+  type StructuredResponse 
+} from "@/lib/structured-response-parser";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
 import { cn } from "@/lib/utils";
 import { getVersion } from "@tauri-apps/api/app";
@@ -69,6 +75,10 @@ type ChatMessage = {
     | "tool_call_result";
   content: string;
   isJsx?: boolean; // Flag to indicate if content should be rendered as JSX
+  isStructured?: boolean; // Flag to indicate if content has structured format
+  structuredContent?: StructuredResponse; // Parsed structured content
+  renderType?: 'jsx' | 'markdown' | 'text'; // Determined render type
+  speechText?: string; // Text optimized for TTS
   screenshot_base64?: string; // Optional base64 screenshot data
   tool_name?: string;
   tool_args?: any;
@@ -325,11 +335,26 @@ function renderChatMessage(
             <span>✓</span>
             <span>Task completed successfully</span>
           </span>
-        ) : msg.isJsx ||
-          (msg.role === "assistant" &&
-            !msg.isStreaming &&
-            isJsxContent(msg.content)) ? (
-          <JsxMessageRenderer jsx={msg.content} />
+        ) : msg.role === "assistant" && !msg.isStreaming ? (
+          // Handle structured content for completed assistant messages
+          (() => {
+            if (msg.isStructured && msg.structuredContent) {
+              const renderContent = getRenderContent(msg.structuredContent);
+              
+              if (renderContent.type === 'jsx') {
+                return <JsxMessageRenderer jsx={renderContent.content} />;
+              } else if (renderContent.type === 'markdown') {
+                return <AIResponse>{renderContent.content}</AIResponse>;
+              } else {
+                return <AIResponse>{renderContent.content}</AIResponse>;
+              }
+            } else if (msg.isJsx || isJsxContent(msg.content)) {
+              // Fallback to existing JSX detection for non-structured content
+              return <JsxMessageRenderer jsx={msg.content} />;
+            } else {
+              return <AIResponse>{msg.content}</AIResponse>;
+            }
+          })()
         ) : msg.role === "assistant" && msg.content ? (
           <AIResponse>{msg.content}</AIResponse>
         ) : (
@@ -649,13 +674,38 @@ function App() {
         // and this isn't a duplicate of a recently streamed message
         if (!hasStreamingMessage && !isRecentlyStreamed) {
           console.log("Adding assistant message from backend response");
-          const assistantMessage: ChatMessage = {
-            role: "assistant",
-            content: response.text,
-            isJsx: isJsxContent(response.text), // Auto-detect JSX content
-            screenshot_base64: response.screenshot_base64,
-            timestamp: Date.now(),
-          };
+          
+          // Parse structured content
+          const parsedContent = parseStructuredResponse(response.text);
+          const isStructuredResponse = parsedContent.hasStructuredContent;
+          
+          let assistantMessage: ChatMessage;
+          
+          if (isStructuredResponse) {
+            // Handle structured response
+            const renderContent = getRenderContent(parsedContent);
+            
+            assistantMessage = {
+              role: "assistant",
+              content: response.text, // Keep original content
+              isStructured: true,
+              structuredContent: parsedContent,
+              renderType: renderContent.type,
+              speechText: renderContent.speechText,
+              isJsx: renderContent.type === 'jsx',
+              screenshot_base64: response.screenshot_base64,
+              timestamp: Date.now(),
+            };
+          } else {
+            // Handle non-structured response (existing logic)
+            assistantMessage = {
+              role: "assistant",
+              content: response.text,
+              isJsx: isJsxContent(response.text), // Auto-detect JSX content
+              screenshot_base64: response.screenshot_base64,
+              timestamp: Date.now(),
+            };
+          }
 
           // Play audio if available (only when not streaming)
           if (response.audio_base64) {
@@ -1801,12 +1851,33 @@ function App() {
         setConversation((prev) =>
           prev.map((msg) => {
             if (msg.messageId === message_id && msg.isStreaming) {
-              return {
-                ...msg,
-                content: complete_text,
-                isJsx: isJsxContent(complete_text), // Auto-detect JSX in completed stream
-                isStreaming: false,
-              };
+              // Parse structured content
+              const parsedContent = parseStructuredResponse(complete_text);
+              const isStructuredResponse = parsedContent.hasStructuredContent;
+              
+              if (isStructuredResponse) {
+                // Handle structured response
+                const renderContent = getRenderContent(parsedContent);
+                
+                return {
+                  ...msg,
+                  content: complete_text, // Keep original content
+                  isStructured: true,
+                  structuredContent: parsedContent,
+                  renderType: renderContent.type,
+                  speechText: renderContent.speechText,
+                  isJsx: renderContent.type === 'jsx',
+                  isStreaming: false,
+                };
+              } else {
+                // Handle non-structured response (existing logic)
+                return {
+                  ...msg,
+                  content: complete_text,
+                  isJsx: isJsxContent(complete_text), // Auto-detect JSX in completed stream
+                  isStreaming: false,
+                };
+              }
             }
             return msg;
           })
