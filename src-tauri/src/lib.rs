@@ -248,6 +248,12 @@ use crate::commands::{
     is_tool_enabled,
     reset_tool_configuration,
     get_tool_configuration_summary,
+    set_tool_approval_required,
+    get_tool_approval_required,
+    approve_tool_execution,
+    deny_tool_execution,
+    get_pending_tool_approvals,
+    clear_pending_tool_approvals,
 };
 
 // Import keyboard shortcuts commands explicitly
@@ -846,6 +852,12 @@ pub fn run() {
             is_tool_enabled,
             reset_tool_configuration,
             get_tool_configuration_summary,
+            set_tool_approval_required,
+            get_tool_approval_required,
+            approve_tool_execution,
+            deny_tool_execution,
+            get_pending_tool_approvals,
+            clear_pending_tool_approvals,
             // Autostart Commands
             enable_autostart,
             disable_autostart,
