@@ -115,6 +115,13 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
+    // --- Validate query text ---
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        warn!("Received empty or whitespace-only query, ignoring");
+        return Ok(());
+    }
+
     // --- Check if an agent is already running and cancel it ---
     if state.is_agent_executing() {
         let current_execution_id = state.get_current_agent_execution_id();
@@ -273,9 +280,9 @@ pub async fn submit_query(
 
             // Prepare the query with system context
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
             } else {
-                query.clone()
+                trimmed_query.to_string()
             };
 
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
@@ -321,9 +328,9 @@ pub async fn submit_query(
 
             // Prepare the query with system context for orchestrator
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
             } else {
-                query.clone()
+                trimmed_query.to_string()
             };
 
             let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
@@ -466,11 +473,12 @@ pub async fn submit_query(
         let error_event_handle = app_handle.clone();
         let error_state = final_response.agent_state.clone();
         let error_text = final_response.text.clone();
+        let trimmed_query = query.trim();
         tauri::async_runtime::spawn(async move {
             let event_data = serde_json::json!({
                 "agent_state": error_state,
                 "error_message": error_text,
-                "original_query": query
+                "original_query": trimmed_query
             });
             if let Err(e) = error_event_handle.emit("agent-error", event_data) {
                 warn!("Failed to emit agent-error event: {}", e);
