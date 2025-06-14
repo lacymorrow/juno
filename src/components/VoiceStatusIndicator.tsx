@@ -1,16 +1,6 @@
 import { cn } from "@/lib/utils";
-import { listen } from "@tauri-apps/api/event";
 import { AlertCircle, Brain, Mic, MicOff, Type, Volume2 } from "lucide-react";
-import { useEffect, useState } from "react";
-
-interface VoiceState {
-  mode: "dictation" | "agent" | "idle";
-  isListening: boolean;
-  isTranscribing: boolean;
-  isSpeaking: boolean;
-  transcriptionText?: string;
-  error?: string;
-}
+import { useVoiceState } from "@/contexts/VoiceContext";
 
 interface VoiceStatusIndicatorProps {
   className?: string;
@@ -23,137 +13,7 @@ export function VoiceStatusIndicator({
   showText = true,
   variant = "detailed",
 }: VoiceStatusIndicatorProps) {
-  const [voiceState, setVoiceState] = useState<VoiceState>({
-    mode: "idle",
-    isListening: false,
-    isTranscribing: false,
-    isSpeaking: false,
-  });
-
-  const [audioLevel, setAudioLevel] = useState(0);
-
-  useEffect(() => {
-    let unlistenCallbacks: (() => void)[] = [];
-
-    const setupListeners = async () => {
-      // Listen for dictation mode events
-      unlistenCallbacks.push(
-        await listen("dictation-active", (event) => {
-          const isActive = event.payload as boolean;
-          setVoiceState((prev) => ({
-            ...prev,
-            mode: isActive ? "dictation" : "idle",
-            isListening: isActive,
-          }));
-        })
-      );
-
-      // Listen for agent mode events
-      unlistenCallbacks.push(
-        await listen("app-dictation-started", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            mode: "agent",
-            isListening: true,
-          }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen("app-dictation-finished", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            isListening: false,
-          }));
-        })
-      );
-
-      // Listen for transcription events
-      unlistenCallbacks.push(
-        await listen("dictation-transcription-partial", (event) => {
-          const text = event.payload as string;
-          setVoiceState((prev) => ({
-            ...prev,
-            isTranscribing: true,
-            transcriptionText: text,
-          }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen("dictation-transcription-final", (event) => {
-          const text = event.payload as string;
-          setVoiceState((prev) => ({
-            ...prev,
-            isTranscribing: false,
-            transcriptionText: text,
-          }));
-        })
-      );
-
-      // Listen for TTS events
-      unlistenCallbacks.push(
-        await listen("tts-started", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            isSpeaking: true,
-          }));
-        })
-      );
-
-      unlistenCallbacks.push(
-        await listen("tts-finished", () => {
-          setVoiceState((prev) => ({
-            ...prev,
-            isSpeaking: false,
-          }));
-        })
-      );
-
-      // Listen for audio level updates
-      unlistenCallbacks.push(
-        await listen<number>("audio-level", (event) => {
-          setAudioLevel(event.payload);
-        })
-      );
-
-      // Listen for voice errors
-      unlistenCallbacks.push(
-        await listen<string>("voice-error", (event) => {
-          setVoiceState((prev) => ({
-            ...prev,
-            error: event.payload,
-            isListening: false,
-            isTranscribing: false,
-          }));
-        })
-      );
-    };
-
-    setupListeners();
-
-    return () => {
-      unlistenCallbacks.forEach((unlisten) => unlisten());
-    };
-  }, []);
-
-  // Clear transcription text after a delay when not active
-  useEffect(() => {
-    if (
-      !voiceState.isListening &&
-      !voiceState.isTranscribing &&
-      voiceState.transcriptionText
-    ) {
-      const timer = setTimeout(() => {
-        setVoiceState((prev) => ({ ...prev, transcriptionText: undefined }));
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [
-    voiceState.isListening,
-    voiceState.isTranscribing,
-    voiceState.transcriptionText,
-  ]);
+  const voiceState = useVoiceState();
 
   // Get the appropriate icon based on current state
   const getIcon = () => {
@@ -235,7 +95,9 @@ export function VoiceStatusIndicator({
             key={i}
             className={cn(
               "w-1 rounded-full transition-all duration-150",
-              audioLevel > (i + 1) * 20 ? "bg-current h-3" : "bg-current/30 h-1"
+              voiceState.audioLevel > (i + 1) * 20
+                ? "bg-current h-3"
+                : "bg-current/30 h-1"
             )}
           />
         ))}
@@ -305,21 +167,4 @@ export function VoiceStatusIndicator({
       )}
     </div>
   );
-}
-
-// Hook for other components to access voice state
-export function useVoiceState() {
-  const [voiceState, setVoiceState] = useState<VoiceState>({
-    mode: "idle",
-    isListening: false,
-    isTranscribing: false,
-    isSpeaking: false,
-  });
-
-  // NOTE: Removed duplicate event listeners to prevent race conditions
-  // The main VoiceStatusIndicator component already handles these events
-  // This hook should be refactored to share state via context instead
-  // For now, returning a basic state to prevent crashes
-
-  return voiceState;
 }

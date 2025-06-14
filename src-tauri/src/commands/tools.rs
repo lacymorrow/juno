@@ -224,3 +224,76 @@ pub async fn test_tool_config(
 
     Ok(format!("Tool config system working! {} tools ({} enabled), {} categories", tool_count, enabled_count, category_count))
 }
+
+/// Set tool approval required setting
+#[tauri::command]
+pub async fn set_tool_approval_required(
+    required: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Setting tool approval required: {}", required);
+    state.set_tool_approval_required(required);
+    Ok(())
+}
+
+/// Get tool approval required setting
+#[tauri::command]
+pub async fn get_tool_approval_required(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let required = state.is_tool_approval_required();
+    info!("Current tool approval required setting: {}", required);
+    Ok(required)
+}
+
+/// Approve a pending tool execution
+#[tauri::command]
+pub async fn approve_tool_execution(
+    tool_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    info!("Approving tool execution for ID: {}", tool_id);
+    let success = state.approve_tool(&tool_id).await;
+    if success {
+        info!("Tool {} approved successfully", tool_id);
+    } else {
+        info!("Tool {} not found in pending approvals", tool_id);
+    }
+    Ok(success)
+}
+
+/// Deny a pending tool execution
+#[tauri::command]
+pub async fn deny_tool_execution(
+    tool_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    info!("Denying tool execution for ID: {}", tool_id);
+    let success = state.deny_tool(&tool_id).await;
+    if success {
+        info!("Tool {} denied successfully", tool_id);
+    } else {
+        info!("Tool {} not found in pending approvals", tool_id);
+    }
+    Ok(success)
+}
+
+/// Get all pending tool approval requests
+#[tauri::command]
+pub async fn get_pending_tool_approvals(
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    info!("Getting pending tool approval requests");
+    let pending_approvals = state.get_pending_tool_approvals().await;
+    Ok(json!(pending_approvals))
+}
+
+/// Clear all pending tool approval requests
+#[tauri::command]
+pub async fn clear_pending_tool_approvals(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    info!("Clearing all pending tool approval requests");
+    state.clear_pending_tool_approvals().await;
+    Ok(())
+}

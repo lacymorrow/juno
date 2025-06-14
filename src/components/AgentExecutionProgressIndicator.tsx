@@ -121,7 +121,7 @@ export function AgentExecutionProgressIndicator({
     return (
       <div className={cn("flex items-center gap-1 text-xs", className)}>
         <Clock className="h-3 w-3 text-blue-400 animate-pulse" />
-        <span className="text-white/60">...</span>
+        <span className="text-primary/60">...</span>
       </div>
     );
   }
@@ -130,7 +130,7 @@ export function AgentExecutionProgressIndicator({
     return (
       <div className={cn("flex items-center gap-1 text-xs", className)}>
         <AlertCircle className="h-3 w-3 text-red-400" />
-        <span className="text-white/60">Error</span>
+        <span className="text-primary/60">Error</span>
       </div>
     );
   }
@@ -140,9 +140,9 @@ export function AgentExecutionProgressIndicator({
     return (
       <div className={cn("flex items-center gap-1 text-xs", className)}>
         {getStatusIcon()}
-        <span className="text-white/70">{getStepText()}</span>
+        <span className="text-primary/70">{getStepText()}</span>
         {getRemainingText() && (
-          <span className="text-white/50 text-[10px]">
+          <span className="text-primary/50 text-[10px]">
             ({getRemainingText()})
           </span>
         )}
@@ -160,11 +160,11 @@ export function AgentExecutionProgressIndicator({
           ) : (
             <Square className="h-4 w-4 text-gray-400" />
           )}
-          <span className="text-sm font-medium text-white">
+          <span className="text-sm font-medium text-primary">
             Agent Execution
           </span>
         </div>
-        <div className="flex items-center gap-1 text-xs text-white/60">
+        <div className="flex items-center gap-1 text-xs text-primary/60">
           {getStatusIcon()}
           <span>{getStepText()}</span>
         </div>
@@ -176,7 +176,7 @@ export function AgentExecutionProgressIndicator({
           {/* Progress Bar */}
           {showProgressBar && progress.max_steps && (
             <div className="space-y-1">
-              <div className="flex justify-between text-xs text-white/60">
+              <div className="flex justify-between text-xs text-primary/60">
                 <span>Progress</span>
                 <span>
                   {progress.current_step || 0}/{progress.max_steps}
@@ -212,7 +212,7 @@ export function AgentExecutionProgressIndicator({
 
           {/* Execution ID */}
           {progress.execution_id && (
-            <div className="text-xs text-white/40">
+            <div className="text-xs text-primary/40">
               ID: {progress.execution_id.substring(0, 8)}...
             </div>
           )}
@@ -221,7 +221,9 @@ export function AgentExecutionProgressIndicator({
 
       {/* Status Messages */}
       {loading && (
-        <div className="text-xs text-white/60">Loading execution status...</div>
+        <div className="text-xs text-primary/60">
+          Loading execution status...
+        </div>
       )}
 
       {error && (
@@ -231,7 +233,7 @@ export function AgentExecutionProgressIndicator({
       )}
 
       {!progress?.is_executing && !loading && !error && (
-        <div className="text-xs text-white/60">
+        <div className="text-xs text-primary/60">
           Agent ready to execute (limit: {progress?.max_steps || 15} steps)
         </div>
       )}

@@ -21,6 +21,7 @@ use crate::agent::providers::config::AgentMode;
 use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
+use crate::constants::agent_config;
 
 
 // --- Agent State ---
@@ -114,6 +115,13 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
+    // --- Validate query text ---
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        warn!("Received empty or whitespace-only query, ignoring");
+        return Ok(());
+    }
+
     // --- Check if an agent is already running and cancel it ---
     if state.is_agent_executing() {
         let current_execution_id = state.get_current_agent_execution_id();
@@ -139,9 +147,8 @@ pub async fn submit_query(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-    const MAX_ITERATIONS: u32 = 15;
-    state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
-    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
+    state.mark_agent_execution_started_with_steps(execution_id.clone(), agent_config::MAX_ITERATIONS);
+    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, agent_config::MAX_ITERATIONS);
 
     // Register escape key for cancellation during agent execution
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
@@ -264,7 +271,7 @@ pub async fn submit_query(
                 memory_manager_clone,
                 agent_tool_provider,
                 brain,
-                MAX_ITERATIONS,
+                agent_config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
             info!("Single agent runner created with all tools.");
@@ -273,9 +280,9 @@ pub async fn submit_query(
 
             // Prepare the query with system context
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
             } else {
-                query.clone()
+                trimmed_query.to_string()
             };
 
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
@@ -312,7 +319,7 @@ pub async fn submit_query(
                 memory_manager_clone,
                 orchestrator_tool_provider,
                 orchestrator_brain,
-                MAX_ITERATIONS,
+                agent_config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
             info!("Orchestrator agent runner created with personality and delegation capabilities.");
@@ -321,9 +328,9 @@ pub async fn submit_query(
 
             // Prepare the query with system context for orchestrator
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
             } else {
-                query.clone()
+                trimmed_query.to_string()
             };
 
             let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
@@ -466,11 +473,12 @@ pub async fn submit_query(
         let error_event_handle = app_handle.clone();
         let error_state = final_response.agent_state.clone();
         let error_text = final_response.text.clone();
+        let trimmed_query = query.trim().to_string();
         tauri::async_runtime::spawn(async move {
             let event_data = serde_json::json!({
                 "agent_state": error_state,
                 "error_message": error_text,
-                "original_query": query
+                "original_query": trimmed_query
             });
             if let Err(e) = error_event_handle.emit("agent-error", event_data) {
                 warn!("Failed to emit agent-error event: {}", e);
