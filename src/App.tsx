@@ -450,15 +450,12 @@ function renderChatMessage(
 }
 
 function App() {
-  const [query, setQuery] = useState("");
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [serverConfig, setServerConfig] = useState<any>(null);
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
+  const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [serverStatus, setServerStatus] = useState<
-    "checking" | "connected" | "error"
-  >("checking");
-  const [isDevPanelOpen, setIsDevPanelOpen] = useState(false); // State for collapsible panel
-  const [currentView, setCurrentView] = useState<AppView>("chat"); // State for current view
-  const [appVersion, setAppVersion] = useState<string>(""); // Dynamic version state
+  const [serverStatus, setServerStatus] = useState<"connected" | "error" | "connecting">("connecting");
   const conversationEndRef = useRef<HTMLDivElement>(null);
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
@@ -502,6 +499,11 @@ function App() {
     stop_current_task: string;
     open_settings: string;
   } | null>(null);
+
+  // Add state for scroll management
+  const [userHasScrolledUp, setUserHasScrolledUp] = useState(false);
+  const [lastScrollTime, setLastScrollTime] = useState(0);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -1786,10 +1788,8 @@ function App() {
           })
         );
 
-        // Auto-scroll to bottom during streaming
-        setTimeout(() => {
-          conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        }, 50);
+        // Smart auto-scroll during streaming (throttled)
+        throttledAutoScroll();
       }
     );
 
@@ -1824,7 +1824,7 @@ function App() {
       streamTextListener.then((unlistenFn) => unlistenFn());
       streamEndListener.then((unlistenFn) => unlistenFn());
     };
-  }, []); // Empty dependency array, so it runs once on mount and cleans up on unmount
+  }, [throttledAutoScroll]); // Empty dependency array, so it runs once on mount and cleans up on unmount
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1913,10 +1913,19 @@ function App() {
     };
   }, [currentAudio]);
 
-  // Scroll conversation to bottom
+  // Smart scroll conversation to bottom - only when user hasn't scrolled up
   useEffect(() => {
-    conversationEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversation]);
+    autoScrollToBottom();
+  }, [conversation, autoScrollToBottom]);
+
+  // Force scroll to bottom when user sends a message or chat is cleared
+  useEffect(() => {
+    const lastMessage = conversation[conversation.length - 1];
+    if (lastMessage?.role === "user" || conversation.length === 0) {
+      // Always scroll to bottom when user sends a message or chat is empty
+      autoScrollToBottom(true); // force scroll
+    }
+  }, [conversation, autoScrollToBottom]);
 
   // Router logic based on URL path
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
@@ -2696,6 +2705,54 @@ function App() {
     };
   }, [conversation]);
 
+  // Add scroll detection
+  const handleScroll = useCallback(() => {
+    const scrollElement = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (!scrollElement) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = scrollElement;
+    const scrollBottom = scrollHeight - scrollTop - clientHeight;
+    
+    // Consider user at bottom if within 100px of bottom
+    const isNearBottom = scrollBottom < 100;
+    
+    // Update user scroll state
+    if (!isNearBottom && Date.now() - lastScrollTime > 500) {
+      // User scrolled up and it's been more than 500ms since last auto-scroll
+      setUserHasScrolledUp(true);
+    } else if (isNearBottom) {
+      // User is at bottom, resume auto-scrolling
+      setUserHasScrolledUp(false);
+    }
+  }, [lastScrollTime]);
+
+  // Improved auto-scroll function
+  const autoScrollToBottom = useCallback((forceScroll = false) => {
+    if (!conversationEndRef.current) return;
+    
+    // Don't auto-scroll if user has scrolled up, unless forced
+    if (userHasScrolledUp && !forceScroll) return;
+
+    // Smooth scroll to bottom
+    conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
+    setLastScrollTime(Date.now());
+  }, [userHasScrolledUp]);
+
+  // Throttled scroll function for streaming (limits frequency)
+  const throttledAutoScroll = useCallback(
+    debounce(() => autoScrollToBottom(), 200), // Only scroll every 200ms during streaming
+    [autoScrollToBottom]
+  );
+
+  // Add scroll event listener to detect user scroll behavior
+  useEffect(() => {
+    const scrollElement = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (!scrollElement) return;
+
+    scrollElement.addEventListener('scroll', handleScroll);
+    return () => scrollElement.removeEventListener('scroll', handleScroll);
+  }, [handleScroll]);
+
   return (
     <VoiceProvider>
       <main className="h-screen flex flex-col">
@@ -2821,7 +2878,7 @@ function App() {
                 >
                   <div className="flex flex-col h-full p-2">
                     {/* Conversation Area */}
-                    <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4">
+                    <ScrollArea className="flex-1 min-h-0 mb-2 -mr-4 pr-4" ref={scrollAreaRef}>
                       {conversation.length === 0 ? (
                         /* Compact welcome message when conversation is empty */
                         <div className="flex flex-col items-center justify-center h-full text-center space-y-2 p-2">
