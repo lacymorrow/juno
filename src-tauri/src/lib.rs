@@ -18,6 +18,7 @@ use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as S
 use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 use tracing::{info, warn, error}; // Import logging macros
 use std::sync::Mutex; // Added for VoiceController state access
+use crate::constants::events;
 
 // macOS specific imports
 #[cfg(target_os = "macos")]
@@ -2011,7 +2012,7 @@ pub fn run() {
                     });
 
                     // Emit both dictation-active false and a specific cancellation event
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
                         tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
 
@@ -2064,7 +2065,7 @@ pub fn run() {
                         commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
                     });
 
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
                         tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
                 });
@@ -2117,7 +2118,7 @@ pub fn run() {
                         commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
                     });
 
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
                         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
                 });
@@ -2146,7 +2147,7 @@ pub fn run() {
                     });
 
                     // Emit cleanup complete event
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
+                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
                         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
 
@@ -2271,7 +2272,7 @@ pub fn run() {
                                 Ok(()) => {
                                     info!("[Agent Mode] Started agent transcription successfully");
 
-                                    if let Err(e) = app_handle_clone.emit("agent-active", true) {
+                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, true) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2281,7 +2282,7 @@ pub fn run() {
                                     // Reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event after failure: {}", e);
                                     }
                                 }
@@ -2293,7 +2294,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -2321,7 +2322,7 @@ pub fn run() {
                                 Ok(_) => {
                                     info!("[Agent Mode] Stopped agent transcription successfully");
 
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2331,7 +2332,7 @@ pub fn run() {
                                     // Force reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2343,7 +2344,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -2368,7 +2369,7 @@ pub fn run() {
                                 Ok(_) => {
                                     info!("[Agent Mode] Cancelled agent transcription successfully");
 
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2378,7 +2379,7 @@ pub fn run() {
                                     // Force reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2390,7 +2391,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -2422,7 +2423,7 @@ pub fn run() {
                     // Reset agent input monitor state
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
 
@@ -2458,7 +2459,7 @@ pub fn run() {
                     let app_state = app_handle_clone.state::<crate::state::AppState>();
                     app_state.mark_agent_execution_finished();
 
-                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
 
@@ -2494,7 +2495,7 @@ pub fn run() {
                                     // Reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event after transcription stop failure: {}", e);
                                     }
                                 }
@@ -2506,7 +2507,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
+                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -3097,7 +3098,7 @@ async fn handle_voice_transcription_final_result(
         }
 
         // Emit state change event for UI
-        if let Err(e) = app_handle.emit("dictation-active", false) {
+        if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, false) {
             error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
         }
 
@@ -3121,7 +3122,7 @@ async fn handle_voice_transcription_final_result(
                     let transformed_payload = serde_json::json!({
                         "query": text_value
                     });
-                    if let Err(e) = app_handle.emit("app-dictation-finished", transformed_payload) {
+                    if let Err(e) = app_handle.emit(events::APP_DICTATION_FINISHED, transformed_payload) {
                         tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
                     }
                 } else {
@@ -3131,7 +3132,7 @@ async fn handle_voice_transcription_final_result(
             Err(e) => {
                 tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
                 // Fallback: emit with original payload
-                if let Err(e) = app_handle.emit("app-dictation-finished", payload_str) {
+                if let Err(e) = app_handle.emit(events::APP_DICTATION_FINISHED, payload_str) {
                     tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
                 }
             }
@@ -3199,7 +3200,7 @@ async fn handle_dictation_transcription_start(
                 Ok(()) => {
                     info!("[Dictation Mode] Started immediate transcription successfully");
 
-                    if let Err(e) = app_handle.emit("dictation-active", true) {
+                    if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, true) {
                         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
 
@@ -3222,7 +3223,7 @@ async fn handle_dictation_transcription_start(
                     }
 
                     // Emit state change event for UI
-                    if let Err(e) = app_handle.emit("dictation-active", false) {
+                    if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, false) {
                         error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
                     }
 
@@ -3243,7 +3244,7 @@ async fn handle_dictation_transcription_start(
             }
 
             // Emit state change event for UI
-            if let Err(e) = app_handle.emit("dictation-active", false) {
+            if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, false) {
                 error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
             }
         }

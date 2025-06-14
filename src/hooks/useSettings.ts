@@ -1,83 +1,23 @@
-import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { KeyboardShortcuts } from "@/types/keyboard";
 import { AUDIO } from "@/lib/constants";
+import { useInvoke } from "@/hooks/useInvoke";
+import type {
+  ProviderInfo,
+  ProviderSettings,
+  ToolConfig,
+  ToolCategory,
+  MCPServerConfig,
+  MCPServerStatus,
+  MCPToolInfo,
+  PermissionsState,
+} from "@/types/settings";
 
-interface ProviderInfo {
-  id: string;
-  name: string;
-  description: string;
-  models: string[];
-  default_model: string;
-  model_info: {
-    id: string;
-    name: string;
-    supports_computer_use: boolean;
-    is_recommended: boolean;
-  }[];
-  is_available: boolean;
-  is_default: boolean;
-  computer_use_supported: boolean;
-}
-
-interface ProviderSettings {
-  api_key: string;
-  model: string;
-  max_tokens?: number;
-  temperature?: number;
-  system_prompt?: string;
-}
-
-interface ToolConfig {
-  name: string;
-  category: string;
-  enabled: boolean;
-  description?: string;
-  required: boolean;
-}
-
-interface ToolCategory {
-  name: string;
-  description: string;
-  enabled: boolean;
-  tools: ToolConfig[];
-}
-
-interface MCPServerConfig {
-  id: string;
-  name: string;
-  description?: string;
-  command: string;
-  args: string[];
-  working_directory?: string;
-  environment_variables: Record<string, string>;
-  enabled: boolean;
-  auto_start: boolean;
-  timeout_seconds: number;
-  max_retries: number;
-}
-
-interface MCPServerStatus {
-  Disconnected?: null;
-  Connecting?: null;
-  Connected?: null;
-  Error?: string;
-  Timeout?: null;
-}
-
-interface MCPToolInfo {
-  server_id: string;
-  server_name: string;
-  tool_definition: {
-    name: string;
-    description: string;
-    input_schema: any;
-  };
-  enabled: boolean;
-}
+// Types are now imported from shared types
 
 export function useSettings() {
+  const { invokeCommand } = useInvoke();
   // TTS Settings
   const [ttsProvider, setTtsProvider] = useState<string>("system");
 
@@ -135,13 +75,7 @@ export function useSettings() {
   });
 
   // Permissions state
-  const [permissionsState, setPermissionsState] = useState<{
-    accessibility: { granted: boolean; required: boolean };
-    screenRecording: { granted: boolean; required: boolean };
-    microphone: { granted: boolean; required: boolean };
-    allGranted: boolean;
-    appName: string;
-  } | null>(null);
+  const [permissionsState, setPermissionsState] = useState<PermissionsState | null>(null);
   const [permissionsLoading, setPermissionsLoading] = useState<boolean>(false);
 
   // Keyboard Shortcuts state
@@ -159,53 +93,53 @@ export function useSettings() {
     loadAllSettings();
   }, []);
 
-  const loadAllSettings = async () => {
+  const loadAllSettings = useCallback(async () => {
     setIsLoading(true);
     try {
       // Load TTS settings
-      const currentTtsProvider = await invoke<string>("get_tts_provider_command");
+      const currentTtsProvider = await invokeCommand<string>("get_tts_provider_command");
       setTtsProvider(currentTtsProvider);
 
       // Load AI provider settings
-      const availableProviders = await invoke<ProviderInfo[]>("get_providers");
+      const availableProviders = await invokeCommand<ProviderInfo[]>("get_providers");
       setProviders(availableProviders);
 
-      const currentActiveProvider = await invoke<string>("get_active_provider");
+      const currentActiveProvider = await invokeCommand<string>("get_active_provider");
       setActiveProvider(currentActiveProvider);
 
       // Load agent mode settings
-      const currentAgentMode = await invoke<string>("get_agent_mode");
+      const currentAgentMode = await invokeCommand<string>("get_agent_mode");
       setAgentMode(currentAgentMode);
 
       // Load agent trigger mode settings
-      const currentAgentTriggerMode = await invoke<string>("get_agent_trigger_mode");
+      const currentAgentTriggerMode = await invokeCommand<string>("get_agent_trigger_mode");
       setAgentTriggerMode(currentAgentTriggerMode);
 
       // Load dictation settings
-      const currentClipboardEnabled = await invoke<boolean>("get_dictation_clipboard_enabled");
+      const currentClipboardEnabled = await invokeCommand<boolean>("get_dictation_clipboard_enabled");
       setDictationClipboardEnabled(currentClipboardEnabled);
 
       // Load sound settings
-      const currentSoundEnabled = await invoke<boolean>("get_sound_enabled");
+      const currentSoundEnabled = await invokeCommand<boolean>("get_sound_enabled");
       setSoundEnabled(currentSoundEnabled);
 
       // Load performance monitoring settings
-      const currentPerformanceMonitoringEnabled = await invoke<boolean>("get_performance_monitoring");
+      const currentPerformanceMonitoringEnabled = await invokeCommand<boolean>("get_performance_monitoring");
       setPerformanceMonitoringEnabled(currentPerformanceMonitoringEnabled);
 
       // Load always listening settings
-      const alwaysListeningStatus = await invoke<boolean>("get_always_listening_status");
+      const alwaysListeningStatus = await invokeCommand<boolean>("get_always_listening_status");
       setAlwaysListeningActive(alwaysListeningStatus);
 
-      const sensitivity = await invoke<number>("get_always_listening_sensitivity");
+      const sensitivity = await invokeCommand<number>("get_always_listening_sensitivity");
       setAlwaysListeningSensitivity(sensitivity);
 
-      const wakeWords = await invoke<string[]>("get_always_listening_wake_words");
+      const wakeWords = await invokeCommand<string[]>("get_always_listening_wake_words");
       setAlwaysListeningWakeWords(wakeWords);
       setWakeWordsInput(wakeWords.join(", "));
 
       if (currentActiveProvider) {
-        const settings = await invoke<ProviderSettings>("get_provider_settings", {
+        const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
           providerId: currentActiveProvider,
         });
         setProviderSettings(settings);
@@ -235,18 +169,12 @@ export function useSettings() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [invokeCommand]);
 
-  const loadPermissionsStatus = async () => {
+  const loadPermissionsStatus = useCallback(async () => {
     setPermissionsLoading(true);
     try {
-      const permissions = await invoke<{
-        accessibility: { granted: boolean; required: boolean };
-        screenRecording: { granted: boolean; required: boolean };
-        microphone: { granted: boolean; required: boolean };
-        allGranted: boolean;
-        appName: string;
-      }>("check_permissions_status");
+      const permissions = await invokeCommand<PermissionsState>("check_permissions_status");
       setPermissionsState(permissions);
     } catch (error) {
       console.error("Error loading permissions status:", error);
@@ -254,12 +182,12 @@ export function useSettings() {
     } finally {
       setPermissionsLoading(false);
     }
-  };
+  }, [invokeCommand]);
 
-  const loadKeyboardShortcuts = async () => {
+  const loadKeyboardShortcuts = useCallback(async () => {
     setShortcutsLoading(true);
     try {
-      const shortcuts = await invoke<KeyboardShortcuts>("get_keyboard_shortcuts");
+      const shortcuts = await invokeCommand<KeyboardShortcuts>("get_keyboard_shortcuts");
       setKeyboardShortcuts(shortcuts);
     } catch (error) {
       console.error("Error loading keyboard shortcuts:", error);
@@ -267,12 +195,12 @@ export function useSettings() {
     } finally {
       setShortcutsLoading(false);
     }
-  };
+  }, [invokeCommand]);
 
-  const loadToolConfigurations = async () => {
+  const loadToolConfigurations = useCallback(async () => {
     setToolConfigLoading(true);
     try {
-      const configs = await invoke<Record<string, ToolCategory>>("get_tool_configurations");
+      const configs = await invokeCommand<Record<string, ToolCategory>>("get_tool_configurations");
       setToolConfigurations(configs);
     } catch (error) {
       console.error("Error loading tool configurations:", error);
@@ -280,18 +208,18 @@ export function useSettings() {
     } finally {
       setToolConfigLoading(false);
     }
-  };
+  }, [invokeCommand]);
 
-  const loadMcpServers = async () => {
+  const loadMcpServers = useCallback(async () => {
     setMcpLoading(true);
     try {
-      const servers = await invoke<MCPServerConfig[]>("get_mcp_servers");
+      const servers = await invokeCommand<MCPServerConfig[]>("get_mcp_servers");
       setMcpServers(servers);
 
-      const statuses = await invoke<Record<string, MCPServerStatus>>("get_mcp_server_statuses");
+      const statuses = await invokeCommand<Record<string, MCPServerStatus>>("get_mcp_server_statuses");
       setMcpServerStatuses(statuses);
 
-      const tools = await invoke<MCPToolInfo[]>("get_mcp_tools");
+      const tools = await invokeCommand<MCPToolInfo[]>("get_mcp_tools");
       setMcpTools(tools);
     } catch (error) {
       console.error("Error loading MCP servers:", error);
@@ -299,49 +227,44 @@ export function useSettings() {
     } finally {
       setMcpLoading(false);
     }
-  };
+  }, [invokeCommand]);
 
   // Handler functions
-  const handleTtsProviderChange = async (newProvider: string) => {
-    try {
-      await invoke("set_tts_provider_command", { provider: newProvider });
-      setTtsProvider(newProvider);
-      toast.success(
-        `TTS provider set to: ${
+  const handleTtsProviderChange = useCallback(async (newProvider: string) => {
+    await invokeCommand(
+      "set_tts_provider_command", 
+      { provider: newProvider },
+      {
+        showSuccessToast: true,
+        successMessage: `TTS provider set to: ${
           newProvider === "off"
             ? "Off"
             : newProvider.charAt(0).toUpperCase() + newProvider.slice(1)
-        }`
-      );
-    } catch (error) {
-      console.error("Failed to set TTS provider:", error);
-      toast.error("Failed to set TTS provider");
-    }
-  };
+        }`,
+        errorMessage: "Failed to set TTS provider"
+      }
+    );
+    setTtsProvider(newProvider);
+  }, [invokeCommand]);
 
-  const handleActiveProviderChange = async (providerId: string) => {
-    try {
-      await invoke("set_active_provider", { providerId });
-      setActiveProvider(providerId);
+  const handleActiveProviderChange = useCallback(async (providerId: string) => {
+    await invokeCommand("set_active_provider", { providerId });
+    setActiveProvider(providerId);
 
-      const settings = await invoke<ProviderSettings>("get_provider_settings", {
-        providerId,
-      });
-      setProviderSettings(settings);
-      setFormData({
-        apiKey: settings.api_key || "",
-        model: settings.model || "",
-        maxTokens: settings.max_tokens?.toString() || "",
-        temperature: settings.temperature?.toString() || "",
-        systemPrompt: settings.system_prompt || "",
-      });
+    const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
+      providerId,
+    });
+    setProviderSettings(settings);
+    setFormData({
+      apiKey: settings.api_key || "",
+      model: settings.model || "",
+      maxTokens: settings.max_tokens?.toString() || "",
+      temperature: settings.temperature?.toString() || "",
+      systemPrompt: settings.system_prompt || "",
+    });
 
-      toast.success(`Active AI provider set to: ${providerId}`);
-    } catch (error) {
-      console.error("Failed to set active provider:", error);
-      toast.error("Failed to set active provider");
-    }
-  };
+    toast.success(`Active AI provider set to: ${providerId}`);
+  }, [invokeCommand]);
 
   const handleSaveProviderSettings = async () => {
     if (!activeProvider) {
@@ -398,38 +321,44 @@ export function useSettings() {
     }
   };
 
-  const handleSoundEnabledChange = async (enabled: boolean) => {
-    try {
-      await invoke("set_sound_enabled", { enabled });
-      setSoundEnabled(enabled);
-      toast.success(`Sound ${enabled ? "enabled" : "disabled"}`);
-    } catch (error) {
-      console.error("Failed to set sound enabled:", error);
-      toast.error("Failed to update sound setting");
-    }
-  };
+  const handleSoundEnabledChange = useCallback(async (enabled: boolean) => {
+    await invokeCommand(
+      "set_sound_enabled", 
+      { enabled },
+      {
+        showSuccessToast: true,
+        successMessage: `Sound ${enabled ? "enabled" : "disabled"}`,
+        errorMessage: "Failed to update sound setting"
+      }
+    );
+    setSoundEnabled(enabled);
+  }, [invokeCommand]);
 
-  const handlePerformanceMonitoringChange = async (enabled: boolean) => {
-    try {
-      await invoke("set_performance_monitoring", { enabled });
-      setPerformanceMonitoringEnabled(enabled);
-      toast.success(`Performance monitoring ${enabled ? "enabled" : "disabled"}`);
-    } catch (error) {
-      console.error("Failed to set performance monitoring:", error);
-      toast.error("Failed to update performance monitoring setting");
-    }
-  };
+  const handlePerformanceMonitoringChange = useCallback(async (enabled: boolean) => {
+    await invokeCommand(
+      "set_performance_monitoring", 
+      { enabled },
+      {
+        showSuccessToast: true,
+        successMessage: `Performance monitoring ${enabled ? "enabled" : "disabled"}`,
+        errorMessage: "Failed to update performance monitoring setting"
+      }
+    );
+    setPerformanceMonitoringEnabled(enabled);
+  }, [invokeCommand]);
 
-  const handleAgentModeChange = async (newMode: string) => {
-    try {
-      await invoke("set_agent_mode", { mode: newMode });
-      setAgentMode(newMode);
-      toast.success(`Agent mode set to: ${newMode}`);
-    } catch (error) {
-      console.error("Failed to set agent mode:", error);
-      toast.error("Failed to set agent mode");
-    }
-  };
+  const handleAgentModeChange = useCallback(async (newMode: string) => {
+    await invokeCommand(
+      "set_agent_mode", 
+      { mode: newMode },
+      {
+        showSuccessToast: true,
+        successMessage: `Agent mode set to: ${newMode}`,
+        errorMessage: "Failed to set agent mode"
+      }
+    );
+    setAgentMode(newMode);
+  }, [invokeCommand]);
 
   const handleAgentTriggerModeChange = async (newMode: string) => {
     try {
