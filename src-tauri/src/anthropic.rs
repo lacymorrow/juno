@@ -473,7 +473,7 @@ pub async fn submit_query(
         let error_event_handle = app_handle.clone();
         let error_state = final_response.agent_state.clone();
         let error_text = final_response.text.clone();
-        let trimmed_query = query.trim();
+        let trimmed_query = query.trim().to_string();
         tauri::async_runtime::spawn(async move {
             let event_data = serde_json::json!({
                 "agent_state": error_state,
