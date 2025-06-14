@@ -419,8 +419,8 @@ pub async fn register_desktop_tools(
 
     // --- Element Tools ---
 
-    /// Tool for getting accessibility information about the currently focused UI element.
-    /// Used by: UI automation, accessibility testing, element interaction workflows
+    // Tool for getting accessibility information about the currently focused UI element.
+    // Used by: UI automation, accessibility testing, element interaction workflows
     // get_focused_element_info
     let get_focused_def = ToolDefinition {
         name: "get_focused_element_info".to_string(),
@@ -455,8 +455,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(get_focused_def, get_focused_exec).await;
     info!("Registered tool: get_focused_element_info");
 
-    /// Tool for capturing full desktop screenshots.
-    /// Used by: Computer use agents, visual analysis, UI state documentation
+    // Tool for capturing full desktop screenshots.
+    // Used by: Computer use agents, visual analysis, UI state documentation
     // capture_screenshot
     let capture_screenshot_def = ToolDefinition {
         name: "capture_screenshot".to_string(),
@@ -494,8 +494,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(capture_screenshot_def, capture_screenshot_exec).await;
     info!("Registered tool: capture_screenshot");
 
-    /// Tool for capturing screenshots of specific UI elements.
-    /// Used by: Element-focused automation, accessibility testing, targeted analysis
+    // Tool for capturing screenshots of specific UI elements.
+    // Used by: Element-focused automation, accessibility testing, targeted analysis
     // capture_element_screenshot
     let capture_element_screenshot_def = ToolDefinition {
         name: "capture_element_screenshot".to_string(),
@@ -530,8 +530,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(capture_element_screenshot_def, capture_element_screenshot_exec).await;
     info!("Registered tool: capture_element_screenshot");
 
-    /// Tool for typing text into the active desktop application.
-    /// Used by: Text input automation, form filling, content creation
+    // Tool for typing text into the active desktop application.
+    // Used by: Text input automation, form filling, content creation
     // type_text
     #[derive(serde::Deserialize)]
     #[allow(dead_code)] // Allow unused fields for now
@@ -576,8 +576,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(type_text_def, type_text_exec).await;
     info!("Registered tool: type_text");
 
-    /// Tool for getting current clipboard text content.
-    /// Used by: Data extraction, clipboard monitoring, text analysis workflows
+    // Tool for getting current clipboard text content.
+    // Used by: Data extraction, clipboard monitoring, text analysis workflows
     // Get Clipboard Tool
     let get_clipboard_def = ToolDefinition {
         name: "get_clipboard".to_string(),
@@ -604,8 +604,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(get_clipboard_def, get_clipboard_exec).await;
     info!("Registered tool: get_clipboard");
 
-    /// Tool for setting clipboard text content.
-    /// Used by: Data injection, automated copying, content sharing workflows
+    // Tool for setting clipboard text content.
+    // Used by: Data injection, automated copying, content sharing workflows
     // Set Clipboard Tool
     let set_clipboard_def = ToolDefinition {
         name: "set_clipboard".to_string(),
@@ -647,8 +647,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(set_clipboard_def, set_clipboard_exec).await;
     info!("Registered tool: set_clipboard");
 
-    /// Tool for performing mouse clicks at specified desktop coordinates.
-    /// Used by: Computer use agents, UI automation, element interaction workflows
+    // Tool for performing mouse clicks at specified desktop coordinates.
+    // Used by: Computer use agents, UI automation, element interaction workflows
     // Desktop click tool
     #[derive(serde::Deserialize)]
     #[allow(dead_code)] // Allow unused fields for now
@@ -730,8 +730,8 @@ pub async fn register_desktop_tools(
 
     // Note: left_mouse_down and left_mouse_up tools are already registered in register_additional_computer_use_tools
 
-    /// Tool for moving the mouse cursor to specified coordinates.
-    /// Used by: Mouse positioning, cursor setup for subsequent actions
+    // Tool for moving the mouse cursor to specified coordinates.
+    // Used by: Mouse positioning, cursor setup for subsequent actions
     // mouse_move
     let mouse_move_def = ToolDefinition {
         name: "mouse_move".to_string(),
@@ -774,8 +774,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(mouse_move_def, mouse_move_exec).await;
     info!("Registered tool: mouse_move");
 
-    /// Tool for performing left mouse clicks at specified coordinates.
-    /// Used by: Basic UI interaction, button clicking, element selection
+    // Tool for performing left mouse clicks at specified coordinates.
+    // Used by: Basic UI interaction, button clicking, element selection
     // left_click
     let left_click_def = ToolDefinition {
         name: "left_click".to_string(),
@@ -818,8 +818,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(left_click_def, left_click_exec).await;
     info!("Registered tool: left_click");
 
-    /// Tool for performing right mouse clicks (context menu activation).
-    /// Used by: Context menu access, right-click interactions, alternate UI actions
+    // Tool for performing right mouse clicks (context menu activation).
+    // Used by: Context menu access, right-click interactions, alternate UI actions
     // right_click
     let right_click_def = ToolDefinition {
         name: "right_click".to_string(),
@@ -862,8 +862,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(right_click_def, right_click_exec).await;
     info!("Registered tool: right_click");
 
-    /// Tool for performing middle mouse clicks (scroll wheel click).
-    /// Used by: Middle-click paste, opening links in new tabs, special interactions
+    // Tool for performing middle mouse clicks (scroll wheel click).
+    // Used by: Middle-click paste, opening links in new tabs, special interactions
     // middle_click
     let middle_click_def = ToolDefinition {
         name: "middle_click".to_string(),
@@ -906,8 +906,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(middle_click_def, middle_click_exec).await;
     info!("Registered tool: middle_click");
 
-    /// Tool for performing double-clicks (rapid successive clicks).
-    /// Used by: File opening, text selection, application launching
+    // Tool for performing double-clicks (rapid successive clicks).
+    // Used by: File opening, text selection, application launching
     // double_click
     let double_click_def = ToolDefinition {
         name: "double_click".to_string(),
@@ -950,8 +950,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(double_click_def, double_click_exec).await;
     info!("Registered tool: double_click");
 
-    /// Tool for performing click-and-drag operations.
-    /// Used by: Object moving, selection areas, dragging items between locations
+    // Tool for performing click-and-drag operations.
+    // Used by: Object moving, selection areas, dragging items between locations
     // left_click_drag
     let left_click_drag_def = ToolDefinition {
         name: "left_click_drag".to_string(),
@@ -1004,8 +1004,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(left_click_drag_def, left_click_drag_exec).await;
     info!("Registered tool: left_click_drag");
 
-    /// Tool for getting current mouse cursor position.
-    /// Used by: Position tracking, relative movement calculations, cursor state queries
+    // Tool for getting current mouse cursor position.
+    // Used by: Position tracking, relative movement calculations, cursor state queries
     // cursor_position
     let cursor_position_def = ToolDefinition {
         name: "cursor_position".to_string(),
@@ -1043,8 +1043,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(cursor_position_def, cursor_position_exec).await;
     info!("Registered tool: cursor_position");
 
-    /// Tool for listing all open windows in the system.
-    /// Used by: Window discovery, application targeting, desktop state analysis
+    // Tool for listing all open windows in the system.
+    // Used by: Window discovery, application targeting, desktop state analysis
     // window_management
     let window_list_def = ToolDefinition {
         name: "list_windows".to_string(),
@@ -1076,8 +1076,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(window_list_def, window_list_exec).await;
     info!("Registered tool: list_windows");
 
-    /// Tool for getting detailed information about a specific window.
-    /// Used by: Window analysis, specific window targeting, window state queries
+    // Tool for getting detailed information about a specific window.
+    // Used by: Window analysis, specific window targeting, window state queries
     let window_info_def = ToolDefinition {
         name: "get_window_info".to_string(),
         description: "Get detailed information about a specific window by its ID.".to_string(),
@@ -1120,8 +1120,8 @@ pub async fn register_desktop_tools(
     // === COMPOUND TOOLS ===
     // These tools combine multiple basic operations for common workflows
 
-    /// Compound tool for executing shell commands and capturing output.
-    /// Used by: Development workflows, system administration, automated testing
+    // Compound tool for executing shell commands and capturing output.
+    // Used by: Development workflows, system administration, automated testing
     #[derive(serde::Deserialize)]
     struct ExecuteCommandArgs {
         command: String,
@@ -1194,8 +1194,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(execute_command_def, execute_command_exec).await;
     info!("Registered compound tool: execute_command");
 
-    /// Compound tool for opening a file and typing content into it.
-    /// Used by: File editing workflows, content creation, automated document generation
+    // Compound tool for opening a file and typing content into it.
+    // Used by: File editing workflows, content creation, automated document generation
     #[derive(serde::Deserialize)]
     struct OpenFileAndTypeArgs {
         file_path: String,
@@ -1272,8 +1272,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(open_file_and_type_def, open_file_and_type_exec).await;
     info!("Registered compound tool: open_file_and_type");
 
-    /// Compound tool for saving and closing the current file.
-    /// Used by: File editing workflows, automated saving, document completion
+    // Compound tool for saving and closing the current file.
+    // Used by: File editing workflows, automated saving, document completion
     let save_and_close_file_def = ToolDefinition {
         name: "save_and_close_file".to_string(),
         description: "Save the current file and close the editor. Uses keyboard shortcuts Cmd+S and Cmd+W.".to_string(),
@@ -1333,8 +1333,8 @@ pub async fn register_desktop_tools(
     provider.register_async_tool(save_and_close_file_def, save_and_close_file_exec).await;
     info!("Registered compound tool: save_and_close_file");
 
-    /// Compound tool for copying text to clipboard and pasting at cursor.
-    /// Used by: Text manipulation workflows, content transfer, automated copy-paste operations
+    // Compound tool for copying text to clipboard and pasting at cursor.
+    // Used by: Text manipulation workflows, content transfer, automated copy-paste operations
     #[derive(serde::Deserialize)]
     struct CopyAndPasteArgs {
         text: String,
