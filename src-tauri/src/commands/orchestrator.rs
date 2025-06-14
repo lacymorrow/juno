@@ -100,7 +100,7 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
         MCPServerConfig::new(
             "sqlite".to_string(),
             "npx".to_string(),
-            vec!["mcp-server-sqlite".to_string(), "--db-path".to_string(), "./juno-agent-data.db".to_string()]
+            vec!["mcp-server-sqlite".to_string(), "--db-path", "./juno-agent-data.db".to_string()]
         ).with_description("Local SQLite database for structured data storage and queries".to_string()),
 
         // Calculator for mathematical operations
