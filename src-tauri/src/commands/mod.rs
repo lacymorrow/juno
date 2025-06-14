@@ -41,7 +41,15 @@ pub use self::core::*;
 pub use self::dev::*;
 pub use self::dictation::*;
 pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
-pub use self::floating_bar::*;
+pub use self::floating_bar::{
+    floating_bar_click, floating_bar_focus_change, floating_bar_input_blur,
+    floating_bar_input_change, floating_bar_submit, get_floating_bar_config,
+    set_floating_bar_config, handle_backend_response, handle_dictation_started,
+    handle_dictation_partial, handle_dictation_finished, handle_tts_started,
+    handle_tts_finished, handle_dictation_mode_change, handle_always_listening_change,
+    handle_agent_started, handle_agent_stopped, handle_agent_cancelled,
+    initialize_bar_manager
+};
 pub use self::floating_panel::*;
 pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};
 pub use self::mouse::*;

@@ -189,11 +189,13 @@ macro_rules! generate_invoke_handler {
             get_dictation_transcription_status,
 
             // Floating Bar Commands
-            floating_bar_click,
-            floating_bar_focus_change,
-            floating_bar_input_blur,
-            floating_bar_input_change,
-            floating_bar_submit,
+                    floating_bar_click,
+        floating_bar_focus_change,
+        floating_bar_input_blur,
+        floating_bar_input_change,
+        floating_bar_submit,
+        get_floating_bar_config,
+        set_floating_bar_config,
 
             // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
             list_ai_providers,
