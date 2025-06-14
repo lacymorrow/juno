@@ -204,11 +204,18 @@ pub async fn submit_orchestrated_query(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    // --- Validate query text ---
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        warn!("Received empty or whitespace-only query for orchestrator, ignoring");
+        return Ok("No query provided".to_string());
+    }
+
     if !use_orchestrator {
         // Fall back to the existing single-agent system
-        crate::anthropic::submit_query(query.clone(), state, app_handle).await
+        crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle).await
             .map_err(|e| e)?;
-        return Ok(format!("Query processed: {}", query));
+        return Ok(format!("Query processed: {}", trimmed_query));
     }
 
     let orchestrator = get_orchestrator().await?;
@@ -224,7 +231,7 @@ pub async fn submit_orchestrated_query(
 
     // Create enhanced task request
     let task_request = TaskCreationRequest {
-        description: query.clone(),
+        description: trimmed_query.to_string(),
         agent_type: None, // Let orchestrator decide
         priority: Some(format!("{:?}", task_priority)),
         dependencies: None,
