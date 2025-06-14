@@ -96,7 +96,6 @@ export default function OnboardingWindow() {
         onSkip={handleOnboardingSkip}
         permissionsAlreadyGranted={permissionsGranted}
       />
-      <Toaster position="top-right" />
     </>
   );
 }
