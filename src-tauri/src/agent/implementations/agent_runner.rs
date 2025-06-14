@@ -14,7 +14,7 @@ use crate::agent::traits::{
     ToolProvider,
 };
 use crate::agent::tool_logger; // Added for logging
-use tauri::{AppHandle, Manager}; // Added Manager trait for accessing app state
+use tauri::{AppHandle, Manager, Emitter}; // Added Manager trait for accessing app state
 
 /// Default implementation of the AgentRunnable trait.
 /// Orchestrates the agent's execution flow using the provided components.
@@ -79,17 +79,17 @@ where
     /// Filter tools based on brain type to prevent access to inappropriate tools
     fn filter_tools_for_brain(&self, all_tools: &[crate::agent::structs::ToolDefinition]) -> Vec<crate::agent::structs::ToolDefinition> {
         // Check if this brain is an orchestrator by checking if it only has delegation tools
-        let has_delegation_tools = all_tools.iter().any(|tool| 
+        let has_delegation_tools = all_tools.iter().any(|tool|
             tool.name.starts_with("delegate_to_")
         );
-        
+
         // If this tool provider has delegation tools, it's likely an orchestrator
         // Only allow delegation tools and basic coordination tools
         if has_delegation_tools {
             let delegation_tool_count = all_tools.iter()
                 .filter(|tool| tool.name.starts_with("delegate_to_"))
                 .count();
-            
+
             // If most tools are delegation tools, this is an orchestrator
             if delegation_tool_count > 0 && (delegation_tool_count as f32 / all_tools.len() as f32) > 0.3 {
                 let filtered_tools: Vec<crate::agent::structs::ToolDefinition> = all_tools.iter()
@@ -98,23 +98,23 @@ where
                         if tool.name.starts_with("delegate_to_") {
                             return true;
                         }
-                        
+
                         // Allow basic coordination tools that orchestrators might need
                         match tool.name.as_str() {
-                            "analyze_task" | "plan_workflow" | "coordinate_agents" | 
+                            "analyze_task" | "plan_workflow" | "coordinate_agents" |
                             "check_task_status" | "summarize_results" => true,
                             _ => false
                         }
                     })
                     .cloned()
                     .collect();
-                
-                log::info!("Orchestrator brain detected: filtering tools from {} to {} (keeping only delegation and coordination tools)", 
+
+                log::info!("Orchestrator brain detected: filtering tools from {} to {} (keeping only delegation and coordination tools)",
                     all_tools.len(), filtered_tools.len());
                 return filtered_tools;
             }
         }
-        
+
         // For non-orchestrator brains, return all tools
         // The specialist agents will get their tools filtered by ToolMappingService elsewhere
         all_tools.to_vec()
@@ -209,11 +209,11 @@ where
                 }
                 AgentAction::FinishWithDualContent { typed_content, spoken_content } => {
                     log::info!("Agent finished with dual content - typed: \"{}\" spoken: \"{}\"", typed_content, spoken_content);
-                    
+
                     // Store the spoken content in app state for TTS retrieval
                     let app_state = self.app_handle.state::<crate::state::AppState>();
                     app_state.set_last_spoken_content(Some(spoken_content));
-                    
+
                     self.transition_state(AgentState::Finished).await;
                     // Return typed content for display, spoken content will be handled by TTS separately
                     return Ok(typed_content);
@@ -272,7 +272,7 @@ where
             mem.get_messages().await?
         };
         let all_tools = self.tool_provider.list_tools().await?;
-        
+
         // Filter tools based on brain type to prevent orchestrator from seeing specialist tools
         let tools = self.filter_tools_for_brain(&all_tools);
 
@@ -361,6 +361,94 @@ where
                         }
 
                         return Err(AgentError::Terminated);
+                    }
+
+                    // --- Tool Approval Check ---
+                    let app_state = self.app_handle.state::<crate::state::AppState>();
+                    if app_state.is_tool_approval_required() {
+                        log::info!("Tool approval required for: {}", tool_call.name);
+
+                        // Create approval request
+                        let approval_request = crate::state::ToolApprovalRequest::new(
+                            tool_call.id.clone(),
+                            tool_call.name.clone(),
+                            tool_call.input.clone(),
+                            format!("Agent wants to execute tool: {}", tool_call.name)
+                        );
+
+                        // Add to pending approvals
+                        app_state.add_pending_tool_approval(approval_request.clone()).await;
+
+                        // Emit tool approval request event to frontend
+                        let approval_event = serde_json::json!({
+                            "tool_name": approval_request.tool_name,
+                            "tool_id": approval_request.tool_id,
+                            "tool_input": approval_request.tool_input,
+                            "description": approval_request.description,
+                            "timestamp": approval_request.timestamp
+                        });
+
+                        if let Err(e) = self.app_handle.emit("tool-approval-request", approval_event) {
+                            log::error!("Failed to emit tool approval request: {}", e);
+                            // Continue with execution if we can't emit the event
+                        }
+
+                        // Wait for approval with timeout
+                        log::info!("Waiting for user approval for tool: {}", tool_call.name);
+
+                        let mut approval_timeout = 60; // 60 seconds timeout
+                        let mut approved = false;
+
+                        while approval_timeout > 0 && !approved {
+                            // Check for cancellation during approval wait
+                            if *cancel_rx.borrow() {
+                                log::info!("Cancellation detected during tool approval wait");
+                                app_state.remove_tool_approval(&tool_call.id).await;
+                                return Err(AgentError::Terminated);
+                            }
+
+                            // Check approval status
+                            match app_state.get_tool_approval_status(&tool_call.id).await {
+                                Some(true) => {
+                                    approved = true;
+                                    log::info!("Tool approved: {}", tool_call.name);
+                                    break;
+                                }
+                                Some(false) => {
+                                    log::info!("Tool denied: {}", tool_call.name);
+                                    break;
+                                }
+                                None => {
+                                    // Still pending, continue waiting
+                                }
+                            }
+
+                            // Sleep for 1 second and decrement timeout
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            approval_timeout -= 1;
+                        }
+
+                        // Clean up the approval request
+                        app_state.remove_tool_approval(&tool_call.id).await;
+
+                        if !approved {
+                            let reason = if approval_timeout <= 0 { "timeout" } else { "user denied" };
+                            log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
+
+                            // Add tool result indicating rejection
+                            let mut mem = self.memory.lock().await;
+                            mem.add_message(Message {
+                                role: Role::Tool,
+                                content: format!("Tool execution was denied - {}", reason),
+                                tool_calls: None,
+                                tool_call_id: Some(tool_call.id.clone()),
+                                name: Some(tool_call.name.clone()),
+                            })
+                            .await?;
+                            continue; // Skip to next tool
+                        }
+
+                        log::info!("Tool approved for execution: {}", tool_call.name);
                     }
 
                     // Emit tool call request event
