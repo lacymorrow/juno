@@ -1,8 +1,6 @@
 // macOS permissions management for accessibility, screen recording, and microphone
 
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::time::Duration;
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::permissions::{
     check_accessibility_permissions,
@@ -1113,19 +1111,19 @@ async fn test_voice_transcription_availability() -> bool {
         // Import necessary types for the voice transcription plugin
         use std::sync::{Arc, Mutex};
         use tauri_plugin_voice_transcription::VoiceController;
-        
+
         info!("Testing voice transcription availability through plugin initialization status");
-        
+
         // Attempt to create a test VoiceController to verify Whisper functionality
         // This is similar to what the plugin does during initialization
         let test_model_path = "models/whisper-base.en.bin";
-        
+
         // Check if model file exists first
         if !std::path::Path::new(test_model_path).exists() {
             debug!("Voice transcription test: Model file not found at {}", test_model_path);
             return false;
         }
-        
+
         // Try to create a VoiceController instance to test initialization
         match VoiceController::new(test_model_path) {
             Ok(controller) => {
@@ -1138,7 +1136,7 @@ async fn test_voice_transcription_availability() -> bool {
             }
         }
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         // On non-macOS platforms, voice transcription may not be available
@@ -1169,12 +1167,12 @@ fn test_applescript_microphone_access() -> Result<bool, String> {
             Ok(output) => {
                 let result = String::from_utf8_lossy(&output.stdout);
                 let result_clean = result.trim();
-                
+
                 if result_clean.starts_with("error:") {
                     warn!("AppleScript microphone check returned error: {}", result_clean);
                     return Err(result_clean.to_string());
                 }
-                
+
                 let granted = result_clean == "true" || result_clean == "authorized" || result_clean == "1";
                 info!("AppleScript microphone authorization result: '{}' (granted: {})", result_clean, granted);
                 Ok(granted)
@@ -1274,7 +1272,7 @@ pub async fn test_microphone_functionality(app: AppHandle) -> Result<serde_json:
         Some(controller_state) => {
             let controller = controller_state.lock()
                 .map_err(|e| format!("Failed to lock VoiceController: {}", e))?;
-            
+
             serde_json::json!({
                 "voice_controller_available": true,
                 "is_initialized": controller.is_initialized(),
@@ -1296,7 +1294,7 @@ pub async fn test_microphone_functionality(app: AppHandle) -> Result<serde_json:
         Some(controller_state) => {
             let controller = controller_state.lock()
                 .map_err(|e| format!("Failed to lock AlwaysListeningController: {}", e))?;
-            
+
             // Try to run the whisper model test
             match controller.test_whisper_model() {
                 Ok(test_result) => {
