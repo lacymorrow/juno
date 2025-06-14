@@ -33,6 +33,10 @@ pub async fn stop_all_operations(app_handle: AppHandle) -> Result<String, String
         app_state.signal_cancel();
     }
 
+    // Force reset agent input state for comprehensive cleanup
+    info!("[StopOperations] Force resetting agent input state");
+    crate::agent_monitor::force_reset_agent_input_state().await;
+
     // Check if dictation is active and stop it
     if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
         // Check if dictation is active and stop it synchronously if possible
@@ -48,9 +52,41 @@ pub async fn stop_all_operations(app_handle: AppHandle) -> Result<String, String
         }
     }
 
+    // Force reset dictation input state for comprehensive cleanup
+    info!("[StopOperations] Force resetting dictation input state");
+    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+    // Clean up app state flags
+    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        if *dictation_active {
+            info!("[StopOperations] Resetting dictation active flag");
+            *dictation_active = false;
+        }
+    }
+
+    // Mark agent execution as finished for clean state
+    app_state.mark_agent_execution_finished();
+    info!("[StopOperations] Agent execution marked as finished");
+
     // Emit agent stopping event for any running AI agents
     if let Err(e) = app_handle.emit(constants::events::AGENT_STOPPING, ()) {
         warn!("[StopOperations Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
+    }
+
+    // Emit comprehensive agent-stop-all event for broader compatibility
+    if let Err(e) = app_handle.emit("agent-stop-all", ()) {
+        warn!("[StopOperations Error] Failed to emit agent-stop-all event: {}", e);
+    } else {
+        info!("[StopOperations] agent-stop-all event emitted successfully");
+    }
+
+    // Emit state update events for UI consistency
+    if let Err(e) = app_handle.emit("agent-active", false) {
+        warn!("[StopOperations Error] Failed to emit agent-active event: {}", e);
+    }
+
+    if let Err(e) = app_handle.emit("dictation-active", false) {
+        warn!("[StopOperations Error] Failed to emit dictation-active event: {}", e);
     }
 
     // Immediately signal floating bar manager about cancellation for quick UI feedback
@@ -59,10 +95,10 @@ pub async fn stop_all_operations(app_handle: AppHandle) -> Result<String, String
         crate::commands::floating_bar::handle_backend_response(
             &app_handle_for_bar,
             "Cancelled",
-            Some("Agent execution was cancelled by stop button.".to_string())
+            Some("All operations cancelled by stop button.".to_string())
         ).await;
     });
 
-    info!("[StopOperations] Stop all operations completed");
+    info!("[StopOperations] Stop all operations completed successfully");
     Ok("All operations stopped successfully".to_string())
 }
