@@ -8,7 +8,7 @@ use tracing::warn;
 use crate::agents::{
     AgentFactory, AgentStatus, Orchestrator, OrchestratorConfig, Task, TaskResult, TaskPriority
 };
-use crate::agent::tools::mcp_integration::{MCPManager, MCPServerConfig, MCPToolInfo};
+use crate::agent::tools::mcp_integration::{MCPManager, MCPServerConfig};
 use crate::state::AppState;
 
 /// Global orchestrator instance
@@ -612,7 +612,7 @@ pub async fn execute_workflow_template(
         .ok_or_else(|| format!("Workflow template '{}' not found", template_id))?;
 
     let orchestrator = get_orchestrator().await?;
-    let orchestrator_guard = orchestrator.lock().await;
+    let _orchestrator_guard = orchestrator.lock().await;
 
     // Execute each task in the template based on dependencies
     let mut task_results = HashMap::new();

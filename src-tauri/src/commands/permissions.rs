@@ -9,19 +9,14 @@ use computer_use_ai_sdk::platforms::macos::permissions::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn, error, debug};
-use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
 use lazy_static::lazy_static;
-use tauri::State;
 use tokio_util::sync::CancellationToken;
 use std::sync::atomic::{AtomicBool, Ordering};
+use chrono::Utc;
 use crate::constants::permission_types;
-use std::process::Command;
-use chrono::{DateTime, Utc};
-use crate::state::AppState;
-use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -725,7 +720,6 @@ pub async fn request_microphone_permission() -> Result<bool, String> {
 async fn trigger_microphone_permission_dialog() -> bool {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         // Try to trigger microphone permission using a simple audio recording test
         // This should cause macOS to show the permission dialog if not already granted
@@ -780,7 +774,6 @@ async fn trigger_microphone_permission_dialog() -> bool {
 async fn open_microphone_system_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         info!("Opening System Settings to Microphone privacy section");
 
@@ -869,7 +862,6 @@ pub async fn request_screen_recording_permission() -> Result<bool, String> {
 async fn open_screen_recording_system_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         info!("Opening System Settings to Screen Recording privacy section");
 
@@ -950,7 +942,6 @@ pub async fn request_input_monitoring_permission() -> Result<bool, String> {
 async fn open_input_monitoring_system_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         info!("Opening System Settings to Input Monitoring privacy section");
 
@@ -1037,7 +1028,6 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
 async fn test_microphone_access() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
         use std::time::Duration;
 
         info!("Testing microphone access using enhanced voice transcription detection");
@@ -1158,7 +1148,6 @@ async fn test_voice_transcription_availability() -> bool {
 fn test_applescript_microphone_access() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         // Use a more robust osascript test
         let output = Command::new("osascript")
@@ -1241,7 +1230,6 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
 async fn test_input_monitoring_access() -> bool {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         // Test using ioreg to check if we can monitor input events
         let output = Command::new("ioreg")
@@ -1352,7 +1340,6 @@ pub async fn test_microphone_functionality(app: AppHandle) -> Result<serde_json:
 async fn check_audio_devices_system() -> serde_json::Value {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
         use std::time::Duration;
 
         let system_audio_check = tokio::time::timeout(Duration::from_secs(3), async {
