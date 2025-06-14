@@ -191,8 +191,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 <p className="font-medium">Common MCP Servers:</p>
                 <div className="space-y-1 text-xs font-mono bg-muted/50 p-3 rounded">
                   <div><strong>File System:</strong> npx @modelcontextprotocol/server-filesystem /path</div>
-                  <div><strong>SQLite:</strong> npx @modelcontextprotocol/server-sqlite /path/to/db.sqlite</div>
-                  <div><strong>Git:</strong> npx @modelcontextprotocol/server-git /path/to/repo</div>
+                  <div><strong>Everything Server:</strong> npx @modelcontextprotocol/server-everything</div>
+                  <div><strong>Memory:</strong> npx @modelcontextprotocol/server-memory</div>
                   <div><strong>Brave Search:</strong> npx @modelcontextprotocol/server-brave-search</div>
                 </div>
                 <a
