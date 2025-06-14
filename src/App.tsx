@@ -1559,7 +1559,7 @@ function App() {
           })
         );
 
-        // Reset processing state since the AI has finished responding
+        // Reset processing state since the AI has finished responded
         setIsProcessing(false);
       }
     );
@@ -1569,7 +1569,7 @@ function App() {
       streamTextListener.then((unlistenFn) => unlistenFn());
       streamEndListener.then((unlistenFn) => unlistenFn());
     };
-  }, [throttledAutoScroll]); // Include throttledAutoScroll in dependency array
+  }, []); // Remove throttledAutoScroll dependency to prevent re-creation of listeners
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1657,6 +1657,31 @@ function App() {
       }
     };
   }, [currentAudio]);
+
+  // Improved auto-scroll function (moved here to be available for the useEffect hooks below)
+  const autoScrollToBottom = useCallback(
+    (forceScroll = false) => {
+      if (!conversationEndRef.current) return;
+
+      // Don't auto-scroll if user has scrolled up, unless forced
+      if (userHasScrolledUp && !forceScroll) return;
+
+      // Smooth scroll to bottom
+      conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
+      setLastScrollTime(Date.now());
+    },
+    [userHasScrolledUp]
+  );
+
+  // Throttled scroll function for streaming (limits frequency)
+  const throttledAutoScroll = useRef(
+    debounce(() => {
+      if (conversationEndRef.current && !userHasScrolledUp) {
+        conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
+        setLastScrollTime(Date.now());
+      }
+    }, 200)
+  ).current;
 
   // Smart scroll conversation to bottom - only when user hasn't scrolled up
   useEffect(() => {
@@ -2017,27 +2042,6 @@ function App() {
     };
   }, [conversation]);
 
-  // Improved auto-scroll function
-  const autoScrollToBottom = useCallback(
-    (forceScroll = false) => {
-      if (!conversationEndRef.current) return;
-
-      // Don't auto-scroll if user has scrolled up, unless forced
-      if (userHasScrolledUp && !forceScroll) return;
-
-      // Smooth scroll to bottom
-      conversationEndRef.current.scrollIntoView({ behavior: "smooth" });
-      setLastScrollTime(Date.now());
-    },
-    [userHasScrolledUp]
-  );
-
-  // Throttled scroll function for streaming (limits frequency)
-  const throttledAutoScroll = useCallback(
-    debounce(() => autoScrollToBottom(), 200), // Only scroll every 200ms during streaming
-    [autoScrollToBottom]
-  );
-
   // Add scroll detection
   const handleScroll = useCallback(() => {
     const scrollElement = scrollAreaRef.current?.querySelector(
@@ -2052,14 +2056,15 @@ function App() {
     const isNearBottom = scrollBottom < 100;
 
     // Update user scroll state
-    if (!isNearBottom && Date.now() - lastScrollTime > 500) {
+    const currentTime = Date.now();
+    if (!isNearBottom && currentTime - lastScrollTime > 500) {
       // User scrolled up and it's been more than 500ms since last auto-scroll
       setUserHasScrolledUp(true);
     } else if (isNearBottom) {
       // User is at bottom, resume auto-scrolling
       setUserHasScrolledUp(false);
     }
-  }, [lastScrollTime]);
+  }, []);
 
   // Add scroll event listener to detect user scroll behavior
   useEffect(() => {
@@ -2075,7 +2080,9 @@ function App() {
   // Listen for comprehensive agent-stop-all events
   useEffect(() => {
     const unlisten = listen("agent-stop-all", async () => {
-      console.log("Agent stop all event received - performing comprehensive UI cleanup");
+      console.log(
+        "Agent stop all event received - performing comprehensive UI cleanup"
+      );
       try {
         // Stop TTS immediately
         await stopTTS((msg, level) =>
