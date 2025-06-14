@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { listen } from '@tauri-apps/api/event';
-import { invoke } from '@tauri-apps/api/core';
-import { toast } from 'sonner';
+import { useState, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -9,11 +9,17 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, CheckCircle, XCircle, Clock, Shield } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Shield,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface ToolApprovalRequest {
   tool_name: string;
@@ -25,41 +31,45 @@ interface ToolApprovalRequest {
 
 export default function ToolApprovalModal() {
   const [isOpen, setIsOpen] = useState(false);
-  const [currentRequest, setCurrentRequest] = useState<ToolApprovalRequest | null>(null);
+  const [currentRequest, setCurrentRequest] =
+    useState<ToolApprovalRequest | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     // Listen for tool approval requests
-    const unlistenPromise = listen<ToolApprovalRequest>('tool-approval-request', (event) => {
-      console.log('Tool approval request received:', event.payload);
-      setCurrentRequest(event.payload);
-      setIsOpen(true);
-    });
+    const unlistenPromise = listen<ToolApprovalRequest>(
+      "tool-approval-request",
+      (event) => {
+        console.log("Tool approval request received:", event.payload);
+        setCurrentRequest(event.payload);
+        setIsOpen(true);
+      }
+    );
 
     return () => {
-      unlistenPromise.then(unlisten => unlisten());
+      unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
 
   const handleApprove = async () => {
     if (!currentRequest) return;
-    
+
     setIsProcessing(true);
     try {
-      const success = await invoke<boolean>('approve_tool_execution', {
-        toolId: currentRequest.tool_id
+      const success = await invoke<boolean>("approve_tool_execution", {
+        toolId: currentRequest.tool_id,
       });
-      
+
       if (success) {
         toast.success(`Tool "${currentRequest.tool_name}" approved`);
         setIsOpen(false);
         setCurrentRequest(null);
       } else {
-        toast.error('Failed to approve tool execution');
+        toast.error("Failed to approve tool execution");
       }
     } catch (error) {
-      console.error('Error approving tool:', error);
-      toast.error('Failed to approve tool execution');
+      console.error("Error approving tool:", error);
+      toast.error("Failed to approve tool execution");
     } finally {
       setIsProcessing(false);
     }
@@ -67,23 +77,23 @@ export default function ToolApprovalModal() {
 
   const handleDeny = async () => {
     if (!currentRequest) return;
-    
+
     setIsProcessing(true);
     try {
-      const success = await invoke<boolean>('deny_tool_execution', {
-        toolId: currentRequest.tool_id
+      const success = await invoke<boolean>("deny_tool_execution", {
+        toolId: currentRequest.tool_id,
       });
-      
+
       if (success) {
         toast.success(`Tool "${currentRequest.tool_name}" denied`);
         setIsOpen(false);
         setCurrentRequest(null);
       } else {
-        toast.error('Failed to deny tool execution');
+        toast.error("Failed to deny tool execution");
       }
     } catch (error) {
-      console.error('Error denying tool:', error);
-      toast.error('Failed to deny tool execution');
+      console.error("Error denying tool:", error);
+      toast.error("Failed to deny tool execution");
     } finally {
       setIsProcessing(false);
     }
@@ -94,13 +104,13 @@ export default function ToolApprovalModal() {
   };
 
   const getToolInputPreview = (input: any) => {
-    if (!input) return 'No parameters';
-    
+    if (!input) return "No parameters";
+
     try {
       const str = JSON.stringify(input, null, 2);
       // Truncate if too long
       if (str.length > 200) {
-        return str.substring(0, 200) + '...';
+        return str.substring(0, 200) + "...";
       }
       return str;
     } catch {
@@ -133,7 +143,9 @@ export default function ToolApprovalModal() {
                     <span className="font-medium">Tool:</span>
                     <Badge variant="outline">{currentRequest.tool_name}</Badge>
                   </div>
-                  <p className="text-sm text-gray-600">{currentRequest.description}</p>
+                  <p className="text-sm text-gray-600">
+                    {currentRequest.description}
+                  </p>
                 </div>
 
                 <div>
@@ -164,8 +176,8 @@ export default function ToolApprovalModal() {
             <div className="text-sm text-amber-800">
               <div className="font-medium">Review Carefully</div>
               <div className="mt-1">
-                Make sure you understand what this tool will do before approving. 
-                Some tools may make changes to your system or files.
+                Make sure you understand what this tool will do before
+                approving. Some tools may make changes to your system or files.
               </div>
             </div>
           </div>
@@ -187,7 +199,7 @@ export default function ToolApprovalModal() {
             className="flex items-center gap-2"
           >
             <CheckCircle className="h-4 w-4" />
-            {isProcessing ? 'Processing...' : 'Approve'}
+            {isProcessing ? "Processing..." : "Approve"}
           </Button>
         </DialogFooter>
       </DialogContent>
