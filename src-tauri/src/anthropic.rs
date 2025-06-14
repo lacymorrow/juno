@@ -21,7 +21,7 @@ use crate::agent::providers::config::AgentMode;
 use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
-use crate::constants::agent_config;
+use crate::constants::{agent_config, tool_names, events, anthropic_content_types, timeouts};
 
 
 // --- Agent State ---
@@ -132,7 +132,7 @@ pub async fn submit_query(
         info!("Signaled cancellation for existing agent execution");
 
         // Give existing agent a brief moment to clean up gracefully
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MEDIUM_DELAY_MS)).await;
 
         // Reset the cancellation signal for the new agent
         state.reset_cancel();
@@ -532,7 +532,7 @@ async fn register_orchestrator_delegation_tools(
 
     // Delegate to Browser Agent
     let browser_delegation_def = crate::agent::structs::ToolDefinition {
-        name: "delegate_to_browser_agent".to_string(),
+        name: tool_names::DELEGATE_TO_BROWSER_AGENT.to_string(),
         description: "Delegate web browsing, navigation, and web interaction tasks to the browser specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -581,7 +581,7 @@ async fn register_orchestrator_delegation_tools(
 
     // Delegate to Desktop Agent
     let desktop_delegation_def = crate::agent::structs::ToolDefinition {
-        name: "delegate_to_desktop_agent".to_string(),
+        name: tool_names::DELEGATE_TO_DESKTOP_AGENT.to_string(),
         description: "Delegate desktop automation, clicking, typing, and system interaction tasks to the desktop specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -630,7 +630,7 @@ async fn register_orchestrator_delegation_tools(
 
     // Delegate to File Agent
     let file_delegation_def = crate::agent::structs::ToolDefinition {
-        name: "delegate_to_file_agent".to_string(),
+        name: tool_names::DELEGATE_TO_FILE_AGENT.to_string(),
         description: "Delegate file operations, code editing, terminal commands, and development tasks to the file specialist agent".to_string(),
         input_schema: json!({
             "type": "object",

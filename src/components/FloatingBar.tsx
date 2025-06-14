@@ -1,6 +1,4 @@
 import { cn } from "@/lib/utils";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { LogicalSize, Window } from "@tauri-apps/api/window";
 import {
   AlertCircle,
@@ -15,62 +13,25 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
+import { useInvoke } from "@/hooks/useInvoke";
+import { useEventListener } from "@/hooks/useEventListener";
+import { useWindowSize } from "@/hooks/useWindowSize";
+import type { BarState, BarStateData, FloatingBarConfig, WindowConfig } from "@/types/floating-bar";
+import { FLOATING_BAR_DIMENSIONS } from "@/types/floating-bar";
 
 // Get default window dimensions from tauri.conf.json
 const floatingBarConfig = tauriConfig.app.windows.find(
-  (window) => window.label === "floating-bar"
+  (window: WindowConfig) => window.label === "floating-bar"
 );
-const DEFAULT_WIDTH = floatingBarConfig?.width || 110;
-const DEFAULT_HEIGHT = floatingBarConfig?.height || 60;
-const EXPANDED_WIDTH = 320;
-const EXPANDED_HEIGHT = 80;
+const DEFAULT_WIDTH = floatingBarConfig?.width || FLOATING_BAR_DIMENSIONS.DEFAULT_WIDTH;
+const DEFAULT_HEIGHT = floatingBarConfig?.height || FLOATING_BAR_DIMENSIONS.DEFAULT_HEIGHT;
+const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
+const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
 
-// Enhanced bar state with more granular feedback
-type BarState =
-  | "default"
-  | "expanding"
-  | "input"
-  | "shrinking"
-  | "loading"
-  | "finishing"
-  | "success"
-  | "error"
-  | "dictation_ready"
-  | "dictation_active"
-  | "dictation_processing"
-  | "agent_listening"
-  | "agent_thinking"
-  | "agent_responding"
-  | "speaking"
-  | "listening"
-  | "transcribing"
-  | "dictating"
-  | "always-listening";
-
-interface BarStateData {
-  barState: BarState;
-  inputValue: string;
-  lastSubmittedValue: string;
-  currentError: string | null;
-  transcriptionText: string;
-  spokenText: string;
-  isAgentWorking: boolean;
-  isDictationMode: boolean;
-  isAlwaysListening: boolean;
-  audioLevel: number;
-  voiceMode: "dictation" | "agent" | "idle";
-}
-
-interface FloatingBarConfig {
-  showVoiceIndicator: boolean;
-  enableAnimations: boolean;
-  autoHide: boolean;
-  autoHideDelay: number;
-  opacity: number;
-}
+// Types are now imported from shared types
 
 export function FloatingBar() {
   // Enhanced state management - mirrors backend state exactly
@@ -87,6 +48,9 @@ export function FloatingBar() {
   const [voiceMode, setVoiceMode] = useState<"dictation" | "agent" | "idle">(
     "idle"
   );
+
+  const { invokeCommand } = useInvoke();
+  const { resizeWindow } = useWindowSize("floating-bar");
 
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
@@ -108,7 +72,7 @@ export function FloatingBar() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const savedConfig = await invoke<FloatingBarConfig>(
+        const savedConfig = await invokeCommand<FloatingBarConfig>(
           "get_floating_bar_config"
         );
         setConfig(savedConfig);
@@ -117,30 +81,18 @@ export function FloatingBar() {
       }
     };
     loadConfig();
-  }, []);
+  }, [invokeCommand]);
 
   // Update window size based on bar state
   useEffect(() => {
-    const resizeWindow = async () => {
-      try {
-        const appWindow = await Window.getByLabel("floating-bar");
-        const isCompact = ["default", "finishing"].includes(barState);
-
-        if (isCompact) {
-          await appWindow?.setSize(
-            new LogicalSize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
-          );
-        } else {
-          await appWindow?.setSize(
-            new LogicalSize(EXPANDED_WIDTH, EXPANDED_HEIGHT)
-          );
-        }
-      } catch (err) {
-        console.error("Failed to resize window:", err);
-      }
-    };
-    resizeWindow();
-  }, [barState]);
+    const isCompact = ["default", "finishing"].includes(barState);
+    
+    const targetSize = isCompact
+      ? { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }
+      : { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
+    
+    resizeWindow(targetSize);
+  }, [barState, resizeWindow]);
 
   // Handle animation state tracking
   useEffect(() => {
@@ -149,84 +101,67 @@ export function FloatingBar() {
     }
   }, [barState, config.enableAnimations]);
 
-  // Listen for enhanced backend state updates
+  // Cleanup tooltip timeout on unmount
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-
-    const setupListener = async () => {
-      try {
-        unlisten = await listen<BarStateData>("bar-state-update", (event) => {
-          console.log("Received bar-state-update:", event.payload);
-          const data = event.payload;
-
-          // Update all state from backend
-          setBarState(data.barState);
-          setInputValue(data.inputValue);
-          setLastSubmittedValue(data.lastSubmittedValue);
-          setCurrentError(data.currentError);
-          setTranscriptionText(data.transcriptionText);
-          setSpokenText(data.spokenText);
-          setIsAgentWorking(data.isAgentWorking);
-          setIsDictationMode(data.isDictationMode);
-          setIsAlwaysListening(data.isAlwaysListening);
-          setAudioLevel(data.audioLevel || 0);
-          setVoiceMode(data.voiceMode || "idle");
-
-          // Auto-focus input when in input state
-          if (data.barState === "input" && inputRef.current) {
-            requestAnimationFrame(() => {
-              inputRef.current?.focus();
-            });
-          }
-        });
-      } catch (error) {
-        console.error("Failed to setup bar state listener:", error);
-      }
-    };
-
-    setupListener();
     return () => {
-      if (unlisten) {
-        unlisten();
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current);
       }
     };
   }, []);
 
-  // Listen for window hover events
-  useEffect(() => {
-    let unlistenEnter: (() => void) | undefined;
-    let unlistenLeave: (() => void) | undefined;
+  // Listen for enhanced backend state updates
+  const handleBarStateUpdate = useCallback((data: BarStateData) => {
+    console.log("Received bar-state-update:", data);
 
-    const setupListeners = async () => {
-      unlistenEnter = await listen<null>("mouse-entered-window", () => {
-        setIsWindowHovered(true);
+    // Update all state from backend
+    setBarState(data.barState);
+    setInputValue(data.inputValue);
+    setLastSubmittedValue(data.lastSubmittedValue);
+    setCurrentError(data.currentError);
+    setTranscriptionText(data.transcriptionText);
+    setSpokenText(data.spokenText);
+    setIsAgentWorking(data.isAgentWorking);
+    setIsDictationMode(data.isDictationMode);
+    setIsAlwaysListening(data.isAlwaysListening);
+    setAudioLevel(data.audioLevel || 0);
+    setVoiceMode(data.voiceMode || "idle");
 
-        if (barState === "default") {
-          setShowTooltip(true);
-          if (tooltipTimeoutRef.current) {
-            clearTimeout(tooltipTimeoutRef.current);
-          }
-          tooltipTimeoutRef.current = setTimeout(() => {
-            setShowTooltip(false);
-          }, 2000);
-        }
+    // Auto-focus input when in input state
+    if (data.barState === "input" && inputRef.current) {
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
       });
+    }
+  }, []);
 
-      unlistenLeave = await listen<null>("mouse-left-window", () => {
-        setIsWindowHovered(false);
+  useEventListener("bar-state-update", handleBarStateUpdate);
+
+  // Window hover handlers
+  const handleMouseEnter = useCallback(() => {
+    setIsWindowHovered(true);
+
+    if (barState === "default") {
+      setShowTooltip(true);
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current);
+      }
+      tooltipTimeoutRef.current = setTimeout(() => {
         setShowTooltip(false);
-        if (tooltipTimeoutRef.current) {
-          clearTimeout(tooltipTimeoutRef.current);
-        }
-      });
-    };
-
-    setupListeners();
-    return () => {
-      unlistenEnter?.();
-      unlistenLeave?.();
-    };
+      }, 2000);
+    }
   }, [barState]);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsWindowHovered(false);
+    setShowTooltip(false);
+    if (tooltipTimeoutRef.current) {
+      clearTimeout(tooltipTimeoutRef.current);
+    }
+  }, []);
+
+  useEventListener("mouse-entered-window", handleMouseEnter, [barState]);
+  useEventListener("mouse-left-window", handleMouseLeave);
 
   // Listen for window focus changes
   useEffect(() => {
@@ -243,11 +178,7 @@ export function FloatingBar() {
               "Current bar state:",
               barState
             );
-            try {
-              await invoke("floating_bar_focus_change", { isFocused });
-            } catch (err) {
-              console.error("Failed to handle focus change:", err);
-            }
+            await invokeCommand("floating_bar_focus_change", { isFocused });
           }
         );
       } catch (error) {
@@ -261,45 +192,29 @@ export function FloatingBar() {
         unlisten();
       }
     };
-  }, [barState]);
+  }, [barState, invokeCommand]);
 
   // Handler functions that call backend commands
-  const handleBarClick = async () => {
-    try {
-      await invoke("floating_bar_click");
-    } catch (err) {
-      console.error("Failed to handle bar click:", err);
-    }
-  };
+  const handleBarClick = useCallback(async () => {
+    await invokeCommand("floating_bar_click");
+  }, [invokeCommand]);
 
-  const handleInputBlur = async () => {
-    try {
-      await invoke("floating_bar_input_blur");
-    } catch (err) {
-      console.error("Failed to handle input blur:", err);
-    }
-  };
+  const handleInputBlur = useCallback(async () => {
+    await invokeCommand("floating_bar_input_blur");
+  }, [invokeCommand]);
 
-  const handleInputChange = async (value: string) => {
-    try {
-      setInputValue(value);
-      await invoke("floating_bar_input_change", { value });
-    } catch (err) {
-      console.error("Failed to handle input change:", err);
-    }
-  };
+  const handleInputChange = useCallback(async (value: string) => {
+    setInputValue(value);
+    await invokeCommand("floating_bar_input_change", { value });
+  }, [invokeCommand]);
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = useCallback(async (e: FormEvent) => {
     e.preventDefault();
     const query = inputValue.trim();
     if (!query) return;
 
-    try {
-      await invoke("floating_bar_submit", { query });
-    } catch (err) {
-      console.error("Failed to handle submit:", err);
-    }
-  };
+    await invokeCommand("floating_bar_submit", { query });
+  }, [inputValue, invokeCommand]);
 
   // Get main icon based on enhanced state
   const getMainIcon = () => {
