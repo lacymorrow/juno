@@ -1,7 +1,12 @@
+#[cfg(target_os = "macos")]
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
 use tempfile::NamedTempFile;
+#[cfg(target_os = "macos")]
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+#[cfg(target_os = "macos")]
 use tracing::{error, info};
 
 #[cfg(target_os = "macos")]

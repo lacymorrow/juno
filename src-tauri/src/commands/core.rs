@@ -3,14 +3,10 @@
 use tauri::State;
 use tracing::info;
 use crate::state::AppState;
-use tauri::{AppHandle, WebviewWindow, Wry};
-use tracing::{warn, error};
+use tauri::AppHandle;
+use tracing::warn;
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
-use std::collections::HashMap;
-use std::fs;
-use crate::cloud::CloudClient;
-use crate::anthropic::submit_query;
 use serde::{Deserialize, Serialize};
 use tauri_plugin_store::StoreExt;
 
