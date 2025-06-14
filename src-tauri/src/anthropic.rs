@@ -140,14 +140,8 @@ pub async fn submit_query(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-<<<<<<< HEAD
-    const MAX_ITERATIONS: u32 = 30;
-    state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
-    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
-=======
     state.mark_agent_execution_started_with_steps(execution_id.clone(), agent_config::MAX_ITERATIONS);
     info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, agent_config::MAX_ITERATIONS);
->>>>>>> 2059ff331fcf2494354c437c03c830b99129180f
 
     // Register escape key for cancellation during agent execution
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
