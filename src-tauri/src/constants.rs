@@ -44,6 +44,76 @@ pub mod events {
     pub const MINIMIZE_WINDOW_REQUESTED: &str = "minimize-window-requested";
     pub const ZOOM_WINDOW_REQUESTED: &str = "zoom-window-requested";
     pub const UPDATE_CHECK_REQUESTED: &str = "update-check-requested";
+
+    // Agent State Events - Missing from current events
+    pub const AGENT_ACTIVE: &str = "agent-active";
+    pub const AGENT_ERROR: &str = "agent-error";
+    pub const AGENT_TRANSCRIPTION_START: &str = "agent-transcription-start";
+    pub const AGENT_TRANSCRIPTION_STOP: &str = "agent-transcription-stop";
+    pub const AGENT_CANCEL: &str = "agent-cancel";
+    pub const AGENT_COMMITTED: &str = "agent-committed";
+    pub const AGENT_FORCE_STOP: &str = "agent-force-stop";
+    pub const AGENT_FORCE_CLEANUP: &str = "agent-force-cleanup";
+
+    // Dictation State Events
+    pub const DICTATION_ACTIVE: &str = "dictation-active";
+    pub const DICTATION_CANCELLED: &str = "dictation-cancelled";
+    pub const DICTATION_TRANSCRIPTION_START: &str = "dictation-transcription-start";
+    pub const DICTATION_TRANSCRIPTION_STOP: &str = "dictation-transcription-stop";
+    pub const DICTATION_COMMITTED: &str = "dictation-committed";
+    pub const DICTATION_STOP: &str = "dictation-stop";
+    pub const DICTATION_TRANSCRIPTION_CANCEL: &str = "dictation-transcription-cancel";
+    pub const DICTATION_TRANSCRIPTION_FORCE_STOP: &str = "dictation-transcription-force-stop";
+    pub const DICTATION_TRANSCRIPTION_FORCE_CLEANUP: &str = "dictation-transcription-force-cleanup";
+    pub const DICTATION_EMERGENCY_CLEANUP: &str = "dictation-emergency-cleanup";
+
+    // TTS Events
+    pub const TTS_AUDIO_READY: &str = "tts-audio-ready";
+    pub const TTS_STOP_REQUESTED: &str = "tts-stop-requested";
+
+    // UI Visualization Events
+    pub const KEY_PRESS_VISUALIZATION: &str = "key-press-visualization";
+    pub const CLICK_VISUALIZATION: &str = "click-visualization";
+
+    // Always Listening Events
+    pub const ALWAYS_LISTENING_MODE_CHANGED: &str = "always-listening-mode-changed";
+    pub const ALWAYS_LISTENING_WAKE_WORD_DETECTED: &str = "always-listening:wake-word-detected";
+    pub const TOGGLE_DICTATION_REQUEST: &str = "toggle-dictation-request";
+
+    // Permission Events
+    pub const PERMISSIONS_CHANGED: &str = "permissions-changed";
+    pub const PERMISSIONS_RESTART_REQUIRED: &str = "permissions-restart-required";
+
+    // About/Menu Events
+    pub const ABOUT_REQUESTED: &str = "about-requested";
+
+    // Dev Tool Events
+    pub const DEV_TOOL_NOTIFICATION: &str = "dev-tool-notification";
+}
+
+pub mod tool_names {
+    // Agent delegation tools
+    pub const DELEGATE_TO_BROWSER_AGENT: &str = "delegate_to_browser_agent";
+    pub const DELEGATE_TO_DESKTOP_AGENT: &str = "delegate_to_desktop_agent";
+    pub const DELEGATE_TO_FILE_AGENT: &str = "delegate_to_file_agent";
+
+    // Anthropic Computer Use tools
+    pub const COMPUTER: &str = "computer";
+    pub const BASH: &str = "bash";
+    pub const STR_REPLACE_BASED_EDIT_TOOL: &str = "str_replace_based_edit_tool";
+
+    // Text editor tools
+    pub const TEXT_EDITOR_INSERT: &str = "text_editor_insert";
+    pub const TEXT_EDITOR_STR_REPLACE: &str = "text_editor_str_replace";
+    pub const TEXT_EDITOR_UNDO_EDIT: &str = "text_editor_undo_edit";
+
+    // Computer use actions
+    pub const ACTION_SCREENSHOT: &str = "screenshot";
+    pub const ACTION_CLICK: &str = "click";
+    pub const ACTION_TYPE: &str = "type";
+    pub const ACTION_KEY: &str = "key";
+    pub const ACTION_SCROLL: &str = "scroll";
+    pub const ACTION_WAIT: &str = "wait";
 }
 
 pub mod window_labels {
@@ -51,6 +121,7 @@ pub mod window_labels {
     pub const FLOATING_BAR: &str = "floating-bar";
     pub const FLOATING_PANEL: &str = "floating-panel";
     pub const ONBOARDING: &str = "onboarding";
+    pub const SETTINGS: &str = "settings";
 }
 
 pub mod tray_menu_ids {
@@ -117,8 +188,21 @@ pub mod timeouts {
 
     // Monitoring and polling intervals
     pub const DICTATION_MONITOR_INTERVAL_MS: u64 = 50;
+    pub const AGENT_MONITOR_INTERVAL_MS: u64 = 100;
     pub const TREE_SEARCH_INTERVAL_MS: u64 = 250;
     pub const HEARTBEAT_INTERVAL_MS: u64 = 30000;
+
+    // Mouse and input automation delays
+    pub const MOUSE_MICRO_DELAY_MS: u64 = 10;
+    pub const MOUSE_CLICK_DELAY_MS: u64 = 50;
+    pub const MOUSE_ACTION_DELAY_MS: u64 = 100;
+    pub const MOUSE_SEQUENCE_DELAY_MS: u64 = 300;
+    pub const DOUBLE_CLICK_DELAY_MS: u64 = 500;
+
+    // UI animation and transition delays
+    pub const UI_FADE_DELAY_MS: u64 = 300;
+    pub const UI_SLIDE_DELAY_MS: u64 = 600;
+    pub const UI_NOTIFICATION_DISPLAY_MS: u64 = 3000;
 
     // Buffer and audio timeouts
     pub const PARTIAL_BUFFER_DURATION_MS: u64 = 1500;
@@ -642,7 +726,7 @@ mod tests {
     #[test]
     fn test_agent_config() {
         // Test iteration limits
-        assert_eq!(agent_config::MAX_ITERATIONS, 15);
+        assert_eq!(agent_config::MAX_ITERATIONS, 25);
         assert_eq!(agent_config::MAX_ITERATIONS_REDUCED, 10);
         assert!(agent_config::MAX_ITERATIONS_REDUCED < agent_config::MAX_ITERATIONS);
 
@@ -718,5 +802,61 @@ mod tests {
         assert!(timeouts::PERMISSION_CHECK_TIMEOUT_MS < timeouts::TOOL_EXECUTION_TIMEOUT_MS);
         assert!(timeouts::TOOL_EXECUTION_TIMEOUT_MS <= timeouts::MCP_INTEGRATION_TIMEOUT_MS);
         assert!(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS == timeouts::MCP_INTEGRATION_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn test_new_event_constants() {
+        // Test agent state events
+        assert_eq!(events::AGENT_ACTIVE, "agent-active");
+        assert_eq!(events::AGENT_ERROR, "agent-error");
+        assert_eq!(events::AGENT_TRANSCRIPTION_START, "agent-transcription-start");
+        assert_eq!(events::AGENT_CANCEL, "agent-cancel");
+
+        // Test dictation state events
+        assert_eq!(events::DICTATION_ACTIVE, "dictation-active");
+        assert_eq!(events::DICTATION_COMMITTED, "dictation-committed");
+        assert_eq!(events::DICTATION_TRANSCRIPTION_START, "dictation-transcription-start");
+
+        // Test UI events
+        assert_eq!(events::KEY_PRESS_VISUALIZATION, "key-press-visualization");
+        assert_eq!(events::CLICK_VISUALIZATION, "click-visualization");
+
+        // Test TTS events
+        assert_eq!(events::TTS_AUDIO_READY, "tts-audio-ready");
+        assert_eq!(events::TTS_STOP_REQUESTED, "tts-stop-requested");
+    }
+
+    #[test]
+    fn test_tool_names() {
+        // Test delegation tools
+        assert_eq!(tool_names::DELEGATE_TO_BROWSER_AGENT, "delegate_to_browser_agent");
+        assert_eq!(tool_names::DELEGATE_TO_DESKTOP_AGENT, "delegate_to_desktop_agent");
+        assert_eq!(tool_names::DELEGATE_TO_FILE_AGENT, "delegate_to_file_agent");
+
+        // Test computer use tools
+        assert_eq!(tool_names::COMPUTER, "computer");
+        assert_eq!(tool_names::BASH, "bash");
+        assert_eq!(tool_names::STR_REPLACE_BASED_EDIT_TOOL, "str_replace_based_edit_tool");
+
+        // Test action names
+        assert_eq!(tool_names::ACTION_SCREENSHOT, "screenshot");
+        assert_eq!(tool_names::ACTION_CLICK, "click");
+        assert_eq!(tool_names::ACTION_TYPE, "type");
+    }
+
+    #[test]
+    fn test_mouse_timing_constants() {
+        // Test mouse timing hierarchy
+        assert!(timeouts::MOUSE_MICRO_DELAY_MS < timeouts::MOUSE_CLICK_DELAY_MS);
+        assert!(timeouts::MOUSE_CLICK_DELAY_MS < timeouts::MOUSE_ACTION_DELAY_MS);
+        assert!(timeouts::MOUSE_ACTION_DELAY_MS < timeouts::MOUSE_SEQUENCE_DELAY_MS);
+        assert!(timeouts::MOUSE_SEQUENCE_DELAY_MS < timeouts::DOUBLE_CLICK_DELAY_MS);
+
+        // Test reasonable values
+        assert_eq!(timeouts::MOUSE_MICRO_DELAY_MS, 10);
+        assert_eq!(timeouts::MOUSE_CLICK_DELAY_MS, 50);
+        assert_eq!(timeouts::MOUSE_ACTION_DELAY_MS, 100);
+        assert_eq!(timeouts::MOUSE_SEQUENCE_DELAY_MS, 300);
+        assert_eq!(timeouts::DOUBLE_CLICK_DELAY_MS, 500);
     }
 }
