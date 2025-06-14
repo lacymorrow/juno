@@ -56,6 +56,7 @@ import ClickVisualizer from "./components/ClickVisualizer";
 import CommandOverlay from "./components/CommandOverlay";
 import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
+import ToolApprovalModal from "./components/ToolApprovalModal";
 import "./styles/globals.css";
 
 // Type for conversation messages
@@ -2700,6 +2701,9 @@ function App() {
       <ClickVisualizer />
       <KeyPressOverlay />
       <CommandOverlay />
+      
+      {/* Tool Approval Modal - for requesting user approval before tool execution */}
+      <ToolApprovalModal />
 
       <div className="w-screen h-screen bg-background text-foreground">
         <div className="container mx-auto p-2 h-full flex flex-col">

@@ -7,6 +7,7 @@ pub use desktop_wrapper::DesktopWrapper;
 use log;
 use playwright::Playwright; // Import Playwright
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -105,6 +106,33 @@ type CancelSender = watch::Sender<bool>;
 // Define a type alias for the cancellation receiver for clarity
 pub type CancelReceiver = watch::Receiver<bool>;
 
+/// Tool approval request structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolApprovalRequest {
+    pub tool_id: String,
+    pub tool_name: String,
+    pub tool_input: Value,
+    pub description: String,
+    pub timestamp: u64,
+    pub approved: Option<bool>, // None = pending, Some(true) = approved, Some(false) = denied
+}
+
+impl ToolApprovalRequest {
+    pub fn new(tool_id: String, tool_name: String, tool_input: Value, description: String) -> Self {
+        Self {
+            tool_id,
+            tool_name,
+            tool_input,
+            description,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            approved: None,
+        }
+    }
+}
+
 // Application state structure
 #[derive(Clone)] // AppState needs to be Clone
 pub struct AppState {
@@ -172,6 +200,10 @@ pub struct AppState {
     pub last_spoken_content: Arc<Mutex<Option<String>>>, // Store spoken content separate from displayed text
     // Debug mode tracking
     pub debug_mode: Arc<Mutex<bool>>, // Track if debug mode is enabled
+    // Tool approval setting
+    pub tool_approval_required: Arc<Mutex<bool>>, // Track if tool approval is required before execution
+    // Pending tool approvals
+    pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>, // Track pending approval requests
 }
 
 impl AppState {
@@ -241,6 +273,10 @@ impl AppState {
             last_spoken_content: Arc::new(Mutex::new(None)),
             // Initialize debug mode tracking
             debug_mode: Arc::new(Mutex::new(false)),
+            // Initialize tool approval setting as disabled by default
+            tool_approval_required: Arc::new(Mutex::new(false)),
+            // Initialize pending tool approvals
+            pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
         }
     }
 
@@ -859,6 +895,63 @@ impl AppState {
     pub fn is_debug_mode(&self) -> bool {
         let debug_guard = self.debug_mode.lock().unwrap();
         *debug_guard
+    }
+
+    // Methods for tool approval setting
+    pub fn set_tool_approval_required(&self, required: bool) {
+        let mut approval_guard = self.tool_approval_required.lock().unwrap();
+        *approval_guard = required;
+    }
+
+    pub fn is_tool_approval_required(&self) -> bool {
+        let approval_guard = self.tool_approval_required.lock().unwrap();
+        *approval_guard
+    }
+
+    // Methods for managing tool approval requests
+    pub async fn add_pending_tool_approval(&self, request: ToolApprovalRequest) {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.insert(request.tool_id.clone(), request);
+    }
+
+    pub async fn approve_tool(&self, tool_id: &str) -> bool {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        if let Some(request) = pending_guard.get_mut(tool_id) {
+            request.approved = Some(true);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn deny_tool(&self, tool_id: &str) -> bool {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        if let Some(request) = pending_guard.get_mut(tool_id) {
+            request.approved = Some(false);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn get_tool_approval_status(&self, tool_id: &str) -> Option<bool> {
+        let pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.get(tool_id).and_then(|request| request.approved)
+    }
+
+    pub async fn remove_tool_approval(&self, tool_id: &str) -> Option<ToolApprovalRequest> {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.remove(tool_id)
+    }
+
+    pub async fn get_pending_tool_approvals(&self) -> Vec<ToolApprovalRequest> {
+        let pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.values().cloned().collect()
+    }
+
+    pub async fn clear_pending_tool_approvals(&self) {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.clear();
     }
 }
 

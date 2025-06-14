@@ -316,6 +316,94 @@ where
                         return Err(AgentError::Terminated);
                     }
 
+                    // --- Tool Approval Check ---
+                    let app_state = self.app_handle.state::<crate::state::AppState>();
+                    if app_state.is_tool_approval_required() {
+                        log::info!("Tool approval required for: {}", tool_call.name);
+                        
+                        // Create approval request
+                        let approval_request = crate::state::ToolApprovalRequest::new(
+                            tool_call.id.clone(),
+                            tool_call.name.clone(),
+                            tool_call.input.clone(),
+                            format!("Agent wants to execute tool: {}", tool_call.name)
+                        );
+                        
+                        // Add to pending approvals
+                        app_state.add_pending_tool_approval(approval_request.clone()).await;
+                        
+                        // Emit tool approval request event to frontend
+                        let approval_event = serde_json::json!({
+                            "tool_name": approval_request.tool_name,
+                            "tool_id": approval_request.tool_id,
+                            "tool_input": approval_request.tool_input,
+                            "description": approval_request.description,
+                            "timestamp": approval_request.timestamp
+                        });
+                        
+                        if let Err(e) = self.app_handle.emit("tool-approval-request", approval_event) {
+                            log::error!("Failed to emit tool approval request: {}", e);
+                            // Continue with execution if we can't emit the event
+                        }
+
+                        // Wait for approval with timeout
+                        log::info!("Waiting for user approval for tool: {}", tool_call.name);
+                        
+                        let mut approval_timeout = 60; // 60 seconds timeout
+                        let mut approved = false;
+                        
+                        while approval_timeout > 0 && !approved {
+                            // Check for cancellation during approval wait
+                            if *cancel_rx.borrow() {
+                                log::info!("Cancellation detected during tool approval wait");
+                                app_state.remove_tool_approval(&tool_call.id).await;
+                                return Err(AgentError::Terminated);
+                            }
+                            
+                            // Check approval status
+                            match app_state.get_tool_approval_status(&tool_call.id).await {
+                                Some(true) => {
+                                    approved = true;
+                                    log::info!("Tool approved: {}", tool_call.name);
+                                    break;
+                                }
+                                Some(false) => {
+                                    log::info!("Tool denied: {}", tool_call.name);
+                                    break;
+                                }
+                                None => {
+                                    // Still pending, continue waiting
+                                }
+                            }
+                            
+                            // Sleep for 1 second and decrement timeout
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            approval_timeout -= 1;
+                        }
+                        
+                        // Clean up the approval request
+                        app_state.remove_tool_approval(&tool_call.id).await;
+                        
+                        if !approved {
+                            let reason = if approval_timeout <= 0 { "timeout" } else { "user denied" };
+                            log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
+                            
+                            // Add tool result indicating rejection
+                            let mut mem = self.memory.lock().await;
+                            mem.add_message(Message {
+                                role: Role::Tool,
+                                content: format!("Tool execution was denied - {}", reason),
+                                tool_calls: None,
+                                tool_call_id: Some(tool_call.id.clone()),
+                                name: Some(tool_call.name.clone()),
+                            })
+                            .await?;
+                            continue; // Skip to next tool
+                        }
+                        
+                        log::info!("Tool approved for execution: {}", tool_call.name);
+                    }
+
                     // Emit tool call request event
                     tool_logger::log_tool_call_request(
                         &self.app_handle,

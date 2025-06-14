@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { RefreshCw, RotateCcw } from "lucide-react";
+import { RefreshCw, RotateCcw, Shield } from "lucide-react";
+import { useState, useEffect } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,38 @@ import { Switch } from "@/components/ui/switch";
 import { SettingsSectionProps } from "../types";
 
 export default function ToolsSettings({ settings }: SettingsSectionProps) {
+  const [toolApprovalRequired, setToolApprovalRequired] = useState(false);
+  const [toolApprovalLoading, setToolApprovalLoading] = useState(false);
+
+  // Load tool approval setting on mount
+  useEffect(() => {
+    const loadToolApprovalSetting = async () => {
+      try {
+        const required = await invoke<boolean>("get_tool_approval_required");
+        setToolApprovalRequired(required);
+      } catch (error) {
+        console.error("Failed to load tool approval setting:", error);
+      }
+    };
+    loadToolApprovalSetting();
+  }, []);
+
+  const handleToggleToolApproval = async (required: boolean) => {
+    setToolApprovalLoading(true);
+    try {
+      await invoke("set_tool_approval_required", { required });
+      setToolApprovalRequired(required);
+      toast.success(
+        `Tool approval ${required ? "enabled" : "disabled"}${required ? " - You will be asked to approve each tool execution" : ""}`
+      );
+    } catch (error) {
+      console.error("Failed to toggle tool approval:", error);
+      toast.error("Failed to toggle tool approval setting");
+    } finally {
+      setToolApprovalLoading(false);
+    }
+  };
+
   const handleToggleCategory = async (
     categoryName: string,
     enabled: boolean
@@ -58,6 +91,49 @@ export default function ToolsSettings({ settings }: SettingsSectionProps) {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Tools</h3>
+
+        {/* Tool Approval Settings */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Shield size={20} />
+              Tool Approval
+            </CardTitle>
+            <CardDescription>
+              Control whether the agent requires your approval before executing tools
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between p-3 border rounded-lg">
+              <div>
+                <div className="font-medium">Require Tool Approval</div>
+                <div className="text-sm text-gray-500">
+                  Agent will ask for permission before executing each tool
+                </div>
+              </div>
+              <Switch
+                checked={toolApprovalRequired}
+                disabled={toolApprovalLoading}
+                onCheckedChange={handleToggleToolApproval}
+              />
+            </div>
+            
+            {toolApprovalRequired && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <Shield className="h-4 w-4 text-amber-600 mt-0.5" />
+                  <div className="text-sm text-amber-800">
+                    <div className="font-medium">Approval Required Mode</div>
+                    <div className="mt-1">
+                      The agent will pause before executing any tool and show you an approval dialog. 
+                      This provides maximum control but may slow down agent operations.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
