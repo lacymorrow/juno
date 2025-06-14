@@ -1,12 +1,11 @@
 // Commands for managing keyboard shortcuts configuration
 
 use crate::state::{AppState, KeyboardShortcuts};
-use tauri::{State, AppHandle, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, Modifiers, ShortcutState};
+use tauri::{State, AppHandle};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, error, warn};
 use serde_json;
-use std::sync::Arc;
 
 // Global escape key management
 static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
