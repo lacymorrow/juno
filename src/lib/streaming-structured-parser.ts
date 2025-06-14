@@ -33,7 +33,6 @@ const MARKER_PATTERNS = {
 export class StreamingStructuredParser {
     private sections: StreamingSections;
     private buffer: string = '';
-    private lastMarkerPosition: number = 0;
 
     constructor() {
         this.sections = this.createEmptySections();
@@ -161,7 +160,6 @@ export class StreamingStructuredParser {
     reset(): void {
         this.sections = this.createEmptySections();
         this.buffer = '';
-        this.lastMarkerPosition = 0;
     }
 
     /**

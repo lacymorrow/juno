@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import {
   AlertCircle,
   AlertTriangle,
+  Apple,
   Brush,
   Check,
   CheckCircle,
@@ -74,6 +75,49 @@ const ColorShowcase = ({ color, name }: { color: string; name: string }) => (
     <span className="text-sm font-medium">{name}</span>
   </div>
 );
+
+const List = ({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) => <div className={cn("space-y-2", className)}>{children}</div>;
+
+const ListItem = ({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon?: React.ReactNode | string;
+  title?: string;
+  description?: string;
+  children?: React.ReactNode;
+}) => (
+  <div className="flex items-start gap-3 p-2 rounded-lg border bg-card">
+    {icon && (
+      <div className="flex-shrink-0 mt-0.5">
+        {typeof icon === "string" ? (
+          <span className="text-lg">{icon}</span>
+        ) : (
+          icon
+        )}
+      </div>
+    )}
+    <div className="flex-1 min-w-0">
+      {title && <div className="font-medium text-sm">{title}</div>}
+      {description && (
+        <div className="text-sm text-muted-foreground">{description}</div>
+      )}
+      {children}
+    </div>
+  </div>
+);
+
+// Fruit icon components for common fruits
+const Banana = () => <span className="text-lg">🍌</span>;
+const Orange = () => <span className="text-lg">🍊</span>;
 
 const StatusCard = ({
   status,
@@ -357,9 +401,14 @@ const availableComponents = {
   ColorShowcase,
   StatusCard,
   ProgressBar,
+  List,
+  ListItem,
+  Banana,
+  Orange,
 
   // Icons
   AlertCircle,
+  Apple,
   Check,
   X,
   Star,

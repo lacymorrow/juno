@@ -34,7 +34,6 @@ import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { notificationService } from "@/lib/notifications";
 import {
   parseStructuredResponse,
-  hasStructuredContent,
   getRenderContent,
   type StructuredResponse,
 } from "@/lib/structured-response-parser";
@@ -1856,14 +1855,15 @@ function App() {
         }
 
         // Process the chunk through the parser
-        const sections = parser.processChunk(chunk);
+        const parseResult = parser.processChunk(chunk);
+        const sections = parseResult.sections;
 
         // Update the streaming message with parsed sections
         setConversation((prev) =>
           prev.map((msg) => {
             if (msg.messageId === message_id && msg.isStreaming) {
               // Determine the render content based on what's available
-              let renderContent = "";
+              let displayContent = "";
               let renderType: "jsx" | "markdown" | "text" = "text";
               let speechText = "";
               let isStructured = false;
@@ -1872,30 +1872,30 @@ function App() {
                 isStructured = true;
                 // Priority: visual > markdown > speech > default
                 if (sections.visual.content.trim()) {
-                  renderContent = sections.visual.content;
+                  displayContent = sections.visual.content;
                   renderType = "jsx";
                 } else if (sections.markdown.content.trim()) {
-                  renderContent = sections.markdown.content;
+                  displayContent = sections.markdown.content;
                   renderType = "markdown";
                 } else if (sections.speech.content.trim()) {
-                  renderContent = sections.speech.content;
+                  displayContent = sections.speech.content;
                   renderType = "text";
                 } else {
-                  renderContent = sections.default.content;
+                  displayContent = sections.default.content;
                   renderType = "text";
                 }
                 speechText =
                   sections.speech.content || sections.default.content;
               } else {
                 // No structured content yet, use raw content
-                renderContent = msg.content + chunk;
-                renderType = isJsxContent(renderContent) ? "jsx" : "text";
-                speechText = renderContent;
+                displayContent = msg.content + chunk;
+                renderType = isJsxContent(displayContent) ? "jsx" : "text";
+                speechText = displayContent;
               }
 
               return {
                 ...msg,
-                content: msg.content + chunk, // Keep building raw content
+                content: displayContent, // Use the determined display content
                 isStructured,
                 streamingSections: sections, // Store sections for real-time display
                 renderType,
@@ -1940,23 +1940,18 @@ function App() {
             if (msg.messageId === message_id && msg.isStreaming) {
               if (finalSections && finalSections.hasStructuredContent) {
                 // Handle structured response
-                let renderContent = "";
                 let renderType: "jsx" | "markdown" | "text" = "text";
                 let speechText =
                   finalSections.speech.content || finalSections.default.content;
 
                 // Priority: visual > markdown > speech > default
                 if (finalSections.visual.content.trim()) {
-                  renderContent = finalSections.visual.content;
                   renderType = "jsx";
                 } else if (finalSections.markdown.content.trim()) {
-                  renderContent = finalSections.markdown.content;
                   renderType = "markdown";
                 } else if (finalSections.speech.content.trim()) {
-                  renderContent = finalSections.speech.content;
                   renderType = "text";
                 } else {
-                  renderContent = finalSections.default.content;
                   renderType = "text";
                 }
 

@@ -38,6 +38,12 @@ export function matchJsxTag(code: string) {
  * // Returns: '<div></div>'
  */
 export function completeJsxTag(code: string) {
+	// Safety check: ensure code is a valid string
+	if (!code || typeof code !== 'string') {
+		console.warn('completeJsxTag received invalid code:', code);
+		return '';
+	}
+
 	const stack: string[] = [];
 	let result = "";
 	let currentPosition = 0;
