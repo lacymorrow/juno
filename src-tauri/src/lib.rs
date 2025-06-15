@@ -2205,29 +2205,26 @@ pub fn run() {
                             if let Some(text_value) = payload_json.get("text") {
                                 if let Some(text) = text_value.as_str() {
                                     let trimmed_text = text.trim();
-                                    if !trimmed_text.is_empty() {
-                                        info!("[AlwaysListening] Activating agent with query: '{}'", trimmed_text);
+                                    info!("[AlwaysListening] Activating agent with query: '{}'", trimmed_text);
 
-                                        // Update floating bar for agent query
-                                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(trimmed_text.to_string())).await;
-
-                                        // Submit query to agent system using the submit_query function
-                                        let state = app_state.clone();
-                                        let query = trimmed_text.to_string();
-
-                                        match crate::anthropic::submit_query(query, state, app_handle_clone.clone()).await {
-                                            Ok(()) => {
+                                    // Only activate agent if we have meaningful content
+                                    if !trimmed_text.is_empty() && trimmed_text.len() > 2 {
+                                        // Submit the query to the agent system
+                                        let app_state = app_handle_clone.state::<state::AppState>();
+                                        match crate::anthropic::submit_query(
+                                            trimmed_text.to_string(),
+                                            app_state,
+                                            app_handle_clone.clone()
+                                        ).await {
+                                            Ok(_) => {
                                                 info!("[AlwaysListening] Agent query submitted successfully");
                                             }
                                             Err(e) => {
                                                 error!("[AlwaysListening] Failed to submit agent query: {}", e);
-
-                                                // Update floating bar to show error
-                                                commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(format!("Agent error: {}", e))).await;
                                             }
                                         }
                                     } else {
-                                        info!("[AlwaysListening] Transcribed text was empty or whitespace only - ignoring");
+                                        info!("[AlwaysListening] Transcribed text was empty or too short - ignoring: '{}'", trimmed_text);
                                     }
                                 } else {
                                     warn!("[AlwaysListening] Text field in transcription payload is not a string");
@@ -2240,6 +2237,67 @@ pub fn run() {
                             error!("[AlwaysListening] Failed to parse transcription payload: {}", e);
                         }
                     }
+                });
+            });
+
+            // Listen for always listening stop requests (from stop words)
+            let app_handle_for_stop_request = app.handle().clone();
+            app.listen("always-listening:stop-requested", move |event| {
+                info!("[AlwaysListening] Received stop request: {:?}", event.payload());
+
+                let app_handle_clone = app_handle_for_stop_request.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Stop always listening mode
+                    let app_state = app_handle_clone.state::<state::AppState>();
+                    match commands::always_listening::stop_always_listening_mode(app_handle_clone.clone(), app_state).await {
+                        Ok(_) => {
+                            info!("[AlwaysListening] Always listening stopped due to stop word");
+                            
+                            // Emit notification to UI
+                            if let Err(e) = app_handle_clone.emit("always-listening:stopped-by-command", ()) {
+                                error!("[AlwaysListening] Failed to emit stopped-by-command event: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("[AlwaysListening] Failed to stop always listening: {}", e);
+                        }
+                    }
+                });
+            });
+
+            // Listen for command processed events (to auto-stop or return to wake word mode)
+            let app_handle_for_command_processed = app.handle().clone();
+            app.listen("always-listening:command-processed", move |_event| {
+                info!("[AlwaysListening] Command processed - considering auto-stop");
+
+                let app_handle_clone = app_handle_for_command_processed.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Wait a bit for the command to complete processing
+                    tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+                    
+                    // Check if we should auto-stop always listening or return to wake word mode
+                    // For now, we'll return to wake word mode to allow for follow-up commands
+                    info!("[AlwaysListening] Returning to wake word detection mode after command processing");
+                    
+                    // Emit event to return to wake word mode
+                    if let Err(e) = app_handle_clone.emit("always-listening:return-to-wake-word", ()) {
+                        error!("[AlwaysListening] Failed to emit return-to-wake-word event: {}", e);
+                    }
+                });
+            });
+
+            // Listen for return to wake word mode events
+            let app_handle_for_wake_word_return = app.handle().clone();
+            app.listen("always-listening:return-to-wake-word", move |_event| {
+                info!("[AlwaysListening] Returning to wake word detection mode");
+
+                let app_handle_clone = app_handle_for_wake_word_return.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Update floating bar to indicate wake word mode
+                    commands::floating_bar::handle_always_listening_change(&app_handle_clone, false).await;
+                    
+                    // The always listening system will automatically return to monitoring mode
+                    // after processing the command, so we don't need to do anything else here
                 });
             });
 
