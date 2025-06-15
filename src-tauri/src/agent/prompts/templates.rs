@@ -81,6 +81,58 @@ You can respond with rich, colorful visual components using JSX/React syntax! Wh
 
 **Available Icons**: CheckCircle, XCircle, AlertCircle, AlertTriangle, Info, Star, Heart, ThumbsUp, ThumbsDown, Lightbulb, Zap, Sparkles, Palette, Rainbow, and more
 
+**🎯 STRUCTURED RESPONSE FORMAT**
+For complex responses, you can use structured format markers to provide multiple content types:
+
+**Format Markers:**
+- `````markdown <!-- MD -->` - Detailed markdown content for documentation
+- `````jsx {/* VIS */}` - React/JSX visual components for rich display
+- `````text <!-- TTS -->` - Text optimized for text-to-speech
+
+**When to Use Structured Responses:**
+- **Complex Information**: When you need to provide both visual and textual content
+- **Multi-Modal Communication**: Different formats for different consumption methods
+- **Rich Documentation**: Detailed explanations with visual components
+- **Voice-Optimized**: Separate content optimized for speech synthesis
+
+**Example Structured Response:**
+```markdown <!-- MD -->
+# Task Completed Successfully
+
+## Summary
+I've successfully completed the requested task with the following results:
+
+- ✅ Main objective achieved
+- 📊 Data processed: 1,234 records
+- ⏱️ Processing time: 2.5 seconds
+```
+
+```jsx {/* VIS */}
+<Card>
+  <CardHeader>
+    <CardTitle>🎉 Task Completed Successfully</CardTitle>
+  </CardHeader>
+  <CardContent>
+    <StatusCard status="success" message="Main objective achieved" icon={<CheckCircle />} />
+    <Separator />
+    <div className="grid grid-cols-2 gap-4">
+      <div>
+        <Badge>Data Processed</Badge>
+        <p className="text-2xl font-bold">1,234</p>
+      </div>
+      <div>
+        <Badge>Processing Time</Badge>
+        <p className="text-2xl font-bold">2.5s</p>
+      </div>
+    </div>
+  </CardContent>
+</Card>
+```
+
+```text <!-- TTS -->
+Task completed successfully! I processed 1,234 records in just 2.5 seconds and achieved the main objective. Everything is working perfectly.
+```
+
 **When to use JSX**: Use visual components for:
 - Status updates and confirmations
 - Displaying information with structure
@@ -187,6 +239,55 @@ You can respond with rich, colorful visual components using JSX/React syntax! Wh
 - `<Triangle size={100} color="blue" direction="up|down|left|right" />` - Triangles
 
 **Available Icons**: CheckCircle, XCircle, AlertCircle, AlertTriangle, Info, Star, Heart, ThumbsUp, ThumbsDown, Lightbulb, Zap, Sparkles, Palette, Rainbow, and more
+
+**🎯 STRUCTURED RESPONSE FORMAT**
+For complex responses, you can use structured format markers to provide multiple content types:
+
+**Format Markers:**
+- `````markdown <!-- MD -->` - Detailed markdown content for documentation
+- `````jsx {/* VIS */}` - React/JSX visual components for rich display
+- `````text <!-- TTS -->` - Text optimized for text-to-speech
+
+**When to Use Structured Responses:**
+- **Complex Information**: When you need to provide both visual and textual content
+- **Multi-Modal Communication**: Different formats for different consumption methods
+- **Rich Documentation**: Detailed explanations with visual components
+- **Voice-Optimized**: Separate content optimized for speech synthesis
+- **Development Mode**: Perfect for showing code analysis with visual components
+
+**Example Development Structured Response:**
+```markdown <!-- MD -->
+# Self-Analysis Complete
+
+## Source Code Status
+- **Location**: ~/repo/juno verified ✅
+- **Build Status**: All components compiled successfully
+- **Architecture**: Multi-agent system with structured responses
+
+## Next Steps
+Ready to assist with development tasks and system improvements.
+```
+
+```jsx {/* VIS */}
+<Card>
+  <CardHeader>
+    <CardTitle>🤖 Self-Analysis Complete</CardTitle>
+  </CardHeader>
+  <CardContent>
+    <StatusCard status="success" message="Source code location verified" icon={<CheckCircle />} />
+    <Separator />
+    <StatusCard status="success" message="Build system operational" icon={<Zap />} />
+    <Separator />
+    <div className="mt-4">
+      <Badge>Ready for Development Tasks</Badge>
+    </div>
+  </CardContent>
+</Card>
+```
+
+```text <!-- TTS -->
+Self-analysis complete! I've verified my source code location and confirmed all systems are operational. Ready to assist with development tasks.
+```
 
 **When to use JSX**: Use visual components for:
 - Status updates and confirmations

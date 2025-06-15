@@ -45,6 +45,7 @@ import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import ToolApprovalModal from "./components/ToolApprovalModal";
 import { useVoice } from "@/contexts/VoiceContext";
+import { parseStructuredResponse, getDisplayContent } from "./lib/structured-response-parser";
 
 // Type for the result from submit_query
 type SubmitQueryResult = {
@@ -1278,14 +1279,18 @@ function App() {
         console.log("Stream ended:", event.payload);
         const { message_id, complete_text } = event.payload;
 
+        // Parse the structured response to handle multi-format content
+        const structuredResponse = parseStructuredResponse(complete_text);
+        const displayInfo = getDisplayContent(complete_text, structuredResponse);
+
         // Finalize the streaming message
         setConversation((prev) =>
           prev.map((msg) => {
             if (msg.messageId === message_id && msg.isStreaming) {
               return {
                 ...msg,
-                content: complete_text,
-                isJsx: isJsxContent(complete_text), // Auto-detect JSX in completed stream
+                content: displayInfo.displayContent,
+                isJsx: displayInfo.isJsx,
                 isStreaming: false,
               };
             }
