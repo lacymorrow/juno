@@ -70,15 +70,15 @@ impl BrowserController {
         let cdp_endpoints = chrome_debug_urls::get_all_urls();
 
         for endpoint in &cdp_endpoints {
-            log::debug!("Trying CDP endpoint: {}", endpoint);
+            log::info!("Trying CDP endpoint: {}", endpoint);
 
-            // Use a shorter timeout for CDP connection attempts
+            // Use a reasonable timeout for CDP connection attempts
             match tokio::time::timeout(
-                std::time::Duration::from_secs(5), // Increased from 3 to 5 seconds
+                std::time::Duration::from_secs(8), // Increased timeout for more reliable connection
                 playwright.chromium().connect_over_cdp_builder(endpoint).connect_over_cdp()
             ).await {
                 Ok(Ok(browser)) => {
-                    log::info!("Connected to existing browser at {}", endpoint);
+                    log::info!("Successfully connected to existing browser at {}", endpoint);
 
                     // Create a new context since we can't clone existing ones
                     log::info!("Creating new context in existing browser");
@@ -115,10 +115,10 @@ impl BrowserController {
                     });
                 },
                 Ok(Err(e)) => {
-                    log::debug!("CDP connection failed at {}: {}", endpoint, e);
+                    log::info!("CDP connection failed at {}: {}", endpoint, e);
                 },
                 Err(_) => {
-                    log::debug!("CDP connection timeout at {}", endpoint);
+                    log::info!("CDP connection timeout at {}", endpoint);
                 }
             }
         }
@@ -175,15 +175,24 @@ impl BrowserController {
     async fn try_launch_with_user_profile(playwright: Arc<Playwright>) -> ControllerResult<Self> {
         log::info!("Attempting to launch browser with user profile...");
 
-        // First, check if Chrome is already running - if so, skip this strategy
-        if Self::is_chrome_running().await {
-            log::info!("Chrome is already running, skipping user profile launch to avoid SingletonLock conflict");
-            return Err(AgentError::ToolError("Chrome already running - avoiding profile conflict".to_string()));
+        // First, check if Chrome is already running - if so, try with temporary profile
+        let chrome_running = Self::is_chrome_running().await;
+        if chrome_running {
+            log::info!("Chrome is already running, will try with temporary profile to avoid SingletonLock conflict");
+            return Self::try_launch_with_temp_profile(playwright).await;
         }
 
         // Detect user profile directory based on OS and browser
         let user_data_dir = Self::detect_user_profile_directory()?;
         log::info!("Using user data directory: {:?}", user_data_dir);
+
+        // Additional check: look for SingletonLock file directly
+        let singleton_lock_path = format!("{}/SingletonLock", user_data_dir);
+        if std::path::Path::new(&singleton_lock_path).exists() {
+            log::warn!("SingletonLock file exists at: {}", singleton_lock_path);
+            log::info!("Profile appears to be in use, switching to temporary profile strategy");
+            return Self::try_launch_with_temp_profile(playwright).await;
+        }
 
         // Detect browser executable
         let browser_info = Self::detect_browser_executable()?;
@@ -214,7 +223,7 @@ impl BrowserController {
             Ok(context) => {
                 log::info!("Successfully launched browser with user profile");
 
-                                // Get browser from context - may return None for persistent contexts
+                // Get browser from context - may return None for persistent contexts
                 let browser = match context.browser() {
                     Ok(Some(browser)) => browser,
                     Ok(None) => return Err(AgentError::ToolError("No browser available from persistent context".to_string())),
@@ -249,11 +258,98 @@ impl BrowserController {
             },
             Err(e) => {
                 log::warn!("Failed to launch with user profile: {}", e);
-                // Check if this is a SingletonLock error
+                // Check if this is a SingletonLock error and try temp profile
                 if e.to_string().contains("SingletonLock") || e.to_string().contains("profile directory") {
-                    log::info!("Profile conflict detected - Chrome may be running. Consider using fresh instance.");
+                    log::info!("Profile conflict detected - trying temporary profile strategy");
+                    return Self::try_launch_with_temp_profile(playwright).await;
                 }
                 Err(AgentError::ToolError(format!("Persistent profile launch failed: {}", e)))
+            }
+        }
+    }
+
+    /// Strategy 2b: Launch browser with temporary profile (when main profile is in use)
+    async fn try_launch_with_temp_profile(playwright: Arc<Playwright>) -> ControllerResult<Self> {
+        log::info!("Attempting to launch browser with temporary profile...");
+
+        // Create a temporary directory for the browser profile
+        let temp_dir = std::env::temp_dir();
+        let temp_profile = temp_dir.join(format!("juno-browser-{}", std::process::id()));
+        
+        // Create the temporary profile directory
+        if let Err(e) = std::fs::create_dir_all(&temp_profile) {
+            log::warn!("Failed to create temporary profile directory: {}", e);
+            return Err(AgentError::ToolError(format!("Failed to create temp profile: {}", e)));
+        }
+        
+        log::info!("Using temporary profile directory: {:?}", temp_profile);
+
+        // Detect browser executable
+        let browser_info = Self::detect_browser_executable()?;
+        log::info!("Using browser: {} at {:?}", browser_info.0, browser_info.1);
+
+        let chromium = playwright.chromium();
+
+        // Use persistent_context_launcher with temporary profile
+        let args = vec![
+            "--no-first-run".to_string(),
+            "--no-default-browser-check".to_string(),
+            "--disable-component-update".to_string(),
+            "--remote-debugging-port=9223".to_string(), // Use different port to avoid conflicts
+        ];
+        let launcher = chromium.persistent_context_launcher(&temp_profile)
+            .headless(false)
+            .accept_downloads(true)
+            .executable(&browser_info.1)
+            .timeout(30000.0) // 30 second timeout
+            .args(&args);
+
+        let context_result = launcher.launch().await;
+
+        match context_result {
+            Ok(context) => {
+                log::info!("Successfully launched browser with temporary profile");
+
+                // Get browser from context - may return None for persistent contexts
+                let browser = match context.browser() {
+                    Ok(Some(browser)) => browser,
+                    Ok(None) => return Err(AgentError::ToolError("No browser available from temporary context".to_string())),
+                    Err(e) => return Err(AgentError::ToolError(format!("Failed to get browser from temporary context: {}", e))),
+                };
+
+                // Get existing page or create new one
+                let page = match context.pages() {
+                    Ok(pages) if !pages.is_empty() => {
+                        log::info!("Using existing page from temporary context");
+                        Some(pages[0].clone())
+                    },
+                    _ => {
+                        log::info!("Creating new page in temporary context");
+                        match context.new_page().await {
+                            Ok(page) => Some(page),
+                            Err(e) => {
+                                log::warn!("Failed to create page in temporary context: {}", e);
+                                None
+                            }
+                        }
+                    }
+                };
+
+                Ok(BrowserController {
+                    _playwright: playwright,
+                    browser: Arc::new(browser),
+                    context: Arc::new(context),
+                    page: Arc::new(Mutex::new(page)),
+                    connection_method: format!("TempProfile:{}", temp_profile.display()),
+                })
+            },
+            Err(e) => {
+                log::warn!("Failed to launch with temporary profile: {}", e);
+                // Clean up the temporary directory if launch failed
+                if let Err(cleanup_err) = std::fs::remove_dir_all(&temp_profile) {
+                    log::warn!("Failed to clean up temporary profile directory: {}", cleanup_err);
+                }
+                Err(AgentError::ToolError(format!("Temporary profile launch failed: {}", e)))
             }
         }
     }
@@ -262,25 +358,68 @@ impl BrowserController {
     async fn is_chrome_running() -> bool {
         #[cfg(target_os = "macos")]
         {
-            // Use pgrep to check for Chrome processes
-            let output = tokio::process::Command::new("pgrep")
+            // Use multiple methods to detect Chrome processes
+            log::info!("Checking if Chrome is already running...");
+            
+            // Method 1: Use pgrep to check for Chrome processes
+            let pgrep_output = tokio::process::Command::new("pgrep")
                 .arg("-f")
                 .arg("Google Chrome")
                 .output()
                 .await;
             
-            if let Ok(output) = output {
+            if let Ok(output) = pgrep_output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let running = !stdout.trim().is_empty();
-                if running {
-                    log::info!("Chrome processes detected: {}", stdout.trim());
+                let pgrep_running = !stdout.trim().is_empty();
+                if pgrep_running {
+                    log::info!("Chrome processes detected via pgrep: {}", stdout.trim());
+                    return true;
                 }
-                return running;
+            } else {
+                log::debug!("pgrep command failed, trying alternative detection");
             }
+            
+            // Method 2: Check for Chrome application running via osascript
+            let osascript_output = tokio::process::Command::new("osascript")
+                .arg("-e")
+                .arg("tell application \"System Events\" to (name of processes) contains \"Google Chrome\"")
+                .output()
+                .await;
+                
+            if let Ok(output) = osascript_output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.trim() == "true" {
+                    log::info!("Chrome detected as running application via osascript");
+                    return true;
+                }
+            } else {
+                log::debug!("osascript command failed, trying alternative detection");
+            }
+            
+            // Method 3: Check for Chrome processes via ps
+            let ps_output = tokio::process::Command::new("ps")
+                .arg("-A")
+                .arg("-o")
+                .arg("comm")
+                .output()
+                .await;
+                
+            if let Ok(output) = ps_output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.contains("Google Chrome") || stdout.contains("chrome") {
+                    log::info!("Chrome detected via ps command");
+                    return true;
+                }
+            }
+            
+            log::info!("No Chrome processes detected");
+            false
         }
         
         #[cfg(target_os = "windows")]
         {
+            log::info!("Checking if Chrome is already running...");
+            
             let output = tokio::process::Command::new("tasklist")
                 .arg("/FI")
                 .arg("IMAGENAME eq chrome.exe")
@@ -289,12 +428,22 @@ impl BrowserController {
                 
             if let Ok(output) = output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                return stdout.contains("chrome.exe");
+                let running = stdout.contains("chrome.exe");
+                if running {
+                    log::info!("Chrome processes detected on Windows");
+                } else {
+                    log::info!("No Chrome processes detected on Windows");
+                }
+                return running;
             }
+            
+            false
         }
         
         #[cfg(target_os = "linux")]
         {
+            log::info!("Checking if Chrome is already running...");
+            
             let output = tokio::process::Command::new("pgrep")
                 .arg("-f")
                 .arg("chrome")
@@ -303,11 +452,17 @@ impl BrowserController {
                 
             if let Ok(output) = output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                return !stdout.trim().is_empty();
+                let running = !stdout.trim().is_empty();
+                if running {
+                    log::info!("Chrome processes detected on Linux: {}", stdout.trim());
+                } else {
+                    log::info!("No Chrome processes detected on Linux");
+                }
+                return running;
             }
+            
+            false
         }
-        
-        false
     }
 
     /// Strategy 3: Launch fresh browser instance (current behavior)
@@ -373,9 +528,9 @@ impl BrowserController {
         launcher = launcher
             .headless(false)
             .args(&args)
-            .timeout(60000.0); // Reduce timeout to 60 seconds from 90
+            .timeout(45000.0); // Reduced timeout to 45 seconds for better user experience
 
-        log::info!("Launching browser with 60 second timeout and remote debugging enabled...");
+        log::info!("Launching browser with 45 second timeout and remote debugging enabled...");
 
         let browser = match launcher.launch().await {
             Ok(browser) => {
@@ -400,7 +555,7 @@ impl BrowserController {
                 launcher = launcher
                     .headless(false)
                     .args(&minimal_args)
-                    .timeout(60000.0);
+                    .timeout(45000.0); // Consistent timeout with first attempt
 
                 log::info!("Retrying browser launch with minimal configuration...");
                 launcher.launch().await
@@ -1164,6 +1319,19 @@ impl BrowserController {
             log::error!("Failed to close browser gracefully: {}", e);
         } else {
             log::info!("Browser instance closed.");
+        }
+
+        // Clean up temporary profile if this was a temporary profile launch
+        if self.connection_method.starts_with("TempProfile:") {
+            let temp_profile_path = self.connection_method.strip_prefix("TempProfile:").unwrap_or("");
+            if !temp_profile_path.is_empty() {
+                log::info!("Cleaning up temporary profile directory: {}", temp_profile_path);
+                if let Err(e) = std::fs::remove_dir_all(temp_profile_path) {
+                    log::warn!("Failed to clean up temporary profile directory: {}", e);
+                } else {
+                    log::info!("Temporary profile directory cleaned up successfully");
+                }
+            }
         }
 
         Ok(())
