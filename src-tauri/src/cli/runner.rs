@@ -198,8 +198,8 @@ async fn run_test_command(
     test_matches: &clap::ArgMatches,
 ) -> Result<(), String> {
     if test_matches.get_flag("tts") || test_matches.subcommand_matches("tts").is_some() {
-        let text = "Testing TTS functionality";
-        let provider = "system";
+        let _text = "Testing TTS functionality";
+        let _provider = "system";
 
         // Create a runtime for blocking on async function
         let rt = tokio::runtime::Runtime::new()
