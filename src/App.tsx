@@ -44,7 +44,6 @@ import CommandOverlay from "./components/CommandOverlay";
 import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import ToolApprovalModal from "./components/ToolApprovalModal";
-import "./styles/globals.css";
 
 // Type for the result from submit_query
 type SubmitQueryResult = {

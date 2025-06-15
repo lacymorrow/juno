@@ -180,7 +180,7 @@ impl CloudCommandProcessor {
         Ok(response)
     }
 
-    /// Execute specific command based on type
+    #[allow(dead_code)]
     async fn execute_command(&self, command: CloudCommand) -> Result<CommandResult, CloudError> {
         match command.command_type {
             CloudCommandType::TextQuery => {
@@ -582,7 +582,7 @@ impl CloudCommandProcessor {
         Ok(system_info)
     }
 
-    /// Get permissions status
+    #[allow(dead_code)]
     async fn get_permissions_status(&self) -> Result<serde_json::Value, CloudError> {
         let app_state = self.app_handle.state::<AppState>();
 

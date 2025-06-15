@@ -357,6 +357,7 @@ impl Orchestrator {
     }
 
     /// Main queue processing loop
+    #[allow(dead_code)]
     async fn queue_processor_loop(&self, interval: Duration) {
         tracing::info!("Starting task queue processor with interval {:?}", interval);
 
@@ -404,6 +405,7 @@ impl Orchestrator {
     }
 
     /// Dequeue the next task based on priority and wait time
+    #[allow(dead_code)]
     async fn dequeue_next_task(&self) -> Option<QueuedTask> {
         let mut queue = self.task_queue.lock().await;
         let queued_task = queue.pop_front();

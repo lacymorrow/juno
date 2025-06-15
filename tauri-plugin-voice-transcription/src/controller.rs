@@ -80,9 +80,9 @@ impl VoiceController {
     /// Helper method to check initialization before performing operations
     fn ensure_initialized(&self) -> Result<&WhisperContext> {
         if !self.is_initialized {
-            let error_msg = self.initialization_error
+            let _error_msg = self.initialization_error
                 .as_ref()
-                .map(|e| format!("Voice controller not initialized: {}", e))
+                .map(|e| e.to_string())
                 .unwrap_or_else(|| "Voice controller not initialized".to_string());
             return Err(Error::NotInitialized);
         }
@@ -187,7 +187,7 @@ impl VoiceController {
     pub fn start_dictation<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
         // Check if controller is initialized before starting dictation
         self.ensure_initialized()?;
-        
+
         if self.is_dictating {
             return Err(Error::AlreadyDictating);
         }
