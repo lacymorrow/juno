@@ -8,6 +8,8 @@ use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::AgentBrain;
+use crate::agent::providers::factory::model_ids;
+use crate::constants::{api_endpoints, agent_config};
 
 #[derive(Serialize, Debug)]
 struct GeminiRequest {
@@ -113,10 +115,6 @@ struct GeminiSafetyRating {
     probability: String,
 }
 
-const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL: &str = "gemini-1.5-flash"; // Smaller, faster model for orchestration
-const DEFAULT_MAX_TOKENS: i32 = 1024; // Smaller token limit for orchestrator
-
 #[derive(Clone)]
 pub struct GeminiBrain {
     client: Client,
@@ -138,8 +136,8 @@ impl GeminiBrain {
         Ok(GeminiBrain {
             client: Client::new(),
             api_key,
-            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-            max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+            model: model.unwrap_or_else(|| model_ids::GEMINI_1_5_FLASH.to_string()),
+            max_tokens: max_tokens.unwrap_or(agent_config::DEFAULT_MAX_TOKENS_COMPACT),
             system_prompt,
             temperature: temperature.unwrap_or(0.1), // Low temperature for consistent routing decisions
         })
@@ -283,7 +281,7 @@ impl AgentBrain for GeminiBrain {
         };
 
         let url = format!("{}/{}:generateContent?key={}",
-                         GEMINI_API_BASE, self.model, self.api_key);
+                          api_endpoints::GEMINI_API_BASE, self.model, self.api_key);
 
         let response = self.client
             .post(&url)
