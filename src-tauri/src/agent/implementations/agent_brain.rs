@@ -8,6 +8,8 @@ use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::AgentBrain;
+use crate::agent::providers::factory::model_ids;
+use crate::constants::{api_endpoints, agent_config};
 
 // --- Placeholder Anthropic API Structs --- //
 // Renamed to avoid potential conflicts
@@ -75,9 +77,9 @@ struct BrainApiTool { // Renamed
 
 // --- AnthropicBrain Implementation --- //
 
-const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const DEFAULT_MODEL: &str = "claude-3-7-sonnet-20250219"; // Or another suitable model
-const DEFAULT_MAX_TOKENS: u32 = 4096;
+// Use centralized constants instead of local ones
+// const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";  // REMOVED - use centralized
+// const DEFAULT_MAX_TOKENS: u32 = 4096;  // REMOVED - use centralized
 
 #[derive(Clone)]
 pub struct AnthropicBrain {
@@ -98,8 +100,8 @@ impl AnthropicBrain {
         Ok(AnthropicBrain {
             client: Client::new(),
             api_key,
-            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-            max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+            model: model.unwrap_or_else(|| model_ids::CLAUDE_3_7_SONNET.to_string()),
+            max_tokens: max_tokens.unwrap_or(agent_config::DEFAULT_MAX_TOKENS_STANDARD),
             system_prompt,
         })
     }
@@ -337,7 +339,7 @@ impl AgentBrain for AnthropicBrain {
 
         let response = self
             .client
-            .post(ANTHROPIC_API_URL)
+            .post(api_endpoints::ANTHROPIC_API_URL)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01") // Required header
             .header("content-type", "application/json")
