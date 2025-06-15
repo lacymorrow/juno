@@ -22,13 +22,6 @@ use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::constants::{agent_config, tool_names, timeouts};
-use crate::errors::AgentError;
-
-
-// --- Agent State ---
-
-
-// --- Anthropic API Structs ---
 
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
