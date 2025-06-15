@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tracing::{info, error, debug, warn};
-use crate::constants::{monitor_sessions, timeouts, events};
+use crate::constants::{monitor_sessions, events};
 
 // Configuration constants
 // const HOLD_DURATION_MS: u64 = 500; // Hold dictation input key for 500ms to commit dictation

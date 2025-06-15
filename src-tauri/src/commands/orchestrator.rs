@@ -663,7 +663,7 @@ pub async fn execute_workflow_template(
 
                 // Replace variables in context
                 if let Some(context_obj) = context.as_object_mut() {
-                    for (key, value) in context_obj.iter_mut() {
+                    for (_key, value) in context_obj.iter_mut() {
                         if let Some(value_str) = value.as_str() {
                             let mut replaced_value = value_str.to_string();
                             for (var_name, var_value) in &variables {
@@ -678,7 +678,7 @@ pub async fn execute_workflow_template(
                 }
 
                 // Create task request
-                let task_request = TaskCreationRequest {
+                let _task_request = TaskCreationRequest {
                     description: task_template.description.clone(),
                     agent_type: Some(task_template.agent_type.clone()),
                     priority: Some("Normal".to_string()),

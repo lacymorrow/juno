@@ -30,9 +30,9 @@ use serde_json::{Value, json};
 use tracing::{info, warn};
 use crate::commands::window; // Add window for scroll command
 use std::sync::Arc;
-use std::time::Duration;
+
 use tokio;
-use tokio::sync::Mutex as TokioMutex;
+
 
 // Removed unused imports: capture_screenshot_command, dev_get_clipboard, dev_set_clipboard
 // use crate::{
@@ -1136,7 +1136,7 @@ pub async fn register_desktop_tools(
             "type": "object",
             "properties": {
                 "command": {
-                    "type": "string", 
+                    "type": "string",
                     "description": "The shell command to execute"
                 },
                 "timeout_seconds": {
@@ -1369,14 +1369,13 @@ pub async fn register_desktop_tools(
                 return Err(e.to_string());
             }
 
-            let state_manager = app.state::<AppState>();
             let args = serde_json::from_value::<CopyAndPasteArgs>(input)
                 .map_err(|e| format!("Failed to parse copy_and_paste input: {}", e))?;
 
             // Step 1: Set clipboard content
             let state_manager = app.state::<AppState>();
             let clipboard_result = commands::core::dev_set_clipboard(args.text.clone(), state_manager).await;
-            
+
             if let Err(e) = clipboard_result {
                 return Err(format!("Failed to set clipboard: {}", e));
             }
@@ -1391,7 +1390,7 @@ pub async fn register_desktop_tools(
                     app.clone(),
                     state_manager,
                 ).await;
-                
+
                 // Brief pause
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
