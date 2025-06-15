@@ -5,7 +5,7 @@ use crate::always_listening::AlwaysListeningController;
 use crate::error::Error;
 use crate::config::VoiceTranscriptionConfig;
 use crate::utils::resolve_model_path;
-use tracing::{info, error, warn};
+use tracing::{info, error};
 use serde_json::json;
 
 /// Enhanced helper function to check VoiceController status and provide comprehensive error messages
@@ -17,7 +17,7 @@ fn check_voice_controller_availability<R: tauri::Runtime>(
             // State is managed, but check if controller is actually initialized
             let controller = controller_state.lock()
                 .map_err(|e| Error::LockError(format!("Failed to lock VoiceController: {}", e)))?;
-            
+
             if !controller.is_initialized() {
                 let error_msg = if let Some(init_error) = controller.get_initialization_error() {
                     format!("Voice transcription is not available. Initialization failed: {}\n\

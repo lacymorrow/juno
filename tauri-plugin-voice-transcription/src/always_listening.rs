@@ -882,6 +882,17 @@ impl AlwaysListeningController {
             }))
         }
     }
+
+    pub(crate) async fn get_audio_input_status<R: Runtime>(
+        &self,
+        _app_handle: &AppHandle<R>,
+    ) -> Result<serde_json::Value> {
+        // Implementation of the method
+        Ok(serde_json::json!({
+            "status": "not_implemented",
+            "error": "This method is not implemented"
+        }))
+    }
 }
 
 unsafe impl Send for AlwaysListeningController {}
