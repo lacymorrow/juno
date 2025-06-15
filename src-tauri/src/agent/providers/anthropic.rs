@@ -79,21 +79,21 @@ struct ApiTool {
 }
 
 // Streaming event structures for parsing SSE events
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct StreamEvent {
     #[serde(rename = "type")]
     event_type: String,
     // The actual event data will be in different structures depending on event type
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct MessageStartEvent {
     #[serde(rename = "type")]
     event_type: String, // "message_start"
     message: StreamMessage,
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct StreamMessage {
     id: String,
     #[serde(rename = "type")]
@@ -105,7 +105,7 @@ struct StreamMessage {
     stop_sequence: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct ContentBlockStartEvent {
     #[serde(rename = "type")]
     event_type: String, // "content_block_start"
@@ -113,7 +113,7 @@ struct ContentBlockStartEvent {
     content_block: ApiContentBlock,
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct ContentBlockDeltaEvent {
     #[serde(rename = "type")]
     event_type: String, // "content_block_delta"
@@ -121,7 +121,7 @@ struct ContentBlockDeltaEvent {
     delta: ContentDelta,
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct ContentDelta {
     #[serde(rename = "type")]
     delta_type: String, // "text_delta", "input_json_delta", etc.
@@ -131,14 +131,14 @@ struct ContentDelta {
     partial_json: Option<String>, // For input_json_delta
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct ContentBlockStopEvent {
     #[serde(rename = "type")]
     event_type: String, // "content_block_stop"
     index: u32,
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct MessageDeltaEvent {
     #[serde(rename = "type")]
     event_type: String, // "message_delta"
@@ -146,13 +146,13 @@ struct MessageDeltaEvent {
     usage: Option<serde_json::Value>, // Usage info
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct MessageDelta {
     stop_reason: Option<String>,
     stop_sequence: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct MessageStopEvent {
     #[serde(rename = "type")]
     event_type: String, // "message_stop"
