@@ -33,15 +33,19 @@ const COMMAND_COMPLETION_TIMEOUT_MS: u64 = 5000; // Return to wake word after co
 
 // Stop words that should end always listening mode
 const STOP_WORDS: &[&str] = &[
-    "stop", "nevermind", "never mind", "cancel", "quit", "exit", 
+    "stop", "nevermind", "never mind", "cancel", "quit", "exit",
     "done", "that's all", "thats all", "end", "finish", "enough"
 ];
 
 // Noise patterns that should be ignored
 const NOISE_PATTERNS: &[&str] = &[
-    "[blank_audio]", "[BLANK_AUDIO]", "blank audio", 
-    "[music]", "[noise]", "[silence]", 
-    "um", "uh", "hmm", "ah", "er",
+    "[blank_audio]", "[BLANK_AUDIO]", "blank audio",
+    "[music]", "[noise]", "[silence]",
+];
+
+// Single word noise patterns that should only match complete words
+const NOISE_WORDS: &[&str] = &[
+    "um", "uh", "hmm", "ah", "er", "mm", "mhm",
     // Single letter transcriptions are usually noise
     "a", "i", "o", "e", "u"
 ];
@@ -91,7 +95,7 @@ impl AlwaysListeningController {
             state: AlwaysListeningState::Monitoring,
             audio_thread: None,
             sensitivity: 0.5,
-            wake_words: vec!["hey juno".to_string(), "computer".to_string()],
+            wake_words: vec!["hey juno".to_string(), "juno".to_string(), "joono".to_string(), "computer".to_string(), "hey computer".to_string()],
             last_activity: Arc::new(Mutex::new(None)),
             agent_call_timestamps: Arc::new(Mutex::new(Vec::new())),
             last_meaningful_command: Arc::new(Mutex::new(None)),
@@ -716,9 +720,9 @@ impl AlwaysListeningController {
                         // Check for stop words
                         if Self::contains_stop_words(cleaned_text) {
                             info!("[AlwaysListening] Stop word detected: '{}' - stopping always listening", cleaned_text);
-                            
+
                             // Emit stop event to main app
-                            if let Err(e) = app_handle.emit("always-listening:stop-requested", 
+                            if let Err(e) = app_handle.emit("always-listening:stop-requested",
                                 serde_json::json!({ "reason": "stop_word", "text": cleaned_text })) {
                                 error!("[AlwaysListening] Failed to emit stop-requested event: {}", e);
                             }
@@ -729,7 +733,7 @@ impl AlwaysListeningController {
                         if Self::is_agent_call_allowed() {
                             // Mark successful agent call
                             Self::record_agent_call();
-                            
+
                             // Emit the transcription result for agent processing
                             if let Err(e) = app_handle.emit("always-listening:transcription",
                                 serde_json::json!({ "text": cleaned_text })) {
@@ -756,27 +760,54 @@ impl AlwaysListeningController {
         }
     }
 
-    // Intelligent content filtering functions
+        // Intelligent content filtering functions
     fn should_process_with_agent(text: &str) -> bool {
         let text_lower = text.to_lowercase();
-        let text_trimmed = text_lower.trim();
-        
+        let mut text_trimmed = text_lower.trim().to_string();
+
         // Filter out empty or very short content
         if text_trimmed.len() < MIN_MEANINGFUL_CONTENT_LENGTH {
             info!("[AlwaysListening] Content too short: '{}' (length: {})", text_trimmed, text_trimmed.len());
             return false;
         }
 
-        // Filter out known noise patterns
+        // Remove phrase-level noise patterns but don't reject the entire text
+        // This allows "Open Spotify [BLANK_AUDIO]" to become "Open Spotify"
+        let mut found_noise_patterns = Vec::new();
         for pattern in NOISE_PATTERNS {
             if text_trimmed.contains(pattern) {
-                info!("[AlwaysListening] Noise pattern detected: '{}' contains '{}'", text_trimmed, pattern);
-                return false;
+                found_noise_patterns.push(pattern);
+                text_trimmed = text_trimmed.replace(pattern, " ");
             }
         }
 
-        // Filter out repeated single characters (like "a a a a")
+        // Clean up extra whitespace after pattern removal
+        text_trimmed = text_trimmed.split_whitespace().collect::<Vec<&str>>().join(" ");
+
+        if !found_noise_patterns.is_empty() {
+            info!("[AlwaysListening] Removed noise patterns {:?} from text, remaining: '{}'", found_noise_patterns, text_trimmed);
+        }
+
+        // Re-check length after noise pattern removal
+        if text_trimmed.len() < MIN_MEANINGFUL_CONTENT_LENGTH {
+            info!("[AlwaysListening] Content too short after noise removal: '{}' (length: {})", text_trimmed, text_trimmed.len());
+            return false;
+        }
+
+        // Split into words for word-level analysis
         let words: Vec<&str> = text_trimmed.split_whitespace().collect();
+
+        // Filter out if text consists entirely of noise words
+        let noise_word_count = words.iter()
+            .filter(|word| NOISE_WORDS.contains(word))
+            .count();
+
+        if noise_word_count == words.len() && words.len() > 0 {
+            info!("[AlwaysListening] Text consists entirely of noise words: '{}'", text_trimmed);
+            return false;
+        }
+
+        // Filter out repeated single characters (like "a a a a")
         if words.len() > 2 {
             let unique_words: std::collections::HashSet<&str> = words.iter().cloned().collect();
             if unique_words.len() == 1 && words[0].len() == 1 {
@@ -788,18 +819,18 @@ impl AlwaysListeningController {
         // Filter out content that is mostly punctuation or numbers
         let letter_count = text_trimmed.chars().filter(|c| c.is_alphabetic()).count();
         let total_meaningful_chars = text_trimmed.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).count();
-        
+
         if total_meaningful_chars > 0 && (letter_count as f32 / total_meaningful_chars as f32) < 0.3 {
             info!("[AlwaysListening] Content mostly non-alphabetic: '{}'", text_trimmed);
             return false;
         }
 
-        // Check for minimum meaningful word count
+        // Check for minimum meaningful word count (exclude noise words from meaningful words)
         let meaningful_words: Vec<&str> = words.iter()
-            .filter(|word| word.len() > 2 && !NOISE_PATTERNS.contains(word))
+            .filter(|word| word.len() > 2 && !NOISE_WORDS.contains(word))
             .cloned()
             .collect();
-        
+
         if meaningful_words.is_empty() {
             info!("[AlwaysListening] No meaningful words found: '{}'", text_trimmed);
             return false;
@@ -824,19 +855,19 @@ impl AlwaysListeningController {
         // the Arc<Mutex<Vec<Instant>>> timestamps here for proper rate limiting
         // For now, we'll implement basic time-based limiting
         static mut LAST_CALL_TIMES: Option<Vec<std::time::SystemTime>> = None;
-        
+
         unsafe {
             let now = std::time::SystemTime::now();
             let one_minute_ago = now - std::time::Duration::from_secs(60);
-            
+
             if LAST_CALL_TIMES.is_none() {
                 LAST_CALL_TIMES = Some(Vec::new());
             }
-            
+
             if let Some(ref mut times) = LAST_CALL_TIMES {
                 // Remove calls older than 1 minute
                 times.retain(|&time| time > one_minute_ago);
-                
+
                 // Check if we're under the limit
                 if times.len() < MAX_AGENT_CALLS_PER_MINUTE as usize {
                     times.push(now);
