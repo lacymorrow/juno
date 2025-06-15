@@ -22,14 +22,6 @@ use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::constants::{agent_config, tool_names, timeouts};
-use crate::agent::structs::AgentError;
-
-
-// --- Agent State ---
-
-
-// --- Anthropic API Structs ---
-
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -410,7 +402,7 @@ pub async fn submit_query(
     // Clear spoken content from app state now that we've used it
     state.clear_last_spoken_content();
 
-    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone()).await {
+    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone(), app_handle.clone()).await {
         Ok(audio_result) => {
             if audio_result != "TTS_DISABLED_BY_SETTING" {
                 final_response.audio_base64 = Some(audio_result.clone());
@@ -822,9 +814,9 @@ pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String>
 // --- TTS Function ---
 
 #[tauri::command]
-pub async fn get_tts_audio(text: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn get_tts_audio(text: String, state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<String, String> {
     // Call the invoke_tts function with the text and state
-    crate::tts::invoke_tts(text, state).await
+    crate::tts::invoke_tts(text, state, app_handle).await
 }
 
 // --- Clear Conversation History ---
