@@ -340,6 +340,7 @@ struct AgentEvent {
     payload: AgentEventPayload,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)] // Allows payload to be one of the variants without a type field in payload itself
 enum AgentEventPayload {
@@ -392,17 +393,20 @@ struct GenericContentPayload {
 }
 
 // NEW: Streaming event payloads
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamingTextPayload {
     chunk: String,
     message_id: Option<String>, // Optional message ID to track which response this belongs to
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamStartPayload {
     message_id: String,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamEndPayload {
     message_id: String,

@@ -11,8 +11,6 @@ use uuid;
 
 use super::types::{
     CloudError, CloudCommand, CloudCommandType, DeviceResponse, ResponseStatus, ResponseData,
-    DeviceStatus,
-    HardwareInfo,
 };
 use super::security::CloudSecurity;
 use crate::state::AppState;
@@ -298,7 +296,7 @@ impl CloudCommandProcessor {
             std::sync::Arc<tokio::sync::Mutex<tauri_plugin_voice_transcription::VoiceController>>
         >() {
             let voice_controller = voice_controller_state.lock().await;
-            
+
             match voice_controller.transcribe_audio_file(audio_path) {
                 Ok(transcription) => {
                     info!("Audio file transcription successful: '{}'", transcription);
@@ -312,7 +310,7 @@ impl CloudCommandProcessor {
         } else {
             // Fallback: Try to use the voice transcription plugin commands directly
             info!("Voice controller not available in app state, trying plugin command");
-            
+
             match tauri_plugin_voice_transcription::commands::transcribe_file(
                 audio_path.to_string(),
                 self.app_handle.clone(),

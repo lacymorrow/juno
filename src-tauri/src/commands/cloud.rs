@@ -30,7 +30,7 @@ pub struct CloudStatusResponse {
 /// Get current cloud configuration
 #[tauri::command]
 pub async fn get_cloud_config(
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     app_state: State<'_, AppState>,
 ) -> Result<CloudConfigResponse, String> {
     info!("Getting cloud configuration");
@@ -105,7 +105,7 @@ pub async fn get_cloud_status(
 ) -> Result<CloudStatusResponse, String> {
     let enabled = app_state.is_cloud_enabled();
     let mut connected = false;
-    let mut last_heartbeat: Option<std::time::SystemTime> = None;
+    let _last_heartbeat: Option<std::time::SystemTime> = None;
     let mut connection_state = serde_json::json!({
         "status": "disconnected",
         "message": "Not connected to cloud"
@@ -812,7 +812,7 @@ async fn run_authentication_test(app_state: &AppState) -> serde_json::Value {
     }
 }
 
-async fn run_command_processing_test(app_state: &AppState) -> serde_json::Value {
+async fn run_command_processing_test(_app_state: &AppState) -> serde_json::Value {
     info!("Running command processing test");
 
     // Test creating and validating a command
