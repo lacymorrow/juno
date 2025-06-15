@@ -1,10 +1,10 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
+use tracing::{info, warn, error};
 
 pub mod desktop_wrapper;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
-use log;
 use playwright::Playwright; // Import Playwright
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -220,7 +220,20 @@ impl AppState {
             browser_controller: Arc::new(TokioMutex::new(None)),
             memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            tts_provider: Arc::new(Mutex::new("system".to_string())), // Initialize TTS provider to "system" (was "off")
+            tts_provider: Arc::new(Mutex::new({
+                #[cfg(debug_assertions)]
+                {
+                    // In development, default to 'system' TTS
+                    info!("Initializing TTS provider to 'system' (development mode)");
+                    "system".to_string()
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    // In production, default to 'elevenlabs' TTS
+                    info!("Initializing TTS provider to 'elevenlabs' (production mode)");
+                    "elevenlabs".to_string()
+                }
+            })),
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
             dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
             dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
