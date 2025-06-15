@@ -1,3 +1,6 @@
+#![macro_use]
+extern crate serde;
+
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
