@@ -142,7 +142,9 @@ export default function ModularSettingsWindow() {
       {/* Sidebar with categories - macOS style */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+          <h1 className="text-xl font-semibold text-gray-900">
+            MODULAR Settings
+          </h1>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">

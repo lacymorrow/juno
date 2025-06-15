@@ -143,7 +143,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
   const [validationMessage, setValidationMessage] = useState<string>("");
   const [validationError, setValidationError] = useState<string>("");
   const [pressedKeys, setPressedKeys] = useState<string[]>([]);
-  const [captureTimeout, setCaptureTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [captureTimeout, setCaptureTimeout] = useState<NodeJS.Timeout | null>(
+    null
+  );
 
   // Update current value when prop changes
   useEffect(() => {
@@ -162,25 +164,30 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
   }, [captureTimeout]);
 
   // Validation function with debouncing
-  const validateShortcut = useCallback(async (shortcutValue: string) => {
-    if (!shortcutValue.trim()) {
-      setValidationMessage("Enter a shortcut combination");
-      setValidationError("");
-      return;
-    }
+  const validateShortcut = useCallback(
+    async (shortcutValue: string) => {
+      if (!shortcutValue.trim()) {
+        setValidationMessage("Enter a shortcut combination");
+        setValidationError("");
+        return;
+      }
 
-    try {
-      const result = await invoke<string>("validate_keyboard_shortcut", {
-        shortcutValue: shortcutValue,
-        shortcutName: shortcutName,
-      });
-      setValidationMessage(result);
-      setValidationError("");
-    } catch (error) {
-      setValidationError(typeof error === 'string' ? error : 'Invalid shortcut');
-      setValidationMessage("");
-    }
-  }, [shortcutName]);
+      try {
+        const result = await invoke<string>("validate_keyboard_shortcut", {
+          shortcutValue: shortcutValue,
+          shortcutName: shortcutName,
+        });
+        setValidationMessage(result);
+        setValidationError("");
+      } catch (error) {
+        setValidationError(
+          typeof error === "string" ? error : "Invalid shortcut"
+        );
+        setValidationMessage("");
+      }
+    },
+    [shortcutName]
+  );
 
   // Debounced validation
   useEffect(() => {
@@ -192,142 +199,158 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
     }
   }, [currentValue, isEditing, validateShortcut]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!isCapturing) return;
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!isCapturing) return;
 
-    e.preventDefault();
-    e.stopPropagation();
+      e.preventDefault();
+      e.stopPropagation();
 
-    // Clear any existing timeout
-    if (captureTimeout) {
-      clearTimeout(captureTimeout);
-    }
-
-    const modifiers: string[] = [];
-
-    // Detect modifiers with platform-aware naming
-    if (e.ctrlKey || e.metaKey) {
-      if (e.metaKey) {
-        modifiers.push("Cmd");
-      } else {
-        modifiers.push("Ctrl");
+      // Clear any existing timeout
+      if (captureTimeout) {
+        clearTimeout(captureTimeout);
       }
-    }
-    if (e.altKey) {
-      // Use Option on macOS for better UX
-      modifiers.push(navigator.platform.toLowerCase().includes('mac') ? "Option" : "Alt");
-    }
-    if (e.shiftKey) modifiers.push("Shift");
 
-    let key = "";
+      const modifiers: string[] = [];
 
-    // Enhanced key detection with better special key handling
-    switch (e.code) {
-      case "Space":
-        key = "Space";
-        break;
-      case "Escape":
-        key = "Escape";
-        break;
-      case "Enter":
-        key = "Enter";
-        break;
-      case "Tab":
-        key = "Tab";
-        break;
-      case "Backspace":
-        key = "Backspace";
-        break;
-      case "Delete":
-        key = "Delete";
-        break;
-      case "Home":
-        key = "Home";
-        break;
-      case "End":
-        key = "End";
-        break;
-      case "PageUp":
-        key = "PageUp";
-        break;
-      case "PageDown":
-        key = "PageDown";
-        break;
-      case "Insert":
-        key = "Insert";
-        break;
-      case "ArrowUp":
-        key = "Up";
-        break;
-      case "ArrowDown":
-        key = "Down";
-        break;
-      case "ArrowLeft":
-        key = "Left";
-        break;
-      case "ArrowRight":
-        key = "Right";
-        break;
-      case "PrintScreen":
-        key = "PrintScreen";
-        break;
-      case "ScrollLock":
-        key = "ScrollLock";
-        break;
-      case "Pause":
-        key = "Pause";
-        break;
-      case "CapsLock":
-        key = "CapsLock";
-        break;
-      case "NumLock":
-        key = "NumLock";
-        break;
-      default:
-        // Function keys (including extended range)
-        if (e.code.startsWith("F") && e.code.length <= 3) {
-          key = e.code;
+      // Detect modifiers with platform-aware naming
+      if (e.ctrlKey || e.metaKey) {
+        if (e.metaKey) {
+          modifiers.push("Cmd");
+        } else {
+          modifiers.push("Ctrl");
         }
-        // Number keys
-        else if (e.code.startsWith("Digit")) {
-          key = e.code.replace("Digit", "");
-        }
-        // Letter keys
-        else if (e.code.startsWith("Key")) {
-          key = e.code.replace("Key", "");
-        }
-        // Numpad keys
-        else if (e.code.startsWith("Numpad")) {
-          key = "Numpad" + e.code.replace("Numpad", "");
-        }
-        // Punctuation and special characters
-        else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-          key = e.key;
-        }
-        // Fallback to the key name for other special keys
-        else if (e.key && e.key !== "Control" && e.key !== "Alt" && e.key !== "Shift" && e.key !== "Meta") {
-          key = e.key;
-        }
-        break;
-    }
+      }
+      if (e.altKey) {
+        // Use Option on macOS for better UX
+        modifiers.push(
+          navigator.platform.toLowerCase().includes("mac") ? "Option" : "Alt"
+        );
+      }
+      if (e.shiftKey) modifiers.push("Shift");
 
-    if (key) {
-      const allKeys = [...modifiers, key];
-      setPressedKeys(allKeys);
+      let key = "";
 
-      const shortcutString = allKeys.join("+");
-      setCurrentValue(shortcutString);
+      // Enhanced key detection with better special key handling
+      switch (e.code) {
+        case "Space":
+          key = "Space";
+          break;
+        case "Escape":
+          key = "Escape";
+          break;
+        case "Enter":
+          key = "Enter";
+          break;
+        case "Tab":
+          key = "Tab";
+          break;
+        case "Backspace":
+          key = "Backspace";
+          break;
+        case "Delete":
+          key = "Delete";
+          break;
+        case "Home":
+          key = "Home";
+          break;
+        case "End":
+          key = "End";
+          break;
+        case "PageUp":
+          key = "PageUp";
+          break;
+        case "PageDown":
+          key = "PageDown";
+          break;
+        case "Insert":
+          key = "Insert";
+          break;
+        case "ArrowUp":
+          key = "Up";
+          break;
+        case "ArrowDown":
+          key = "Down";
+          break;
+        case "ArrowLeft":
+          key = "Left";
+          break;
+        case "ArrowRight":
+          key = "Right";
+          break;
+        case "PrintScreen":
+          key = "PrintScreen";
+          break;
+        case "ScrollLock":
+          key = "ScrollLock";
+          break;
+        case "Pause":
+          key = "Pause";
+          break;
+        case "CapsLock":
+          key = "CapsLock";
+          break;
+        case "NumLock":
+          key = "NumLock";
+          break;
+        default:
+          // Function keys (including extended range)
+          if (e.code.startsWith("F") && e.code.length <= 3) {
+            key = e.code;
+          }
+          // Number keys
+          else if (e.code.startsWith("Digit")) {
+            key = e.code.replace("Digit", "");
+          }
+          // Letter keys
+          else if (e.code.startsWith("Key")) {
+            key = e.code.replace("Key", "");
+          }
+          // Numpad keys
+          else if (e.code.startsWith("Numpad")) {
+            key = "Numpad" + e.code.replace("Numpad", "");
+          }
+          // Punctuation and special characters
+          else if (
+            e.key.length === 1 &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !e.altKey
+          ) {
+            key = e.key;
+          }
+          // Fallback to the key name for other special keys
+          else if (
+            e.key &&
+            e.key !== "Control" &&
+            e.key !== "Alt" &&
+            e.key !== "Shift" &&
+            e.key !== "Meta"
+          ) {
+            key = e.key;
+          }
+          break;
+      }
 
-      // Auto-finish capture with longer delay for complex combinations
-      const delay = modifiers.length >= 2 ? 800 : 500;
-      const newTimeout = setTimeout(() => {
-        setIsCapturing(false);
-        setPressedKeys([]);
-        setCaptureTimeout(null);
-      }, delay);
-      setCaptureTimeout(newTimeout);
-    }
-  }, [isCapturing, captureTimeout]);
+      if (key) {
+        const allKeys = [...modifiers, key];
+        setPressedKeys(allKeys);
+
+        const shortcutString = allKeys.join("+");
+        setCurrentValue(shortcutString);
+
+        // Auto-finish capture with longer delay for complex combinations
+        const delay = modifiers.length >= 2 ? 800 : 500;
+        const newTimeout = setTimeout(() => {
+          setIsCapturing(false);
+          setPressedKeys([]);
+          setCaptureTimeout(null);
+        }, delay);
+        setCaptureTimeout(newTimeout);
+      }
+    },
+    [isCapturing, captureTimeout]
+  );
 
   const handleStartCapture = () => {
     setIsCapturing(true);
@@ -392,10 +415,10 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
 
   // Get platform-appropriate example
   const getExampleShortcut = () => {
-    const isMac = navigator.platform.toLowerCase().includes('mac');
-    if (shortcutName === 'agent_mode_toggle') {
+    const isMac = navigator.platform.toLowerCase().includes("mac");
+    if (shortcutName === "agent_mode_toggle") {
       return isMac ? "Option+D" : "Alt+D";
-    } else if (shortcutName === 'dictation_input') {
+    } else if (shortcutName === "dictation_input") {
       return isMac ? "Option+Space" : "Alt+Space";
     }
     return isMac ? "Cmd+K" : "Ctrl+K";
@@ -412,7 +435,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             </kbd>
             <span className="text-sm text-muted-foreground">{description}</span>
           </div>
-          <Badge variant="secondary" className="text-xs">System</Badge>
+          <Badge variant="secondary" className="text-xs">
+            System
+          </Badge>
         </div>
       </div>
     );
@@ -427,10 +452,15 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
             {/* Key capture area with enhanced feedback */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <Label className="text-sm font-medium">Shortcut combination:</Label>
+                <Label className="text-sm font-medium">
+                  Shortcut combination:
+                </Label>
                 {isCapturing && (
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs animate-pulse bg-blue-50 border-blue-200">
+                    <Badge
+                      variant="outline"
+                      className="text-xs animate-pulse bg-blue-50 border-blue-200"
+                    >
                       🎯 Listening...
                     </Badge>
                     <button
@@ -453,7 +483,11 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                 onKeyDown={handleKeyDown}
                 tabIndex={0}
                 role="button"
-                aria-label={isCapturing ? "Press keys to capture shortcut" : "Click to start capturing shortcut"}
+                aria-label={
+                  isCapturing
+                    ? "Press keys to capture shortcut"
+                    : "Click to start capturing shortcut"
+                }
               >
                 {pressedKeys.length > 0 ? (
                   <div className="flex items-center gap-1 flex-wrap">
@@ -463,7 +497,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                           {key}
                         </kbd>
                         {index < pressedKeys.length - 1 && (
-                          <span className="text-muted-foreground font-medium">+</span>
+                          <span className="text-muted-foreground font-medium">
+                            +
+                          </span>
                         )}
                       </span>
                     ))}
@@ -478,8 +514,7 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                     <span className="text-sm">
                       {isCapturing
                         ? "Press the keys you want to use..."
-                        : `Click here to capture shortcut (e.g., ${getExampleShortcut()})`
-                      }
+                        : `Click here to capture shortcut (e.g., ${getExampleShortcut()})`}
                     </span>
                   </div>
                 )}
@@ -497,18 +532,21 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                 disabled={isCapturing}
               />
               <div className="text-xs text-muted-foreground">
-                Tip: Use modifiers like Alt, Ctrl, Cmd, Shift combined with letters
+                Tip: Use modifiers like Alt, Ctrl, Cmd, Shift combined with
+                letters
               </div>
             </div>
 
             {/* Enhanced validation feedback */}
             {(validationMessage || validationError) && (
-              <div className={cn(
-                "flex items-start gap-2 text-sm p-3 rounded-md border",
-                validationError
-                  ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800 dark:text-red-400"
-                  : "text-green-700 bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800 dark:text-green-400"
-              )}>
+              <div
+                className={cn(
+                  "flex items-start gap-2 text-sm p-3 rounded-md border",
+                  validationError
+                    ? "text-red-700 bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-800 dark:text-red-400"
+                    : "text-green-700 bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-800 dark:text-green-400"
+                )}
+              >
                 <div className="flex-shrink-0 mt-0.5">
                   {validationError ? (
                     <AlertTriangle className="h-4 w-4" />
@@ -520,7 +558,8 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
                   <span>{validationError || validationMessage}</span>
                   {validationError && validationError.includes("conflicts") && (
                     <div className="mt-1 text-xs opacity-75">
-                      Consider using a different key combination to avoid conflicts.
+                      Consider using a different key combination to avoid
+                      conflicts.
                     </div>
                   )}
                 </div>
@@ -532,7 +571,12 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={isLoading || !!validationError || !currentValue.trim() || isCapturing}
+                disabled={
+                  isLoading ||
+                  !!validationError ||
+                  !currentValue.trim() ||
+                  isCapturing
+                }
                 className="flex items-center gap-2"
               >
                 <Save className="h-4 w-4" />
@@ -564,7 +608,9 @@ const ShortcutInput: React.FC<ShortcutInputProps> = ({
               <kbd className="px-2 py-1 bg-muted rounded text-sm min-w-[80px] text-center font-mono">
                 {value || "Not set"}
               </kbd>
-              <span className="text-sm text-muted-foreground">{description}</span>
+              <span className="text-sm text-muted-foreground">
+                {description}
+              </span>
             </div>
             <Button
               size="sm"
@@ -618,7 +664,9 @@ export default function SettingsWindow() {
       {/* Sidebar with categories - macOS style */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+          <h1 className="text-xl font-semibold text-gray-900">
+            OLD Settings Window
+          </h1>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
@@ -967,7 +1015,10 @@ function AIProviderSettings({
                       <div className="flex items-center gap-2">
                         <span>{provider.name}</span>
                         {provider.computer_use_supported && (
-                          <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                          <Badge
+                            variant="secondary"
+                            className="text-xs bg-blue-100 text-blue-800"
+                          >
                             Computer Use
                           </Badge>
                         )}
@@ -976,15 +1027,25 @@ function AIProviderSettings({
                   ))}
                 </SelectContent>
               </Select>
-              {settings.providers.find(p => p.id === settings.activeProvider) && (
+              {settings.providers.find(
+                (p) => p.id === settings.activeProvider
+              ) && (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
-                    {settings.providers.find(p => p.id === settings.activeProvider)?.description}
+                    {
+                      settings.providers.find(
+                        (p) => p.id === settings.activeProvider
+                      )?.description
+                    }
                   </p>
-                  {settings.providers.find(p => p.id === settings.activeProvider)?.computer_use_supported && (
+                  {settings.providers.find(
+                    (p) => p.id === settings.activeProvider
+                  )?.computer_use_supported && (
                     <div className="flex items-center gap-2 text-sm">
                       <CheckCircle className="h-4 w-4 text-green-600" />
-                      <span className="text-green-700">Computer use capabilities available</span>
+                      <span className="text-green-700">
+                        Computer use capabilities available
+                      </span>
                     </div>
                   )}
                 </div>
@@ -1021,7 +1082,9 @@ function AIProviderSettings({
               <div className="space-y-2">
                 <Label htmlFor="model">
                   Model
-                  {settings.providers.find(p => p.id === settings.activeProvider)?.computer_use_supported && (
+                  {settings.providers.find(
+                    (p) => p.id === settings.activeProvider
+                  )?.computer_use_supported && (
                     <span className="text-xs text-gray-500 ml-2">
                       (🖥️ = Computer Use)
                     </span>
@@ -1038,26 +1101,35 @@ function AIProviderSettings({
                   </SelectTrigger>
                   <SelectContent>
                     {(() => {
-                      const currentProvider = settings.providers.find(p => p.id === settings.activeProvider);
+                      const currentProvider = settings.providers.find(
+                        (p) => p.id === settings.activeProvider
+                      );
 
                       if (currentProvider?.model_info) {
                         return (
                           <>
                             {/* Computer Use Models */}
-                            {currentProvider.model_info.filter(model => model.supports_computer_use).length > 0 && (
+                            {currentProvider.model_info.filter(
+                              (model) => model.supports_computer_use
+                            ).length > 0 && (
                               <>
                                 <div className="px-2 py-1 text-xs font-medium text-gray-500 bg-blue-50 border-b">
                                   Computer Use Models
                                 </div>
                                 {currentProvider.model_info
-                                  .filter(model => model.supports_computer_use)
+                                  .filter(
+                                    (model) => model.supports_computer_use
+                                  )
                                   .map((model) => (
                                     <SelectItem key={model.id} value={model.id}>
                                       <div className="flex items-center gap-2">
                                         <span>🖥️</span>
                                         <span>{model.name}</span>
                                         {model.is_recommended && (
-                                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs bg-green-50 text-green-700 border-green-200"
+                                          >
                                             Recommended
                                           </Badge>
                                         )}
@@ -1068,20 +1140,27 @@ function AIProviderSettings({
                             )}
 
                             {/* General Chat Models */}
-                            {currentProvider.model_info.filter(model => !model.supports_computer_use).length > 0 && (
+                            {currentProvider.model_info.filter(
+                              (model) => !model.supports_computer_use
+                            ).length > 0 && (
                               <>
                                 <div className="px-2 py-1 text-xs font-medium text-gray-500 bg-gray-50 border-b">
                                   General Chat Models
                                 </div>
                                 {currentProvider.model_info
-                                  .filter(model => !model.supports_computer_use)
+                                  .filter(
+                                    (model) => !model.supports_computer_use
+                                  )
                                   .map((model) => (
                                     <SelectItem key={model.id} value={model.id}>
                                       <div className="flex items-center gap-2">
                                         <span>💬</span>
                                         <span>{model.name}</span>
                                         {model.is_recommended && (
-                                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                          <Badge
+                                            variant="outline"
+                                            className="text-xs bg-green-50 text-green-700 border-green-200"
+                                          >
                                             Recommended
                                           </Badge>
                                         )}
@@ -1104,9 +1183,13 @@ function AIProviderSettings({
                   </SelectContent>
                 </Select>
                 {(() => {
-                  const currentProvider = settings.providers.find(p => p.id === settings.activeProvider);
+                  const currentProvider = settings.providers.find(
+                    (p) => p.id === settings.activeProvider
+                  );
                   if (settings.formData.model && currentProvider?.model_info) {
-                    const selectedModel = currentProvider.model_info.find(m => m.id === settings.formData.model);
+                    const selectedModel = currentProvider.model_info.find(
+                      (m) => m.id === settings.formData.model
+                    );
                     if (selectedModel?.supports_computer_use) {
                       return (
                         <div className="text-xs text-gray-500">
@@ -1440,7 +1523,9 @@ function SecuritySettings({
 }: {
   settings: ReturnType<typeof useSettings>;
 }) {
-  const [isRequestingPermission, setIsRequestingPermission] = useState<string | null>(null);
+  const [isRequestingPermission, setIsRequestingPermission] = useState<
+    string | null
+  >(null);
   const [autoRedirectEnabled] = useState(false);
 
   // Enhanced permission icons with priority indicators
@@ -1472,19 +1557,28 @@ function SecuritySettings({
   const getPermissionBadge = (granted: boolean, required: boolean) => {
     if (granted) {
       return (
-        <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">
+        <Badge
+          variant="outline"
+          className="text-green-600 border-green-200 bg-green-50"
+        >
           ✓ Granted
         </Badge>
       );
     } else if (required) {
       return (
-        <Badge variant="destructive" className="bg-red-100 text-red-700 border-red-300">
+        <Badge
+          variant="destructive"
+          className="bg-red-100 text-red-700 border-red-300"
+        >
           ⚠ Required
         </Badge>
       );
     } else {
       return (
-        <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 border-yellow-300">
+        <Badge
+          variant="secondary"
+          className="bg-yellow-100 text-yellow-700 border-yellow-300"
+        >
           💡 Optional
         </Badge>
       );
@@ -1492,13 +1586,19 @@ function SecuritySettings({
   };
 
   // Enhanced accessibility permission request with auto-redirect
-  const requestAccessibilityPermissionEnhanced = async (withAutoRedirect = true) => {
+  const requestAccessibilityPermissionEnhanced = async (
+    withAutoRedirect = true
+  ) => {
     try {
       setIsRequestingPermission("accessibility");
 
-      const granted = withAutoRedirect && autoRedirectEnabled
-        ? await invoke<boolean>("request_accessibility_permission_with_auto_redirect", { autoOpenSettings: true })
-        : await invoke<boolean>("request_accessibility_permission");
+      const granted =
+        withAutoRedirect && autoRedirectEnabled
+          ? await invoke<boolean>(
+              "request_accessibility_permission_with_auto_redirect",
+              { autoOpenSettings: true }
+            )
+          : await invoke<boolean>("request_accessibility_permission");
 
       if (granted) {
         await settings.loadPermissionsStatus();
@@ -1516,7 +1616,9 @@ function SecuritySettings({
   // Enhanced system preferences opening
   const openSystemPreferencesEnhanced = async (preferencePane: string) => {
     try {
-      await invoke("open_system_settings_enhanced", { permissionType: preferencePane });
+      await invoke("open_system_settings_enhanced", {
+        permissionType: preferencePane,
+      });
     } catch (err) {
       console.error("Error opening enhanced System Settings:", err);
       toast.error("Failed to open System Settings");
@@ -1536,7 +1638,9 @@ function SecuritySettings({
   const requestScreenRecordingPermission = async () => {
     try {
       setIsRequestingPermission("screen_recording");
-      const granted = await invoke<boolean>("request_screen_recording_permission");
+      const granted = await invoke<boolean>(
+        "request_screen_recording_permission"
+      );
 
       if (granted) {
         await settings.loadPermissionsStatus();
@@ -1574,7 +1678,12 @@ function SecuritySettings({
   };
 
   // Enhanced permission card renderer
-  const renderPermissionCard = (permission: any, permissionType: string, onRequest?: () => void, onRequestEnhanced?: () => void) => {
+  const renderPermissionCard = (
+    permission: any,
+    permissionType: string,
+    onRequest?: () => void,
+    onRequestEnhanced?: () => void
+  ) => {
     const isRequired = permission.required;
     const cardClassName = permission.granted
       ? "transition-colors border-green-200 bg-green-50/30"
@@ -1594,12 +1703,19 @@ function SecuritySettings({
               <div className="flex-1">
                 <div className="flex items-center space-x-2 mb-1">
                   <CardTitle className="text-lg">
-                    {permissionType.replace("_", " ").replace(/\b\w/g, (l) => l.toUpperCase())} Access
+                    {permissionType
+                      .replace("_", " ")
+                      .replace(/\b\w/g, (l) => l.toUpperCase())}{" "}
+                    Access
                   </CardTitle>
                   {getPermissionBadge(permission.granted, permission.required)}
                 </div>
                 <CardDescription className="text-sm">
-                  {permission.description || `${permissionType.replace("_", " ")} permission is required for Juno to function properly`}
+                  {permission.description ||
+                    `${permissionType.replace(
+                      "_",
+                      " "
+                    )} permission is required for Juno to function properly`}
                 </CardDescription>
                 {isRequired && !permission.granted && (
                   <div className="flex items-center space-x-1 mt-2">
@@ -1624,34 +1740,52 @@ function SecuritySettings({
         <CardContent>
           {!permission.granted && (
             <div className="space-y-3">
-              <div className={`p-3 rounded-md border ${isRequired ? "bg-red-50 border-red-200" : "bg-yellow-50 border-yellow-200"}`}>
-                <p className={`text-sm ${isRequired ? "text-red-800" : "text-yellow-800"}`}>
-                  <strong>{isRequired ? "Action Required:" : "Optional Setup:"}</strong>{" "}
-                  {permission.instructions || `Click 'Grant Permission' to enable ${permissionType.replace("_", " ")} access.`}
+              <div
+                className={`p-3 rounded-md border ${
+                  isRequired
+                    ? "bg-red-50 border-red-200"
+                    : "bg-yellow-50 border-yellow-200"
+                }`}
+              >
+                <p
+                  className={`text-sm ${
+                    isRequired ? "text-red-800" : "text-yellow-800"
+                  }`}
+                >
+                  <strong>
+                    {isRequired ? "Action Required:" : "Optional Setup:"}
+                  </strong>{" "}
+                  {permission.instructions ||
+                    `Click 'Grant Permission' to enable ${permissionType.replace(
+                      "_",
+                      " "
+                    )} access.`}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {/* Enhanced auto-redirect button for accessibility */}
-                {onRequestEnhanced && autoRedirectEnabled && permissionType === "accessibility" && (
-                  <Button
-                    onClick={onRequestEnhanced}
-                    disabled={isRequestingPermission === permissionType}
-                    size="sm"
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {isRequestingPermission === permissionType ? (
-                      <>
-                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                        Opening Settings...
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 mr-2" />
-                        Auto-Grant Permission
-                      </>
-                    )}
-                  </Button>
-                )}
+                {onRequestEnhanced &&
+                  autoRedirectEnabled &&
+                  permissionType === "accessibility" && (
+                    <Button
+                      onClick={onRequestEnhanced}
+                      disabled={isRequestingPermission === permissionType}
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      {isRequestingPermission === permissionType ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Opening Settings...
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4 mr-2" />
+                          Auto-Grant Permission
+                        </>
+                      )}
+                    </Button>
+                  )}
 
                 {/* Standard request button */}
                 {onRequest && (
@@ -1659,7 +1793,13 @@ function SecuritySettings({
                     onClick={onRequest}
                     disabled={isRequestingPermission === permissionType}
                     size="sm"
-                    variant={autoRedirectEnabled && permissionType === "accessibility" ? "outline" : isRequired ? "default" : "secondary"}
+                    variant={
+                      autoRedirectEnabled && permissionType === "accessibility"
+                        ? "outline"
+                        : isRequired
+                        ? "default"
+                        : "secondary"
+                    }
                   >
                     {isRequestingPermission === permissionType ? (
                       <>
@@ -1668,7 +1808,9 @@ function SecuritySettings({
                       </>
                     ) : (
                       <>
-                        {isRequired ? "Grant Required Permission" : "Grant Optional Permission"}
+                        {isRequired
+                          ? "Grant Required Permission"
+                          : "Grant Optional Permission"}
                       </>
                     )}
                   </Button>
@@ -1695,7 +1837,8 @@ function SecuritySettings({
                 <div className="mt-2 p-2 bg-blue-50 rounded-md border border-blue-200">
                   <p className="text-xs text-blue-700">
                     <Zap className="h-3 w-3 inline mr-1" />
-                    Auto-redirect enabled: System Settings will open automatically when needed
+                    Auto-redirect enabled: System Settings will open
+                    automatically when needed
                   </p>
                 </div>
               )}
@@ -1705,7 +1848,8 @@ function SecuritySettings({
             <div className="flex items-center space-x-2 p-3 bg-green-50 rounded-md border border-green-200">
               <CheckCircle className="h-4 w-4 text-green-600" />
               <p className="text-sm text-green-800 font-medium">
-                Permission granted - {permissionType.replace("_", " ")} access is working properly
+                Permission granted - {permissionType.replace("_", " ")} access
+                is working properly
               </p>
             </div>
           )}
@@ -1747,7 +1891,11 @@ function SecuritySettings({
                   size="sm"
                   className="bg-green-600 hover:bg-green-700"
                 >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${settings.permissionsLoading ? "animate-spin" : ""}`} />
+                  <RefreshCw
+                    className={`h-4 w-4 mr-2 ${
+                      settings.permissionsLoading ? "animate-spin" : ""
+                    }`}
+                  />
                   Refresh Status
                 </Button>
               </div>
@@ -1777,14 +1925,20 @@ function SecuritySettings({
             <div className="space-y-4">
               <div className="flex items-center space-x-2">
                 <AlertCircle className="h-5 w-5 text-red-500" />
-                <h3 className="text-lg font-semibold text-red-800">Required Permissions</h3>
-                <Badge variant="destructive" className="bg-red-100 text-red-700">
+                <h3 className="text-lg font-semibold text-red-800">
+                  Required Permissions
+                </h3>
+                <Badge
+                  variant="destructive"
+                  className="bg-red-100 text-red-700"
+                >
                   Essential for Core Functionality
                 </Badge>
               </div>
               <p className="text-sm text-gray-600 mb-4">
-                These permissions are essential for Juno's core AI computer use functionality.
-                Without them, Juno cannot automate tasks or interact with your desktop.
+                These permissions are essential for Juno's core AI computer use
+                functionality. Without them, Juno cannot automate tasks or
+                interact with your desktop.
               </p>
 
               <div className="space-y-3">
@@ -1794,7 +1948,9 @@ function SecuritySettings({
                     settings.permissionsState.accessibility,
                     "accessibility",
                     () => requestAccessibilityPermissionEnhanced(false),
-                    autoRedirectEnabled ? () => requestAccessibilityPermissionEnhanced(true) : undefined
+                    autoRedirectEnabled
+                      ? () => requestAccessibilityPermissionEnhanced(true)
+                      : undefined
                   )}
 
                 {/* Screen Recording Permission */}
@@ -1814,19 +1970,26 @@ function SecuritySettings({
                 <div className="space-y-4">
                   <div className="flex items-center space-x-2">
                     <Info className="h-5 w-5 text-yellow-600" />
-                    <h3 className="text-lg font-semibold text-yellow-800">Optional Permissions</h3>
-                    <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
+                    <h3 className="text-lg font-semibold text-yellow-800">
+                      Optional Permissions
+                    </h3>
+                    <Badge
+                      variant="secondary"
+                      className="bg-yellow-100 text-yellow-700"
+                    >
                       Enhances Experience
                     </Badge>
                   </div>
                   <p className="text-sm text-gray-600 mb-4">
-                    These permissions enhance Juno's functionality but are not required for basic operation.
-                    You can grant them now or enable them later.
+                    These permissions enhance Juno's functionality but are not
+                    required for basic operation. You can grant them now or
+                    enable them later.
                   </p>
 
                   <div className="space-y-3">
                     {/* Microphone Permission */}
-                    {settings.permissionsState.microphone && !settings.permissionsState.microphone.required &&
+                    {settings.permissionsState.microphone &&
+                      !settings.permissionsState.microphone.required &&
                       renderPermissionCard(
                         settings.permissionsState.microphone,
                         "microphone",
@@ -1844,9 +2007,12 @@ function SecuritySettings({
                   <div className="flex items-center space-x-3">
                     <CheckCircle className="h-6 w-6 text-green-600" />
                     <div>
-                      <span className="text-green-800 font-semibold text-lg">🎉 Setup Complete!</span>
+                      <span className="text-green-800 font-semibold text-lg">
+                        🎉 Setup Complete!
+                      </span>
                       <p className="text-green-700 text-sm mt-1">
-                        All permissions configured. Juno is ready for AI computer use.
+                        All permissions configured. Juno is ready for AI
+                        computer use.
                       </p>
                     </div>
                   </div>
@@ -1863,9 +2029,12 @@ function SecuritySettings({
               <div className="flex items-center space-x-3">
                 <AlertCircle className="h-6 w-6 text-red-600" />
                 <div>
-                  <span className="text-red-800 font-semibold">Failed to load permissions status</span>
+                  <span className="text-red-800 font-semibold">
+                    Failed to load permissions status
+                  </span>
                   <p className="text-red-700 text-sm mt-1">
-                    Unable to check current permission status. Please try refreshing.
+                    Unable to check current permission status. Please try
+                    refreshing.
                   </p>
                 </div>
               </div>
@@ -1938,7 +2107,8 @@ function ShortcutsSettings({
               Global Shortcuts
             </CardTitle>
             <CardDescription>
-              Configure keyboard shortcuts that work system-wide with interactive key capture
+              Configure keyboard shortcuts that work system-wide with
+              interactive key capture
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -2013,18 +2183,24 @@ function ShortcutsSettings({
 
             {/* Usage Tips */}
             <div className="bg-muted/50 p-4 rounded-lg">
-              <h5 className="text-sm font-medium mb-2">💡 Keyboard Shortcut Tips</h5>
+              <h5 className="text-sm font-medium mb-2">
+                💡 Keyboard Shortcut Tips
+              </h5>
               <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
                 <li>
-                  Click on the capture area and press your desired key combination
+                  Click on the capture area and press your desired key
+                  combination
                 </li>
                 <li>
-                  Use modifier keys like Alt, Cmd, Ctrl, Shift combined with letters
+                  Use modifier keys like Alt, Cmd, Ctrl, Shift combined with
+                  letters
                 </li>
                 <li>
                   Function keys (F1-F12) and special keys are also supported
                 </li>
-                <li>Real-time validation prevents conflicts with system shortcuts</li>
+                <li>
+                  Real-time validation prevents conflicts with system shortcuts
+                </li>
                 <li>Changes are applied immediately and saved automatically</li>
               </ul>
             </div>
