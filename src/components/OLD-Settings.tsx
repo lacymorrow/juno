@@ -1322,7 +1322,7 @@ const Settings: React.FC<SettingsProps> = ({
     <div className="space-y-6 p-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-2 mb-6">
         <SettingsIcon size={24} />
-        <h1 className="text-2xl font-bold">Settings</h1>
+        <h1 className="text-2xl font-bold">OLD Settings</h1>
       </div>
 
       {/* Voice & Audio Settings */}
