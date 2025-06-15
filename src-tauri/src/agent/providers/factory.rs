@@ -16,7 +16,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
 
 // Model ID Constants - Single source of truth
-mod model_ids {
+pub mod model_ids {
     // Anthropic Claude Models
     pub const CLAUDE_4_OPUS: &str = "claude-opus-4-20250514";
     pub const CLAUDE_4_SONNET: &str = "claude-sonnet-4-20250514";
@@ -38,6 +38,9 @@ mod model_ids {
     pub const GEMINI_PRO: &str = "gemini-pro";
     pub const GEMINI_PRO_VISION: &str = "gemini-pro-vision";
 }
+
+// Re-export model constants for backward compatibility
+pub use model_ids::*;
 
 /// Unified agent runtime - can be either single or multi-agent
 pub enum AgentRuntime {
