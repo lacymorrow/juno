@@ -2,7 +2,7 @@ pub mod elevenlabs;
 pub mod replicate;
 pub mod system;
 
-use tauri::State;
+use tauri::{State, AppHandle};
 use crate::state::AppState;
 use tracing::{info, warn, error};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,6 +52,24 @@ pub fn reset_tts_stop_flag() {
     TTS_STOP_REQUESTED.store(false, Ordering::SeqCst);
 }
 
+// Register escape key for TTS cancellation
+async fn register_tts_escape_key(app_handle: &AppHandle) {
+    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
+        warn!("Failed to register escape key for TTS: {} - TTS will still work but escape key may not stop it", e);
+    } else {
+        info!("[TTS] Registered escape key for TTS cancellation");
+    }
+}
+
+// Unregister escape key after TTS completion
+async fn unregister_tts_escape_key(app_handle: &AppHandle) {
+    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
+        warn!("Failed to unregister escape key after TTS: {} - continuing anyway", e);
+    } else {
+        info!("[TTS] Unregistered escape key after TTS completion");
+    }
+}
+
 // Tauri command to stop TTS from frontend
 #[tauri::command]
 pub async fn stop_tts() -> Result<(), String> {
@@ -82,11 +100,12 @@ pub async fn get_tts_provider_command(
     Ok(provider)
 }
 
-// Central TTS invocation function
+// Central TTS invocation function with escape key registration
 #[tauri::command]
 pub async fn invoke_tts(
     text: String,
     state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<String, String> {
     // Reset stop flag before starting new TTS
     reset_tts_stop_flag();
@@ -99,9 +118,18 @@ pub async fn invoke_tts(
         return Ok("TTS_DISABLED_BY_SETTING".to_string());
     }
 
+    // Register escape key for TTS cancellation
+    register_tts_escape_key(&app_handle).await;
+
     info!("Using TTS provider from state: {}", provider_from_state);
+    
     // Use fallback mechanism to try alternative providers if the primary fails
-    invoke_tts_with_fallback(text, &provider_from_state).await
+    let result = invoke_tts_with_fallback(text, &provider_from_state).await;
+    
+    // Unregister escape key after TTS completion (success or failure)
+    unregister_tts_escape_key(&app_handle).await;
+    
+    result
 }
 
 // Invoke TTS for a specific provider name
