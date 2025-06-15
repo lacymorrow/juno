@@ -36,7 +36,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DogIcon, Plus, Send, Square, Trash2 } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import ClickVisualizer from "./components/ClickVisualizer";
@@ -44,6 +44,7 @@ import CommandOverlay from "./components/CommandOverlay";
 import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import ToolApprovalModal from "./components/ToolApprovalModal";
+import { useVoice } from "@/contexts/VoiceContext";
 
 // Type for the result from submit_query
 type SubmitQueryResult = {
@@ -244,6 +245,9 @@ function App() {
   // Add missing view state variables
   const [currentView, setCurrentView] = useState<AppView>("chat");
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
+
+  // Add VoiceContext usage
+  const { voiceState, agentState, recentMessages } = useVoice();
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -849,53 +853,34 @@ function App() {
     }
   };
 
-  // Listen for transcription results from dictation
+  // React to voice state changes from VoiceContext instead of duplicate listeners
   useEffect(() => {
-    const unlisten = listen<{ query?: string | null; error?: string | null }>( // Define the expected payload structure
-      "app-dictation-finished",
-      (event) => {
-        // Listen for "app-dictation-finished"
-        console.log("Received app-dictation-finished event:", event.payload);
-        const transcribedText = event.payload?.query; // Extract text from payload.query
-        const error = event.payload?.error;
+    // Handle transcription text from VoiceContext
+    if (voiceState.transcriptionText && voiceState.transcriptionText.trim() !== "") {
+      console.log(
+        "Transcribed text from VoiceContext, automatically submitting to AI agent:",
+        voiceState.transcriptionText
+      );
+      submitQuery(voiceState.transcriptionText, true); // isFromDictation = true
+    }
+  }, [voiceState.transcriptionText, submitQuery]);
 
-        if (error) {
-          console.error("Dictation error:", error);
-          // Voice error sound is now played by the backend when transcription fails
-          // Optionally, display this error to the user in the chat or via a notification
-          setConversation((prev) => [
-            ...prev,
-            {
-              role: "system",
-              content: `Dictation failed: ${error}`,
-              timestamp: Date.now(),
-            },
-          ]);
-          return; // Stop further processing if there was an error
-        }
+  // React to voice errors from VoiceContext
+  useEffect(() => {
+    if (voiceState.error) {
+      console.error("Voice error from VoiceContext:", voiceState.error);
+      setConversation((prev) => [
+        ...prev,
+        {
+          role: "system",
+          content: `Voice error: ${voiceState.error}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  }, [voiceState.error]);
 
-        if (transcribedText && transcribedText.trim() !== "") {
-          // Only play sound for successful Agent Mode transcription (not Dictation Mode)
-          console.log(
-            "Transcribed text received, automatically submitting to AI agent:",
-            transcribedText
-          );
-          submitQuery(transcribedText, true); // isFromDictation = true
-        } else {
-          console.log(
-            "Received empty, whitespace-only, or null transcription, not submitting."
-          );
-          // Note: No need to play notification sound here - let backend handle feedback
-        }
-      }
-    );
-
-    return () => {
-      unlisten.then((unlistenFn) => unlistenFn());
-    };
-  }, [submitQuery, voiceSounds, sound]);
-
-  // Listen for dictation toggle requests
+  // Listen for dictation toggle requests (keep - not duplicate)
   useEffect(() => {
     const unlisten = listen("toggle-dictation-request", async () => {
       console.log("Received toggle-dictation-request event");
@@ -921,27 +906,6 @@ function App() {
       unlisten.then((unlistenFn) => unlistenFn());
     };
   }, [voiceSounds, sound]);
-
-  // Listen for agent-active events (hold mode)
-  useEffect(() => {
-    const unlisten = listen("agent-active", async (event) => {
-      const isActive = event.payload as boolean;
-      console.log("Received agent-active event:", isActive);
-
-      if (isActive) {
-        // Agent mode is activated - the transcription is already being handled
-        // by the agent monitor in hold mode, so we don't need to call toggleDictation()
-        console.log("Agent mode activated - transcription handled by backend");
-      } else {
-        // Agent mode ended
-        console.log("Agent mode deactivated");
-      }
-    });
-
-    return () => {
-      unlisten.then((unlistenFn) => unlistenFn());
-    };
-  }, []);
 
   // Check server status on mount
   useEffect(() => {
