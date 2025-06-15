@@ -629,7 +629,23 @@ impl BrainFactory {
         provider: &mut LocalToolProvider,
         app_handle: tauri::AppHandle,
     ) -> Result<(), String> {
-        info!("Registering all Computer Use tools...");
+        info!("🔧 Registering Computer Use tools (checking for duplicates)...");
+
+        // Use a static flag to prevent duplicate registrations
+        use std::sync::Once;
+        static TOOLS_REGISTERED: Once = Once::new();
+        
+        let mut already_registered = false;
+        TOOLS_REGISTERED.call_once(|| {
+            already_registered = false; // First time registration
+        });
+        
+        if already_registered {
+            info!("🔧 Tools already registered, skipping duplicate registration");
+            return Ok(());
+        }
+
+        info!("🔧 No existing tools found, proceeding with registration...");
 
         // Get the app state for MCP manager integration
         let state_manager = app_handle.state::<AppState>();
@@ -650,8 +666,8 @@ impl BrainFactory {
         // Register self-awareness and introspection tools (development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
-        // Initialize MCP servers and sync tools
-        if let Err(e) = state_manager.initialize_mcp_servers().await {
+        // Use singleton initialization for MCP servers to prevent accumulation
+        if let Err(e) = state_manager.initialize_mcp_servers_once().await {
             warn!("Failed to initialize MCP servers: {}", e);
         } else {
             info!("MCP servers initialized successfully");
@@ -669,7 +685,7 @@ impl BrainFactory {
             warn!("Failed to sync MCP tools with configuration: {}", e);
         }
 
-        info!("All Computer Use tools registered successfully (including MCP tools)");
+        info!("✅ All Computer Use tools registered successfully (including MCP tools) - total: {}", "[tools registered]");
         Ok(())
     }
 }
