@@ -403,7 +403,7 @@ pub async fn submit_query(
     // Clear spoken content from app state now that we've used it
     state.clear_last_spoken_content();
 
-    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone()).await {
+    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone(), app_handle.clone()).await {
         Ok(audio_result) => {
             if audio_result != "TTS_DISABLED_BY_SETTING" {
                 final_response.audio_base64 = Some(audio_result.clone());
@@ -815,9 +815,9 @@ pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String>
 // --- TTS Function ---
 
 #[tauri::command]
-pub async fn get_tts_audio(text: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn get_tts_audio(text: String, state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<String, String> {
     // Call the invoke_tts function with the text and state
-    crate::tts::invoke_tts(text, state).await
+    crate::tts::invoke_tts(text, state, app_handle).await
 }
 
 // --- Clear Conversation History ---
