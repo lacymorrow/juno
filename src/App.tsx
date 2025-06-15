@@ -37,14 +37,13 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DogIcon, Plus, Send, Square, Trash2 } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import ClickVisualizer from "./components/ClickVisualizer";
 import CommandOverlay from "./components/CommandOverlay";
 import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import ToolApprovalModal from "./components/ToolApprovalModal";
-import "./styles/globals.css";
 
 // Type for the result from submit_query
 type SubmitQueryResult = {
