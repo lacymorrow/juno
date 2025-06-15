@@ -81,6 +81,7 @@ struct GeminiGenerationConfig {
     response_mime_type: String,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
@@ -88,6 +89,7 @@ struct GeminiResponse {
     usage_metadata: Option<GeminiUsageMetadata>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct GeminiCandidate {
     content: GeminiContent,
@@ -96,6 +98,7 @@ struct GeminiCandidate {
     safety_ratings: Option<Vec<GeminiSafetyRating>>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct GeminiUsageMetadata {
     prompt_tokens: i32,
@@ -103,6 +106,7 @@ struct GeminiUsageMetadata {
     total_tokens: i32,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct GeminiSafetyRating {
     category: String,

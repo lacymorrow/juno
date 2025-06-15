@@ -21,7 +21,8 @@ use crate::agent::providers::config::AgentMode;
 use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
-use crate::constants::{agent_config, tool_names, events, anthropic_content_types, timeouts};
+use crate::constants::{agent_config, tool_names, timeouts};
+use crate::errors::AgentError;
 
 
 // --- Agent State ---
@@ -559,7 +560,7 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            
+
             // Execute the specialist agent task with proper error handling
             match execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx).await {
                 Ok(result) => Ok(result),
@@ -608,7 +609,7 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            
+
             // Execute the specialist agent task with proper error handling
             match execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx).await {
                 Ok(result) => Ok(result),
@@ -657,7 +658,7 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            
+
             // Execute the specialist agent task with proper error handling
             match execute_specialized_agent_task(provider, "file", input, handle, cancel_rx).await {
                 Ok(result) => Ok(result),
