@@ -23,7 +23,6 @@ use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::constants::{agent_config, tool_names, timeouts};
 
-
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
     #[serde(rename = "type")]

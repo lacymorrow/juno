@@ -465,14 +465,62 @@ impl MCPServerConnection {
 
     /// Disconnect from the MCP server
     pub async fn disconnect(&mut self) {
+        info!("🔌 Disconnecting from MCP server: {}", self.config.name);
+
+        // Try graceful termination first, then force kill if needed
         if let Some(mut process) = self.process.take() {
-            let _ = process.kill().await;
+            // First attempt: try to terminate gracefully
+            match process.kill().await {
+                Ok(_) => {
+                    info!("✅ MCP server '{}' terminated gracefully", self.config.name);
+                }
+                Err(e) => {
+                    warn!("Failed to terminate MCP server '{}' gracefully: {}", self.config.name, e);
+                    
+                    // Second attempt: Force kill with timeout
+                    let kill_future = async {
+                        process.kill().await
+                    };
+                    
+                    match tokio::time::timeout(Duration::from_secs(5), kill_future).await {
+                        Ok(Ok(_)) => {
+                            warn!("✅ MCP server '{}' force-killed successfully", self.config.name);
+                        }
+                        Ok(Err(e)) => {
+                            error!("❌ Failed to force-kill MCP server '{}': {}", self.config.name, e);
+                        }
+                        Err(_) => {
+                            error!("❌ Timeout while force-killing MCP server '{}'", self.config.name);
+                        }
+                    }
+                }
+            }
+            
+            // Wait for process to actually exit (with timeout)
+            let wait_future = async {
+                process.wait().await
+            };
+            
+            match tokio::time::timeout(Duration::from_secs(3), wait_future).await {
+                Ok(Ok(exit_status)) => {
+                    info!("MCP server '{}' exited with status: {}", self.config.name, exit_status);
+                }
+                Ok(Err(e)) => {
+                    warn!("Error waiting for MCP server '{}' to exit: {}", self.config.name, e);
+                }
+                Err(_) => {
+                    warn!("Timeout waiting for MCP server '{}' to exit", self.config.name);
+                }
+            }
         }
+        
+        // Clean up all resources
         self.stdin_writer = None;
         self.stdout_reader = None;
         self.stderr_reader = None;
         self.status = MCPServerStatus::Disconnected;
-        info!("Disconnected from MCP server: {}", self.config.name);
+        
+        info!("✅ MCP server '{}' disconnected and cleaned up", self.config.name);
     }
 
     fn next_request_id(&mut self) -> u64 {

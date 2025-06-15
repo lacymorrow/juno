@@ -877,7 +877,51 @@ impl AppState {
         Ok(())
     }
 
-
+    /// Cleanup all MCP servers and resources
+    pub async fn cleanup_mcp_resources(&self) -> Result<(), String> {
+        log::info!("🧹 Cleaning up MCP resources...");
+        
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        
+        // Stop all servers
+        let configs = manager_guard.get_server_configs().await;
+        for config in configs {
+            if let Err(e) = manager_guard.stop_server(&config.id).await {
+                log::warn!("Failed to stop MCP server '{}': {}", config.name, e);
+            }
+        }
+        
+        drop(manager_guard);
+        log::info!("✅ MCP resources cleaned up");
+        Ok(())
+    }
+    
+    /// Initialize MCP servers with deduplication
+    pub async fn initialize_mcp_servers_once(&self) -> Result<(), String> {
+        use std::sync::Once;
+        static INITIALIZED: Once = Once::new();
+        static mut INITIALIZATION_RESULT: Option<Result<(), String>> = None;
+        
+        unsafe {
+            INITIALIZED.call_once(|| {
+                // Use a blocking approach to ensure initialization completes
+                let rt = match tokio::runtime::Handle::try_current() {
+                    Ok(handle) => handle,
+                    Err(_) => {
+                        INITIALIZATION_RESULT = Some(Err("No tokio runtime available".to_string()));
+                        return;
+                    }
+                };
+                
+                INITIALIZATION_RESULT = Some(rt.block_on(async {
+                    self.initialize_mcp_servers().await
+                }));
+            });
+            
+            INITIALIZATION_RESULT.as_ref().unwrap().clone()
+        }
+    }
 
     // Dual content communication methods
 

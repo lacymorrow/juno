@@ -2569,6 +2569,31 @@ pub fn run() {
                 });
             });
 
+            // Listen for frontend reload events and cleanup resources (development mode)
+            #[cfg(debug_assertions)]
+            {
+                let app_handle_for_frontend_reload = app.handle().clone();
+                app.listen("frontend-reload", move |_event| {
+                    info!("🔄 Frontend reload detected - cleaning up resources...");
+                    
+                    let app_handle_clone = app_handle_for_frontend_reload.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // Cleanup MCP servers to prevent accumulation
+                        if let Some(state) = app_handle_clone.try_state::<crate::state::AppState>() {
+                            if let Err(e) = state.cleanup_mcp_resources().await {
+                                error!("Failed to cleanup MCP resources: {}", e);
+                            } else {
+                                info!("✅ MCP resources cleaned up successfully");
+                            }
+                        }
+                        
+                        info!("✅ Development cleanup completed");
+                    });
+                });
+                
+                info!("🛠️ Development mode cleanup handlers installed");
+            }
+
             Ok(())
         });
 
