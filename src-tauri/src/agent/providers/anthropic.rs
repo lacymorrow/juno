@@ -80,13 +80,14 @@ struct ApiTool {
 
 // Streaming event structures for parsing SSE events
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct StreamEvent {
     #[serde(rename = "type")]
     event_type: String,
-    // The actual event data will be in different structures depending on event type
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct MessageStartEvent {
     #[serde(rename = "type")]
     event_type: String, // "message_start"
@@ -94,6 +95,7 @@ struct MessageStartEvent {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct StreamMessage {
     id: String,
     #[serde(rename = "type")]
@@ -106,6 +108,7 @@ struct StreamMessage {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct ContentBlockStartEvent {
     #[serde(rename = "type")]
     event_type: String, // "content_block_start"
@@ -114,6 +117,7 @@ struct ContentBlockStartEvent {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct ContentBlockDeltaEvent {
     #[serde(rename = "type")]
     event_type: String, // "content_block_delta"
@@ -122,6 +126,7 @@ struct ContentBlockDeltaEvent {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct ContentDelta {
     #[serde(rename = "type")]
     delta_type: String, // "text_delta", "input_json_delta", etc.
@@ -132,6 +137,7 @@ struct ContentDelta {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct ContentBlockStopEvent {
     #[serde(rename = "type")]
     event_type: String, // "content_block_stop"
@@ -139,6 +145,7 @@ struct ContentBlockStopEvent {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct MessageDeltaEvent {
     #[serde(rename = "type")]
     event_type: String, // "message_delta"
@@ -147,12 +154,14 @@ struct MessageDeltaEvent {
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct MessageDelta {
     stop_reason: Option<String>,
     stop_sequence: Option<String>,
 }
 
 #[allow(dead_code)]
+#[derive(Deserialize, Debug)]
 struct MessageStopEvent {
     #[serde(rename = "type")]
     event_type: String, // "message_stop"
