@@ -1,8 +1,16 @@
 import { AgentExecutionProgressIndicator } from "@/components/AgentExecutionProgressIndicator";
 import { Button } from "@/components/ui/button";
 import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
+import { ModelSelector } from "@/components/ModelSelector";
+import { AgentModeSelector } from "@/components/AgentModeSelector";
+import { ProviderSelector } from "@/components/ProviderSelector";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, DogIcon, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import {
+  ArrowLeft,
+  DogIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 
 // Type for view state
 export type AppView = "chat" | "devtools" | "permissions";
@@ -25,9 +33,9 @@ export function AppHeader({
   onToggleDevPanel,
 }: AppHeaderProps) {
   return (
-    <header className="flex items-center justify-between py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1">
+    <header className="flex items-center justify-between py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 min-h-[40px]">
+      <div className="flex items-center gap-2 min-w-0 flex-1 max-w-fit">
+        <div className="flex items-center gap-1 flex-shrink-0">
           <DogIcon size={16} className="text-blue-500" />
           <span className="text-sm font-semibold">Juno AI</span>
           <div className="flex items-center gap-1">
@@ -51,20 +59,31 @@ export function AppHeader({
             )}
           </div>
         </div>
+
+        {/* AI Configuration Selectors - only show in chat view */}
+        {currentView === "chat" && (
+          <div className="hidden md:flex items-center gap-1 ml-2 border-l border-border pl-2 flex-shrink-0">
+            <ProviderSelector variant="compact" />
+            <div className="w-px h-4 bg-border" />
+            <ModelSelector variant="compact" />
+            <div className="w-px h-4 bg-border" />
+            <AgentModeSelector variant="compact" />
+          </div>
+        )}
       </div>
 
       {/* Voice Status Indicator - only show in chat view */}
       {currentView === "chat" && (
-        <div className="flex-1 flex justify-center mx-2">
+        <div className="flex-1 flex justify-center mx-2 min-w-0">
           <VoiceStatusIndicator
             variant="compact"
-            className="max-w-xs"
+            className="max-w-xs truncate"
             showText={false}
           />
         </div>
       )}
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 flex-shrink-0">
         {/* Back Button - show for devtools, permissions views */}
         {(currentView === "devtools" || currentView === "permissions") && (
           <Button
