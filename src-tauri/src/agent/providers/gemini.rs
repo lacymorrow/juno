@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
+use tracing;
 
 use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
@@ -224,11 +225,56 @@ impl GeminiBrain {
     }
 
     fn convert_tool_definitions(tools: &[ToolDefinition]) -> Vec<GeminiFunctionDeclaration> {
-        tools.iter().map(|tool| {
+        tools.iter().enumerate().map(|(index, tool)| {
+            // Debug logging to identify problematic tools
+            tracing::debug!("Converting tool {}: {} (index {})", tool.name, tool.description, index);
+
+            // Validate and potentially fix the input schema for Gemini API compatibility
+            let sanitized_schema = match &tool.input_schema {
+                Value::Object(map) => {
+                    let mut sanitized = map.clone();
+
+                    // Ensure the schema follows JSON Schema format expected by Gemini
+                    if !sanitized.contains_key("type") {
+                        sanitized.insert("type".to_string(), Value::String("object".to_string()));
+                    }
+
+                    // Ensure properties is an object, not an array
+                    if let Some(properties) = sanitized.get("properties") {
+                        if !properties.is_object() {
+                            tracing::warn!("Tool {} has invalid properties field (not an object), attempting to fix", tool.name);
+                            sanitized.insert("properties".to_string(), Value::Object(serde_json::Map::new()));
+                        }
+                    } else {
+                        sanitized.insert("properties".to_string(), Value::Object(serde_json::Map::new()));
+                    }
+
+                    // Ensure required is an array
+                    if let Some(required) = sanitized.get("required") {
+                        if !required.is_array() {
+                            tracing::warn!("Tool {} has invalid required field (not an array), attempting to fix", tool.name);
+                            sanitized.insert("required".to_string(), Value::Array(vec![]));
+                        }
+                    }
+
+                    Value::Object(sanitized)
+                }
+                _ => {
+                    tracing::warn!("Tool {} has invalid input_schema (not an object), using default", tool.name);
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    })
+                }
+            };
+
+            tracing::debug!("Sanitized schema for tool {}: {}", tool.name, sanitized_schema);
+
             GeminiFunctionDeclaration {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
-                parameters: tool.input_schema.clone(),
+                parameters: sanitized_schema,
             }
         }).collect()
     }

@@ -29,6 +29,56 @@ import { SettingsSectionProps } from "../types";
 export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [newServerJson, setNewServerJson] = useState("");
 
+  // JSON coercion function to fix common JSON issues
+  const coerceJson = (jsonStr: string): string => {
+    try {
+      // First try to parse as-is
+      JSON.parse(jsonStr);
+      return jsonStr;
+    } catch (error) {
+      // Try to fix common JSON issues
+      let fixed = jsonStr.trim();
+
+      // Remove comments
+      fixed = fixed.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+
+      // Fix unquoted keys
+      fixed = fixed.replace(
+        /([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$-]*)\s*:/g,
+        '$1"$2":'
+      );
+
+      // Fix single quotes to double quotes
+      fixed = fixed.replace(/'/g, '"');
+
+      // Remove trailing commas
+      fixed = fixed.replace(/,(\s*[}\]])/g, "$1");
+
+      // Try to complete incomplete JSON
+      if (!fixed.startsWith("{") && !fixed.startsWith("[")) {
+        fixed = "{" + fixed + "}";
+      }
+
+      // Fix missing braces/brackets
+      let openBraces = (fixed.match(/\{/g) || []).length;
+      let closeBraces = (fixed.match(/\}/g) || []).length;
+      while (openBraces > closeBraces) {
+        fixed += "}";
+        closeBraces++;
+      }
+
+      try {
+        JSON.parse(fixed);
+        toast.info("JSON format was automatically corrected", {
+          duration: 3000,
+        });
+        return fixed;
+      } catch (secondError) {
+        throw error; // Return original error
+      }
+    }
+  };
+
   const getMcpServerStatusBadge = (status: any) => {
     if (!status) {
       return <Badge variant="outline">Disconnected</Badge>;
@@ -69,19 +119,64 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleAddMcpServer = async () => {
     try {
-      const parsedEnvVars = JSON.parse(newServerJson);
+      const correctedJson = coerceJson(newServerJson);
+      const parsedConfig = JSON.parse(correctedJson);
+
+      // Update the textarea with corrected JSON if it was changed
+      if (correctedJson !== newServerJson) {
+        setNewServerJson(correctedJson);
+      }
+
+      // Support standard MCP format (Claude Desktop format) where server name is the key
+      // Example: { "mcp-server-firecrawl": { "command": "pnpm dlx", "args": ["firecrawl-mcp"], "env": { "FIRECRAWL_API_KEY": "..." } } }
+      const serverEntries = Object.entries(parsedConfig);
+
+      // Check if this is the standard format (server name as key)
+      if (
+        serverEntries.length === 1 &&
+        typeof serverEntries[0][1] === "object" &&
+        serverEntries[0][1] !== null &&
+        "command" in serverEntries[0][1]
+      ) {
+        const [serverName, serverConfig] = serverEntries[0];
+        const config = serverConfig as any;
+
+        const newServer = {
+          id: `mcp-${Date.now()}`,
+          name: serverName,
+          description: config.description || `MCP Server: ${serverName}`,
+          command: config.command || "",
+          args: config.args || [],
+          working_directory: config.working_directory || "",
+          environment_variables:
+            config.env || config.environment_variables || {},
+          enabled: true,
+          auto_start: config.auto_start || false,
+          timeout_seconds: config.timeout_seconds || 30,
+          max_retries: config.max_retries || 3,
+        };
+
+        await invoke("add_mcp_server", { config: newServer });
+        toast.success(`MCP server "${serverName}" added successfully`);
+        setNewServerJson("");
+        await settings.loadMcpServers();
+        return;
+      }
+
+      // Support legacy format (single server object)
       const newServer = {
         id: `mcp-${Date.now()}`,
-        name: parsedEnvVars.name || "Unnamed Server",
-        description: parsedEnvVars.description || "",
-        command: parsedEnvVars.command || "",
-        args: parsedEnvVars.args || [],
-        working_directory: parsedEnvVars.working_directory || "",
-        environment_variables: parsedEnvVars.environment_variables || {},
+        name: parsedConfig.name || "Unnamed Server",
+        description: parsedConfig.description || "",
+        command: parsedConfig.command || "",
+        args: parsedConfig.args || [],
+        working_directory: parsedConfig.working_directory || "",
+        environment_variables:
+          parsedConfig.env || parsedConfig.environment_variables || {},
         enabled: true,
-        auto_start: parsedEnvVars.auto_start || false,
-        timeout_seconds: parsedEnvVars.timeout_seconds || 30,
-        max_retries: parsedEnvVars.max_retries || 3,
+        auto_start: parsedConfig.auto_start || false,
+        timeout_seconds: parsedConfig.timeout_seconds || 30,
+        max_retries: parsedConfig.max_retries || 3,
       };
 
       await invoke("add_mcp_server", { config: newServer });
@@ -150,22 +245,21 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 value={newServerJson}
                 onChange={(e) => setNewServerJson(e.target.value)}
                 placeholder={`{
-  "name": "File System Server",
-  "description": "Access local file system",
-  "command": "npx",
-  "args": ["@modelcontextprotocol/server-filesystem", "/Users/username/Documents"],
-  "working_directory": "",
-  "environment_variables": {},
-  "auto_start": true,
-  "timeout_seconds": 30,
-  "max_retries": 3
+  "mcp-server-firecrawl": {
+    "command": "pnpm dlx",
+    "args": ["firecrawl-mcp"],
+    "env": {
+      "FIRECRAWL_API_KEY": "your-api-key-here"
+    }
+  }
 }`}
                 className="h-64 font-mono text-sm"
               />
               <div className="text-xs text-muted-foreground space-y-1">
-                <p>
-                  • <strong>name</strong>: Display name for the server
+                <p className="font-medium">
+                  Standard Format (Claude Desktop compatible):
                 </p>
+                <p>• Server name as JSON key (e.g. "mcp-server-firecrawl")</p>
                 <p>
                   • <strong>command</strong>: Executable command (required)
                 </p>
@@ -173,12 +267,15 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                   • <strong>args</strong>: Command arguments (array)
                 </p>
                 <p>
-                  • <strong>environment_variables</strong>: Environment
-                  variables (object)
+                  • <strong>env</strong>: Environment variables (object)
                 </p>
                 <p>
                   • <strong>auto_start</strong>: Start automatically on app
                   launch
+                </p>
+                <p className="pt-2 font-medium">
+                  Legacy format also supported with "name" field and
+                  "environment_variables"
                 </p>
               </div>
             </div>
