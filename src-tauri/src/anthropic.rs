@@ -688,7 +688,7 @@ async fn execute_specialized_agent_task(
     info!("Executing {} agent task: {}", agent_type, task);
 
     // Create a simple memory manager for the specialized agent
-    let mut specialist_memory = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+            let mut specialist_memory = crate::agent::implementations::memory_manager::AdvancedMemoryManager::new();
 
     // Clean up any orphaned tool calls that might exist from previous failed executions
     // This provides additional safety against conversation state issues

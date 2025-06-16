@@ -17,7 +17,7 @@ use tokio::sync::{watch, Mutex as TokioMutex}; // Added for keyboard shortcuts
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
 // Import the memory manager for persistent conversation state
-use crate::agent::implementations::memory_manager::SimpleMemoryManager;
+use crate::agent::implementations::memory_manager::AdvancedMemoryManager;
 // Import permissions types
 use crate::commands::permissions::PermissionsState;
 // Import tool configuration manager
@@ -148,7 +148,7 @@ pub struct AppState {
     // Persistent browser controller instance
     pub browser_controller: Arc<TokioMutex<Option<BrowserController>>>,
     // Persistent memory manager for conversation history
-    pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
+    pub memory_manager: Arc<TokioMutex<AdvancedMemoryManager>>,
     // Dynamic storage for other state components - Wrapped in Arc
     state_components: Arc<std::sync::Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
     pub tts_provider: Arc<Mutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
@@ -218,7 +218,7 @@ impl AppState {
             previous_content: Arc::new(std::sync::Mutex::new(None)),
             playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
-            memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
+            memory_manager: Arc::new(TokioMutex::new(AdvancedMemoryManager::new())), // Initialize persistent memory with advanced features
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tts_provider: Arc::new(Mutex::new({
                 #[cfg(debug_assertions)]
@@ -490,7 +490,7 @@ impl AppState {
     }
 
     // Method to get the persistent memory manager
-    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<SimpleMemoryManager>> {
+    pub async fn get_memory_manager(&self) -> Arc<TokioMutex<AdvancedMemoryManager>> {
         self.memory_manager.clone()
     }
 
@@ -880,10 +880,10 @@ impl AppState {
     /// Cleanup all MCP servers and resources
     pub async fn cleanup_mcp_resources(&self) -> Result<(), String> {
         log::info!("🧹 Cleaning up MCP resources...");
-        
+
         let mcp_manager = self.get_mcp_manager().await;
         let manager_guard = mcp_manager.lock().await;
-        
+
         // Stop all servers
         let configs = manager_guard.get_server_configs().await;
         for config in configs {
@@ -891,18 +891,18 @@ impl AppState {
                 log::warn!("Failed to stop MCP server '{}': {}", config.name, e);
             }
         }
-        
+
         drop(manager_guard);
         log::info!("✅ MCP resources cleaned up");
         Ok(())
     }
-    
+
     /// Initialize MCP servers with deduplication
     pub async fn initialize_mcp_servers_once(&self) -> Result<(), String> {
         use std::sync::Once;
         static INITIALIZED: Once = Once::new();
         static mut INITIALIZATION_RESULT: Option<Result<(), String>> = None;
-        
+
         unsafe {
             INITIALIZED.call_once(|| {
                 // Use a blocking approach to ensure initialization completes
@@ -913,12 +913,12 @@ impl AppState {
                         return;
                     }
                 };
-                
+
                 INITIALIZATION_RESULT = Some(rt.block_on(async {
                     self.initialize_mcp_servers().await
                 }));
             });
-            
+
             INITIALIZATION_RESULT.as_ref().unwrap().clone()
         }
     }
