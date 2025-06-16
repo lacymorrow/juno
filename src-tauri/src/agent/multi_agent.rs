@@ -130,7 +130,7 @@ impl MultiAgentOrchestrator {
         // Wrap the memory in a Mutex for thread-safe mutable access
         let wrapped_memory = Arc::new(tokio::sync::Mutex::new(
             // Create a new SimpleMemoryManager since we can't move out of Arc
-            crate::agent::implementations::memory_manager::SimpleMemoryManager::new()
+            crate::agent::implementations::memory_manager::AdvancedMemoryManager::new()
         ));
 
         Ok(Self {
