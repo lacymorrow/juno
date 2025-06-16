@@ -9,8 +9,6 @@ import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import "./styles/globals.css";
-import SettingsWindow from "./components/OLD-SettingsWindow";
-import Settings from "./components/OLD-Settings";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -18,7 +16,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<App />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/settings" element={<ModularSettingsWindow />} />
           <Route path="/floating-bar" element={<FloatingBar />} />
           <Route path="/floating-panel" element={<FloatingPanel />} />
           <Route path="/onboarding" element={<OnboardingWindow />} />

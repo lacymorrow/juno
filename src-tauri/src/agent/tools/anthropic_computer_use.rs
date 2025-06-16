@@ -23,22 +23,22 @@ async fn verify_input_focus_after_click(
 ) -> Result<bool, String> {
     // Wait a bit for the click to take effect
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    
+
     let max_attempts = timeout_ms / 50; // Check every 50ms
-    
+
     for attempt in 0..max_attempts {
         // Get the focused element
         match state_manager.desktop.focused_element() {
             Ok(focused_element) => {
                 let attrs = focused_element.attributes();
-                
+
                 // Check if this looks like a text input element
                 let is_text_input = attrs.role.contains("TextField") ||
                     attrs.role.contains("TextArea") ||
                     attrs.role.contains("ComboBox") ||
                     attrs.role.contains("SearchField") ||
                     attrs.properties.contains_key("AXValue");
-                
+
                 if is_text_input {
                     // Verify the element is actually focused
                     match focused_element.is_focused() {
@@ -62,12 +62,12 @@ async fn verify_input_focus_after_click(
                 warn!("Verification: Failed to get focused element: {}", e);
             }
         }
-        
+
         if attempt < max_attempts - 1 {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
     }
-    
+
     Ok(false) // Timeout reached without successful verification
 }
 
@@ -77,19 +77,19 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
     match state_manager.desktop.focused_element() {
         Ok(focused_element) => {
             let attrs = focused_element.attributes();
-            
+
             // Check if this is a text input element
             let is_text_input = attrs.role.contains("TextField") ||
                 attrs.role.contains("TextArea") ||
                 attrs.role.contains("ComboBox") ||
                 attrs.role.contains("SearchField") ||
                 attrs.properties.contains_key("AXValue");
-            
+
             if !is_text_input {
                 warn!("Verification: Currently focused element is not a text input (role: {})", attrs.role);
                 return Ok(false);
             }
-            
+
             // Verify the element is focused
             match focused_element.is_focused() {
                 Ok(true) => {
@@ -196,7 +196,7 @@ pub async fn register_anthropic_computer_use_tools(
                     "description": "Optional window ID to target specific window for screenshots and clicks. When provided, coordinates are relative to the window's top-left corner."
                 },
                 "use_focused_window": {
-                    "type": "boolean", 
+                    "type": "boolean",
                     "description": "When true, targets the currently focused window for screenshots and clicks. Coordinates are relative to the window's top-left corner.",
                     "default": false
                 }
@@ -223,8 +223,8 @@ pub async fn register_anthropic_computer_use_tools(
                         return Err(e.to_string());
                     }
                 }
-                "key" | "hold_key" | "type" | "left_click" | "right_click" | "middle_click" | 
-                "double_click" | "triple_click" | "left_click_drag" | "mouse_move" | 
+                "key" | "hold_key" | "type" | "left_click" | "right_click" | "middle_click" |
+                "double_click" | "triple_click" | "left_click_drag" | "mouse_move" |
                 "left_mouse_down" | "left_mouse_up" | "scroll" => {
                     // Mouse and keyboard actions require accessibility permissions
                     if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, &format!("computer/{}", action)).await {
@@ -340,8 +340,12 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                    // Transform coordinates from screenshot space to screen space
+                    let (x, y) = crate::utils::coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
                     let modifiers = input["text"].as_str(); // Optional modifier keys
                     let window_id = input["window_id"].as_str();
                     let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
@@ -378,7 +382,7 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
-                        // Use global coordinates (default behavior)
+                        // Use global coordinates (default behavior) - coordinates already transformed
                         state_manager.desktop.left_click(x, y, modifiers)
                     };
 
@@ -387,14 +391,14 @@ pub async fn register_anthropic_computer_use_tools(
                     // VERIFICATION: Check if clicking an input resulted in proper focus
                     match verify_input_focus_after_click(x, y, &state_manager, 500).await {
                         Ok(true) => {
-                            info!("Action verification: Click at ({}, {}) successful", x, y);
+                            info!("Action verification: Click at ({}, {}) successful [transformed from screenshot coords ({}, {})]", x, y, screenshot_x, screenshot_y);
                         }
                         Ok(false) => {
-                            warn!("Action verification: Click at ({}, {}) may not have achieved expected focus", x, y);
+                            warn!("Action verification: Click at ({}, {}) may not have achieved expected focus [transformed from screenshot coords ({}, {})]", x, y, screenshot_x, screenshot_y);
                             // Continue anyway - not all clicks need to result in focus
                         }
                         Err(e) => {
-                            warn!("Action verification: Failed to verify click at ({}, {}): {}", x, y, e);
+                            warn!("Action verification: Failed to verify click at ({}, {}): {} [transformed from screenshot coords ({}, {})]", x, y, e, screenshot_x, screenshot_y);
                             // Continue anyway - verification failure shouldn't block the action
                         }
                     }
@@ -408,8 +412,12 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                    // Transform coordinates from screenshot space to screen space
+                    let (x, y) = crate::utils::coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
                     let modifiers = input["text"].as_str(); // Optional modifier keys
                     let window_id = input["window_id"].as_str();
                     let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
@@ -444,10 +452,12 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
+                        // Use global coordinates - coordinates already transformed
                         state_manager.desktop.right_click(x, y, modifiers)
                     };
 
                     click_result.map_err(|e| format!("Right click failed: {}", e))?;
+                    info!("Right click at ({}, {}) completed [transformed from screenshot coords ({}, {})]", x, y, screenshot_x, screenshot_y);
                     Ok(json!({"success": true}))
                 },
                 "middle_click" => {
@@ -457,8 +467,12 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                    // Transform coordinates from screenshot space to screen space
+                    let (x, y) = crate::utils::coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
                     let modifiers = input["text"].as_str(); // Optional modifier keys
                     let window_id = input["window_id"].as_str();
                     let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
@@ -493,10 +507,12 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
+                        // Use global coordinates - coordinates already transformed
                         state_manager.desktop.middle_click(x, y, modifiers)
                     };
 
                     click_result.map_err(|e| format!("Middle click failed: {}", e))?;
+                    info!("Middle click at ({}, {}) completed [transformed from screenshot coords ({}, {})]", x, y, screenshot_x, screenshot_y);
                     Ok(json!({"success": true}))
                 },
                 "double_click" => {
@@ -506,8 +522,12 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                    // Transform coordinates from screenshot space to screen space
+                    let (x, y) = crate::utils::coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
                     let modifiers = input["text"].as_str(); // Optional modifier keys
                     let window_id = input["window_id"].as_str();
                     let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
@@ -542,26 +562,12 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
+                        // Use global coordinates - coordinates already transformed
                         state_manager.desktop.double_click(x, y, modifiers)
                     };
 
                     click_result.map_err(|e| format!("Double click failed: {}", e))?;
-
-                    // VERIFICATION: Check if double-clicking an input resulted in proper focus
-                    match verify_input_focus_after_click(x, y, &state_manager, 500).await {
-                        Ok(true) => {
-                            info!("Action verification: Double-click at ({}, {}) successful", x, y);
-                        }
-                        Ok(false) => {
-                            warn!("Action verification: Double-click at ({}, {}) may not have achieved expected focus", x, y);
-                            // Continue anyway - not all clicks need to result in focus
-                        }
-                        Err(e) => {
-                            warn!("Action verification: Failed to verify double-click at ({}, {}): {}", x, y, e);
-                            // Continue anyway - verification failure shouldn't block the action
-                        }
-                    }
-
+                    info!("Double click at ({}, {}) completed [transformed from screenshot coords ({}, {})]", x, y, screenshot_x, screenshot_y);
                     Ok(json!({"success": true}))
                 },
                 "triple_click" => {
@@ -571,8 +577,12 @@ pub async fn register_anthropic_computer_use_tools(
                     if coordinate.len() != 2 {
                         return Err("coordinate must be an array of [x, y]".to_string());
                     }
-                    let x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
-                    let y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+                    let screenshot_x = coordinate[0].as_f64().ok_or("Invalid x coordinate")?;
+                    let screenshot_y = coordinate[1].as_f64().ok_or("Invalid y coordinate")?;
+
+                    // Transform coordinates from screenshot space to screen space
+                    let (x, y) = crate::utils::coordinates::transform_to_screen_coordinates(screenshot_x, screenshot_y);
+
                     let modifiers = input["text"].as_str(); // Optional modifier keys
                     let window_id = input["window_id"].as_str();
                     let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
@@ -607,26 +617,12 @@ pub async fn register_anthropic_computer_use_tools(
                             })
                         })
                     } else {
+                        // Use global coordinates - coordinates already transformed
                         state_manager.desktop.triple_click(x, y, modifiers)
                     };
 
                     click_result.map_err(|e| format!("Triple click failed: {}", e))?;
-
-                    // VERIFICATION: Check if triple-clicking an input resulted in proper focus
-                    match verify_input_focus_after_click(x, y, &state_manager, 500).await {
-                        Ok(true) => {
-                            info!("Action verification: Triple-click at ({}, {}) successful", x, y);
-                        }
-                        Ok(false) => {
-                            warn!("Action verification: Triple-click at ({}, {}) may not have achieved expected focus", x, y);
-                            // Continue anyway - not all clicks need to result in focus
-                        }
-                        Err(e) => {
-                            warn!("Action verification: Failed to verify triple-click at ({}, {}): {}", x, y, e);
-                            // Continue anyway - verification failure shouldn't block the action
-                        }
-                    }
-
+                    info!("Triple click at ({}, {}) completed [transformed from screenshot coords ({}, {})]", x, y, screenshot_x, screenshot_y);
                     Ok(json!({"success": true}))
                 },
                 "left_click_drag" => {
@@ -693,7 +689,7 @@ pub async fn register_anthropic_computer_use_tools(
 
                     state_manager.desktop.type_text(text)
                         .map_err(|e| format!("Type text failed: {}", e))?;
-                    
+
                     info!("Action completed: Successfully typed {} characters", text.len());
                     Ok(json!({"success": true}))
                 },

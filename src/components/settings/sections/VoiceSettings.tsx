@@ -32,7 +32,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             <CardTitle>Text-to-Speech</CardTitle>
             <CardDescription>Configure voice output settings</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="tts-provider">TTS Provider</Label>
               <Select
@@ -50,6 +50,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
                 </SelectContent>
               </Select>
             </div>
+
           </CardContent>
         </Card>
 
@@ -78,6 +79,7 @@ export default function VoiceSettings({ settings }: SettingsSectionProps) {
             </div>
           </CardContent>
         </Card>
+
 
         <Card>
           <CardHeader>

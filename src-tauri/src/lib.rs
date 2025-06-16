@@ -721,6 +721,7 @@ pub fn run() {
             tts::stop_tts, // Added for stopping TTS via escape key
             commands::stop_operations::stop_all_operations, // Added for stop button functionality
             capture_screenshot_command,
+            debug_scaling_info,
             dev_get_focused_element_info,
             capture_element_screenshot_command,
             dev_click_focused_element,
@@ -2252,7 +2253,7 @@ pub fn run() {
                     match commands::always_listening::stop_always_listening_mode(app_handle_clone.clone(), app_state).await {
                         Ok(_) => {
                             info!("[AlwaysListening] Always listening stopped due to stop word");
-                            
+
                             // Emit notification to UI
                             if let Err(e) = app_handle_clone.emit("always-listening:stopped-by-command", ()) {
                                 error!("[AlwaysListening] Failed to emit stopped-by-command event: {}", e);
@@ -2274,11 +2275,11 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     // Wait a bit for the command to complete processing
                     tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
-                    
+
                     // Check if we should auto-stop always listening or return to wake word mode
                     // For now, we'll return to wake word mode to allow for follow-up commands
                     info!("[AlwaysListening] Returning to wake word detection mode after command processing");
-                    
+
                     // Emit event to return to wake word mode
                     if let Err(e) = app_handle_clone.emit("always-listening:return-to-wake-word", ()) {
                         error!("[AlwaysListening] Failed to emit return-to-wake-word event: {}", e);
@@ -2295,7 +2296,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     // Update floating bar to indicate wake word mode
                     commands::floating_bar::handle_always_listening_change(&app_handle_clone, false).await;
-                    
+
                     // The always listening system will automatically return to monitoring mode
                     // after processing the command, so we don't need to do anything else here
                 });
@@ -2633,7 +2634,7 @@ pub fn run() {
                 let app_handle_for_frontend_reload = app.handle().clone();
                 app.listen("frontend-reload", move |_event| {
                     info!("🔄 Frontend reload detected - cleaning up resources...");
-                    
+
                     let app_handle_clone = app_handle_for_frontend_reload.clone();
                     tauri::async_runtime::spawn(async move {
                         // Cleanup MCP servers to prevent accumulation
@@ -2644,11 +2645,11 @@ pub fn run() {
                                 info!("✅ MCP resources cleaned up successfully");
                             }
                         }
-                        
+
                         info!("✅ Development cleanup completed");
                     });
                 });
-                
+
                 info!("🛠️ Development mode cleanup handlers installed");
             }
 

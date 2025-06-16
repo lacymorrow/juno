@@ -1,10 +1,9 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
 use tauri::State;
-use tracing::info;
+use tracing::{info, warn};
 use crate::state::AppState;
 use tauri::AppHandle;
-use tracing::warn;
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use serde::{Deserialize, Serialize};
@@ -21,6 +20,15 @@ use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consist
 pub(crate) async fn capture_screenshot_command(app: AppHandle) -> Result<String, String> {
     match macos_utils::capture_and_encode_screenshot() {
         Ok(base64_string) => {
+            // Automatically detect and update scaling information
+            if let Err(e) = crate::utils::coordinates::detect_and_update_scaling_from_screenshot(&base64_string) {
+                warn!("Failed to detect screenshot scaling: {}", e);
+                // Try to set native resolution as fallback
+                if let Err(fallback_err) = crate::utils::coordinates::set_native_resolution_scaling() {
+                    warn!("Failed to set native resolution scaling fallback: {}", fallback_err);
+                }
+            }
+
             // Send notification on success
             send_dev_tool_notification(&app, "Screenshot", "Screenshot captured successfully.")?;
             Ok(base64_string)
@@ -200,6 +208,27 @@ pub(crate) async fn dev_set_clipboard(content: String, state: State<'_, AppState
     let desktop = state.get_desktop()?;
     desktop.set_clipboard_content(&content)
         .map_err(|e| format!("Error setting clipboard content: {}", e))
+}
+
+/// Debug command to check current screenshot scaling information
+#[tauri::command]
+pub(crate) async fn debug_scaling_info() -> Result<serde_json::Value, String> {
+    match crate::utils::coordinates::get_current_scaling_info() {
+        Ok(scaling) => {
+            info!("Current scaling info: {:?}", scaling);
+            Ok(serde_json::json!({
+                "original_width": scaling.original_width,
+                "original_height": scaling.original_height,
+                "scaled_width": scaling.scaled_width,
+                "scaled_height": scaling.scaled_height,
+                "scale_factor": scaling.scale_factor
+            }))
+        }
+        Err(e) => {
+            warn!("Failed to get scaling info: {}", e);
+            Err(e)
+        }
+    }
 }
 
 /// Get a list of available AI providers

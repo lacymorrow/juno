@@ -201,6 +201,7 @@ macro_rules! generate_invoke_handler {
             list_ai_providers,
             set_ai_provider,
             get_agent_execution_progress,
+            debug_scaling_info,
 
             // Always Listening Commands
             get_always_listening_status,

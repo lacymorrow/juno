@@ -3049,6 +3049,7 @@ dependencies = [
  "clap",
  "cocoa 0.25.0",
  "computer-use-ai-sdk",
+ "core-graphics 0.24.0",
  "cpal",
  "dirs 5.0.1",
  "dotenvy",

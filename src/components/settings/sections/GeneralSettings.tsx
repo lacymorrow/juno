@@ -191,6 +191,32 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Performance</CardTitle>
+            <CardDescription>
+              Configure performance monitoring and optimization
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="performance-monitoring" className="text-sm font-medium">
+                  Enable Performance Monitoring
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Monitor system performance and memory usage
+                </p>
+              </div>
+              <Switch
+                id="performance-monitoring"
+                checked={settings.performanceMonitoringEnabled}
+                onCheckedChange={settings.handlePerformanceMonitoringChange}
+              />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
