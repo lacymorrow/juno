@@ -8,8 +8,6 @@ use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::AgentBrain;
-use crate::agent::providers::factory::model_ids;
-use crate::constants::{api_endpoints, agent_config};
 
 // --- OpenAI API Structs --- //
 
@@ -88,10 +86,10 @@ struct OpenAIChoice {
 
 // --- OpenAIBrain Implementation --- //
 
-// Use centralized constants instead of local ones
-// const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";  // REMOVED - use centralized
-// const DEFAULT_MAX_TOKENS: u32 = 4096;  // REMOVED - use centralized
-// const DEFAULT_TEMPERATURE: f32 = 0.7;  // REMOVED - use centralized
+const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_MODEL: &str = "gpt-4o";
+const DEFAULT_MAX_TOKENS: u32 = 4096;
+const DEFAULT_TEMPERATURE: f32 = 0.7;
 
 #[derive(Clone)]
 pub struct OpenAIBrain {
@@ -112,9 +110,9 @@ impl OpenAIBrain {
         Ok(OpenAIBrain {
             client: Client::new(),
             api_key,
-            model: model.unwrap_or_else(|| model_ids::GPT_4O.to_string()),
-            max_tokens: max_tokens.unwrap_or(agent_config::DEFAULT_MAX_TOKENS_STANDARD),
-            temperature: temperature.unwrap_or(agent_config::DEFAULT_TEMPERATURE),
+            model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            max_tokens: max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+            temperature: temperature.unwrap_or(DEFAULT_TEMPERATURE),
         })
     }
 
@@ -225,7 +223,7 @@ impl AgentBrain for OpenAIBrain {
 
         // Make the API call to OpenAI
         let response = self.client
-            .post(api_endpoints::OPENAI_API_URL)
+            .post(OPENAI_API_URL)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&request)

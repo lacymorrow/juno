@@ -6,7 +6,6 @@ use std::io::ErrorKind;
 use tracing::{info, error, warn};
 use crate::agent::structs::AgentError;
 use crate::agent::prompts::PromptManager;
-use crate::agent::providers::factory::model_ids;
 
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -77,7 +76,7 @@ impl Default for ProviderConfig {
                 ProviderSettings {
                     id: "anthropic".to_string(),
                     api_key: None,
-                    model: Some(model_ids::CLAUDE_3_7_SONNET.to_string()),
+                    model: Some("claude-3-7-sonnet-20250219".to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
@@ -85,7 +84,7 @@ impl Default for ProviderConfig {
                 ProviderSettings {
                     id: "openai".to_string(),
                     api_key: None,
-                    model: Some(model_ids::GPT_4O.to_string()),
+                    model: Some("gpt-4o".to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
@@ -93,7 +92,7 @@ impl Default for ProviderConfig {
                 ProviderSettings {
                     id: "rig".to_string(),
                     api_key: None, // Rig uses OpenAI's API key by default
-                    model: Some(model_ids::GPT_4O.to_string()),
+                    model: Some("gpt-4o".to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,

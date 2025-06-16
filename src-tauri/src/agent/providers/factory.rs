@@ -16,7 +16,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
 
 // Model ID Constants - Single source of truth
-pub mod model_ids {
+mod model_ids {
     // Anthropic Claude Models
     pub const CLAUDE_4_OPUS: &str = "claude-opus-4-20250514";
     pub const CLAUDE_4_SONNET: &str = "claude-sonnet-4-20250514";
@@ -38,9 +38,6 @@ pub mod model_ids {
     pub const GEMINI_PRO: &str = "gemini-pro";
     pub const GEMINI_PRO_VISION: &str = "gemini-pro-vision";
 }
-
-// Re-export model constants for backward compatibility
-pub use model_ids::*;
 
 /// Unified agent runtime - can be either single or multi-agent
 pub enum AgentRuntime {
@@ -415,7 +412,7 @@ impl BrainFactory {
                 // Create memory manager - need to extract from Arc
                 // This is tricky because we need to move out of Arc
                 // For now, create a new one with same type
-                let memory_impl = crate::agent::implementations::memory_manager::AdvancedMemoryManager::new();
+                let memory_impl = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
 
                 let runner = DefaultAgentRunner::with_boxed_brain(
                     memory_impl,
@@ -637,12 +634,12 @@ impl BrainFactory {
         // Use a static flag to prevent duplicate registrations
         use std::sync::Once;
         static TOOLS_REGISTERED: Once = Once::new();
-
+        
         let mut already_registered = false;
         TOOLS_REGISTERED.call_once(|| {
             already_registered = false; // First time registration
         });
-
+        
         if already_registered {
             info!("🔧 Tools already registered, skipping duplicate registration");
             return Ok(());
