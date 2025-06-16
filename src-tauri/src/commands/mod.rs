@@ -3,7 +3,7 @@
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::state::AppState;
 use tauri::{State, Emitter, AppHandle, WebviewUrl, WebviewWindowBuilder, Manager};
-use tracing::warn;
+use tracing::{warn, info};
 
 // Declare the submodules
 pub mod registry;
@@ -209,5 +209,51 @@ pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
     if let Some(onboarding_window) = app.get_webview_window("onboarding") {
         onboarding_window.hide().map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// Open/recreate the main window
+#[tauri::command]
+pub async fn open_main_window(app: AppHandle) -> Result<(), String> {
+    // Check if main window already exists
+    if let Some(main_window) = app.get_webview_window("main") {
+        // If it exists, just show and focus it
+        main_window.show().map_err(|e| e.to_string())?;
+        main_window.set_focus().map_err(|e| e.to_string())?;
+        main_window.unminimize().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Create new main window if it doesn't exist (recreate after being closed)
+    let main_window = WebviewWindowBuilder::new(
+        &app,
+        "main",
+        WebviewUrl::App("/".into()),
+    )
+    .title("Juno")
+    .inner_size(800.0, 600.0)
+    .resizable(true)
+    .visible(false) // Start hidden, show after setup
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    // Apply macOS-specific styling
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::TitleBarStyle;
+
+        // Set transparent title bar for native look
+        if let Err(e) = main_window.set_title_bar_style(TitleBarStyle::Transparent) {
+            warn!("Failed to set title bar style: {}", e);
+        }
+    }
+
+    // Show and focus the window
+    main_window.show().map_err(|e| e.to_string())?;
+    main_window.set_focus().map_err(|e| e.to_string())?;
+    main_window.unminimize().map_err(|e| e.to_string())?;
+
+    info!("Main window successfully opened/recreated");
+
     Ok(())
 }

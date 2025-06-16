@@ -146,9 +146,9 @@ impl GeminiBrain {
     }
 
     pub fn from_env() -> Result<Self, AgentError> {
-        let api_key = env::var("GOOGLE_GEMINI_API_KEY")
+        let api_key = env::var("GEMINI_API_KEY")
             .map_err(|_| AgentError::ConfigurationError(
-                "GOOGLE_GEMINI_API_KEY environment variable not set".to_string()
+                "GEMINI_API_KEY environment variable not set".to_string()
             ))?;
 
         let model = env::var("GEMINI_MODEL").ok();
