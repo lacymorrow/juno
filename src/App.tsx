@@ -1,3 +1,17 @@
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+} from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
+import { toast } from "sonner";
+import { toggleDictation } from "tauri-plugin-voice-transcription-api";
+
 import { AppHeader, type AppView } from "@/components/AppHeader";
 import {
   ChatMessageComponent,
@@ -31,14 +45,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
 import { notificationService } from "@/lib/notifications";
 import { setCurrentAudioElement, stopTTS } from "@/lib/ttsService";
-import { getVersion } from "@tauri-apps/api/app";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DogIcon, Plus, Send, Square, Trash2 } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { toast } from "sonner";
-import { toggleDictation } from "tauri-plugin-voice-transcription-api";
 import ClickVisualizer from "./components/ClickVisualizer";
 import CommandOverlay from "./components/CommandOverlay";
 import { FloatingBar } from "./components/FloatingBar";
@@ -247,7 +254,10 @@ function App() {
   const [isDevPanelOpen, setIsDevPanelOpen] = useState(false);
 
   // Add VoiceContext usage
-  const { voiceState, agentState, recentMessages } = useVoice();
+  const { voiceState } = useVoice();
+
+  // Note: Conversation pruning is now handled automatically by the backend AdvancedMemoryManager
+  // No need for frontend pruning logic
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -432,7 +442,7 @@ function App() {
       // Reset processing state (but streaming end event also does this)
       setIsProcessing(false);
     }, 100), // Debounce for 100ms
-    [] // Remove conversation dependency to avoid stale closure issues
+    [setConversation] // Update dependency
   );
 
   // Submit query using Tauri invoke (primarily for the main input)
@@ -473,6 +483,7 @@ function App() {
             role: "system",
             content:
               "Cannot submit query: Server is not connected. Please wait or check connection.",
+            timestamp: Date.now(),
           },
         ]);
         return;
@@ -528,17 +539,17 @@ function App() {
   // Function to start a new chat (clear conversation and reset state)
   const startNewChat = useCallback(() => {
     console.log("Starting new chat - clearing conversation");
-    setConversation([]);
+    setConversation([]); // Keep this as direct clear
     setQuery("");
     setIsProcessing(false);
-  }, [setConversation, setQuery, setIsProcessing]);
+  }, [setQuery, setIsProcessing]);
 
   // Function to clear conversation history
   const clearConversation = useCallback(() => {
     console.log("Clearing conversation history");
-    setConversation([]);
+    setConversation([]); // Keep this as direct clear
     setIsProcessing(false);
-  }, [setConversation, setIsProcessing]);
+  }, [setIsProcessing]);
 
   // Listen for onboarding completion events from the onboarding window
   useEffect(() => {
@@ -1515,7 +1526,7 @@ function App() {
         setTimeout(() => setCopyingMessageId(null), 1000);
       }
     },
-    []
+    [setConversation]
   );
 
   const handleSaveResponse = useCallback(
@@ -1558,7 +1569,7 @@ function App() {
         setTimeout(() => setSavingMessageId(null), 1000);
       }
     },
-    []
+    [setConversation]
   );
 
   // Enhanced agent event listener for dynamic tool notifications

@@ -415,7 +415,7 @@ impl BrainFactory {
                 // Create memory manager - need to extract from Arc
                 // This is tricky because we need to move out of Arc
                 // For now, create a new one with same type
-                let memory_impl = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+                let memory_impl = crate::agent::implementations::memory_manager::AdvancedMemoryManager::new();
 
                 let runner = DefaultAgentRunner::with_boxed_brain(
                     memory_impl,
@@ -637,12 +637,12 @@ impl BrainFactory {
         // Use a static flag to prevent duplicate registrations
         use std::sync::Once;
         static TOOLS_REGISTERED: Once = Once::new();
-        
+
         let mut already_registered = false;
         TOOLS_REGISTERED.call_once(|| {
             already_registered = false; // First time registration
         });
-        
+
         if already_registered {
             info!("🔧 Tools already registered, skipping duplicate registration");
             return Ok(());
