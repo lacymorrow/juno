@@ -42,6 +42,22 @@ export default function SecuritySettings({ settings }: SettingsSectionProps) {
               }}
             />
 
+            {/* Additional Settings Navigation */}
+            <div className="pt-4 border-t">
+              <Button
+                onClick={() => {
+                  // For now, this would open the full permissions setup
+                  // We can integrate this with onNavigateToPermissions later if needed
+                  console.log("Open full permissions setup");
+                }}
+                size="sm"
+                variant="outline"
+                className="w-full"
+              >
+                <Shield className="h-4 w-4 mr-1" />
+                Open Full Permissions Setup
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

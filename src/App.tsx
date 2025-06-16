@@ -52,6 +52,7 @@ import { FloatingBar } from "./components/FloatingBar";
 import KeyPressOverlay from "./components/KeyPressOverlay";
 import ToolApprovalModal from "./components/ToolApprovalModal";
 import { useVoice } from "@/contexts/VoiceContext";
+import { LIMITS } from "@/lib/constants";
 
 // Type for the result from submit_query
 type SubmitQueryResult = {
@@ -256,8 +257,44 @@ function App() {
   // Add VoiceContext usage
   const { voiceState } = useVoice();
 
-  // Note: Conversation pruning is now handled automatically by the backend AdvancedMemoryManager
-  // No need for frontend pruning logic
+  // Conversation pruning function with memory optimization
+  const pruneConversationIfNeeded = useCallback((messages: ChatMessage[]): ChatMessage[] => {
+    const maxMessages = LIMITS.MAX_CHAT_HISTORY_ITEMS;
+    const minMessagesToKeep = Math.max(50, maxMessages * 0.3); // Keep at least 30% of limit
+    
+    if (messages.length <= maxMessages) {
+      return messages;
+    }
+
+    console.log(`Pruning conversation: ${messages.length} -> ${minMessagesToKeep} messages`);
+    
+    // Always keep the most recent messages, but try to preserve message pairs
+    const messagesToKeep = Math.floor(minMessagesToKeep);
+    const prunedMessages = messages.slice(-messagesToKeep);
+    
+    // Add a system message indicating pruning occurred
+    const pruningNotice: ChatMessage = {
+      role: "system",
+      content: `[Conversation pruned - keeping last ${messagesToKeep} messages for performance]`,
+      timestamp: Date.now(),
+    };
+    
+    return [pruningNotice, ...prunedMessages];
+  }, []);
+
+  // Enhanced setConversation wrapper with automatic pruning
+  const setConversationWithPruning = useCallback((
+    updateFn: React.SetStateAction<ChatMessage[]>
+  ) => {
+    setConversation(prevConversation => {
+      const newConversation = typeof updateFn === 'function' 
+        ? updateFn(prevConversation) 
+        : updateFn;
+      
+      // Apply pruning if needed
+      return pruneConversationIfNeeded(newConversation);
+    });
+  }, [pruneConversationIfNeeded]);
 
   // Fetch app version dynamically
   useEffect(() => {
@@ -387,7 +424,7 @@ function App() {
       const { response } = payload; // Remove query from destructuring since we won't use it
 
       // Check if we have any streaming assistant messages in progress or recently completed
-      setConversation((prevConversation) => {
+      setConversationWithPruning((prevConversation) => {
         const hasStreamingMessage = prevConversation.some(
           (msg: ChatMessage) => msg.isStreaming && msg.role === "assistant"
         );
@@ -442,7 +479,7 @@ function App() {
       // Reset processing state (but streaming end event also does this)
       setIsProcessing(false);
     }, 100), // Debounce for 100ms
-    [setConversation] // Update dependency
+    [setConversationWithPruning] // Update dependency
   );
 
   // Submit query using Tauri invoke (primarily for the main input)
@@ -477,7 +514,7 @@ function App() {
         console.log(
           "[submitQuery] Returning early: server not connected (and not from dictation)."
         );
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -506,7 +543,7 @@ function App() {
         content: text,
         timestamp: Date.now(),
       };
-      setConversation((prev) => [...prev, userMessage]);
+      setConversationWithPruning((prev) => [...prev, userMessage]);
 
       // Store the query before clearing it, for potential error recovery
       setQuery(""); // Clear input immediately IF it was from the manual input field
@@ -524,7 +561,7 @@ function App() {
           content: `Error invoking submit_query: ${error}`,
           timestamp: Date.now(),
         };
-        setConversation((prev) => [...prev, errorMessage]);
+        setConversationWithPruning((prev) => [...prev, errorMessage]);
         setIsProcessing(false); // Reset processing on error
 
         // Restore the input so user can retry
@@ -533,7 +570,7 @@ function App() {
       }
       // No finally block to set isProcessing(false) here, as the event listener handles it on success.
     },
-    [isProcessing, serverStatus, setConversation, setQuery, setIsProcessing]
+    [isProcessing, serverStatus, setConversationWithPruning, setQuery, setIsProcessing]
   );
 
   // Function to start a new chat (clear conversation and reset state)
@@ -739,7 +776,7 @@ function App() {
         console.log("✅ Window minimized successfully");
       } catch (error) {
         console.error("❌ Failed to minimize window:", error);
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -764,7 +801,7 @@ function App() {
         }
       } catch (error) {
         console.error("❌ Failed to toggle window zoom:", error);
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -790,7 +827,7 @@ function App() {
           );
         } catch (error) {
           console.error("❌ Failed to toggle fullscreen:", error);
-          setConversation((prev) => [
+          setConversationWithPruning((prev) => [
             ...prev,
             {
               role: "system",
@@ -839,7 +876,7 @@ function App() {
         console.log("✅ Update available:", updateInfo);
       } else {
         // Show "no updates" message in chat
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -851,7 +888,7 @@ function App() {
       }
     } catch (error) {
       console.error("❌ Failed to check for updates:", error);
-      setConversation((prev) => [
+      setConversationWithPruning((prev) => [
         ...prev,
         {
           role: "system",
@@ -880,7 +917,7 @@ function App() {
   useEffect(() => {
     if (voiceState.error) {
       console.error("Voice error from VoiceContext:", voiceState.error);
-      setConversation((prev) => [
+      setConversationWithPruning((prev) => [
         ...prev,
         {
           role: "system",
@@ -903,7 +940,7 @@ function App() {
       } catch (error) {
         console.error("Failed to toggle dictation:", error);
         // Error sound for failed toggle is now played by the backend
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -925,7 +962,7 @@ function App() {
         const isConnected: boolean = await invoke("check_server_status");
         if (isConnected) {
           setServerStatus("connected");
-          setConversation([
+          setConversationWithPruning([
             {
               role: "system",
               content: "Connected. Enter your query below.",
@@ -933,7 +970,7 @@ function App() {
           ]);
         } else {
           setServerStatus("error");
-          setConversation([
+          setConversationWithPruning([
             {
               role: "system",
               content: "Failed to connect to backend. Please check logs.",
@@ -942,7 +979,7 @@ function App() {
         }
       } catch (error) {
         setServerStatus("error");
-        setConversation([
+        setConversationWithPruning([
           {
             role: "system",
             content: `Error connecting to backend: ${error}. Check console logs.`,
@@ -1101,7 +1138,7 @@ function App() {
       // NOTE: Toast notifications are now handled by the enhanced listener below
       // This listener only manages conversation state
 
-      setConversation((prev) => {
+      setConversationWithPruning((prev) => {
         let newMessage: ChatMessage | null = null;
 
         if (type === "thinking" && "content" in payload) {
@@ -1255,7 +1292,7 @@ function App() {
           messageId: message_id,
         };
 
-        setConversation((prev) => [...prev, streamingMessage]);
+        setConversationWithPruning((prev) => [...prev, streamingMessage]);
       }
     );
 
@@ -1266,7 +1303,7 @@ function App() {
         const { chunk, message_id } = event.payload;
 
         // Update the streaming message with the new chunk
-        setConversation((prev) =>
+        setConversationWithPruning((prev) =>
           prev.map((msg) => {
             if (msg.messageId === message_id && msg.isStreaming) {
               return {
@@ -1290,7 +1327,7 @@ function App() {
         const { message_id, complete_text } = event.payload;
 
         // Finalize the streaming message
-        setConversation((prev) =>
+        setConversationWithPruning((prev) =>
           prev.map((msg) => {
             if (msg.messageId === message_id && msg.isStreaming) {
               return {
@@ -1503,7 +1540,7 @@ function App() {
       try {
         await navigator.clipboard.writeText(content);
         console.log("✅ Copied to clipboard successfully");
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -1513,7 +1550,7 @@ function App() {
         ]);
       } catch (error) {
         console.error("❌ Failed to copy to clipboard:", error);
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -1526,7 +1563,7 @@ function App() {
         setTimeout(() => setCopyingMessageId(null), 1000);
       }
     },
-    [setConversation]
+    [setConversationWithPruning]
   );
 
   const handleSaveResponse = useCallback(
@@ -1546,7 +1583,7 @@ function App() {
           suggested_filename: `agent_response_${Date.now()}`,
         });
         console.log(`✅ Response saved to: ${filePath}`);
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -1556,7 +1593,7 @@ function App() {
         ]);
       } catch (error) {
         console.error(`❌ Failed to save response as ${format}:`, error);
-        setConversation((prev) => [
+        setConversationWithPruning((prev) => [
           ...prev,
           {
             role: "system",
@@ -1569,7 +1606,7 @@ function App() {
         setTimeout(() => setSavingMessageId(null), 1000);
       }
     },
-    [setConversation]
+    [setConversationWithPruning]
   );
 
   // Enhanced agent event listener for dynamic tool notifications
@@ -1778,7 +1815,7 @@ function App() {
           content: `Agent ${agent_state.toLowerCase()}: ${error_message}`,
           timestamp: Date.now(),
         };
-        setConversation((prev) => [...prev, errorMessage]);
+        setConversationWithPruning((prev) => [...prev, errorMessage]);
       }
     });
 
