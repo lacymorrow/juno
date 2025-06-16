@@ -466,7 +466,7 @@ impl BrainFactory {
                 Provider::Anthropic => env::var("ANTHROPIC_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
                 Provider::OpenAI => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
                 Provider::Rig => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings("openai")).and_then(|s| s.api_key.as_ref()).is_some() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
-                Provider::Gemini => env::var("GOOGLE_GEMINI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
+                Provider::Gemini => env::var("GEMINI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
             };
             ProviderInfo {
                 id: provider_id.to_string(),
@@ -634,12 +634,12 @@ impl BrainFactory {
         // Use a static flag to prevent duplicate registrations
         use std::sync::Once;
         static TOOLS_REGISTERED: Once = Once::new();
-        
+
         let mut already_registered = false;
         TOOLS_REGISTERED.call_once(|| {
             already_registered = false; // First time registration
         });
-        
+
         if already_registered {
             info!("🔧 Tools already registered, skipping duplicate registration");
             return Ok(());
