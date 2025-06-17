@@ -995,6 +995,11 @@ pub fn run() {
             commands::open_onboarding_window,
             commands::close_onboarding_window,
             // Onboarding Commands
+            commands::check_onboarding_status,
+            commands::complete_onboarding,
+            commands::skip_onboarding,
+            commands::reset_onboarding,
+            commands::get_onboarding_info,
 
 
             // Debug Mode Commands
@@ -1077,6 +1082,16 @@ pub fn run() {
                     if let Err(e) = app_state.retry_failed_mcp_servers().await {
                         tracing::debug!("MCP retry check failed: {}", e);
                     }
+                }
+            });
+
+            // --- Initialize Onboarding System ---
+            let onboarding_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = commands::onboarding::initialize_onboarding_system(onboarding_app_handle).await {
+                    tracing::warn!("Failed to initialize onboarding system: {}", e);
+                } else {
+                    tracing::info!("Onboarding system initialized successfully");
                 }
             });
 
