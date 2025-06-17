@@ -199,7 +199,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             info!("[Menu] Settings menu item clicked");
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
                     error!("[Menu] Failed to open settings window: {}", e);
                 }
             });
@@ -256,30 +256,18 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
                 error!("[Menu] Failed to emit permissions event: {}", e);
             }
         }
-        constants::app_menu_ids::TOGGLE_FULLSCREEN => {
-            info!("[Menu] Toggle Fullscreen menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::TOGGLE_FULLSCREEN_REQUESTED, ()) {
-                error!("[Menu] Failed to emit toggle fullscreen event: {}", e);
-            }
-        }
 
-        // Window Menu
-        constants::app_menu_ids::MINIMIZE => {
-            info!("[Menu] Minimize menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::MINIMIZE_WINDOW_REQUESTED, ()) {
-                error!("[Menu] Failed to emit minimize event: {}", e);
-            }
-        }
-        constants::app_menu_ids::ZOOM => {
-            info!("[Menu] Zoom menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::ZOOM_WINDOW_REQUESTED, ()) {
-                error!("[Menu] Failed to emit zoom event: {}", e);
-            }
-        }
-        constants::app_menu_ids::BRING_ALL_TO_FRONT => {
-            info!("[Menu] Bring All to Front menu item clicked");
-            // This is handled automatically by macOS for most cases
-            info!("[Menu] Bring All to Front executed");
+
+        // Window Menu - handled by window management module
+        constants::app_menu_ids::MINIMIZE |
+        constants::app_menu_ids::ZOOM |
+        constants::app_menu_ids::BRING_ALL_TO_FRONT |
+        constants::app_menu_ids::TOGGLE_FULLSCREEN => {
+            let app_handle_clone = app_handle.clone();
+            let event_id_owned = event_id.to_string(); // Convert to owned String
+            tauri::async_runtime::spawn(async move {
+                crate::window_management::handle_window_menu_event(&app_handle_clone, &event_id_owned).await;
+            });
         }
 
         // Help Menu
@@ -320,7 +308,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
             info!("[Menu] Received tray menu settings ID, redirecting to settings");
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
                     error!("[Menu] Failed to open settings window: {}", e);
                 }
             });

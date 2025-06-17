@@ -135,7 +135,7 @@ pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), S
         info!("Onboarding not completed, opening onboarding window");
 
         // Open the onboarding window
-        if let Err(e) = crate::commands::open_onboarding_window(app_handle.clone()).await {
+        if let Err(e) = crate::window_management::open_onboarding_window(app_handle.clone()).await {
             warn!("Failed to open onboarding window: {}", e);
             return Err(format!("Failed to open onboarding window: {}", e));
         }
