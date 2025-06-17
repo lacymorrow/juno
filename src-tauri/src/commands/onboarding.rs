@@ -1,4 +1,4 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
 use serde_json::Value;
@@ -75,19 +75,53 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
 pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, String> {
     let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
 
-    // Get all onboarding information
     let completed = store.get("completed").unwrap_or(Value::Bool(false));
-    let skipped = store.get("skipped").unwrap_or(Value::Bool(false));
-    let completed_at = store.get("completed_at").unwrap_or(Value::Null);
+    let skip_count = store.get("skip_count").unwrap_or(Value::Number(0.into()));
+    let completed_at = store.get("completed_at");
 
-    let info = serde_json::json!({
+    // Get current keyboard shortcuts for the onboarding display
+    let app_state = app.state::<crate::state::AppState>();
+    let shortcuts = app_state.keyboard_shortcuts.lock()
+        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?
+        .clone();
+
+    Ok(serde_json::json!({
         "completed": completed,
-        "skipped": skipped,
+        "skip_count": skip_count,
         "completed_at": completed_at,
-        "needs_onboarding": !matches!(completed, Value::Bool(true))
-    });
+        "shortcuts": {
+            "agent_mode_toggle": shortcuts.agent_mode_toggle,
+            "dictation_input": shortcuts.dictation_input
+        }
+    }))
+}
 
-    Ok(info)
+/// Test if global shortcuts are working during onboarding
+#[tauri::command]
+pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, String> {
+    // Check if we have Input Monitoring permissions first
+    #[cfg(target_os = "macos")]
+    {
+        let has_permissions = crate::commands::shortcuts::check_input_monitoring_permissions()
+            .unwrap_or(false);
+
+        if !has_permissions {
+            info!("Input Monitoring permissions not granted - shortcuts won't work");
+            return Ok(false);
+        }
+    }
+
+    // Check if global shortcuts are registered
+    let app_state = app.state::<crate::state::AppState>();
+    let shortcuts = app_state.keyboard_shortcuts.lock()
+        .map_err(|e| format!("Failed to get keyboard shortcuts: {}", e))?
+        .clone();
+
+    // Attempt to parse the shortcuts to see if they're valid
+    let agent_shortcut_valid = crate::events::shortcuts::parse_shortcut_string(&shortcuts.agent_mode_toggle).is_some();
+    let dictation_shortcut_valid = crate::events::shortcuts::parse_shortcut_string(&shortcuts.dictation_input).is_some();
+
+    Ok(agent_shortcut_valid && dictation_shortcut_valid)
 }
 
 /// Initialize the onboarding system and check if onboarding should be shown
