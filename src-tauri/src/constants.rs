@@ -65,7 +65,7 @@ pub mod events {
     pub const DICTATION_TRANSCRIPTION_CANCEL: &str = "dictation-transcription-cancel";
     pub const DICTATION_TRANSCRIPTION_FORCE_STOP: &str = "dictation-transcription-force-stop";
     pub const DICTATION_TRANSCRIPTION_FORCE_CLEANUP: &str = "dictation-transcription-force-cleanup";
-    pub const DICTATION_EMERGENCY_CLEANUP: &str = "dictation-emergency-cleanup";
+
 
     // TTS Events
     pub const TTS_AUDIO_READY: &str = "tts-audio-ready";
@@ -389,7 +389,7 @@ pub mod timeouts {
     pub const PARTIAL_BUFFER_DURATION_MS: u64 = 1500;
     pub const FINAL_BUFFER_DURATION_MS: u64 = 5000;
     pub const MIN_AUDIO_LENGTH_MS: u64 = 500;
-    pub const EMERGENCY_TIMEOUT_MS: u64 = 1000;
+
 
     // Network and Browser Timeouts
     pub const DEFAULT_NAVIGATION_TIMEOUT_MS: u64 = 30_000;
