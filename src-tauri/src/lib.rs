@@ -290,7 +290,6 @@ use crate::commands::mcp::{
     restart_mcp_server_with_diagnostics,
     troubleshoot_mcp_issues,
     apply_mcp_quick_fixes,
-    retry_failed_mcp_servers,
 };
 
 // Added for selector parsing
@@ -966,7 +965,6 @@ pub fn run() {
             restart_mcp_server_with_diagnostics,
             troubleshoot_mcp_issues,
             apply_mcp_quick_fixes,
-            retry_failed_mcp_servers,
             // Always Listening Commands
             start_always_listening_mode,
             stop_always_listening_mode,
@@ -1067,6 +1065,7 @@ pub fn run() {
                 }
             });
 
+<<<<<<< HEAD
             // --- Start MCP Error Recovery Background Task ---
             let retry_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
@@ -1082,6 +1081,8 @@ pub fn run() {
                 }
             });
 
+=======
+>>>>>>> 41b2a1ba739f11a897b33c9af0d185871eb8272e
             // --- Setup Application Menu ---
             // Juno Application Menu
             let about_menu_item = tauri::menu::MenuItemBuilder::new("About Juno")
