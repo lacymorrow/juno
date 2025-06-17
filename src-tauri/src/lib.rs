@@ -34,6 +34,7 @@ pub mod events; // Event handling system for shortcuts and voice transcription
 pub mod window_management; // Window operations, state management, and positioning
 pub mod startup; // Application startup, initialization, and bootstrapping
 pub mod state_management; // Application state management, initialization, and monitoring
+pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 
 // Tray icon data is now handled by the menu::tray_menu module
 
@@ -965,7 +966,7 @@ pub fn run() {
                                                 info!("[AlwaysListening] Agent query submitted successfully");
                                             }
                                             Err(e) => {
-                                                error!("[AlwaysListening] Failed to submit agent query: {}", e);
+                                                error_handling::utils::log_and_emit_error(&app_handle_clone, "AlwaysListening", "agent_query_submission", &e.to_string(), true);
                                             }
                                         }
                                     } else {
@@ -1077,14 +1078,11 @@ pub fn run() {
                                     }
                                 }
                                 Err(e) => {
-                                    error!("[Agent Mode] Failed to start agent transcription: {}", e);
+                                    // Use centralized error handling for agent transcription errors
+                                    error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to start agent transcription: {}", e)).await;
 
                                     // Reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
-
-                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event after failure: {}", e);
-                                    }
                                 }
                             }
                         }
@@ -1293,18 +1291,8 @@ pub fn run() {
                         error!("[Agent Stop All] Emergency cleanup failed: {}", e);
                     }
 
-                    // Force stop voice transcription if available
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await;
-                        }
-                        None => {
-                            warn!("[Agent Stop All] Voice controller not available");
-                        }
-                    }
+                    // Force stop voice transcription using centralized error handling
+                    error_handling::utils::handle_voice_error(&app_handle_clone, "Emergency stop requested").await;
 
                     info!("[Agent Stop All] Comprehensive agent shutdown completed");
                 });
@@ -1344,19 +1332,8 @@ pub fn run() {
             info!("Tauri application exited successfully");
         }
         Err(e) => {
-            error!("Error while running tauri application: {}", e);
-            // Log the error but don't panic - this allows for graceful handling of permission issues
-            eprintln!("Juno failed to start properly. This is often due to missing system permissions.");
-            eprintln!("Please ensure you have granted the following permissions:");
-            eprintln!("- Accessibility (System Settings > Privacy & Security > Accessibility)");
-            eprintln!("- Screen Recording (System Settings > Privacy & Security > Screen Recording)");
-            eprintln!("- Microphone (System Settings > Privacy & Security > Microphone)");
-            eprintln!("");
-            eprintln!("If permissions are already granted, try restarting the app.");
-            eprintln!("Error details: {}", e);
-
-            // Exit with error code but don't panic
-            std::process::exit(1);
+            // Use centralized error handling for application startup errors
+            error_handling::handle_application_startup_error(e);
         }
     }
 }
