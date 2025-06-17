@@ -37,6 +37,9 @@ pub async fn add_mcp_server(
     // Sync tools
     state.sync_mcp_tools().await?;
 
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
+
     Ok(())
 }
 
@@ -66,12 +69,16 @@ pub async fn remove_mcp_server(
     // Save configuration
     state.save_tool_config(&app_handle).await?;
 
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
+
     Ok(())
 }
 
 /// Start an MCP server
 #[tauri::command]
 pub async fn start_mcp_server(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<(), String> {
@@ -85,12 +92,16 @@ pub async fn start_mcp_server(
     drop(manager_guard);
     state.sync_mcp_tools().await?;
 
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
+
     Ok(())
 }
 
 /// Stop an MCP server
 #[tauri::command]
 pub async fn stop_mcp_server(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<(), String> {
@@ -99,6 +110,10 @@ pub async fn stop_mcp_server(
     let mcp_manager = state.get_mcp_manager().await;
     let manager_guard = mcp_manager.lock().await;
     manager_guard.stop_server(&server_id).await?;
+    drop(manager_guard);
+
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
 
     Ok(())
 }
@@ -180,14 +195,20 @@ pub async fn set_mcp_server_enabled(
 
     // Start or stop the server based on enabled status
     if enabled {
-        if let Err(e) = start_mcp_server(state.clone(), server_id).await {
+        if let Err(e) = start_mcp_server(app_handle.clone(), state.clone(), server_id.clone()).await {
             error!("Failed to start MCP server: {}", e);
         }
     } else {
-        if let Err(e) = stop_mcp_server(state, server_id).await {
+        if let Err(e) = stop_mcp_server(app_handle.clone(), state.clone(), server_id).await {
             error!("Failed to stop MCP server: {}", e);
         }
     }
+
+    // The start/stop functions will emit their own updates, but emit one more to be sure
+    // This handles cases where the start/stop might fail but we still want to update the UI
+    state.emit_mcp_state_update(&app_handle).await.unwrap_or_else(|e| {
+        warn!("Failed to emit final MCP state update: {}", e);
+    });
 
     Ok(())
 }

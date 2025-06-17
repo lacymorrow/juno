@@ -1011,6 +1011,19 @@ pub fn run() {
                 }
             });
 
+            // --- Initialize MCP Servers from Configuration ---
+            let mcp_app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let app_state = mcp_app_handle.state::<state::AppState>();
+                tracing::info!("Initializing MCP servers from configuration...");
+                if let Err(e) = app_state.initialize_mcp_servers().await {
+                    tracing::warn!("Failed to initialize MCP servers: {}", e);
+                    tracing::info!("MCP servers can be configured and started via Settings");
+                } else {
+                    tracing::info!("Successfully initialized MCP servers");
+                }
+            });
+
             // --- Setup Application Menu ---
             // Juno Application Menu
             let about_menu_item = tauri::menu::MenuItemBuilder::new("About Juno")
@@ -1481,42 +1494,17 @@ pub fn run() {
                             }
                         }
                     })
-                    .on_tray_icon_event(|tray, event| {
+                    .on_tray_icon_event(|_tray, event| {
                         if let TrayIconEvent::Click {
                             button: MouseButton::Left,
                             button_state: MouseButtonState::Up,
                             ..
                         } = event
                         {
-                            println!("[Tray Icon] Left click detected.");
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                                match window.is_visible() {
-                                    Ok(true) => {
-                                        window.hide().unwrap();
-                                        if let Err(e) = window.set_ignore_cursor_events(true) {
-                                            eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                                        }
-                                        println!("[Tray Icon] Floating bar hidden and ignoring clicks.");
-                                    },
-                                    Ok(false) => {
-                                        if let Err(e) = window.set_ignore_cursor_events(false) {
-                                            eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                                        }
-                                        window.show().unwrap();
-                                        window.set_focus().unwrap();
-                                        println!("[Tray Icon] Floating bar shown, focused, and accepting clicks.");
-                                    },
-                                    Err(e) => eprintln!("[Tray Icon Error] checking floating bar visibility: {}", e),
-                                }
-                                // Update tray menu after state change
-                                let app_clone = app.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    update_tray_menu(&app_clone).await;
-                                });
-                            } else {
-                                 eprintln!("[Tray Icon Error] Floating bar window not found on left click.");
-                            }
+                            println!("[Tray Icon] Left click detected - showing menu only.");
+                            // Note: The tray menu will automatically show on left click.
+                            // We no longer toggle the floating bar on tray icon clicks.
+                            // Users can use the menu items to control the floating bar instead.
                         }
                     });
 

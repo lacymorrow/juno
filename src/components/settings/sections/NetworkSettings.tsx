@@ -159,7 +159,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
         await invoke("add_mcp_server", { config: newServer });
         toast.success(`MCP server "${serverName}" added successfully`);
         setNewServerJson("");
-        await settings.loadMcpServers();
+        // Backend will emit mcp_state_updated event automatically
         return;
       }
 
@@ -182,7 +182,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
       await invoke("add_mcp_server", { config: newServer });
       toast.success("MCP server added successfully");
       setNewServerJson("");
-      await settings.loadMcpServers();
+      // Backend will emit mcp_state_updated event automatically
     } catch (error) {
       console.error("Error adding MCP server:", error);
       if (error instanceof SyntaxError) {
@@ -196,8 +196,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const handleToggleServer = async (serverId: string, enabled: boolean) => {
     try {
       await invoke("toggle_mcp_server", { serverId, enabled });
-      await settings.loadMcpServers();
       toast.success(`Server ${enabled ? "enabled" : "disabled"}`);
+      // Backend will emit mcp_state_updated event automatically
     } catch (error) {
       console.error("Failed to toggle server:", error);
       toast.error("Failed to toggle server");
@@ -211,8 +211,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
   ) => {
     try {
       await invoke("toggle_mcp_tool", { serverId, toolName, enabled });
-      await settings.loadMcpServers();
       toast.success(`Tool ${toolName} ${enabled ? "enabled" : "disabled"}`);
+      // Backend will emit mcp_state_updated event automatically
     } catch (error) {
       console.error("Failed to toggle tool:", error);
       toast.error("Failed to toggle tool");
