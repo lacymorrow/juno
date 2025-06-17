@@ -1,20 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Import necessary external crates and standard library items
-use clap::Parser;
-use computer_use_ai_sdk::Desktop;
 use std::env;
 use std::sync::Arc;
 use tauri::{
-    Builder, App, AppHandle, Listener, Emitter, Manager, State,
+    AppHandle, Listener, Emitter, Manager,
     menu::{PredefinedMenuItem, SubmenuBuilder}, // Menu creation for app
-    async_runtime,
 };
 use tauri_plugin_global_shortcut::{Shortcut, Code, Modifiers as ShortcutModifiers}; // Global shortcuts
-use tauri_plugin_voice_transcription::{controller::VoiceController};
 use tracing::{info, error, warn};
 use std::sync::Mutex; // Added for VoiceController state access
-use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
@@ -38,6 +33,7 @@ pub mod menu; // Menu management for app and tray menus
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod events; // Event handling system for shortcuts and voice transcription
 pub mod window_management; // Window operations, state management, and positioning
+pub mod startup; // Application startup, initialization, and bootstrapping
 
 // Tray icon data is now handled by the menu::tray_menu module
 
@@ -294,54 +290,7 @@ use commands::cloud::{
     execute_remote_command, get_cloud_connection_diagnostics,
 };
 
-/// Enhanced environment variable loading for both development and production builds
-fn load_environment_variables() {
-    // Try to load from current directory first (development)
-    match dotenvy::dotenv() {
-        Ok(path) => {
-            info!("Loaded environment variables from: {:?}", path);
-        }
-        Err(_) => {
-            // Try to load from common production locations
-            let mut potential_paths = vec![
-                std::path::PathBuf::from("./.env"),
-                std::path::PathBuf::from("../.env"),
-                std::path::PathBuf::from("../../.env"),
-            ];
-
-            // Add executable directory if available
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(parent) = exe.parent() {
-                    potential_paths.push(parent.join(".env"));
-                }
-            }
-
-            let mut loaded = false;
-            for path in potential_paths.iter() {
-                if path.exists() {
-                    match dotenvy::from_path(path) {
-                        Ok(_) => {
-                            info!("Loaded environment variables from: {:?}", path);
-                            loaded = true;
-                            break;
-                        }
-                        Err(e) => {
-                            warn!("Failed to load .env from {:?}: {}", path, e);
-                        }
-                    }
-                }
-            }
-
-            if !loaded {
-                warn!("No .env file found in any expected location");
-                info!("Environment variables will be loaded from system environment");
-            }
-        }
-    }
-
-    // Validate critical environment variables
-    validate_environment_variables();
-}
+// Environment loading functions moved to startup module
 
 /// Load environment variables from bundled .env file in production
 #[tauri::command]
@@ -355,7 +304,7 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
                 match dotenvy::from_path(&bundled_env_path) {
                     Ok(_) => {
                         info!("Successfully loaded environment variables from bundled .env file: {:?}", bundled_env_path);
-                        validate_environment_variables();
+                        startup::validate_environment_variables();
                         Ok(format!("Environment variables loaded from: {:?}", bundled_env_path))
                     }
                     Err(e) => {
@@ -378,37 +327,7 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
     }
 }
 
-/// Helper function to try getting app handle in early initialization
-fn try_get_app_handle() -> Option<AppHandle> {
-    // This will be None during early initialization, which is expected
-    None
-}
-
-/// Validate that critical environment variables are available
-fn validate_environment_variables() {
-    let critical_vars = [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "ELEVENLABS_API_KEY",
-        "GEMINI_API_KEY",
-    ];
-
-    let mut missing_vars = Vec::new();
-
-    for var in critical_vars.iter() {
-        if env::var(var).is_err() {
-            missing_vars.push(*var);
-        }
-    }
-
-    if !missing_vars.is_empty() {
-        warn!("Missing environment variables: {:?}", missing_vars);
-        warn!("Some AI provider features may not work without proper API keys");
-        info!("You can set these in a .env file or as system environment variables");
-    } else {
-        info!("All critical environment variables are available");
-    }
-}
+// Environment validation functions moved to startup module
 
 /// Test environment variable loading (for debugging)
 #[tauri::command]
@@ -446,89 +365,14 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize enhanced tracing with Slack/Apple Messages style formatting
-    fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
-        .with_target(false) // Hide target module names for cleaner output
-        .with_thread_ids(false) // Hide thread IDs for cleaner output
-        .with_ansi(true) // Enable colors for better readability
-        .compact() // Use compact format instead of full
-        .init();
-
-    // Enhanced environment loading for both development and production
-    load_environment_variables();
-
-    let cli = cli::Cli::parse();
-
-    // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
-    let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, false);
-    let desktop_instance = match desktop_instance_result {
-        Ok(instance) => {
-            tracing::info!("Desktop Automation Engine initialized successfully with auto-redirect disabled");
-            Some(instance)
-        },
-        Err(e) => {
-            tracing::warn!("Failed to initialize Desktop Automation Engine: {}", e);
-            tracing::info!("App will start with limited functionality - desktop automation features will be disabled");
-            tracing::info!("The app will still open and show the permission flow to guide you through setup");
-
-            // Check if this is specifically a permission error
-            let error_str = e.to_string();
-            if error_str.contains("permission") || error_str.contains("accessibility") || error_str.contains("denied") {
-                tracing::info!("Permission-related error detected - the app's permission flow will guide you through setup");
-                tracing::info!("System Settings may have opened automatically to grant permissions");
-            } else {
-                tracing::warn!("Unexpected Desktop initialization error: {}", e);
-            }
-            None
+    // --- Execute Startup Sequence ---
+    let (desktop_arc, app_state) = match startup::StartupSequence::run() {
+        Ok((desktop_arc, app_state)) => (desktop_arc, app_state),
+        Err(_) => {
+            // CLI command was executed, exit early
+            return;
         }
     };
-
-    // --- Initialize Provider Settings ---
-    if let Err(e) = agent::providers::factory::BrainFactory::init() {
-        tracing::warn!("Failed to initialize AI provider settings: {}", e);
-        tracing::info!("Continuing with environment variables or fallback defaults");
-    } else {
-        tracing::info!("Provider settings initialized from configuration");
-    }
-
-    // --- Handle CLI Commands ---
-    // If handle_cli_commands returns true, it means a command was executed
-    // and the application should exit.
-    if let Some(desktop_ref) = desktop_instance.as_ref() {
-        if cli::runner::handle_cli_commands(&cli, desktop_ref) {
-            return; // Exit early if a CLI command was handled
-        }
-    } else {
-        // Handle CLI commands without desktop instance - create minimal instance for CLI only
-        // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
-        match Desktop::new(false, false) {
-            Ok(minimal_desktop) => {
-                if cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
-                    return;
-                }
-            },
-            Err(_) => {
-                // If CLI commands require desktop and can't create minimal instance,
-                // only handle non-desktop CLI commands
-                if cli::runner::handle_non_desktop_cli_commands(&cli) {
-                    return;
-                }
-            }
-        }
-    }
-
-    // --- Proceed with Tauri Application Launch if no CLI command was run ---
-    println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
-
-    // Create desktop_arc only if we have a valid instance
-    let desktop_arc = desktop_instance.map(|instance| Arc::new(instance));
-
-    // Create the AppState with optional desktop instance
-    let app_state = state::AppState::new(desktop_arc);
-
-    // Initialize shell state
-    commands::shell::init_shell_state(&app_state);
 
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
