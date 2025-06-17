@@ -21,17 +21,7 @@ const TRAY_ICON_DATA: &[u8] = include_bytes!("../../icons/32x32.png");
 
 /// Get current window states for tray menu display
 async fn get_window_states(app_handle: &AppHandle) -> (bool, bool) {
-    let main_visible = app_handle
-        .get_webview_window(constants::window_labels::MAIN)
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-
-    let floating_bar_visible = app_handle
-        .get_webview_window(constants::window_labels::FLOATING_BAR)
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-
-    (main_visible, floating_bar_visible)
+    crate::window_management::get_window_states(app_handle).await
 }
 
 /// Create a state-aware tray menu with window status indicators
@@ -122,7 +112,7 @@ fn handle_tray_menu_event(app_handle: &AppHandle, event_id: &str) {
             info!("[Tray Menu] Show main window requested.");
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::open_main_window(app_handle_clone.clone()).await {
+                if let Err(e) = crate::window_management::open_main_window(app_handle_clone.clone()).await {
                     error!("[Tray Menu] Failed to open main window: {}", e);
                 } else {
                     // Update tray menu after successful window creation/show
@@ -220,7 +210,7 @@ fn handle_tray_menu_event(app_handle: &AppHandle, event_id: &str) {
             info!("[Tray Menu] Settings menu item clicked");
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
                     error!("[Tray Menu] Failed to open settings window: {}", e);
                 }
             });
@@ -230,7 +220,7 @@ fn handle_tray_menu_event(app_handle: &AppHandle, event_id: &str) {
             info!("[Tray Menu] Received app menu settings ID, redirecting to settings");
             let app_handle_clone = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
                     error!("[Tray Menu] Failed to open settings window: {}", e);
                 }
             });
