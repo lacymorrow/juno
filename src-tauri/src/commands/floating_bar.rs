@@ -571,8 +571,12 @@ impl FloatingBarManager {
         debug!("FloatingBarManager: Handling agent cancelled");
         self.is_agent_working = false;
         self.voice_mode = "idle".to_string();
+        self.is_dictation_mode = false; // Also reset dictation mode
         // Clear any transcription text and return to default
         self.transcription_text.clear();
+        self.input_value.clear(); // Clear any input value
+        self.last_submitted_value.clear(); // Clear submitted value
+        self.current_error = None; // Clear any errors
         self.set_state(BarState::Default).await;
         Ok(())
     }
