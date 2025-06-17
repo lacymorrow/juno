@@ -113,4 +113,4 @@ pub async fn test_system_context(state: State<'_, AppState>) -> Result<String, S
     }
 }
 
-// Window management functions moved to window_management module
+

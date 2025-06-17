@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ChevronRight,
   Sparkles,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 const permissions = [
   {
@@ -87,22 +88,22 @@ function KeyboardShortcut({
   onShortcutPressed: () => void;
   shortcutString?: string;
 }) {
-  const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
   const [isComplete, setIsComplete] = useState(false);
+  const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
 
-  // Parse the shortcut string (e.g., "Option+D" or "CommandOrControl+J")
   const parseShortcut = (shortcut: string) => {
-    if (!shortcut) return { modifiers: [], key: "" };
-
-    const parts = shortcut.toLowerCase().split("+");
-    const key = parts[parts.length - 1];
+    const parts = shortcut.split("+").map((part) => part.trim().toLowerCase());
     const modifiers = parts.slice(0, -1);
-
+    const key = parts[parts.length - 1];
     return { modifiers, key };
   };
 
-  const { modifiers, key } = parseShortcut(shortcutString || "Option+D");
+  const shortcut = shortcutString
+    ? parseShortcut(shortcutString)
+    : { modifiers: ["option"], key: "d" };
+  const { modifiers, key } = shortcut;
 
+  // Listen for both frontend key events and backend shortcut detection
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const newPressedKeys = new Set(pressedKeys);
@@ -141,7 +142,7 @@ function KeyboardShortcut({
 
       setPressedKeys(newPressedKeys);
 
-      // Check if correct combination is pressed
+      // Check if correct combination is pressed (frontend detection)
       const modifierPressed = modifiers.every((mod) => {
         switch (mod) {
           case "option":
@@ -183,12 +184,46 @@ function KeyboardShortcut({
       setPressedKeys(newPressedKeys);
     };
 
+    // Listen for backend shortcut detection events
+    const setupBackendListener = async () => {
+      try {
+        const unlisten = await listen("shortcut-agent-mode", (event: any) => {
+          if (event.payload?.state === "pressed") {
+            // Backend detected the shortcut, trigger visual feedback and completion
+            setIsComplete(true);
+            // Simulate the visual feedback by temporarily setting all keys as pressed
+            const allShortcutKeys = new Set([...modifiers, key]);
+            setPressedKeys(allShortcutKeys);
+
+            setTimeout(() => {
+              onShortcutPressed();
+            }, 800);
+
+            // Clear the visual feedback after a short delay
+            setTimeout(() => {
+              setPressedKeys(new Set());
+            }, 1200);
+          }
+        });
+
+        return unlisten;
+      } catch (error) {
+        console.warn("Failed to setup backend shortcut listener:", error);
+        return null;
+      }
+    };
+
+    const backendListenerPromise = setupBackendListener();
+
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
+      if (backendListenerPromise) {
+        backendListenerPromise.then((unlisten: any) => unlisten());
+      }
     };
   }, [pressedKeys, onShortcutPressed, modifiers, key]);
 
@@ -337,70 +372,59 @@ export default function OnboardingFlow({
   permissionsAlreadyGranted = false,
 }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(0);
-  const [isComplete, setIsComplete] = useState(false);
+  const [shortcutPressed, setShortcutPressed] = useState(false);
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
   const [currentPermission, setCurrentPermission] = useState(0);
   const [grantedPermissions, setGrantedPermissions] = useState<string[]>([]);
-  const [shortcutPressed, setShortcutPressed] = useState(false);
-  const [realPermissionsGranted, setRealPermissionsGranted] = useState(
-    permissionsAlreadyGranted
-  );
-  const [keyboardShortcuts, setKeyboardShortcuts] = useState<{
-    agent_mode_toggle: string;
-    dictation_input: string;
-    stop_current_task: string;
-    open_settings: string;
-  } | null>(null);
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
+  const [isComplete, setIsComplete] = useState(false);
+  const [backendShortcutsWorking, setBackendShortcutsWorking] = useState(false);
 
-  const onboardingSteps = getOnboardingSteps(realPermissionsGranted);
-
-  // Check current permission status and keyboard shortcuts on mount
   useEffect(() => {
     const loadInitialData = async () => {
       try {
-        // Load permissions
-        const permissionsState = await invoke<{
-          accessibility: { granted: boolean; required: boolean };
-          screenRecording: { granted: boolean; required: boolean };
-          microphone: { granted: boolean; required: boolean };
-          allGranted: boolean;
-        }>("check_permissions_status");
+        // Load onboarding info and shortcuts
+        const onboardingInfo = await invoke("get_onboarding_info");
+        if (
+          onboardingInfo &&
+          typeof onboardingInfo === "object" &&
+          "shortcuts" in onboardingInfo
+        ) {
+          setKeyboardShortcuts((onboardingInfo as any).shortcuts);
+        }
 
-        setRealPermissionsGranted(permissionsState.allGranted);
+        // Test if backend shortcuts are working
+        const shortcutsWorking = await invoke<boolean>(
+          "test_global_shortcuts_working"
+        );
+        setBackendShortcutsWorking(shortcutsWorking);
 
-        // Update granted permissions list
-        const granted: string[] = [];
-        if (permissionsState.accessibility.granted)
-          granted.push("accessibility");
-        if (permissionsState.screenRecording.granted)
-          granted.push("screen-recording");
-        if (permissionsState.microphone.granted)
-          granted.push("input-monitoring");
-        setGrantedPermissions(granted);
-
-        // Load keyboard shortcuts
-        const shortcuts = await invoke<{
-          agent_mode_toggle: string;
-          dictation_input: string;
-          stop_current_task: string;
-          open_settings: string;
-        }>("get_keyboard_shortcuts");
-        setKeyboardShortcuts(shortcuts);
+        // Load keyboard shortcuts as fallback
+        try {
+          const shortcuts = await invoke("get_keyboard_shortcuts");
+          if (!keyboardShortcuts) {
+            setKeyboardShortcuts(shortcuts);
+          }
+        } catch (error) {
+          console.warn("Failed to load keyboard shortcuts:", error);
+        }
       } catch (error) {
-        console.error("Failed to load initial data:", error);
+        console.error("Failed to load onboarding data:", error);
       }
     };
 
     loadInitialData();
   }, []);
 
+  const onboardingSteps = getOnboardingSteps(permissionsAlreadyGranted);
+
   const handleNext = () => {
-    if (currentStep === 1 && !shortcutPressed) {
-      // Don't proceed if shortcut hasn't been pressed
+    // Block navigation from shortcut step if shortcut hasn't been pressed
+    const currentStepData = onboardingSteps[currentStep];
+    if (currentStepData?.id === "shortcut" && !shortcutPressed) {
       return;
     }
 
-    const currentStepData = onboardingSteps[currentStep];
     if (currentStepData?.id === "permissions") {
       // Permissions step
       setShowPermissionDialog(true);
@@ -535,6 +559,29 @@ export default function OnboardingFlow({
                   {/* Keyboard shortcut for shortcut step */}
                   {step.id === "shortcut" && (
                     <div className="relative">
+                      {/* Backend shortcuts status indicator */}
+                      <div className="mb-4 p-3 rounded-lg bg-gray-50 border">
+                        <div className="flex items-center gap-2 text-sm">
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              backendShortcutsWorking
+                                ? "bg-green-500"
+                                : "bg-yellow-500"
+                            }`}
+                          ></div>
+                          <span className="font-medium">
+                            {backendShortcutsWorking
+                              ? "✓ Global shortcuts active"
+                              : "⚠ Using window-focused detection"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {backendShortcutsWorking
+                            ? "Shortcuts work even when this window is not focused"
+                            : "Keep this window focused while testing the shortcut"}
+                        </p>
+                      </div>
+
                       <KeyboardShortcut
                         onShortcutPressed={handleShortcutPressed}
                         shortcutString={keyboardShortcuts?.agent_mode_toggle}

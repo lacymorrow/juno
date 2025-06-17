@@ -106,6 +106,19 @@ fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 
 /// Handle agent mode shortcut (Option+D by default)
 fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
+    // Emit shortcut detection events for visual feedback in onboarding
+    let shortcut_state = match event.state() {
+        ShortcutState::Pressed => "pressed",
+        ShortcutState::Released => "released",
+    };
+
+    if let Err(e) = app.emit("shortcut-agent-mode", serde_json::json!({
+        "state": shortcut_state,
+        "shortcut": "agent_mode_toggle"
+    })) {
+        error!("[Agent Mode Shortcut] Failed to emit shortcut detection event: {}", e);
+    }
+
     if event.state() == ShortcutState::Pressed {
         info!("[Agent Mode Shortcut] Pressed - starting agent mode transcription");
 
@@ -139,6 +152,19 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     let app_clone = app.clone();
     let event_state = event.state();
 
+    // Emit shortcut detection events for visual feedback in onboarding
+    let shortcut_state = match event_state {
+        ShortcutState::Pressed => "pressed",
+        ShortcutState::Released => "released",
+    };
+
+    if let Err(e) = app.emit("shortcut-dictation-input", serde_json::json!({
+        "state": shortcut_state,
+        "shortcut": "dictation_input"
+    })) {
+        error!("[Dictation Input Shortcut] Failed to emit shortcut detection event: {}", e);
+    }
+
     tauri::async_runtime::spawn(async move {
         if event_state == ShortcutState::Pressed {
             crate::dictation_monitor::on_dictation_input_pressed().await;
@@ -154,4 +180,28 @@ fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
             error!("Failed to emit dictation-input-state-changed event: {}", e);
         }
     });
+}
+
+/// Add a new command to trigger shortcut testing events during onboarding
+#[tauri::command]
+pub async fn trigger_shortcut_test_event(
+    app: AppHandle,
+    shortcut_name: String,
+    state: String
+) -> Result<(), String> {
+    let event_name = match shortcut_name.as_str() {
+        "agent_mode_toggle" => "shortcut-agent-mode",
+        "dictation_input" => "shortcut-dictation-input",
+        _ => return Err("Unknown shortcut name".to_string()),
+    };
+
+    if let Err(e) = app.emit(event_name, serde_json::json!({
+        "state": state,
+        "shortcut": shortcut_name,
+        "test_mode": true
+    })) {
+        return Err(format!("Failed to emit test event: {}", e));
+    }
+
+    Ok(())
 }
