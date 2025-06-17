@@ -1,4 +1,4 @@
-import { OnboardingFlow } from "@/components/OnboardingFlow";
+import OnboardingFlow from "@/components/onboarding/Onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
