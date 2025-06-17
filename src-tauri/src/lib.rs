@@ -235,7 +235,13 @@ use crate::commands::sound::{
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
-use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status, emergency_cleanup_dictation_state};
+use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
+use crate::commands::dictation_state_manager::{
+    force_reset_dictation_state,
+    get_dictation_comprehensive_status,
+    update_dictation_component_state,
+    transition_dictation_state
+};
 
 // Import tool configuration commands explicitly
 use crate::commands::{
@@ -563,6 +569,11 @@ pub fn run() {
 
             // Handle escape key press
             if escape_shortcut.id() == shortcut.id() {
+                // Only handle escape on RELEASE to avoid double triggering
+                if event.state() != ShortcutState::Released {
+                    return;
+                }
+
                 info!("[GlobalShortcut] Escape shortcut triggered - attempting to stop agent");
 
                 // Stop TTS immediately when escape is pressed
@@ -588,20 +599,46 @@ pub fn run() {
                     app_state.signal_cancel();
                 }
 
-                // Check if dictation is active and stop it
+                // Check if dictation is active and stop it PROPERLY
                 if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
                     // Check if dictation is active and stop it synchronously if possible
-                    if let Ok(voice_controller) = voice_controller_state.lock() {
+                    if let Ok(mut voice_controller) = voice_controller_state.lock() {
                         if voice_controller.is_dictating() {
-                            info!("[GlobalShortcut] Dictation active - will attempt to stop it");
-                            drop(voice_controller); // Release the lock before the async operation
+                            info!("[GlobalShortcut] Dictation active - forcing immediate stop");
 
-                            // Instead of spawning, try to stop dictation directly using the app handle
-                            // This is a simpler approach that avoids lifetime issues
-                            let _ = app.emit("stop_dictation", serde_json::Value::Null);
+                            // Call the actual stop_dictation method instead of just emitting an event
+                            match voice_controller.stop_dictation() {
+                                Ok(stopped) => {
+                                    if stopped {
+                                        info!("[GlobalShortcut] Voice controller stopped successfully");
+                                    } else {
+                                        info!("[GlobalShortcut] Voice controller was not dictating");
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
+                                }
+                            }
                         }
                     }
                 }
+
+                // Force reset monitoring states
+                let app_clone = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    crate::agent_monitor::force_reset_agent_input_state().await;
+                    crate::dictation_monitor::force_reset_dictation_input_state().await;
+                    info!("[GlobalShortcut] Monitor states reset completed");
+                });
+
+                // Force clean up app state
+                if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+                    *dictation_active = false;
+                }
+
+                // Emit state change events
+                let _ = app.emit("agent-active", false);
+                let _ = app.emit("dictation-active", false);
 
                 // Emit agent stopping event for any running AI agents
                 if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
@@ -788,10 +825,14 @@ pub fn run() {
             // Dictation Settings Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
-            // Dictation Reset Commands
+            // Dictation Reset Commands (LEGACY)
             force_reset_dictation_transcription,
             get_dictation_transcription_status,
-            emergency_cleanup_dictation_state,
+            // New Dictation State Management Commands
+            force_reset_dictation_state,
+            get_dictation_comprehensive_status,
+            update_dictation_component_state,
+            transition_dictation_state,
             // Permissions Commands
             check_permissions_status,
             request_accessibility_permission,
@@ -2075,7 +2116,7 @@ pub fn run() {
             // Listen for force stop events (timeout/stuck transcription)
             let app_handle_for_force_stop = app.handle().clone();
             app.listen("dictation-transcription-force-stop", move |_event| {
-                warn!("[Event] Received dictation-transcription-force-stop event - emergency cleanup");
+                warn!("[Event] Received dictation-transcription-force-stop event - force stopping dictation");
 
                 let app_handle_clone = app_handle_for_force_stop.clone();
                 tauri::async_runtime::spawn(async move {
@@ -2155,6 +2196,8 @@ pub fn run() {
                     info!("[Dictation Mode] Force cleanup completed");
                 });
             });
+
+
 
             // NOTE: Dictation Mode processing is handled by the main voice-transcription:final-result listener
             // above to prevent duplicate processing and race conditions
@@ -2490,41 +2533,7 @@ pub fn run() {
                 });
             });
 
-            // Listen for agent force-cleanup events (hold mode - emergency cleanup)
-            let app_handle_for_agent_force_cleanup = app.handle().clone();
-            app.listen("agent-force-cleanup", move |_event| {
-                info!("[Event] Received agent-force-cleanup event - emergency cleanup");
 
-                let app_handle_clone = app_handle_for_agent_force_cleanup.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Emergency cleanup - stop everything
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            // Force stop voice transcription
-                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await;
-                        }
-                        None => {
-                            warn!("[Agent Mode] Voice controller not available during emergency cleanup");
-                        }
-                    }
-
-                    // Reset all state
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                    // Mark agent execution as finished
-                    let app_state = app_handle_clone.state::<crate::state::AppState>();
-                    app_state.mark_agent_execution_finished();
-
-                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                    }
-
-                    warn!("[Agent Mode] Emergency cleanup completed");
-                });
-            });
 
             // Listen for agent transcription stop events (hold mode - threshold reached)
             let app_handle_for_agent_transcription_stop = app.handle().clone();

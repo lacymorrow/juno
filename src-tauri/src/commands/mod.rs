@@ -13,6 +13,7 @@ pub mod core;
 pub mod dev;
 pub mod dictation;
 pub mod dictation_reset;
+pub mod dictation_state_manager;
 pub mod element;
 pub mod filesystem;
 pub mod floating_bar;
@@ -41,6 +42,12 @@ pub use self::core::*;
 pub use self::dev::*;
 pub use self::dictation::*;
 pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
+pub use self::dictation_state_manager::{
+    force_reset_dictation_state,
+    get_dictation_comprehensive_status,
+    update_dictation_component_state,
+    transition_dictation_state
+};
 pub use self::floating_bar::{
     floating_bar_click, floating_bar_focus_change, floating_bar_input_blur,
     floating_bar_input_change, floating_bar_submit, get_floating_bar_config,
