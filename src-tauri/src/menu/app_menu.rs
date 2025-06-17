@@ -1,6 +1,5 @@
 use tauri::{
     AppHandle,
-    Manager,
     Emitter,
     menu::{Menu, PredefinedMenuItem, SubmenuBuilder, MenuItemBuilder}
 };

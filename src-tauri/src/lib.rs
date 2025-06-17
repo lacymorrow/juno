@@ -6,17 +6,15 @@ use computer_use_ai_sdk::Desktop;
 use std::env;
 use std::sync::Arc;
 use tauri::{
-    Manager, // WindowEvent, // Removed WindowEvent
-    menu::{MenuItemKind, Menu, PredefinedMenuItem, SubmenuBuilder}, // Added PredefinedMenuItem, SubmenuBuilder
-    AppHandle, // Keep AppHandle
-    Emitter, // Import Emitter trait for .emit()
-    Listener, // Added Listener for .listen()
+    Builder, App, AppHandle, Listener, Emitter, Manager, State,
+    menu::{PredefinedMenuItem, SubmenuBuilder}, // Menu creation for app
+    async_runtime,
 };
-use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
-use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
-use tracing::{info, warn, error}; // Import logging macros
+use tauri_plugin_global_shortcut::{Shortcut, Code, Modifiers as ShortcutModifiers}; // Global shortcuts
+use tauri_plugin_voice_transcription::{controller::VoiceController};
+use tracing::{info, error, warn};
 use std::sync::Mutex; // Added for VoiceController state access
-use crate::constants::events;
+use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
 
 // macOS specific imports
 // macOS-specific imports moved to platform::macos module
@@ -38,6 +36,7 @@ pub mod cloud; // Cloud connectivity and remote control
 pub mod voice_control;
 pub mod menu; // Menu management for app and tray menus
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
+pub mod events; // Event handling system for shortcuts and voice transcription
 
 // Tray icon data is now handled by the menu::tray_menu module
 
@@ -540,178 +539,7 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
         .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
-            println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
-
-            let app_state = app.state::<state::AppState>();
-
-            // Get current keyboard shortcuts from state
-            let current_shortcuts = match app_state.keyboard_shortcuts.lock() {
-                Ok(shortcuts) => shortcuts.clone(),
-                Err(e) => {
-                    error!("Failed to get keyboard shortcuts: {}", e);
-                    return; // Exit early if we can't get shortcuts
-                }
-            };
-
-            // Create shortcut objects from current configuration
-            let escape_shortcut = Shortcut::new(None, Code::Escape);
-            let dictation_toggle_shortcut = parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
-            let dictation_input_shortcut = parse_shortcut_string(&current_shortcuts.dictation_input);
-
-            // Handle escape key press
-            if escape_shortcut.id() == shortcut.id() {
-                // Only handle escape on RELEASE to avoid double triggering
-                if event.state() != ShortcutState::Released {
-                    return;
-                }
-
-                info!("[GlobalShortcut] Escape shortcut triggered - attempting to stop agent");
-
-                // Stop TTS immediately when escape is pressed
-                info!("[GlobalShortcut] Stopping TTS audio playback");
-                crate::tts::stop_speech();
-                info!("[GlobalShortcut] TTS stop_speech() called");
-
-                // Also emit TTS stop event for frontend audio cleanup
-                if let Err(e) = app.emit("tts-stop-requested", ()) {
-                    warn!("Failed to emit TTS stop event: {}", e);
-                } else {
-                    info!("[GlobalShortcut] tts-stop-requested event emitted successfully");
-                }
-
-                // Check if agent is active and stop it
-                let app_state = app.state::<state::AppState>();
-
-                // Check if there's an ongoing cancellation already
-                let cancel_requested = *app_state.cancel_rx.borrow();
-                if !cancel_requested {
-                    info!("[GlobalShortcut] Stopping active agent task");
-                    // Use the signal_cancel method instead of direct field access
-                    app_state.signal_cancel();
-                }
-
-                // Check if dictation is active and stop it PROPERLY
-                if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                    // Check if dictation is active and stop it synchronously if possible
-                    if let Ok(mut voice_controller) = voice_controller_state.lock() {
-                        if voice_controller.is_dictating() {
-                            info!("[GlobalShortcut] Dictation active - forcing immediate stop");
-
-                            // Call the actual stop_dictation method instead of just emitting an event
-                            match voice_controller.stop_dictation() {
-                                Ok(stopped) => {
-                                    if stopped {
-                                        info!("[GlobalShortcut] Voice controller stopped successfully");
-                                    } else {
-                                        info!("[GlobalShortcut] Voice controller was not dictating");
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("[GlobalShortcut] Failed to stop voice controller: {}", e);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Force reset monitoring states
-                let app_clone = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-                    info!("[GlobalShortcut] Monitor states reset completed");
-                });
-
-                // Force clean up app state
-                if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                    *dictation_active = false;
-                }
-
-                // Emit state change events
-                let _ = app.emit("agent-active", false);
-                let _ = app.emit("dictation-active", false);
-
-                // Emit agent stopping event for any running AI agents
-                if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
-                    eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
-                }
-
-                // Immediately signal floating bar manager about cancellation for quick UI feedback
-                let app_handle_for_bar = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::commands::floating_bar::handle_backend_response(
-                        &app_handle_for_bar,
-                        "Cancelled",
-                        Some("Agent execution was cancelled via escape key.".to_string())
-                    ).await;
-                });
-
-                info!("[GlobalShortcut] Escape key handling completed");
-                return; // Exit early for escape shortcut
-            }
-
-            // Handle dictation toggle shortcut (Option+D / Alt+D)
-            if let Some(ref toggle_shortcut) = dictation_toggle_shortcut {
-                if shortcut == toggle_shortcut {
-                    info!("[GlobalShortcut] Agent toggle shortcut ({:?}) triggered with state {:?}.", shortcut, event.state());
-
-                    // Check if agent should handle this key event based on trigger mode
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let key_state = match event.state() {
-                            ShortcutState::Pressed => "pressed",
-                            ShortcutState::Released => "released",
-                        };
-
-                        let should_handle = crate::agent_monitor::should_handle_agent_key(&app_clone, key_state).await;
-
-                        if should_handle {
-                            // Get the current agent trigger mode
-                            let app_state = app_clone.state::<crate::state::AppState>();
-                            let trigger_mode = app_state.agent_trigger_mode.lock()
-                                .map(|mode| mode.clone())
-                                .unwrap_or(crate::state::AgentTriggerMode::Tap);
-
-                            match trigger_mode {
-                                crate::state::AgentTriggerMode::Tap => {
-                                    // Original tap behavior - emit toggle request on release
-                                    if event.state() == ShortcutState::Released {
-                                        info!("[GlobalShortcut] Agent tap mode - emitting toggle request");
-                                        if let Err(e) = app_clone.emit("toggle-dictation-request", ()) {
-                                            tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
-                                        }
-                                    }
-                                },
-                                crate::state::AgentTriggerMode::Hold => {
-                                    // New hold behavior - handle press and release
-                                    if event.state() == ShortcutState::Pressed {
-                                        info!("[GlobalShortcut] Hold mode - calling on_agent_input_pressed");
-                                        crate::agent_monitor::on_agent_input_pressed().await;
-                                    } else if event.state() == ShortcutState::Released {
-                                        info!("[GlobalShortcut] Hold mode - calling on_agent_input_released");
-                                        crate::agent_monitor::on_agent_input_released(&app_clone).await;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-
-            // Handle dictation input shortcut (Alt+Space / Option+Space)
-            if let Some(ref input_shortcut) = dictation_input_shortcut {
-                if shortcut == input_shortcut {
-                    // Handle dictation input with timing logic
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if event.state() == ShortcutState::Pressed {
-                            crate::dictation_monitor::on_dictation_input_pressed().await;
-                        } else if event.state() == ShortcutState::Released {
-                            crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
-                        }
-                    });
-                }
-            }
+            events::shortcuts::handle_global_shortcut(app, shortcut, &event);
         }).build())
         .manage(app_state) // Manage the AppState
         .invoke_handler(tauri::generate_handler![
@@ -1489,7 +1317,10 @@ pub fn run() {
                 info!("[Setup] Agent monitor task started successfully");
             });
 
-            // Listen for dictation started events from the plugin
+            // Setup all event listeners using the events module
+            events::handlers::setup_event_listeners(&app.handle());
+
+            // Listen for dictation started events from the plugin (additional handlers)
             let app_handle_for_listener = app.handle().clone();
             app.listen("voice-transcription:dictation-started", move |event| {
                 info!("[Event] Received voice-transcription:dictation-started event");
@@ -1560,206 +1391,10 @@ pub fn run() {
                 }
             });
 
-            // Listen for final result events from the plugin (UNIFIED HANDLER for both modes)
-            let app_handle_for_listener = app.handle().clone();
-            app.listen("voice-transcription:final-result", move |event| {
-                info!("[Event] Received voice-transcription:final-result event: {:?}", event.payload());
+                        // Note: Core voice transcription events (final-result, dictation-stopped, error)
+            // and basic dictation events (start, commit, cancel, stop) are now handled by events::handlers module
 
-                // Check if Dictation Mode is active to determine processing mode
-                let app_state = app_handle_for_listener.state::<state::AppState>();
-                let is_dictation_active = app_state.dictation_active.lock()
-                    .map(|active| *active)
-                    .unwrap_or(false);
-
-                // Extract text from payload
-                let payload_str = event.payload();
-                let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
-                    Ok(payload_json) => {
-                        payload_json.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
-                    }
-                    Err(_) => None,
-                };
-
-                // Clone everything needed for the async tasks
-                let app_handle_clone = app_handle_for_listener.clone();
-                let app_state_clone = app_handle_for_listener.state::<state::AppState>();
-                let payload_str_clone = payload_str.to_string();
-                let extracted_text_clone = extracted_text.clone();
-
-                // Spawn a task to handle the processing outside the event handler closure
-                tauri::async_runtime::spawn(async move {
-                    handle_voice_transcription_final_result(app_handle_clone, is_dictation_active, extracted_text_clone, payload_str_clone).await;
-                });
-            });
-
-            // Listen for dictation stopped events from the plugin
-            let app_handle_for_listener = app.handle().clone();
-            app.listen("voice-transcription:dictation-stopped", move |event| {
-                info!("[Event] Received voice-transcription:dictation-stopped event");
-
-                // Clone everything needed for the async tasks
-                let app_handle_clone = app_handle_for_listener.clone();
-                let state_clone = app_handle_for_listener.state::<crate::state::AppState>();
-                let payload_clone = event.payload().to_string();
-
-                // Spawn a task to handle the processing outside the event handler closure
-                tauri::async_runtime::spawn(async move {
-                    handle_voice_transcription_dictation_stopped(app_handle_clone, payload_clone).await;
-                });
-            });
-
-            // Listen for voice transcription error events
-            let app_handle_for_error_listener = app.handle().clone();
-            app.listen("voice-transcription:error", move |_event| {
-                info!("[Event] Received voice-transcription:error event");
-
-                // Clone everything needed for the async task
-                let app_handle_clone = app_handle_for_error_listener.clone();
-                let state_clone = app_handle_for_error_listener.state::<crate::state::AppState>();
-
-                // Spawn a task to handle the processing outside the event handler closure
-                tauri::async_runtime::spawn(async move {
-                    handle_voice_transcription_error(app_handle_clone).await;
-                });
-            });
-
-            // Listen for dictation transcription start events (immediate)
-            let app_handle_for_dictation_start = app.handle().clone();
-            app.listen("dictation-transcription-start", move |_event| {
-                info!("[Event] Received dictation-transcription-start event - starting immediate transcription");
-
-                // Start dictation using the voice transcription plugin command
-                let app_handle_clone = app_handle_for_dictation_start.clone();
-                let app_state_clone = app_handle_for_dictation_start.state::<state::AppState>();
-
-                // Use a separate task to handle the dictation start to avoid lifetime issues
-                tauri::async_runtime::spawn(async move {
-                    handle_dictation_transcription_start(app_handle_clone).await;
-                });
-            });
-
-            // Listen for Dictation Mode commitment events (threshold reached)
-            let _app_handle_for_dictation_committed = app.handle().clone();
-            app.listen("dictation-committed", move |_event| {
-                info!("[Event] Received dictation-committed event - threshold reached");
-                // This event indicates the user has held dictation input long enough to commit to dictation
-                // We can use this for additional UI feedback if needed
-                // The transcription is already running, so we just acknowledge the commitment
-            });
-
-            // Listen for dictation transcription cancellation events (released before threshold)
-            let app_handle_for_dictation_cancel = app.handle().clone();
-            app.listen("dictation-transcription-cancel", move |_event| {
-                info!("[Event] Received dictation-transcription-cancel event - cancelling transcription");
-
-                // Stop dictation and discard results
-                let app_handle_clone = app_handle_for_dictation_cancel.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Force stop the voice controller with aggressive timeout
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            // Use shorter timeout for cancellation (more aggressive)
-                            let stop_with_timeout = tokio::time::timeout(
-                                std::time::Duration::from_millis(1500), // Reduced from 2000ms to 1500ms
-                                tauri_plugin_voice_transcription::commands::stop_dictation(
-                                    app_handle_clone.clone(),
-                                    controller_state
-                                )
-                            );
-
-                            match stop_with_timeout.await {
-                                Ok(Ok(_)) => {
-                                    info!("[Dictation Mode] Transcription cancelled successfully");
-                                }
-                                Ok(Err(e)) => {
-                                    error!("[Dictation Mode] Failed to cancel transcription: {}", e);
-                                    // Force cleanup even if stop failed
-                                }
-                                Err(_) => {
-                                    error!("[Dictation Mode] Transcription cancellation timed out - forcing cleanup");
-                                    // Force cleanup after timeout
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("[Dictation Mode] Voice controller not available - cannot cancel transcription");
-                        }
-                    }
-
-                    // Always clean up state regardless of stop_dictation result
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Reset dictation input monitor state immediately
-                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                    // Update floating bar manager
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                    });
-
-                    // Emit both dictation-active false and a specific cancellation event
-                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
-                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                    }
-
-                    // Emit specific cancellation complete event for UI feedback
-                    if let Err(e) = app_handle_clone.emit("dictation-cancelled", ()) {
-                        tracing::error!("[Dictation Mode] Failed to emit dictation-cancelled event: {}", e);
-                    }
-
-                    info!("[Dictation Mode] Cancellation cleanup completed");
-                });
-            });
-
-            // Listen for Dictation Mode stop events (normal completion)
-            let app_handle_for_dictation_stop = app.handle().clone();
-            app.listen("dictation-stop", move |_event| {
-                info!("[Event] Received dictation-stop event - completing dictation normally");
-
-                // Stop dictation using the voice transcription plugin command
-                let app_handle_clone = app_handle_for_dictation_stop.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Use the plugin command to stop dictation only if controller exists
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(_) => {
-                                    info!("[Dictation Mode] Completed dictation successfully");
-                                }
-                                Err(e) => {
-                                    tracing::error!("[Dictation Mode] Failed to stop dictation: {}", e);
-                                }
-                            }
-                        }
-                        None => {
-                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot stop dictation");
-                        }
-                    }
-
-                    // Always clean up state regardless of stop_dictation result
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Update floating bar manager
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                    });
-
-                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
-                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                    }
-                });
-            });
+            // Additional specialized dictation event handlers follow below...
 
             // Listen for force stop events (timeout/stuck transcription)
             let app_handle_for_force_stop = app.handle().clone();
@@ -1808,7 +1443,7 @@ pub fn run() {
                         commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
                     });
 
-                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
+                    if let Err(e) = app_handle_clone.emit(crate::constants::events::DICTATION_ACTIVE, false) {
                         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
                 });
@@ -1837,7 +1472,7 @@ pub fn run() {
                     });
 
                     // Emit cleanup complete event
-                    if let Err(e) = app_handle_clone.emit(events::DICTATION_ACTIVE, false) {
+                    if let Err(e) = app_handle_clone.emit(crate::constants::events::DICTATION_ACTIVE, false) {
                         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                     }
 
@@ -2022,7 +1657,7 @@ pub fn run() {
                                 Ok(()) => {
                                     info!("[Agent Mode] Started agent transcription successfully");
 
-                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, true) {
+                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, true) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2032,7 +1667,7 @@ pub fn run() {
                                     // Reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event after failure: {}", e);
                                     }
                                 }
@@ -2044,7 +1679,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                            if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -2072,7 +1707,7 @@ pub fn run() {
                                 Ok(_) => {
                                     info!("[Agent Mode] Stopped agent transcription successfully");
 
-                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2082,7 +1717,7 @@ pub fn run() {
                                     // Force reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2094,7 +1729,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                            if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -2119,7 +1754,7 @@ pub fn run() {
                                 Ok(_) => {
                                     info!("[Agent Mode] Cancelled agent transcription successfully");
 
-                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2129,7 +1764,7 @@ pub fn run() {
                                     // Force reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                                     }
                                 }
@@ -2141,7 +1776,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                            if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -2173,7 +1808,7 @@ pub fn run() {
                     // Reset agent input monitor state
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
 
@@ -2211,7 +1846,7 @@ pub fn run() {
                                     // Reset agent input monitor state on failure
                                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                                    if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                                    if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                         tracing::error!("[Agent Mode] Failed to emit agent-active event after transcription stop failure: {}", e);
                                     }
                                 }
@@ -2223,7 +1858,7 @@ pub fn run() {
                             // Reset agent input monitor state
                             crate::agent_monitor::force_reset_agent_input_state().await;
 
-                            if let Err(e) = app_handle_clone.emit(events::AGENT_ACTIVE, false) {
+                            if let Err(e) = app_handle_clone.emit(crate::constants::events::AGENT_ACTIVE, false) {
                                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                             }
                         }
@@ -2606,219 +2241,3 @@ mod tests {
 // macOS tracking functionality moved to platform::macos::mouse_tracking module
 
 // --- Enhanced Tray Menu Management now handled by menu::tray_menu module ---
-
-// Helper function to handle the voice-transcription:final-result event outside the closure
-async fn handle_voice_transcription_final_result(
-    app_handle: AppHandle,
-    is_dictation_active: bool,
-    extracted_text: Option<String>,
-    payload_str: String,
-) {
-    if is_dictation_active {
-        info!("[Event] Processing final result for Dictation Mode");
-
-        // Handle immediate typing for Dictation Mode
-        if let Some(text) = extracted_text {
-            let trimmed_text = text.trim();
-            if !trimmed_text.is_empty() {
-                let app_state = app_handle.state::<state::AppState>();
-                // Check if clipboard saving is enabled
-                let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                    .map(|enabled| *enabled)
-                    .unwrap_or(true); // Default to true if lock fails
-
-                // Store to clipboard if enabled
-                if clipboard_enabled {
-                    match crate::commands::core::dev_set_clipboard(
-                        trimmed_text.to_string(),
-                        app_state.clone()
-                    ).await {
-                        Ok(()) => {
-                            info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
-                        }
-                        Err(e) => {
-                            tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
-                        }
-                    }
-                } else {
-                    info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
-                }
-
-                // Then type the transcribed text immediately using the computer use tools
-                info!("Executing global_type_text for text: '{}'", trimmed_text);
-                match crate::commands::keyboard::global_type_text(
-                    trimmed_text.to_string(),
-                    app_handle.clone(),
-                    app_state.clone()
-                ).await {
-                    Ok(()) => {
-                        info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
-                    }
-                    Err(e) => {
-                        tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
-                    }
-                }
-            } else {
-                info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
-            }
-        }
-
-        // Reset Dictation Mode state after processing
-        let app_state = app_handle.state::<state::AppState>();
-        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-            *dictation_active = false;
-        }
-
-        // Emit state change event for UI
-        if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, false) {
-            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
-        }
-
-        // Update floating bar manager for dictation mode completion
-        commands::floating_bar::handle_dictation_finished(&app_handle, None).await;
-        info!("[Dictation Mode] Completed dictation successfully");
-    } else {
-        info!("[Event] Processing final result for AI Agent Mode");
-
-        // Update floating bar manager for agent mode query
-        if let Some(text) = &extracted_text {
-            let query_text = text.clone();
-            commands::floating_bar::handle_dictation_finished(&app_handle, Some(query_text)).await;
-        }
-
-        // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
-        match serde_json::from_str::<serde_json::Value>(&payload_str) {
-            Ok(payload_json) => {
-                if let Some(text_value) = payload_json.get("text") {
-                    // Transform { "text": "..." } to { "query": "..." }
-                    let transformed_payload = serde_json::json!({
-                        "query": text_value
-                    });
-                    if let Err(e) = app_handle.emit(events::APP_DICTATION_FINISHED, transformed_payload) {
-                        tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
-                    }
-                } else {
-                    tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
-                }
-            }
-            Err(e) => {
-                tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
-                // Fallback: emit with original payload
-                if let Err(e) = app_handle.emit(events::APP_DICTATION_FINISHED, payload_str) {
-                    tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
-                }
-            }
-        }
-    }
-}
-
-// Helper function to handle the voice-transcription:dictation-stopped event outside the closure
-async fn handle_voice_transcription_dictation_stopped(
-    app_handle: AppHandle,
-    payload: String,
-) {
-    // Unregister escape key as dictation is complete
-    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
-        warn!("Failed to unregister escape key after dictation: {} - continuing anyway", e);
-    }
-
-    // Play voice end sound automatically when dictation stops
-    let state = app_handle.state::<crate::state::AppState>();
-    if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle.clone(), state).await {
-        warn!("Failed to play voice end sound: {}", e);
-    }
-
-    // Rebroadcast the event as app-dictation-stopped for backward compatibility
-    if let Err(e) = app_handle.emit("app-dictation-stopped", payload) {
-        tracing::error!("[Event] Failed to rebroadcast dictation-stopped event: {}", e);
-    }
-}
-
-// Helper function to handle the voice-transcription:error event outside the closure
-async fn handle_voice_transcription_error(
-    app_handle: AppHandle,
-) {
-    // Play voice error sound automatically when transcription fails
-    let state = app_handle.state::<crate::state::AppState>();
-    if let Err(e) = crate::commands::sound::play_voice_error_sound(app_handle.clone(), state).await {
-        warn!("Failed to play voice error sound: {}", e);
-    }
-}
-
-// Helper function to handle the dictation-transcription-start event outside the closure
-async fn handle_dictation_transcription_start(
-    app_handle: AppHandle,
-) {
-    // Mark this as Dictation Mode in AppState BEFORE starting transcription
-    // This prevents race condition where voice controller emits events before we set the flag
-    let app_state = app_handle.state::<state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-        *dictation_active = true;
-    }
-
-    // Update floating bar manager to set dictation mode
-    let app_handle_for_bar = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
-    });
-
-    // Use the plugin command to start dictation only if controller exists
-    match app_handle.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-        Some(controller_state) => {
-            match tauri_plugin_voice_transcription::commands::start_dictation(
-                app_handle.clone(),
-                controller_state
-            ).await {
-                Ok(()) => {
-                    info!("[Dictation Mode] Started immediate transcription successfully");
-
-                    if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, true) {
-                        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                    }
-
-                    // Register escape key to cancel dictation
-                    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
-                        warn!("Failed to register escape key for dictation: {} - continuing anyway", e);
-                    }
-
-                    // Play voice start sound
-                    if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle.clone(), app_state).await {
-                        warn!("Failed to play voice start sound: {}", e);
-                    }
-                }
-                Err(e) => {
-                    error!("[Dictation Mode] Failed to start dictation: {}", e);
-
-                    // Reset the dictation active flag
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Emit state change event for UI
-                    if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, false) {
-                        error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
-                    }
-
-                    // Update floating bar manager to reset dictation mode
-                    let app_handle_for_bar = app_handle.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                    });
-                }
-            }
-        }
-        None => {
-            error!("[Dictation Mode] Voice controller not found, cannot start dictation");
-
-            // Reset the dictation active flag
-            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                *dictation_active = false;
-            }
-
-            // Emit state change event for UI
-            if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, false) {
-                error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
-            }
-        }
-    }
-}
