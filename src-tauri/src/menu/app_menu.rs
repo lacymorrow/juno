@@ -1,6 +1,7 @@
 use tauri::{
     AppHandle,
-    menu::{MenuItemKind, Menu, PredefinedMenuItem, SubmenuBuilder, MenuItemBuilder}
+    Emitter,
+    menu::{Menu, PredefinedMenuItem, SubmenuBuilder, MenuItemBuilder}
 };
 use tracing::{info, error};
 use crate::constants;
