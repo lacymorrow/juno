@@ -561,3 +561,24 @@ pub async fn apply_mcp_quick_fixes(
         Ok(format!("Applied {} fixes:\n{}", fixes_applied.len(), fixes_applied.join("\n")))
     }
 }
+
+/// Manually retry failed MCP servers
+#[tauri::command]
+pub async fn retry_failed_mcp_servers(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    info!("Manual retry of failed MCP servers requested");
+    
+    match state.retry_failed_mcp_servers().await {
+        Ok(_) => {
+            // Emit state update to frontend
+            state.emit_mcp_state_update(&app_handle).await?;
+            Ok("Failed MCP servers retry completed".to_string())
+        }
+        Err(e) => {
+            error!("Failed to retry MCP servers: {}", e);
+            Err(format!("Failed to retry MCP servers: {}", e))
+        }
+    }
+}
