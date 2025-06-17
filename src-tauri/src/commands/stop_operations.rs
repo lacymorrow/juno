@@ -1,5 +1,5 @@
-use tauri::{AppHandle, State, Manager, Emitter};
-use tracing::{info, warn};
+use tauri::{AppHandle, Manager, Emitter};
+use tracing::{info, warn, error};
 use std::sync::{Arc, Mutex};
 use crate::state::AppState;
 use crate::constants;
@@ -37,17 +37,26 @@ pub async fn stop_all_operations(app_handle: AppHandle) -> Result<String, String
     info!("[StopOperations] Force resetting agent input state");
     crate::agent_monitor::force_reset_agent_input_state().await;
 
-    // Check if dictation is active and stop it
+    // Check if dictation is active and stop it PROPERLY
     if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
         // Check if dictation is active and stop it synchronously if possible
-        if let Ok(voice_controller) = voice_controller_state.lock() {
+        if let Ok(mut voice_controller) = voice_controller_state.lock() {
             if voice_controller.is_dictating() {
-                info!("[StopOperations] Dictation active - will attempt to stop it");
-                drop(voice_controller); // Release the lock before the async operation
+                info!("[StopOperations] Dictation active - forcing immediate stop");
 
-                // Instead of spawning, try to stop dictation directly using the app handle
-                // This is a simpler approach that avoids lifetime issues
-                let _ = app_handle.emit("stop_dictation", serde_json::Value::Null);
+                // Call the actual stop_dictation method instead of just emitting an event
+                match voice_controller.stop_dictation() {
+                    Ok(stopped) => {
+                        if stopped {
+                            info!("[StopOperations] Voice controller stopped successfully");
+                        } else {
+                            info!("[StopOperations] Voice controller was not dictating");
+                        }
+                    }
+                    Err(e) => {
+                        error!("[StopOperations] Failed to stop voice controller: {}", e);
+                    }
+                }
             }
         }
     }

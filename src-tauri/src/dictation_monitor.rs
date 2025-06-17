@@ -311,67 +311,11 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
     }
 }
 
-// Public function to force reset the dictation input state (for emergency cleanup)
+// Public function to force reset the dictation input state
 pub async fn force_reset_dictation_input_state() {
     let mut state = DICTATION_INPUT_STATE.lock().await;
     state.force_reset();
     info!("[DictationMonitor] Dictation input state force reset completed");
 }
 
-// Emergency cleanup function that can be called from frontend when stuck
-pub async fn emergency_cleanup_dictation_state(app_handle: &AppHandle) -> Result<(), String> {
-    warn!("[DictationMonitor] Emergency cleanup requested - performing comprehensive state reset");
 
-    // First, reset the dictation input monitor state
-    force_reset_dictation_input_state().await;
-
-    // Force stop the voice controller if it exists
-    match app_handle.try_state::<Arc<std::sync::Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-        Some(controller_state) => {
-            // Use aggressive timeout for emergency cleanup
-            let stop_result = tokio::time::timeout(
-                std::time::Duration::from_millis(1000), // Very short timeout for emergency
-                tauri_plugin_voice_transcription::commands::stop_dictation(
-                    app_handle.clone(),
-                    controller_state
-                )
-            ).await;
-
-            match stop_result {
-                Ok(Ok(_)) => {
-                    info!("[DictationMonitor] Voice controller stopped successfully during emergency cleanup");
-                }
-                Ok(Err(e)) => {
-                    error!("[DictationMonitor] Voice controller stop failed during emergency cleanup: {}", e);
-                }
-                Err(_) => {
-                    error!("[DictationMonitor] Voice controller stop timed out during emergency cleanup - controller may be stuck");
-                }
-            }
-        }
-        None => {
-            info!("[DictationMonitor] Voice controller not available - skipping voice controller cleanup");
-        }
-    }
-
-    // Force clean up app state
-    let app_state = app_handle.state::<crate::state::AppState>();
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-        *dictation_active = false;
-        info!("[DictationMonitor] App dictation state reset to false");
-    } else {
-        error!("[DictationMonitor] Failed to reset app dictation state - lock may be poisoned");
-    }
-
-    // Emit cleanup events for UI
-    if let Err(e) = app_handle.emit(events::DICTATION_ACTIVE, false) {
-        error!("[DictationMonitor] Failed to emit dictation-active false event: {}", e);
-    }
-
-    if let Err(e) = app_handle.emit(events::DICTATION_EMERGENCY_CLEANUP, ()) {
-        error!("[DictationMonitor] Failed to emit emergency cleanup event: {}", e);
-    }
-
-    info!("[DictationMonitor] Emergency cleanup completed successfully");
-    Ok(())
-}

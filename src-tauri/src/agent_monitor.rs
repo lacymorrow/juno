@@ -214,7 +214,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
     }
 }
 
-// Public function to force reset the agent input state (for emergency cleanup)
+// Public function to force reset the agent input state
 pub async fn force_reset_agent_input_state() {
     let mut state = AGENT_INPUT_STATE.lock().await;
     state.force_reset();
