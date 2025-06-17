@@ -556,9 +556,10 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     Ok(())
 }
 
-/// Check if Input Monitoring permissions are granted (macOS only)
+/// Check if input monitoring permissions are granted (macOS only)
+/// This is required for global shortcuts to work
 #[cfg(target_os = "macos")]
-fn check_input_monitoring_permissions() -> Result<bool, String> {
+pub fn check_input_monitoring_permissions() -> Result<bool, String> {
     // This is a basic check - in a real implementation you would use proper macOS APIs
     // For now, we'll assume permissions are needed and return true to avoid blocking
     // A proper implementation would use IOHIDRequestAccess() or similar APIs

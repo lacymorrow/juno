@@ -266,3 +266,5 @@ pub async fn open_main_window(app: AppHandle) -> Result<(), String> {
 
     Ok(())
 }
+
+
