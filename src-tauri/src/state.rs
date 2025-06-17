@@ -1,7 +1,7 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, warn, error};
+use tracing::info;
 use tauri::Emitter;
 
 pub mod desktop_wrapper;
@@ -31,7 +31,6 @@ use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::app_identity;
-use crate::constants::permission_types;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,38 +321,45 @@ impl AppState {
         }
     }
 
-    // Method to mark agent execution as started
-    pub fn mark_agent_execution_started(&self, execution_id: String) {
+    // Method to mark agent execution started
+    pub fn mark_agent_execution_started(&self, execution_id: String) -> Result<(), String> {
         {
-            let mut active_guard = self.agent_execution_active.lock().unwrap();
+            let mut active_guard = self.agent_execution_active.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
             *active_guard = true;
         }
         {
-            let mut id_guard = self.agent_execution_id.lock().unwrap();
+            let mut id_guard = self.agent_execution_id.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
             *id_guard = Some(execution_id.clone());
         }
         log::info!(
             "[AppState] Agent execution started with ID: {}",
             execution_id
         );
+        Ok(())
     }
 
-    // Method to mark agent execution as started with iteration info
-    pub fn mark_agent_execution_started_with_steps(&self, execution_id: String, max_steps: u32) {
+    // Method to mark agent execution started with iteration info
+    pub fn mark_agent_execution_started_with_steps(&self, execution_id: String, max_steps: u32) -> Result<(), String> {
         {
-            let mut active_guard = self.agent_execution_active.lock().unwrap();
+            let mut active_guard = self.agent_execution_active.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
             *active_guard = true;
         }
         {
-            let mut id_guard = self.agent_execution_id.lock().unwrap();
+            let mut id_guard = self.agent_execution_id.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
             *id_guard = Some(execution_id.clone());
         }
         {
-            let mut max_steps_guard = self.agent_max_steps.lock().unwrap();
+            let mut max_steps_guard = self.agent_max_steps.lock()
+                .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
             *max_steps_guard = Some(max_steps);
         }
         {
-            let mut current_step_guard = self.agent_current_step.lock().unwrap();
+            let mut current_step_guard = self.agent_current_step.lock()
+                .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
             *current_step_guard = Some(0); // Start at step 0
         }
         log::info!(
@@ -361,61 +367,91 @@ impl AppState {
             execution_id,
             max_steps
         );
+        Ok(())
     }
 
     // Method to mark agent execution as finished
     pub fn mark_agent_execution_finished(&self) {
-        {
-            let mut active_guard = self.agent_execution_active.lock().unwrap();
-            *active_guard = false;
-        }
-        {
-            let mut id_guard = self.agent_execution_id.lock().unwrap();
-            let execution_id = id_guard.take();
-            log::info!(
-                "[AppState] Agent execution finished for ID: {:?}",
-                execution_id
-            );
-        }
-        {
-            let mut current_step_guard = self.agent_current_step.lock().unwrap();
-            *current_step_guard = None;
-        }
-        {
-            let mut max_steps_guard = self.agent_max_steps.lock().unwrap();
-            *max_steps_guard = None;
+        let result = (|| -> Result<(), String> {
+            {
+                let mut active_guard = self.agent_execution_active.lock()
+                    .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
+                *active_guard = false;
+            }
+            {
+                let mut id_guard = self.agent_execution_id.lock()
+                    .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
+                let execution_id = id_guard.take();
+                log::info!(
+                    "[AppState] Agent execution finished for ID: {:?}",
+                    execution_id
+                );
+            }
+            {
+                let mut current_step_guard = self.agent_current_step.lock()
+                    .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
+                *current_step_guard = None;
+            }
+            {
+                let mut max_steps_guard = self.agent_max_steps.lock()
+                    .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
+                *max_steps_guard = None;
+            }
+            Ok(())
+        })();
+        
+        if let Err(e) = result {
+            log::error!("Error marking agent execution as finished: {}", e);
         }
     }
 
     // Method to check if an agent is currently executing
     pub fn is_agent_executing(&self) -> bool {
-        let active_guard = self.agent_execution_active.lock().unwrap();
-        *active_guard
+        self.agent_execution_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check agent execution status: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Method to get the current agent execution ID
     pub fn get_current_agent_execution_id(&self) -> Option<String> {
-        let id_guard = self.agent_execution_id.lock().unwrap();
-        id_guard.clone()
+        self.agent_execution_id.lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|e| {
+                log::error!("Failed to get current agent execution ID: {}", e);
+                None // Safe fallback
+            })
     }
 
     // Method to update the current agent step
-    pub fn update_agent_current_step(&self, step: u32) {
-        let mut current_step_guard = self.agent_current_step.lock().unwrap();
+    pub fn update_agent_current_step(&self, step: u32) -> Result<(), String> {
+        let mut current_step_guard = self.agent_current_step.lock()
+            .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
         *current_step_guard = Some(step);
         log::debug!("[AppState] Agent current step updated to: {}", step);
+        Ok(())
     }
 
     // Method to get the current agent step
     pub fn get_agent_current_step(&self) -> Option<u32> {
-        let current_step_guard = self.agent_current_step.lock().unwrap();
-        *current_step_guard
+        self.agent_current_step.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to get current agent step: {}", e);
+                None // Safe fallback
+            })
     }
 
     // Method to get the agent max steps
     pub fn get_agent_max_steps(&self) -> Option<u32> {
-        let max_steps_guard = self.agent_max_steps.lock().unwrap();
-        *max_steps_guard
+        self.agent_max_steps.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to get agent max steps: {}", e);
+                None // Safe fallback
+            })
     }
 
     // Method to get agent step progress info
@@ -427,12 +463,22 @@ impl AppState {
 
     /// Check if agent mode is currently active
     pub fn is_agent_mode_active(&self) -> bool {
-        *self.agent_execution_active.lock().unwrap()
+        self.agent_execution_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check agent mode status: {}", e);
+                false // Safe fallback
+            })
     }
 
     /// Check if dictation mode is currently active
     pub fn is_dictation_active(&self) -> bool {
-        *self.dictation_active.lock().unwrap()
+        self.dictation_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check dictation status: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Method to get or initialize the Playwright driver
@@ -497,16 +543,22 @@ impl AppState {
     }
 
     // Insert a component into the state
-    pub fn insert<T: 'static + Send + Sync>(&self, component: T) {
+    pub fn insert<T: 'static + Send + Sync>(&self, component: T) -> Result<(), String> {
         let type_id = TypeId::of::<T>();
-        let mut components_lock = self.state_components.lock().unwrap();
+        let mut components_lock = self.state_components.lock()
+            .map_err(|e| format!("Failed to acquire state_components lock: {}", e))?;
         components_lock.insert(type_id, Box::new(component));
+        Ok(())
     }
 
     // Get a reference to a component from the state
     pub fn get<T: 'static + Send + Sync + Clone>(&self) -> Option<Arc<T>> {
         let type_id = TypeId::of::<T>();
-        let components_lock = self.state_components.lock().unwrap();
+        let components_lock = self.state_components.lock()
+            .map_err(|e| {
+                log::error!("Failed to acquire state_components lock: {}", e);
+            })
+            .ok()?;
 
         components_lock.get(&type_id).and_then(|boxed| {
             boxed.downcast_ref::<T>().map(|value| {
@@ -529,15 +581,21 @@ impl AppState {
     }
 
     // Method to mark permissions as checked
-    pub fn mark_permissions_checked(&self) {
-        let mut checked_guard = self.permissions_checked.lock().unwrap();
+    pub fn mark_permissions_checked(&self) -> Result<(), String> {
+        let mut checked_guard = self.permissions_checked.lock()
+            .map_err(|e| format!("Failed to acquire permissions_checked lock: {}", e))?;
         *checked_guard = true;
+        Ok(())
     }
 
     // Method to check if permissions have been checked
     pub fn are_permissions_checked(&self) -> bool {
-        let checked_guard = self.permissions_checked.lock().unwrap();
-        *checked_guard
+        self.permissions_checked.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check permissions status: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Helper method to get desktop instance or return an error
@@ -594,9 +652,13 @@ impl AppState {
 
         // Update enabled status
         {
-            let enabled_guard = self.cloud_enabled.lock();
-            if let Ok(mut enabled) = enabled_guard {
-                *enabled = config.enabled;
+            match self.cloud_enabled.lock() {
+                Ok(mut enabled) => {
+                    *enabled = config.enabled;
+                }
+                Err(e) => {
+                    log::error!("Failed to update cloud enabled status: {}", e);
+                }
             }
         }
 
@@ -636,7 +698,10 @@ impl AppState {
         self.cloud_enabled
             .lock()
             .map(|enabled| *enabled)
-            .unwrap_or(false)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check cloud enabled status: {}", e);
+                false // Safe fallback
+            })
     }
 
     /// Get cloud configuration
@@ -664,9 +729,13 @@ impl AppState {
 
         // Update enabled status
         {
-            let enabled_guard = self.cloud_enabled.lock();
-            if let Ok(mut enabled) = enabled_guard {
-                *enabled = config.enabled;
+            match self.cloud_enabled.lock() {
+                Ok(mut enabled) => {
+                    *enabled = config.enabled;
+                }
+                Err(e) => {
+                    log::error!("Failed to update cloud enabled status: {}", e);
+                }
             }
         }
 
@@ -689,18 +758,22 @@ impl AppState {
         self.performance_monitoring_enabled
             .lock()
             .map(|enabled| *enabled)
-            .unwrap_or(false)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check performance monitoring status: {}", e);
+                false // Safe fallback
+            })
     }
 
     /// Set performance monitoring enabled state
-    pub fn set_performance_monitoring_enabled(&self, enabled: bool) {
-        if let Ok(mut monitoring_guard) = self.performance_monitoring_enabled.lock() {
-            *monitoring_guard = enabled;
-            log::info!(
-                "Performance monitoring {}",
-                if enabled { "enabled" } else { "disabled" }
-            );
-        }
+    pub fn set_performance_monitoring_enabled(&self, enabled: bool) -> Result<(), String> {
+        let mut monitoring_guard = self.performance_monitoring_enabled.lock()
+            .map_err(|e| format!("Failed to acquire performance_monitoring_enabled lock: {}", e))?;
+        *monitoring_guard = enabled;
+        log::info!(
+            "Performance monitoring {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Ok(())
     }
 
     // Production cloud connector methods
@@ -965,21 +1038,23 @@ impl AppState {
     }
 
     /// Register a tool provider for MCP tool refresh notifications
-    pub fn register_tool_provider(&self, provider: Arc<tokio::sync::Mutex<LocalToolProvider>>) {
-        if let Ok(mut registry) = self.tool_provider_registry.lock() {
-            registry.push(provider);
-            log::debug!("Registered tool provider for MCP refresh notifications");
-        }
+    pub fn register_tool_provider(&self, provider: Arc<tokio::sync::Mutex<LocalToolProvider>>) -> Result<(), String> {
+        let mut registry = self.tool_provider_registry.lock()
+            .map_err(|e| format!("Failed to acquire tool_provider_registry lock: {}", e))?;
+        registry.push(provider);
+        log::debug!("Registered tool provider for MCP refresh notifications");
+        Ok(())
     }
 
     /// Refresh all registered tool providers when MCP tools are updated
     pub async fn refresh_all_tool_providers(&self) -> Result<(), String> {
         let registry = {
-            if let Ok(registry_guard) = self.tool_provider_registry.lock() {
-                registry_guard.clone()
-            } else {
-                log::warn!("Failed to access tool provider registry");
-                return Ok(());
+            match self.tool_provider_registry.lock() {
+                Ok(registry_guard) => registry_guard.clone(),
+                Err(e) => {
+                    log::error!("Failed to access tool provider registry: {}", e);
+                    return Err(format!("Failed to access tool provider registry: {}", e));
+                }
             }
         };
 
@@ -1092,43 +1167,63 @@ impl AppState {
     // Dual content communication methods
 
     /// Set the last spoken content for TTS
-    pub fn set_last_spoken_content(&self, content: Option<String>) {
-        let mut spoken_guard = self.last_spoken_content.lock().unwrap();
+    pub fn set_last_spoken_content(&self, content: Option<String>) -> Result<(), String> {
+        let mut spoken_guard = self.last_spoken_content.lock()
+            .map_err(|e| format!("Failed to acquire last_spoken_content lock: {}", e))?;
         *spoken_guard = content;
+        Ok(())
     }
 
     /// Get the last spoken content for TTS
     pub fn get_last_spoken_content(&self) -> Option<String> {
-        let spoken_guard = self.last_spoken_content.lock().unwrap();
-        spoken_guard.clone()
+        self.last_spoken_content.lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|e| {
+                log::error!("Failed to get last spoken content: {}", e);
+                None // Safe fallback
+            })
     }
 
     /// Clear the last spoken content
-    pub fn clear_last_spoken_content(&self) {
-        let mut spoken_guard = self.last_spoken_content.lock().unwrap();
+    pub fn clear_last_spoken_content(&self) -> Result<(), String> {
+        let mut spoken_guard = self.last_spoken_content.lock()
+            .map_err(|e| format!("Failed to acquire last_spoken_content lock: {}", e))?;
         *spoken_guard = None;
+        Ok(())
     }
 
     // Debug mode methods
-    pub fn set_debug_mode(&self, enabled: bool) {
-        let mut debug_guard = self.debug_mode.lock().unwrap();
+    pub fn set_debug_mode(&self, enabled: bool) -> Result<(), String> {
+        let mut debug_guard = self.debug_mode.lock()
+            .map_err(|e| format!("Failed to acquire debug_mode lock: {}", e))?;
         *debug_guard = enabled;
+        Ok(())
     }
 
     pub fn is_debug_mode(&self) -> bool {
-        let debug_guard = self.debug_mode.lock().unwrap();
-        *debug_guard
+        self.debug_mode.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check debug mode status: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Methods for tool approval setting
-    pub fn set_tool_approval_required(&self, required: bool) {
-        let mut approval_guard = self.tool_approval_required.lock().unwrap();
+    pub fn set_tool_approval_required(&self, required: bool) -> Result<(), String> {
+        let mut approval_guard = self.tool_approval_required.lock()
+            .map_err(|e| format!("Failed to acquire tool_approval_required lock: {}", e))?;
         *approval_guard = required;
+        Ok(())
     }
 
     pub fn is_tool_approval_required(&self) -> bool {
-        let approval_guard = self.tool_approval_required.lock().unwrap();
-        *approval_guard
+        self.tool_approval_required.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to check tool approval requirement: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Methods for managing tool approval requests
@@ -1184,19 +1279,18 @@ pub(crate) fn update_undo_state(
     state: &AppState,
     file_path: PathBuf,
     previous_content: Option<String>,
-) {
-    // Safely handle potential lock poisoning
-    if let Ok(mut last_edited) = state.last_edited_file.lock() {
-        *last_edited = Some(file_path);
-    } else {
-        log::error!("Failed to acquire lock for last_edited_file - lock may be poisoned");
-    }
+) -> Result<(), String> {
+    // Safely handle potential lock poisoning with proper error handling
+    let mut last_edited = state.last_edited_file.lock()
+        .map_err(|e| format!("Failed to acquire last_edited_file lock: {}", e))?;
+    *last_edited = Some(file_path);
+    drop(last_edited);
 
-    if let Ok(mut previous) = state.previous_content.lock() {
-        *previous = Some(previous_content);
-    } else {
-        log::error!("Failed to acquire lock for previous_content - lock may be poisoned");
-    }
+    let mut previous = state.previous_content.lock()
+        .map_err(|e| format!("Failed to acquire previous_content lock: {}", e))?;
+    *previous = Some(previous_content);
+    
+    Ok(())
 }
 
 // DesktopWrapper implementation moved to desktop_wrapper.rs
@@ -1281,7 +1375,7 @@ mod tests {
         assert!(!state.are_permissions_checked());
         assert!(!state.is_cloud_enabled());
 
-        // Test Arc-wrapped values
+        // Test Arc-wrapped values - using unwrap in tests is acceptable
         {
             let tts_provider = state.tts_provider.lock().unwrap();
             assert_eq!(*tts_provider, "system");
@@ -1313,7 +1407,7 @@ mod tests {
         assert!(state.get_current_agent_execution_id().is_none());
 
         // Mark as started
-        state.mark_agent_execution_started(execution_id.clone());
+        state.mark_agent_execution_started(execution_id.clone()).unwrap();
         assert!(state.is_agent_executing());
         assert_eq!(state.get_current_agent_execution_id(), Some(execution_id));
 
@@ -1383,7 +1477,7 @@ mod tests {
         assert!(!state.are_permissions_checked());
 
         // Mark as checked
-        state.mark_permissions_checked();
+        state.mark_permissions_checked().unwrap();
         assert!(state.are_permissions_checked());
     }
 
@@ -1476,7 +1570,7 @@ mod tests {
         };
 
         // Insert component
-        state.insert(test_component.clone());
+        state.insert(test_component.clone()).unwrap();
 
         // Retrieve component
         let retrieved = state.get::<TestComponent>();
@@ -1614,7 +1708,7 @@ mod tests {
         let state2 = state1.clone();
 
         // Both should track the same agent execution state
-        state1.mark_agent_execution_started("test-123".to_string());
+        state1.mark_agent_execution_started("test-123".to_string()).unwrap();
         assert!(state2.is_agent_executing());
         assert_eq!(
             state2.get_current_agent_execution_id(),
