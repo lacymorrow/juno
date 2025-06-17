@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import {
   ChevronRight,
@@ -11,6 +9,7 @@ import {
   Eye,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { invoke } from "@tauri-apps/api/core";
 
 const permissions = [
   {
@@ -48,32 +47,33 @@ const getOnboardingSteps = (permissionsAlreadyGranted: boolean) => [
   },
   {
     id: "shortcut",
-    title: "Learn the Magic Key",
-    subtitle: "Press ⌘J to summon Juno anywhere",
+    title: "Learn the Magic Keys",
+    subtitle: "Quick shortcuts to control Juno",
     description:
-      "Try it now! Press the keyboard shortcut below to activate Juno from anywhere on your Mac.",
+      "Try the agent mode shortcut below! This will activate Juno's AI assistant from anywhere on your Mac.",
     icon: <Keyboard className="w-12 h-12 text-purple-500" />,
     action: "Continue",
   },
-  ...(permissionsAlreadyGranted ? [] : [
-    {
-      id: "permissions",
-      title: "Grant Permissions",
-      subtitle: "Required for full functionality",
-      description:
-        "Juno needs these permissions to automate tasks and interact with your Mac securely.",
-      icon: <Shield className="w-12 h-12 text-green-500" />,
-      action: "Open System Preferences",
-    }
-  ]),
+  ...(permissionsAlreadyGranted
+    ? []
+    : [
+        {
+          id: "permissions",
+          title: "Grant Permissions",
+          subtitle: "Required for full functionality",
+          description:
+            "Juno needs these permissions to automate tasks and interact with your Mac securely.",
+          icon: <Shield className="w-12 h-12 text-green-500" />,
+          action: "Open System Preferences",
+        },
+      ]),
   {
     id: "complete",
     title: "Ready to Go",
     subtitle: "Juno is now active",
-    description:
-      permissionsAlreadyGranted 
-        ? "Juno is ready to go! Press ⌘J anytime to get started!"
-        : "You can always change these permissions later in System Preferences. Press ⌘J anytime to get started!",
+    description: permissionsAlreadyGranted
+      ? "Juno is ready to go! Press ⌘J anytime to get started!"
+      : "You can always change these permissions later in System Preferences. Press ⌘J anytime to get started!",
     icon: <CheckCircle className="w-12 h-12 text-green-500" />,
     action: "Start Using Juno",
   },
@@ -82,23 +82,87 @@ const getOnboardingSteps = (permissionsAlreadyGranted: boolean) => [
 // Keyboard shortcut component
 function KeyboardShortcut({
   onShortcutPressed,
+  shortcutString,
 }: {
   onShortcutPressed: () => void;
+  shortcutString?: string;
 }) {
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
   const [isComplete, setIsComplete] = useState(false);
+
+  // Parse the shortcut string (e.g., "Option+D" or "CommandOrControl+J")
+  const parseShortcut = (shortcut: string) => {
+    if (!shortcut) return { modifiers: [], key: "" };
+
+    const parts = shortcut.toLowerCase().split("+");
+    const key = parts[parts.length - 1];
+    const modifiers = parts.slice(0, -1);
+
+    return { modifiers, key };
+  };
+
+  const { modifiers, key } = parseShortcut(shortcutString || "Option+D");
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const newPressedKeys = new Set(pressedKeys);
 
-      if (e.metaKey) newPressedKeys.add("cmd");
-      if (e.key.toLowerCase() === "j") newPressedKeys.add("j");
+      // Check for modifiers
+      if (
+        e.altKey &&
+        (modifiers.includes("option") || modifiers.includes("alt"))
+      ) {
+        newPressedKeys.add("option");
+      }
+      if (
+        e.metaKey &&
+        (modifiers.includes("cmd") ||
+          modifiers.includes("command") ||
+          modifiers.includes("commandorcontrol"))
+      ) {
+        newPressedKeys.add("cmd");
+      }
+      if (
+        e.ctrlKey &&
+        (modifiers.includes("ctrl") ||
+          modifiers.includes("control") ||
+          modifiers.includes("commandorcontrol"))
+      ) {
+        newPressedKeys.add("ctrl");
+      }
+      if (e.shiftKey && modifiers.includes("shift")) {
+        newPressedKeys.add("shift");
+      }
+
+      // Check for key
+      if (e.key.toLowerCase() === key) {
+        newPressedKeys.add(key);
+      }
 
       setPressedKeys(newPressedKeys);
 
       // Check if correct combination is pressed
-      if (e.metaKey && e.key.toLowerCase() === "j") {
+      const modifierPressed = modifiers.every((mod) => {
+        switch (mod) {
+          case "option":
+          case "alt":
+            return e.altKey;
+          case "cmd":
+          case "command":
+            return e.metaKey;
+          case "ctrl":
+          case "control":
+            return e.ctrlKey;
+          case "commandorcontrol":
+            return e.metaKey || e.ctrlKey;
+          case "shift":
+            return e.shiftKey;
+          default:
+            return false;
+        }
+      });
+
+      if (modifierPressed && e.key.toLowerCase() === key) {
         e.preventDefault();
         setIsComplete(true);
         setTimeout(() => {
@@ -110,8 +174,11 @@ function KeyboardShortcut({
     const handleKeyUp = (e: KeyboardEvent) => {
       const newPressedKeys = new Set(pressedKeys);
 
+      if (!e.altKey) newPressedKeys.delete("option");
       if (!e.metaKey) newPressedKeys.delete("cmd");
-      if (e.key.toLowerCase() === "j") newPressedKeys.delete("j");
+      if (!e.ctrlKey) newPressedKeys.delete("ctrl");
+      if (!e.shiftKey) newPressedKeys.delete("shift");
+      if (e.key.toLowerCase() === key) newPressedKeys.delete(key);
 
       setPressedKeys(newPressedKeys);
     };
@@ -123,33 +190,63 @@ function KeyboardShortcut({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [pressedKeys, onShortcutPressed]);
+  }, [pressedKeys, onShortcutPressed, modifiers, key]);
+
+  // Display the shortcut keys
+  const displayKeys = () => {
+    const modifierKeys = modifiers.map((mod) => {
+      switch (mod) {
+        case "option":
+        case "alt":
+          return "⌥";
+        case "cmd":
+        case "command":
+          return "⌘";
+        case "ctrl":
+        case "control":
+          return "⌃";
+        case "commandorcontrol":
+          return "⌘";
+        case "shift":
+          return "⇧";
+        default:
+          return mod.toUpperCase();
+      }
+    });
+
+    return [...modifierKeys, key.toUpperCase()];
+  };
+
+  const keys = displayKeys();
 
   return (
-    <div className="flex items-center justify-center gap-4 my-8">
-      <motion.div
-        className={`relative flex items-center justify-center w-20 h-16 rounded-xl border-2 transition-all duration-200 ${
-          pressedKeys.has("cmd")
-            ? "bg-blue-500 border-blue-600 text-white shadow-lg scale-95"
-            : "bg-white border-gray-300 text-gray-700 shadow-sm"
-        }`}
-        animate={pressedKeys.has("cmd") ? { scale: 0.95 } : { scale: 1 }}
-      >
-        <span className="text-lg font-semibold">⌘</span>
-      </motion.div>
+    <div className="flex items-center justify-center gap-4 my-8 relative">
+      {keys.map((keySymbol, index) => {
+        const isPressed =
+          (keySymbol === "⌥" && pressedKeys.has("option")) ||
+          (keySymbol === "⌘" && pressedKeys.has("cmd")) ||
+          (keySymbol === "⌃" && pressedKeys.has("ctrl")) ||
+          (keySymbol === "⇧" && pressedKeys.has("shift")) ||
+          (keySymbol === key.toUpperCase() && pressedKeys.has(key));
 
-      <div className="text-2xl font-light text-gray-400">+</div>
-
-      <motion.div
-        className={`relative flex items-center justify-center w-20 h-16 rounded-xl border-2 transition-all duration-200 ${
-          pressedKeys.has("j")
-            ? "bg-blue-500 border-blue-600 text-white shadow-lg scale-95"
-            : "bg-white border-gray-300 text-gray-700 shadow-sm"
-        }`}
-        animate={pressedKeys.has("j") ? { scale: 0.95 } : { scale: 1 }}
-      >
-        <span className="text-lg font-semibold">J</span>
-      </motion.div>
+        return (
+          <div key={index} className="flex items-center">
+            <motion.div
+              className={`relative flex items-center justify-center w-16 h-16 rounded-xl border-2 transition-all duration-200 ${
+                isPressed
+                  ? "bg-blue-500 border-blue-600 text-white shadow-lg scale-95"
+                  : "bg-white border-gray-300 text-gray-700 shadow-sm"
+              }`}
+              animate={isPressed ? { scale: 0.95 } : { scale: 1 }}
+            >
+              <span className="text-lg font-semibold">{keySymbol}</span>
+            </motion.div>
+            {index < keys.length - 1 && (
+              <div className="text-2xl font-light text-gray-400 mx-2">+</div>
+            )}
+          </div>
+        );
+      })}
 
       {isComplete && (
         <motion.div
@@ -245,8 +342,57 @@ export default function OnboardingFlow({
   const [currentPermission, setCurrentPermission] = useState(0);
   const [grantedPermissions, setGrantedPermissions] = useState<string[]>([]);
   const [shortcutPressed, setShortcutPressed] = useState(false);
-  
-  const onboardingSteps = getOnboardingSteps(permissionsAlreadyGranted);
+  const [realPermissionsGranted, setRealPermissionsGranted] = useState(
+    permissionsAlreadyGranted
+  );
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState<{
+    agent_mode_toggle: string;
+    dictation_input: string;
+    stop_current_task: string;
+    open_settings: string;
+  } | null>(null);
+
+  const onboardingSteps = getOnboardingSteps(realPermissionsGranted);
+
+  // Check current permission status and keyboard shortcuts on mount
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        // Load permissions
+        const permissionsState = await invoke<{
+          accessibility: { granted: boolean; required: boolean };
+          screenRecording: { granted: boolean; required: boolean };
+          microphone: { granted: boolean; required: boolean };
+          allGranted: boolean;
+        }>("check_permissions_status");
+
+        setRealPermissionsGranted(permissionsState.allGranted);
+
+        // Update granted permissions list
+        const granted: string[] = [];
+        if (permissionsState.accessibility.granted)
+          granted.push("accessibility");
+        if (permissionsState.screenRecording.granted)
+          granted.push("screen-recording");
+        if (permissionsState.microphone.granted)
+          granted.push("input-monitoring");
+        setGrantedPermissions(granted);
+
+        // Load keyboard shortcuts
+        const shortcuts = await invoke<{
+          agent_mode_toggle: string;
+          dictation_input: string;
+          stop_current_task: string;
+          open_settings: string;
+        }>("get_keyboard_shortcuts");
+        setKeyboardShortcuts(shortcuts);
+      } catch (error) {
+        console.error("Failed to load initial data:", error);
+      }
+    };
+
+    loadInitialData();
+  }, []);
 
   const handleNext = () => {
     if (currentStep === 1 && !shortcutPressed) {
@@ -274,10 +420,38 @@ export default function OnboardingFlow({
     }, 500);
   };
 
-  const handlePermissionAllow = () => {
+  const handlePermissionAllow = async () => {
     const permission = permissions[currentPermission];
-    setGrantedPermissions([...grantedPermissions, permission.id]);
 
+    try {
+      // Open system settings for the specific permission
+      let success = false;
+
+      switch (permission.id) {
+        case "accessibility":
+          success = await invoke(
+            "request_accessibility_permission_with_auto_redirect",
+            { autoOpenSettings: true }
+          );
+          break;
+        case "screen-recording":
+          success = await invoke("request_screen_recording_permission");
+          break;
+        case "input-monitoring":
+          success = await invoke("request_input_monitoring_permission");
+          break;
+        default:
+          success = false;
+      }
+
+      if (success) {
+        setGrantedPermissions([...grantedPermissions, permission.id]);
+      }
+    } catch (error) {
+      console.error("Error requesting permission:", error);
+    }
+
+    // Move to next permission or complete
     if (currentPermission < permissions.length - 1) {
       setCurrentPermission(currentPermission + 1);
     } else {
@@ -312,8 +486,8 @@ export default function OnboardingFlow({
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/10 backdrop-blur-md flex items-center justify-center z-50">
-        <div className="bg-white/90 backdrop-blur-xl rounded-[20px] shadow-2xl w-[440px] border border-white/20">
+      <div className="fixed inset-0 flex items-center justify-center z-50">
+        <div className="bg-white/90 max-w-[500px] w-full">
           <div className="p-10">
             {/* Progress indicator */}
             <div className="flex gap-2 mb-10">
@@ -363,11 +537,17 @@ export default function OnboardingFlow({
                     <div className="relative">
                       <KeyboardShortcut
                         onShortcutPressed={handleShortcutPressed}
+                        shortcutString={keyboardShortcuts?.agent_mode_toggle}
                       />
                       <p className="text-sm text-gray-500 mt-4">
                         {shortcutPressed
                           ? "Perfect! You've got it."
-                          : "Press and hold both keys together"}
+                          : keyboardShortcuts?.agent_mode_toggle
+                          ? `Press ${keyboardShortcuts.agent_mode_toggle.replace(
+                              /\+/g,
+                              " + "
+                            )} to activate agent mode`
+                          : "Press the keys above together to activate agent mode"}
                       </p>
                     </div>
                   )}

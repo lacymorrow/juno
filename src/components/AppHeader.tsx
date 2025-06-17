@@ -33,7 +33,7 @@ export function AppHeader({
   onToggleDevPanel,
 }: AppHeaderProps) {
   return (
-    <header className="flex items-center py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 min-h-[40px]">
+    <header className="flex items-center py-1 px-2 border-b min-h-[40px]">
       <div className="flex items-center gap-2 flex-shrink-0">
         <div className="flex items-center gap-1 flex-shrink-0">
           <DogIcon size={16} className="text-blue-500" />
