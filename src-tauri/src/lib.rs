@@ -37,6 +37,7 @@ pub mod voice_control;
 pub mod menu; // Menu management for app and tray menus
 pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod events; // Event handling system for shortcuts and voice transcription
+pub mod window_management; // Window operations, state management, and positioning
 
 // Tray icon data is now handled by the menu::tray_menu module
 
@@ -805,14 +806,12 @@ pub fn run() {
             test_environment_variables,
             // TTS Commands
             anthropic::handle_tts_completion,
-            // Settings Window Commands
-            commands::open_settings_window,
-            commands::close_settings_window,
-            // Main Window Commands
-            commands::open_main_window,
-            // Onboarding Window Commands
-            commands::open_onboarding_window,
-            commands::close_onboarding_window,
+            // Window Management Commands
+            window_management::open_settings_window,
+            window_management::close_settings_window,
+            window_management::open_main_window,
+            window_management::open_onboarding_window,
+            window_management::close_onboarding_window,
             // Onboarding Commands
             commands::check_onboarding_status,
             commands::complete_onboarding,
@@ -1102,7 +1101,7 @@ pub fn run() {
                         info!("[Menu] Settings menu item clicked");
                         let app_handle_clone = app_handle_for_menu.clone();
                         tauri::async_runtime::spawn(async move {
-                            if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                            if let Err(e) = window_management::open_settings_window(app_handle_clone).await {
                                 tracing::error!("[Menu] Failed to open settings window: {}", e);
                             }
                         });
@@ -1159,30 +1158,18 @@ pub fn run() {
                             tracing::error!("[Menu] Failed to emit permissions event: {}", e);
                         }
                     }
-                    constants::app_menu_ids::TOGGLE_FULLSCREEN => {
-                        info!("[Menu] Toggle Fullscreen menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::TOGGLE_FULLSCREEN_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit toggle fullscreen event: {}", e);
-                        }
-                    }
 
-                    // Window Menu
-                    constants::app_menu_ids::MINIMIZE => {
-                        info!("[Menu] Minimize menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::MINIMIZE_WINDOW_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit minimize event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::ZOOM => {
-                        info!("[Menu] Zoom menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::ZOOM_WINDOW_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit zoom event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::BRING_ALL_TO_FRONT => {
-                        info!("[Menu] Bring All to Front menu item clicked");
-                        // This is handled automatically by macOS for most cases
-                        info!("[Menu] Bring All to Front executed");
+
+                    // Window Menu - handled by window management module
+                    constants::app_menu_ids::MINIMIZE |
+                    constants::app_menu_ids::ZOOM |
+                    constants::app_menu_ids::BRING_ALL_TO_FRONT |
+                    constants::app_menu_ids::TOGGLE_FULLSCREEN => {
+                        let app_handle_clone = app_handle_for_menu.clone();
+                        let event_id = event.id().as_ref().to_string();
+                        tauri::async_runtime::spawn(async move {
+                            window_management::handle_window_menu_event(&app_handle_clone, &event_id).await;
+                        });
                     }
 
                     // Help Menu
@@ -1223,7 +1210,7 @@ pub fn run() {
                         info!("[Menu] Received tray menu settings ID, redirecting to settings");
                         let app_handle_clone = app_handle_for_menu.clone();
                         tauri::async_runtime::spawn(async move {
-                            if let Err(e) = commands::open_settings_window(app_handle_clone).await {
+                            if let Err(e) = window_management::open_settings_window(app_handle_clone).await {
                                 tracing::error!("[Menu] Failed to open settings window: {}", e);
                             }
                         });
