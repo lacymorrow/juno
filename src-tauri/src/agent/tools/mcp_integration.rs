@@ -93,6 +93,11 @@ pub struct MCPServerConnection {
     stdin_writer: Option<BufWriter<tokio::process::ChildStdin>>,
     stdout_reader: Option<BufReader<tokio::process::ChildStdout>>,
     stderr_reader: Option<BufReader<tokio::process::ChildStderr>>,
+    // Error recovery tracking
+    connection_attempts: u32,
+    last_failure_time: Option<std::time::Instant>,
+    consecutive_failures: u32,
+    last_successful_communication: Option<std::time::Instant>,
 }
 
 impl MCPServerConnection {
@@ -106,13 +111,83 @@ impl MCPServerConnection {
             stdin_writer: None,
             stdout_reader: None,
             stderr_reader: None,
+            // Initialize error recovery fields
+            connection_attempts: 0,
+            last_failure_time: None,
+            consecutive_failures: 0,
+            last_successful_communication: None,
         }
     }
 
-    /// Start the MCP server process and establish connection
+    /// Calculate backoff delay based on consecutive failures
+    fn calculate_backoff_delay(&self) -> Duration {
+        let base_delay = Duration::from_millis(500); // Start with 500ms
+        let max_delay = Duration::from_secs(30); // Cap at 30s
+        
+        if self.consecutive_failures == 0 {
+            return Duration::from_millis(0);
+        }
+        
+        // Exponential backoff: 500ms, 1s, 2s, 4s, 8s, 16s, 30s (capped)
+        let delay_ms = 500_u64.saturating_mul(2_u64.saturating_pow(self.consecutive_failures.saturating_sub(1)));
+        let delay = Duration::from_millis(delay_ms);
+        
+        if delay > max_delay {
+            max_delay
+        } else {
+            delay
+        }
+    }
+
+    /// Check if we should attempt to reconnect based on failure history
+    fn should_attempt_reconnect(&self) -> bool {
+        // Don't exceed max retries
+        if self.connection_attempts >= self.config.max_retries {
+            return false;
+        }
+        
+        // If we have a recent failure, respect backoff delay
+        if let Some(last_failure) = self.last_failure_time {
+            let backoff_delay = self.calculate_backoff_delay();
+            if last_failure.elapsed() < backoff_delay {
+                return false;
+            }
+        }
+        
+        true
+    }
+
+    /// Record a connection failure for backoff calculation
+    fn record_failure(&mut self) {
+        self.connection_attempts += 1;
+        self.consecutive_failures += 1;
+        self.last_failure_time = Some(std::time::Instant::now());
+        
+        debug!("MCP server '{}' failure recorded: attempt {}/{}, consecutive failures: {}", 
+               self.config.name, self.connection_attempts, self.config.max_retries, self.consecutive_failures);
+    }
+
+    /// Record a successful connection/communication
+    fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.last_successful_communication = Some(std::time::Instant::now());
+        
+        debug!("MCP server '{}' success recorded, consecutive failures reset", self.config.name);
+    }
+
+    /// Start the MCP server process and establish connection with retry logic
     pub async fn connect(&mut self) -> Result<(), String> {
         if matches!(self.status, MCPServerStatus::Connected) {
             return Ok(());
+        }
+
+        // Check if we should attempt reconnection based on failure history
+        if !self.should_attempt_reconnect() {
+            let backoff_delay = self.calculate_backoff_delay();
+            return Err(format!(
+                "MCP server '{}' not attempting reconnect: {}/{} attempts used, next retry in {}s",
+                self.config.name, self.connection_attempts, self.config.max_retries, backoff_delay.as_secs()
+            ));
         }
 
         self.status = MCPServerStatus::Connecting;
@@ -138,6 +213,7 @@ impl MCPServerConnection {
             .map_err(|e| {
                 let err = format!("Failed to start MCP server '{}' (command: {}): {}", self.config.name, self.config.command, e);
                 error!("{}", err);
+                self.record_failure();
                 self.status = MCPServerStatus::Error(err.clone());
                 err
             })?;
@@ -145,18 +221,21 @@ impl MCPServerConnection {
         // Setup STDIO communication
         let stdin = child.stdin.take().ok_or_else(|| {
             let err = "Failed to get stdin for MCP server".to_string();
+            self.record_failure();
             self.status = MCPServerStatus::Error(err.clone());
             err
         })?;
 
         let stdout = child.stdout.take().ok_or_else(|| {
             let err = "Failed to get stdout for MCP server".to_string();
+            self.record_failure();
             self.status = MCPServerStatus::Error(err.clone());
             err
         })?;
 
         let stderr = child.stderr.take().ok_or_else(|| {
             let err = "Failed to get stderr for MCP server".to_string();
+            self.record_failure();
             self.status = MCPServerStatus::Error(err.clone());
             err
         })?;
@@ -204,6 +283,7 @@ impl MCPServerConnection {
         self.discover_tools().await?;
 
         self.status = MCPServerStatus::Connected;
+        self.record_success(); // Reset failure counters on successful connection
         info!("Successfully connected to MCP server: {}", self.config.name);
         Ok(())
     }
@@ -559,21 +639,36 @@ impl MCPManager {
     pub async fn add_server(&self, config: MCPServerConfig) -> Result<(), String> {
         let server_id = config.id.clone();
 
-        // Store the configuration
+        // Check for existing server to prevent duplication
         {
-            let mut configs = self.configs.write().await;
-            configs.insert(server_id.clone(), config.clone());
+            let configs = self.configs.read().await;
+            if configs.contains_key(&server_id) {
+                return Err(format!("MCP server with ID '{}' already exists", server_id));
+            }
         }
 
-        // Create and optionally start the connection
-        let connection = MCPServerConnection::new(config.clone());
+        // Atomic add: both configs and servers together
         {
+            let mut configs = self.configs.write().await;
             let mut servers = self.servers.write().await;
+            
+            // Double-check in case another thread added it between our check and lock
+            if configs.contains_key(&server_id) {
+                return Err(format!("MCP server with ID '{}' already exists", server_id));
+            }
+            
+            // Store configuration and create connection atomically
+            configs.insert(server_id.clone(), config.clone());
+            let connection = MCPServerConnection::new(config.clone());
             servers.insert(server_id.clone(), connection);
         }
 
+        // Start server if needed (outside the lock to avoid deadlock)
         if config.auto_start && config.enabled {
-            self.start_server(&server_id).await?;
+            if let Err(e) = self.start_server(&server_id).await {
+                warn!("Failed to auto-start MCP server '{}': {}", config.name, e);
+                // Don't fail the add operation if auto-start fails
+            }
         }
 
         info!("Added MCP server configuration: {}", config.name);
@@ -653,21 +748,48 @@ impl MCPManager {
 
     /// Remove an MCP server
     pub async fn remove_server(&self, server_id: &str) -> Result<(), String> {
-        // Stop the server first
-        self.stop_server(server_id).await?;
+        // Check if server exists first
+        let server_exists = {
+            let configs = self.configs.read().await;
+            configs.contains_key(server_id)
+        };
+        
+        if !server_exists {
+            return Err(format!("MCP server '{}' not found", server_id));
+        }
 
-        // Remove from both configs and servers
-        {
+        // Stop the server with timeout to prevent hanging
+        match tokio::time::timeout(
+            Duration::from_secs(10), 
+            self.stop_server(server_id)
+        ).await {
+            Ok(Ok(_)) => {
+                info!("Successfully stopped MCP server: {}", server_id);
+            }
+            Ok(Err(e)) => {
+                warn!("Error stopping MCP server '{}': {} (proceeding with removal)", server_id, e);
+            }
+            Err(_) => {
+                warn!("Timeout stopping MCP server '{}' (proceeding with removal)", server_id);
+            }
+        }
+
+        // Atomic removal from both data structures
+        let (removed_config, removed_server) = {
             let mut configs = self.configs.write().await;
-            configs.remove(server_id);
-        }
-        {
             let mut servers = self.servers.write().await;
-            servers.remove(server_id);
-        }
+            
+            let config = configs.remove(server_id);
+            let server = servers.remove(server_id);
+            (config, server)
+        };
 
-        info!("Removed MCP server: {}", server_id);
-        Ok(())
+        if removed_config.is_some() || removed_server.is_some() {
+            info!("Successfully removed MCP server: {}", server_id);
+            Ok(())
+        } else {
+            Err(format!("MCP server '{}' was not found during removal", server_id))
+        }
     }
 
     /// Start all enabled servers

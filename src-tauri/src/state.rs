@@ -1,5 +1,6 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{info, warn, error};
 use tauri::Emitter;
 
@@ -26,7 +27,7 @@ use crate::agent::tools::tool_config::ToolConfigManager;
 // Import cloud client
 use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 // Import MCP manager for external MCP server support
-use crate::agent::tools::mcp_integration::MCPManager;
+use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::constants::app_identity;
@@ -756,21 +757,139 @@ impl AppState {
         let mcp_configs = config_guard.get_mcp_servers();
         drop(config_guard);
 
+        if mcp_configs.is_empty() {
+            log::debug!("No MCP servers configured, skipping initialization");
+            return Ok(());
+        }
+
         let mcp_manager = self.get_mcp_manager().await;
         let manager_guard = mcp_manager.lock().await;
 
+        // Add all servers first (fast operation)
+        let mut added_servers = Vec::new();
         for config in mcp_configs {
-            if let Err(e) = manager_guard.add_server(config.clone()).await {
-                log::error!("Failed to add MCP server '{}': {}", config.name, e);
+            match manager_guard.add_server(config.clone()).await {
+                Ok(_) => {
+                    added_servers.push(config.clone());
+                    log::debug!("Added MCP server configuration: {}", config.name);
+                }
+                Err(e) => {
+                    log::warn!("Failed to add MCP server '{}': {}", config.name, e);
+                }
             }
         }
 
-        // Start all enabled servers
-        if let Err(e) = manager_guard.start_all_enabled_servers().await {
-            log::error!("Failed to start MCP servers: {}", e);
+        drop(manager_guard); // Release lock before starting servers
+
+        if added_servers.is_empty() {
+            log::warn!("No MCP servers were successfully added");
+            return Ok(());
         }
 
-        drop(manager_guard);
+        // Start enabled servers concurrently with timeout
+        let enabled_servers: Vec<_> = added_servers.into_iter()
+            .filter(|config| config.enabled && config.auto_start)
+            .collect();
+
+        if !enabled_servers.is_empty() {
+            log::info!("Starting {} enabled MCP servers concurrently", enabled_servers.len());
+            
+            let manager = self.get_mcp_manager().await;
+            let start_futures = enabled_servers.iter().map(|config| {
+                let manager = manager.clone();
+                let server_id = config.id.clone();
+                let server_name = config.name.clone();
+                
+                async move {
+                    let manager_guard = manager.lock().await;
+                    let start_result = tokio::time::timeout(
+                        Duration::from_secs(15),
+                        manager_guard.start_server(&server_id)
+                    ).await;
+                    drop(manager_guard);
+                    
+                    match start_result {
+                        Ok(Ok(_)) => {
+                            log::info!("✅ MCP server '{}' started successfully", server_name);
+                            Ok(server_name)
+                        }
+                        Ok(Err(e)) => {
+                            log::warn!("❌ MCP server '{}' failed to start: {}", server_name, e);
+                            Err(format!("{}: {}", server_name, e))
+                        }
+                        Err(_) => {
+                            log::warn!("⏰ MCP server '{}' startup timed out", server_name);
+                            Err(format!("{}: timeout", server_name))
+                        }
+                    }
+                }
+            });
+
+            // Wait for all servers to attempt startup
+            let results = futures::future::join_all(start_futures).await;
+            
+            let successful: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
+            let failed: Vec<_> = results.iter().filter_map(|r| r.as_ref().err()).collect();
+            
+            log::info!("MCP initialization complete: {} succeeded, {} failed", successful.len(), failed.len());
+            if !failed.is_empty() {
+                let failed_list: Vec<String> = failed.iter().map(|s| s.to_string()).collect();
+                log::warn!("Failed servers: {}", failed_list.join(", "));
+            }
+        }
+
+        // Sync tools once at the end
+        if let Err(e) = self.sync_mcp_tools().await {
+            log::warn!("Failed to sync MCP tools after initialization: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// Retry failed MCP servers with exponential backoff
+    pub async fn retry_failed_mcp_servers(&self) -> Result<(), String> {
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        
+        let statuses = manager_guard.get_server_statuses().await;
+        let failed_servers: Vec<String> = statuses.iter()
+            .filter_map(|(id, status)| {
+                match status {
+                    MCPServerStatus::Error(_) | MCPServerStatus::Timeout => Some(id.clone()),
+                    _ => None
+                }
+            })
+            .collect();
+        
+        if failed_servers.is_empty() {
+            log::debug!("No failed MCP servers to retry");
+            return Ok(());
+        }
+        
+        log::info!("Attempting to retry {} failed MCP servers", failed_servers.len());
+        
+        let mut retry_count = 0;
+        for server_id in failed_servers {
+            // Each server manages its own backoff timing
+            match manager_guard.start_server(&server_id).await {
+                Ok(_) => {
+                    log::info!("✅ Successfully retried MCP server: {}", server_id);
+                    retry_count += 1;
+                }
+                Err(e) => {
+                    log::debug!("⏭️ MCP server {} not ready for retry: {}", server_id, e);
+                }
+            }
+        }
+        
+        if retry_count > 0 {
+            log::info!("Retried {} MCP servers, syncing tools", retry_count);
+            drop(manager_guard);
+            self.sync_mcp_tools().await?;
+        } else {
+            drop(manager_guard);
+        }
+        
         Ok(())
     }
 
@@ -924,29 +1043,49 @@ impl AppState {
         Ok(())
     }
     
-    /// Initialize MCP servers with deduplication
+    /// Initialize MCP servers with atomic deduplication
     pub async fn initialize_mcp_servers_once(&self) -> Result<(), String> {
-        use std::sync::Once;
-        static INITIALIZED: Once = Once::new();
-        static mut INITIALIZATION_RESULT: Option<Result<(), String>> = None;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::sync::Mutex as AsyncMutex;
         
-        unsafe {
-            INITIALIZED.call_once(|| {
-                // Use a blocking approach to ensure initialization completes
-                let rt = match tokio::runtime::Handle::try_current() {
-                    Ok(handle) => handle,
-                    Err(_) => {
-                        INITIALIZATION_RESULT = Some(Err("No tokio runtime available".to_string()));
-                        return;
-                    }
-                };
-                
-                INITIALIZATION_RESULT = Some(rt.block_on(async {
-                    self.initialize_mcp_servers().await
-                }));
-            });
+        static INIT_FLAG: AtomicBool = AtomicBool::new(false);
+        static INIT_RESULT: std::sync::OnceLock<AsyncMutex<Option<Result<(), String>>>> = std::sync::OnceLock::new();
+        
+        // Fast path: if already initialized, return immediately
+        if INIT_FLAG.load(Ordering::Acquire) {
+            let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
+            let guard = result_mutex.lock().await;
+            return guard.as_ref().unwrap().clone();
+        }
+        
+        // Try to claim initialization responsibility
+        if INIT_FLAG.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            // We're responsible for initialization
+            log::info!("Starting MCP servers initialization (first time)");
+            let init_result = self.initialize_mcp_servers().await;
             
-            INITIALIZATION_RESULT.as_ref().unwrap().clone()
+            // Store the result
+            let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
+            let mut guard = result_mutex.lock().await;
+            *guard = Some(init_result.clone());
+            
+            init_result
+        } else {
+            // Someone else is/was initializing, wait for their result
+            log::debug!("MCP servers initialization already in progress, waiting for result");
+            let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
+            
+            // Wait for initialization to complete
+            loop {
+                let guard = result_mutex.lock().await;
+                if let Some(result) = guard.as_ref() {
+                    return result.clone();
+                }
+                drop(guard);
+                
+                // Brief yield to avoid busy waiting
+                tokio::task::yield_now().await;
+            }
         }
     }
 
