@@ -333,7 +333,6 @@ function App() {
       <ClickVisualizer />
       <CommandOverlay />
       <KeyPressOverlay />
-      <FloatingBar />
       <ToolApprovalModal />
 
       {/* Modal System */}

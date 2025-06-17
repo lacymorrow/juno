@@ -31,8 +31,9 @@ export default function OnboardingWindow() {
 
   const handleOnboardingComplete = async () => {
     try {
-      // Mark onboarding as completed
-      localStorage.setItem("juno-onboarding-completed", "true");
+      // Use backend command to mark onboarding as completed
+      await invoke("complete_onboarding");
+      console.log("Onboarding completed via backend");
 
       // Notify main window of completion
       const mainWindow = await Window.getByLabel("main");
@@ -40,7 +41,7 @@ export default function OnboardingWindow() {
         await mainWindow.emit("onboarding-complete", {});
       }
 
-      // Close the onboarding window
+      // Close the onboarding window via backend
       await invoke("close_onboarding_window");
     } catch (error) {
       console.error("Error completing onboarding:", error);
@@ -55,8 +56,9 @@ export default function OnboardingWindow() {
 
   const handleOnboardingSkip = async () => {
     try {
-      // Mark onboarding as completed even if skipped
-      localStorage.setItem("juno-onboarding-completed", "true");
+      // Use backend command to skip onboarding (still marks as completed)
+      await invoke("skip_onboarding");
+      console.log("Onboarding skipped via backend");
 
       // Notify main window that onboarding was skipped
       const mainWindow = await Window.getByLabel("main");
@@ -64,7 +66,7 @@ export default function OnboardingWindow() {
         await mainWindow.emit("onboarding-skipped", {});
       }
 
-      // Close the onboarding window
+      // Close the onboarding window via backend
       await invoke("close_onboarding_window");
     } catch (error) {
       console.error("Error skipping onboarding:", error);
