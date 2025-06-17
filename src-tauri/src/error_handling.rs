@@ -74,7 +74,9 @@ pub fn handle_application_startup_error(error: tauri::Error) -> ! {
     eprintln!("");
     eprintln!("💬 Need help? Visit: https://github.com/juno-ai/issues");
 
-    // Exit with error code but don't panic for graceful error handling
+    // CRITICAL: This is the only acceptable use of std::process::exit in the application
+    // It's only called when the application cannot start at all (e.g., missing critical permissions)
+    // All other error paths should use proper Result<T, E> error handling
     std::process::exit(1);
 }
 
@@ -182,6 +184,51 @@ pub mod utils {
 
         if let Err(e) = app_handle.emit("permission-guidance-needed", guidance_payload) {
             error!("Failed to emit permission guidance event: {}", e);
+        }
+    }
+
+    /// Safe lock wrapper that logs errors instead of panicking
+    pub fn safe_lock<'a, T>(mutex: &'a std::sync::Mutex<T>, operation: &str) -> Result<std::sync::MutexGuard<'a, T>, String> {
+        mutex.lock().map_err(|e| {
+            let error_msg = format!("Failed to acquire lock for {}: {}", operation, e);
+            error!("{}", error_msg);
+            error_msg
+        })
+    }
+
+    /// Safe async lock wrapper that logs errors instead of panicking
+    pub async fn safe_async_lock<'a, T>(mutex: &'a tokio::sync::Mutex<T>, operation: &str) -> tokio::sync::MutexGuard<'a, T> {
+        // Tokio mutexes don't poison, so we can always get the lock
+        // We just include the operation parameter for logging consistency
+        if operation.is_empty() {
+            warn!("safe_async_lock called with empty operation name");
+        }
+        mutex.lock().await
+    }
+
+    /// Convert standard errors to JunoError
+    pub fn to_juno_error(error: Box<dyn std::error::Error>, category: &str) -> JunoError {
+        match category {
+            "permission" => JunoError::PermissionError(error.to_string()),
+            "voice" => JunoError::VoiceError(error.to_string()),
+            "agent" => JunoError::AgentError(error.to_string()),
+            "window" => JunoError::WindowError(error.to_string()),
+            "filesystem" => JunoError::FileSystemError(error.to_string()),
+            "network" => JunoError::NetworkError(error.to_string()),
+            "config" => JunoError::ConfigurationError(error.to_string()),
+            "system" => JunoError::SystemError(error.to_string()),
+            _ => JunoError::ApplicationError(error.to_string()),
+        }
+    }
+
+    /// Helper for parsing system values with proper error logging
+    pub fn safe_parse<T: std::str::FromStr>(value: &str, field_name: &str) -> Option<T> {
+        match value.parse() {
+            Ok(parsed) => Some(parsed),
+            Err(_) => {
+                warn!("Failed to parse {} from value: '{}'", field_name, value);
+                None
+            }
         }
     }
 }

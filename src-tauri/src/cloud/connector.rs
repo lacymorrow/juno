@@ -186,23 +186,43 @@ impl HardwareMonitor {
                     for line in output_str.lines() {
                         if line.contains("Pages free:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                free_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    free_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse free pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages active:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                active_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    active_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse active pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages inactive:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                inactive_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    inactive_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse inactive pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages speculative:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                speculative_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    speculative_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse speculative pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages wired down:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                wired_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    wired_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse wired pages: {}", num_str);
+                                }
                             }
                         }
                     }

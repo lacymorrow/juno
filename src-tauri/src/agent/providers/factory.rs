@@ -419,7 +419,7 @@ impl BrainFactory {
                     local_tool_provider,
                     brain,
                     15, // max_steps
-                    app_handle.unwrap_or_else(|| panic!("AppHandle required for single agent")),
+                    app_handle.ok_or("AppHandle required for single agent")?,
                 );
 
                 Ok(AgentRuntime::Single(Box::new(runner)))
