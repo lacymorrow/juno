@@ -16,7 +16,11 @@ use crate::{state, cli, agent, commands};
 /// Initialize enhanced tracing with optimized formatting
 pub fn init_tracing() {
     fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
+        .with_env_filter(
+            EnvFilter::from_default_env().add_directive(
+                "info".parse().unwrap_or_else(|_| tracing::level_filters::LevelFilter::INFO.into())
+            )
+        )
         .with_target(false) // Hide target module names for cleaner output
         .with_thread_ids(false) // Hide thread IDs for cleaner output
         .with_ansi(true) // Enable colors for better readability

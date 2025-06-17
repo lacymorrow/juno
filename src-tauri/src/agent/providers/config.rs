@@ -122,11 +122,11 @@ impl ProviderConfig {
                     // Attempt to save the default config if parsing failed, but don't error out if save fails here.
                     let _ = default_config.save();
                     AgentError::ConfigurationError(format!("Failed to parse config: {}", e))
-                }).or_else(|_parse_err|{
+                }).or_else(|_agent_err: crate::agent::structs::AgentError|{
                      info!("Creating default configuration as parsing failed or to ensure structure.");
                      let default_config = Self::default();
                      default_config.save()?;
-                     Ok(default_config)
+                     Ok::<ProviderConfig, crate::agent::structs::AgentError>(default_config)
                 })?;
 
                 // Perform configuration migration - add missing providers

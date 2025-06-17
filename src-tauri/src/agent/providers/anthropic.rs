@@ -687,7 +687,7 @@ impl AgentBrain for AnthropicBrain {
         // --- 4. Handle Response (Streaming or Non-Streaming) ---
         if use_streaming {
             // Handle streaming response
-            let app_handle = app_handle.unwrap(); // Safe because we checked above
+            let app_handle = app_handle.ok_or("AppHandle required for streaming")?;
             let message_id = message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
             // Emit stream start event
