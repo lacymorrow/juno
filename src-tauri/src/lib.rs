@@ -1072,10 +1072,10 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 let app_state = retry_app_handle.state::<state::AppState>();
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(60)); // Check every minute
-                
+
                 loop {
                     interval.tick().await;
-                    
+
                     if let Err(e) = app_state.retry_failed_mcp_servers().await {
                         tracing::debug!("MCP retry check failed: {}", e);
                     }
