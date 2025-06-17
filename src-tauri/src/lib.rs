@@ -33,6 +33,7 @@ pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
 pub mod events; // Event handling system for shortcuts and voice transcription
 pub mod window_management; // Window operations, state management, and positioning
 pub mod startup; // Application startup, initialization, and bootstrapping
+pub mod state_management; // Application state management, initialization, and monitoring
 
 // Tray icon data is now handled by the menu::tray_menu module
 
@@ -698,62 +699,13 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // --- Load Environment Variables from Bundled Resources ---
-            let env_app_handle = app_handle.clone();
+            // --- Initialize Application State Management ---
+            let state_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = load_bundled_environment(env_app_handle).await {
-                    tracing::warn!("Failed to load bundled environment: {}", e);
-                    tracing::info!("Using environment variables from system environment or development .env file");
+                if let Err(e) = state_management::initialize_application_state(&state_app_handle).await {
+                    tracing::error!("Failed to initialize application state: {}", e);
                 } else {
-                    tracing::info!("Successfully loaded environment variables from bundled resources");
-                }
-            });
-
-            // --- Load Keyboard Shortcuts from Configuration ---
-            let shortcuts_app_handle = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let app_state = shortcuts_app_handle.state::<state::AppState>();
-                if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&shortcuts_app_handle, &*app_state).await {
-                    tracing::warn!("Failed to load keyboard shortcuts from store: {}", e);
-                    tracing::info!("Using default keyboard shortcuts");
-                }
-            });
-
-            // --- Initialize MCP Servers from Configuration ---
-            let mcp_app_handle = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let app_state = mcp_app_handle.state::<state::AppState>();
-                tracing::info!("Initializing MCP servers from configuration...");
-                if let Err(e) = app_state.initialize_mcp_servers().await {
-                    tracing::warn!("Failed to initialize MCP servers: {}", e);
-                    tracing::info!("MCP servers can be configured and started via Settings");
-                } else {
-                    tracing::info!("Successfully initialized MCP servers");
-                }
-            });
-
-            // --- Start MCP Error Recovery Background Task ---
-            let retry_app_handle = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let app_state = retry_app_handle.state::<state::AppState>();
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(60)); // Check every minute
-
-                loop {
-                    interval.tick().await;
-
-                    if let Err(e) = app_state.retry_failed_mcp_servers().await {
-                        tracing::debug!("MCP retry check failed: {}", e);
-                    }
-                }
-            });
-
-            // --- Initialize Onboarding System ---
-            let onboarding_app_handle = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::onboarding::initialize_onboarding_system(onboarding_app_handle).await {
-                    tracing::warn!("Failed to initialize onboarding system: {}", e);
-                } else {
-                    tracing::info!("Onboarding system initialized successfully");
+                    tracing::info!("Application state management initialized successfully");
                 }
             });
 
@@ -783,78 +735,7 @@ pub fn run() {
             });
             // --- End Boot Sound ---
 
-            // --- Initialize Multi-Agent Orchestrator ---
-            let app_handle_for_orchestrator = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::orchestrator::init_orchestrator_with_app_handle(app_handle_for_orchestrator).await {
-                    tracing::error!("[Setup] Failed to initialize orchestrator system: {}", e);
-                } else {
-                    tracing::info!("[Setup] Multi-agent orchestrator system initialized successfully");
-                }
-            });
-
-            // --- Initialize Cloud Client ---
-            let app_handle_for_cloud = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let app_state = app_handle_for_cloud.state::<crate::state::AppState>();
-
-                // Initialize cloud client configuration
-                if let Err(e) = app_state.init_cloud_client(&app_handle_for_cloud).await {
-                    tracing::error!("[Setup] Failed to initialize cloud client: {}", e);
-                } else {
-                    tracing::info!("[Setup] Cloud client configuration initialized");
-
-                    // Start cloud client if enabled
-                    if app_state.is_cloud_enabled() {
-                        if let Err(e) = app_state.start_cloud_client().await {
-                            tracing::error!("[Setup] Failed to start cloud client: {}", e);
-                        } else {
-                            tracing::info!("[Setup] Cloud client started successfully");
-                        }
-                    } else {
-                        tracing::info!("[Setup] Cloud connectivity is disabled in configuration");
-                    }
-                }
-            });
-
-            // --- Initialize Floating Bar Manager ---
-            let app_handle_for_bar_manager = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                commands::floating_bar::initialize_bar_manager(app_handle_for_bar_manager).await;
-                tracing::info!("[Setup] Floating bar manager initialized successfully");
-            });
-
-            let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
-            tauri::async_runtime::spawn(async move {
-                let state = app_handle_shortcuts.state::<state::AppState>();
-
-                // Load keyboard shortcuts from persistent storage
-                if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&app_handle_shortcuts, &state).await {
-                    tracing::warn!("Failed to load keyboard shortcuts: {} - using defaults", e);
-                }
-
-                // Load agent trigger mode from persistent storage
-                if let Err(e) = crate::commands::core::load_agent_trigger_mode_from_store(&app_handle_shortcuts, &state).await {
-                    tracing::warn!("Failed to load agent trigger mode: {} - using defaults", e);
-                }
-
-                // Register global shortcuts after loading configuration
-                if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(&app_handle_shortcuts, &state).await {
-                    tracing::warn!("Failed to register global shortcuts: {} - continuing without shortcuts", e);
-                }
-
-                // Initialize dictation input monitoring system
-                if let Err(e) = crate::dictation_monitor::init_dictation_input_monitoring(app_handle_shortcuts.clone()).await {
-                    tracing::error!("[Setup] Failed to initialize dictation input monitoring: {}", e);
-                } else {
-                    info!("[Setup] Dictation input monitoring system initialized successfully");
-                }
-
-                // Start agent monitor task for hold behavior (after app is fully running)
-                let app_handle_for_agent_monitor = app_handle_shortcuts.clone();
-                let _agent_monitor_handle = crate::agent_monitor::start_agent_monitor_task(app_handle_for_agent_monitor);
-                info!("[Setup] Agent monitor task started successfully");
-            });
+            // --- State initialization is now handled by state_management module ---
 
             // Setup all event listeners using the events module
             events::handlers::setup_event_listeners(&app.handle());
@@ -1165,12 +1046,7 @@ pub fn run() {
                 });
             });
 
-            // --- Initialize Autostart Configuration ---
-            let app_handle_for_autostart = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                commands::autostart::init_autostart(&app_handle_for_autostart);
-                tracing::info!("[Setup] Autostart configuration initialized successfully");
-            });
+            // --- Autostart initialization is now handled by state_management module ---
 
             // Always listening mode is handled by the plugin and commands
             // No additional monitoring task needed here
@@ -1412,8 +1288,10 @@ pub fn run() {
 
                 let app_handle_clone = app_handle_for_agent_stop_all.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Stop TTS immediately
-                    crate::tts::stop_speech();
+                    // Use state management module for emergency cleanup
+                    if let Err(e) = state_management::handle_emergency_state_cleanup(&app_handle_clone).await {
+                        error!("[Agent Stop All] Emergency cleanup failed: {}", e);
+                    }
 
                     // Force stop voice transcription if available
                     match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
@@ -1427,31 +1305,6 @@ pub fn run() {
                             warn!("[Agent Stop All] Voice controller not available");
                         }
                     }
-
-                    // Force reset all monitoring states
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                    // Clean up app state
-                    let app_state = app_handle_clone.state::<crate::state::AppState>();
-                    app_state.signal_cancel();
-                    app_state.mark_agent_execution_finished();
-
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Emit state updates
-                    let _ = app_handle_clone.emit("agent-active", false);
-                    let _ = app_handle_clone.emit("dictation-active", false);
-                    let _ = app_handle_clone.emit("tts-stop-requested", ());
-
-                    // Update floating bar
-                    crate::commands::floating_bar::handle_backend_response(
-                        &app_handle_clone,
-                        "Stopped",
-                        Some("All agent operations stopped.".to_string())
-                    ).await;
 
                     info!("[Agent Stop All] Comprehensive agent shutdown completed");
                 });
