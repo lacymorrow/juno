@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { KeyboardShortcuts } from "@/types/keyboard";
 import { AUDIO } from "@/lib/constants";
 import { useInvoke } from "@/hooks/useInvoke";
@@ -93,6 +94,27 @@ export function useSettings() {
     loadAllSettings();
   }, []);
 
+  // Listen for MCP state updates from backend
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupMcpListener = async () => {
+      unlisten = await listen<{
+        servers: MCPServerConfig[];
+        statuses: Record<string, MCPServerStatus>;
+        tools: MCPToolInfo[];
+      }>("mcp_state_updated", (event) => {
+        console.log("Received MCP state update:", event.payload);
+        setMcpServers(event.payload.servers);
+        setMcpServerStatuses(event.payload.statuses);
+        setMcpTools(event.payload.tools);
+      });
+    };
+
+    setupMcpListener();
+    return () => unlisten?.();
+  }, []);
+
   const loadAllSettings = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -161,7 +183,7 @@ export function useSettings() {
       // Load keyboard shortcuts
       await loadKeyboardShortcuts();
 
-      // Load MCP server configurations
+      // Load MCP server configurations - Only load current state, don't initialize
       await loadMcpServers();
     } catch (error) {
       console.error("Error loading settings:", error);

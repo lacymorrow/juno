@@ -1,6 +1,7 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
 use tracing::{info, warn, error};
+use tauri::Emitter;
 
 pub mod desktop_wrapper;
 use crate::commands::shell::ShellSessions;
@@ -816,6 +817,32 @@ impl AppState {
                 log::debug!("MCP tools updated, notifying frontend");
             }
         }
+    }
+
+    /// Emit MCP state update to frontend
+    pub async fn emit_mcp_state_update(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+        
+        let servers = manager_guard.get_server_configs().await;
+        let statuses = manager_guard.get_server_statuses().await;
+        let tools = manager_guard.get_all_tools().await;
+        
+        drop(manager_guard);
+        
+        let payload = serde_json::json!({
+            "servers": servers,
+            "statuses": statuses,
+            "tools": tools
+        });
+        
+        if let Err(e) = app_handle.emit("mcp_state_updated", payload) {
+            log::warn!("Failed to emit MCP state update: {}", e);
+            return Err(format!("Failed to emit MCP state update: {}", e));
+        }
+        
+        log::debug!("Emitted MCP state update to frontend");
+        Ok(())
     }
 
     /// Register a tool provider for MCP tool refresh notifications
