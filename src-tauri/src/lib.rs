@@ -1065,7 +1065,6 @@ pub fn run() {
                 }
             });
 
-<<<<<<< HEAD
             // --- Start MCP Error Recovery Background Task ---
             let retry_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
@@ -1081,8 +1080,6 @@ pub fn run() {
                 }
             });
 
-=======
->>>>>>> 41b2a1ba739f11a897b33c9af0d185871eb8272e
             // --- Setup Application Menu ---
             // Juno Application Menu
             let about_menu_item = tauri::menu::MenuItemBuilder::new("About Juno")
