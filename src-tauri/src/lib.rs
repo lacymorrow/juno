@@ -819,6 +819,7 @@ pub fn run() {
             commands::skip_onboarding,
             commands::reset_onboarding,
             commands::get_onboarding_info,
+            commands::test_global_shortcuts_working,
 
 
             // Debug Mode Commands
