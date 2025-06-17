@@ -33,8 +33,8 @@ export function AppHeader({
   onToggleDevPanel,
 }: AppHeaderProps) {
   return (
-    <header className="flex items-center justify-between py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 min-h-[40px]">
-      <div className="flex items-center gap-2 min-w-0 flex-1 max-w-fit">
+    <header className="flex items-center py-1 px-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 min-h-[40px]">
+      <div className="flex items-center gap-2 flex-shrink-0">
         <div className="flex items-center gap-1 flex-shrink-0">
           <DogIcon size={16} className="text-blue-500" />
           <span className="text-sm font-semibold">Juno AI</span>
@@ -74,10 +74,10 @@ export function AppHeader({
 
       {/* Voice Status Indicator - only show in chat view */}
       {currentView === "chat" && (
-        <div className="flex-1 flex justify-center mx-2 min-w-0">
+        <div className="flex items-center justify-center mx-2 min-w-0">
           <VoiceStatusIndicator
             variant="compact"
-            className="max-w-xs truncate"
+            className="flex-shrink-0"
             showText={false}
           />
         </div>
