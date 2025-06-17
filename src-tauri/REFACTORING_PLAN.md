@@ -151,9 +151,9 @@ src-tauri/src/
 - [x] `shortcuts.rs` - Shortcut parsing
 - [x] `menu/mod.rs` - Menu module structure
 - [x] `menu/app_menu.rs` - Application menu
-- [ ] `menu/tray_menu.rs` - Tray menu
-- [ ] `platform/mod.rs` - Platform abstraction
-- [ ] `platform/macos.rs` - macOS specifics
+- [x] `menu/tray_menu.rs` - Tray menu
+- [x] `platform/mod.rs` - Platform abstraction
+- [x] `platform/macos.rs` - macOS specifics
 - [ ] `events/mod.rs` - Event system
 - [ ] `events/handlers.rs` - Event handlers
 - [ ] `events/setup.rs` - Event setup
@@ -226,4 +226,4 @@ src-tauri/src/
 
 **Last Updated**: December 2024  
 **Status**: 🚧 Phase 1 - In Progress  
-**Progress**: 5/13 core modules extracted (38% complete)
+**Progress**: 8/13 core modules extracted (62% complete)
