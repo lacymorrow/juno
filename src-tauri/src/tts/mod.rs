@@ -175,17 +175,30 @@ pub async fn invoke_tts_with_fallback(
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
+    // Check network connectivity for cloud-based providers
+    let is_cloud_provider = matches!(primary_provider.to_lowercase().as_str(), "replicate" | "elevenlabs");
+
+    // If it's a cloud provider, do a quick network check first
+    if is_cloud_provider {
+        info!("Cloud TTS provider detected, checking network connectivity...");
+        let is_online = crate::utils::network::is_online().await;
+        if !is_online {
+            warn!("Device appears offline, skipping cloud TTS providers and using system TTS directly");
+            return invoke_tts_for_provider(text, None, "system").await;
+        }
+    }
+
     // Define the provider fallback order based on the primary provider
     let fallback_providers = match primary_provider.to_lowercase().as_str() {
-        "replicate" => vec!["replicate", "elevenlabs", "system"],
-        "elevenlabs" => vec!["elevenlabs", "system"],
-        "system" => vec!["system", "elevenlabs", "replicate"],
+        "replicate" => vec!["replicate", "system"], // Prioritize system over other cloud providers when offline
+        "elevenlabs" => vec!["elevenlabs", "system"], // Prioritize system over other cloud providers when offline
+        "system" => vec!["system"], // System only, no cloud fallbacks needed
         "off" => {
             return Ok("TTS_DISABLED_BY_SETTING".to_string());
         }
         _ => {
             warn!("Unknown primary TTS provider: '{}'. Using default fallback order.", primary_provider);
-            vec!["system", "elevenlabs", "replicate"]
+            vec!["system"] // Default to system for unknown providers
         }
     };
 
@@ -213,8 +226,27 @@ pub async fn invoke_tts_with_fallback(
             }
             Err(e) => {
                 last_error = e.clone();
+
+                // Check if this is a network-related error
+                let is_network_error = crate::utils::network::is_network_error(&e);
+
                 if is_primary {
-                    warn!("Primary TTS provider '{}' failed: {}", provider, e);
+                    if is_network_error {
+                        warn!("Primary TTS provider '{}' failed with network error: {}. Trying system TTS immediately.", provider, e);
+                        // For network errors, skip other cloud providers and go straight to system
+                        match invoke_tts_for_provider(text.clone(), None, "system").await {
+                            Ok(system_result) => {
+                                warn!("Network error detected, successfully fell back to system TTS");
+                                return Ok(system_result);
+                            }
+                            Err(system_error) => {
+                                error!("Even system TTS failed: {}", system_error);
+                                return Err(format!("Network error with primary provider and system TTS also failed: {}", system_error));
+                            }
+                        }
+                    } else {
+                        warn!("Primary TTS provider '{}' failed: {}", provider, e);
+                    }
                 } else {
                     warn!("Fallback TTS provider '{}' also failed: {}", provider, e);
                 }

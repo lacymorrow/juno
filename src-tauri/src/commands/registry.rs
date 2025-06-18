@@ -87,6 +87,10 @@ macro_rules! generate_invoke_handler {
             dev_release_key,
             dev_global_type_text,
 
+            // Dev Network Commands
+            crate::commands::dev::check_network_connectivity,
+            crate::commands::dev::test_network_error_detection,
+
             // Window Commands
             dev_get_window_list,
             dev_get_window_info,
