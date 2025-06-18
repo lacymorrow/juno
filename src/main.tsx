@@ -1,37 +1,27 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
-import App from "./App";
-import { FloatingBar } from "./components/FloatingBar";
-import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
-import { Toaster } from "./components/ui/sonner";
-import { VoiceProvider } from "./contexts/VoiceContext";
-import FloatingPanel from "./FloatingPanel";
-import OnboardingWindow from "./OnboardingWindow";
-import "./styles/globals.css";
-import SettingsWindow from "./components/OLD-SettingsWindow";
-import Settings from "./components/OLD-Settings";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { Toaster } from "sonner";
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
+import App from "./App";
+import { VoiceProvider } from "./contexts/VoiceContext";
+
+import "./styles/globals.css";
+
+const root = createRoot(document.getElementById("root") as HTMLElement);
+
+root.render(
+  <StrictMode>
     <VoiceProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<App />} />
-          <Route path="/settings" element={<ModularSettingsWindow />} />
-          <Route path="/floating-bar" element={<FloatingBar />} />
-          <Route path="/floating-panel" element={<FloatingPanel />} />
-          <Route path="/onboarding" element={<OnboardingWindow />} />
-        </Routes>
-      </BrowserRouter>
-      {/* Toast notifications */}
+      <App />
       <Toaster
-        position="bottom-right"
-        expand={true}
-        richColors={true}
-        closeButton={true}
-        duration={5000}
+        position="top-center"
+        toastOptions={{
+          duration: 3000,
+          style: {
+            fontSize: "14px",
+          },
+        }}
       />
     </VoiceProvider>
-  </React.StrictMode>
+  </StrictMode>
 );

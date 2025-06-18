@@ -1,26 +1,21 @@
-import { useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { toggleDictation } from "tauri-plugin-voice-transcription-api";
-import type { AppView } from "@/components/AppHeader";
-import type { ModalType, FeedbackData } from "@/components/ModalSystem";
 
-interface UseMenuEventsProps {
+interface MenuEventsProps {
     // Navigation
-    setCurrentView: (view: AppView) => void;
-    setIsDevPanelOpen: (open: boolean) => void;
+    setCurrentView: (view: "chat" | "devtools" | "permissions") => void;
+    setIsDevPanelOpen: (value: boolean | ((current: boolean) => boolean)) => void;
 
     // Modal management
-    setActiveModal: (modal: ModalType) => void;
-    setFeedbackData: (data: React.SetStateAction<FeedbackData>) => void;
+    setActiveModal: (modal: "help" | "feedback" | "export" | "import" | "update" | null) => void;
+    setFeedbackData: (data: any) => void;
 
     // Chat actions
     startNewChat: () => void;
     clearConversation: () => void;
 
     // System message
-    addSystemMessage: (content: string) => void;
+    addSystemMessage: (message: string) => void;
 
     // Update check
     handleUpdateCheck: () => Promise<void>;
@@ -35,253 +30,211 @@ export function useMenuEvents({
     clearConversation,
     addSystemMessage,
     handleUpdateCheck,
-}: UseMenuEventsProps) {
-
-    // Listen for onboarding completion events from the onboarding window
+}: MenuEventsProps) {
     useEffect(() => {
-        const unlistenComplete = listen<{ prompt?: string }>(
-            "onboarding-complete",
-            async (_event) => {
-                console.log("Onboarding completed from separate window");
-                const currentWindow = getCurrentWindow();
-                await currentWindow.show();
-                await currentWindow.setFocus();
-            }
-        );
+        let unlistenCallbacks: (() => void)[] = [];
 
-        const unlistenSkipped = listen<{}>("onboarding-skipped", async (_event) => {
-            console.log("Onboarding skipped from separate window");
-            const currentWindow = getCurrentWindow();
-            await currentWindow.show();
-            await currentWindow.setFocus();
+        const setupMenuListeners = async () => {
+            // View management
+            unlistenCallbacks.push(
+                await listen("menu-view-chat", () => {
+                    console.log("📱 Menu: Switching to chat view");
+                    setCurrentView("chat");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-view-devtools", () => {
+                    console.log("🛠️ Menu: Switching to devtools view");
+                    setCurrentView("devtools");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-view-permissions", () => {
+                    console.log("🔒 Menu: Switching to permissions view");
+                    setCurrentView("permissions");
+                })
+            );
+
+            // Modal management
+            unlistenCallbacks.push(
+                await listen("menu-show-help", () => {
+                    console.log("❓ Menu: Opening help modal");
+                    setActiveModal("help");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-show-feedback", () => {
+                    console.log("📝 Menu: Opening feedback modal");
+                    setFeedbackData({
+                        type: "general",
+                        title: "",
+                        description: "",
+                        email: "",
+                        priority: "medium",
+                    });
+                    setActiveModal("feedback");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-export-chat", () => {
+                    console.log("📤 Menu: Opening export modal");
+                    setActiveModal("export");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-import-chat", () => {
+                    console.log("📥 Menu: Opening import modal");
+                    setActiveModal("import");
+                })
+            );
+
+            // Chat management
+            unlistenCallbacks.push(
+                await listen("menu-new-chat", () => {
+                    console.log("�� Menu: Starting new chat");
+                    startNewChat();
+                    addSystemMessage("🆕 New chat started");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-clear-chat", () => {
+                    console.log("🗑️ Menu: Clearing chat");
+                    clearConversation();
+                    addSystemMessage("🗑️ Chat history cleared");
+                })
+            );
+
+            // Update management
+            unlistenCallbacks.push(
+                await listen("menu-check-updates", () => {
+                    console.log("🔄 Menu: Checking for updates");
+                    handleUpdateCheck();
+                })
+            );
+
+            // Application events
+            unlistenCallbacks.push(
+                await listen("app-ready", () => {
+                    console.log("🚀 App ready event received");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("app-focus", () => {
+                    console.log("👀 App focus event received");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("app-blur", () => {
+                    console.log("😴 App blur event received");
+                })
+            );
+
+            // Window management
+            unlistenCallbacks.push(
+                await listen("window-minimize", () => {
+                    console.log("⬇️ Window minimize requested");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("window-maximize", () => {
+                    console.log("⬆️ Window maximize requested");
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("window-close", () => {
+                    console.log("❌ Window close requested");
+                })
+            );
+
+            // Settings and configuration
+            unlistenCallbacks.push(
+                await listen("menu-open-settings", () => {
+                    console.log("⚙️ Menu: Opening settings");
+                    // Note: Settings opens in a separate window via backend
+                })
+            );
+
+            // Developer tools
+            unlistenCallbacks.push(
+                await listen("menu-toggle-devtools", () => {
+                    console.log("🔧 Menu: Toggling dev tools panel");
+                    setIsDevPanelOpen((current: boolean) => !current);
+                })
+            );
+
+            // Performance and debugging
+            unlistenCallbacks.push(
+                await listen("menu-reload-app", () => {
+                    console.log("🔄 Menu: Reloading application");
+                    window.location.reload();
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-force-reload", () => {
+                    console.log("🔄 Menu: Force reloading application");
+                    window.location.reload();
+                })
+            );
+
+            // Accessibility and user assistance
+            unlistenCallbacks.push(
+                await listen("menu-zoom-in", () => {
+                    console.log("🔍 Menu: Zoom in requested");
+                    // Zoom functionality could be implemented here
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-zoom-out", () => {
+                    console.log("🔍 Menu: Zoom out requested");
+                    // Zoom functionality could be implemented here
+                })
+            );
+
+            unlistenCallbacks.push(
+                await listen("menu-reset-zoom", () => {
+                    console.log("🔍 Menu: Reset zoom requested");
+                    // Reset zoom functionality could be implemented here
+                })
+            );
+
+            console.log(`✅ Menu events initialized with ${unlistenCallbacks.length} listeners`);
+        };
+
+        setupMenuListeners().catch((error) => {
+            console.error("❌ Failed to setup menu listeners:", error);
         });
 
+        // Cleanup function
         return () => {
-            unlistenComplete.then((fn) => fn());
-            unlistenSkipped.then((fn) => fn());
-        };
-    }, []);
-
-    // Listen for settings menu requests from native menu
-    useEffect(() => {
-        const unlisten = listen<string>("settings-requested", async (event) => {
-            console.log("Settings requested from menu:", event.payload);
-            try {
-                await invoke("open_settings_window");
-            } catch (error) {
-                console.error("Failed to open settings window:", error);
-            }
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, []);
-
-    // Listen for devtools menu requests from tray menu
-    useEffect(() => {
-        const unlisten = listen<string>("devtools-requested", (event) => {
-            console.log("DevTools requested from tray menu:", event.payload);
-            setCurrentView("devtools");
-            setIsDevPanelOpen(true);
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, [setCurrentView, setIsDevPanelOpen]);
-
-    // Enhanced help request handler
-    useEffect(() => {
-        const unlisten = listen<string>("help-requested", async (event) => {
-            console.log("Help requested from menu:", event.payload);
-            const helpType = event.payload;
-
-            if (helpType === "shortcuts") {
+            unlistenCallbacks.forEach((unlisten) => {
                 try {
-                    await invoke("open_settings_window");
+                    unlisten();
                 } catch (error) {
-                    console.error("Failed to open settings window:", error);
+                    console.error("❌ Error cleaning up menu listener:", error);
                 }
-            } else {
-                setActiveModal("help");
-            }
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
+            });
+            console.log("🧹 Menu event listeners cleaned up");
         };
-    }, [setActiveModal]);
-
-    // Listen for new chat requests
-    useEffect(() => {
-        const unlisten = listen("new-chat-requested", () => {
-            console.log("New chat requested from menu");
-            startNewChat();
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, [startNewChat]);
-
-    // Listen for clear history requests
-    useEffect(() => {
-        const unlisten = listen("clear-history-requested", () => {
-            console.log("Clear history requested from menu");
-            clearConversation();
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, [clearConversation]);
-
-    // Listen for toggle floating bar requests
-    useEffect(() => {
-        const unlisten = listen("toggle-floating-bar-requested", () => {
-            console.log("Toggle floating bar requested from menu");
-            // Floating bar is managed by backend, just log for now
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, []);
-
-    // Listen for toggle dev panel requests
-    useEffect(() => {
-        const unlisten = listen("toggle-dev-panel-requested", () => {
-            console.log("Toggle dev panel requested from menu");
-            setIsDevPanelOpen((current) => !current);
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, [setIsDevPanelOpen]);
-
-    // Listen for permissions requests
-    useEffect(() => {
-        const unlisten = listen("permissions-requested", () => {
-            console.log("Permissions requested from menu");
-            setCurrentView("permissions");
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, [setCurrentView]);
-
-    // Enhanced feedback request handler
-    useEffect(() => {
-        const unlisten = listen<string>("feedback-requested", (event) => {
-            console.log("Feedback requested from menu:", event.payload);
-            const feedbackType = event.payload;
-
-            setFeedbackData((prev) => ({
-                ...prev,
-                type: feedbackType === "issue" ? "issue" : "general",
-            }));
-            setActiveModal("feedback");
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, [setFeedbackData, setActiveModal]);
-
-    // Enhanced import/export chat handlers
-    useEffect(() => {
-        const unlistenImport = listen("import-chat-requested", () => {
-            console.log("Import chat requested from menu");
-            setActiveModal("import");
-        });
-
-        const unlistenExport = listen("export-chat-requested", () => {
-            console.log("Export chat requested from menu");
-            setActiveModal("export");
-        });
-
-        return () => {
-            unlistenImport.then((unlistenFn) => unlistenFn());
-            unlistenExport.then((unlistenFn) => unlistenFn());
-        };
-    }, [setActiveModal]);
-
-    // Enhanced window management handlers
-    useEffect(() => {
-        const unlistenMinimize = listen("minimize-window-requested", async () => {
-            console.log("Minimize window requested from menu");
-            try {
-                const window = getCurrentWindow();
-                await window.minimize();
-                console.log("✅ Window minimized successfully");
-            } catch (error) {
-                console.error("❌ Failed to minimize window:", error);
-                addSystemMessage(`Failed to minimize window: ${error}`);
-            }
-        });
-
-        const unlistenZoom = listen("zoom-window-requested", async () => {
-            console.log("Zoom window requested from menu");
-            try {
-                const window = getCurrentWindow();
-                const isMaximized = await window.isMaximized();
-                if (isMaximized) {
-                    await window.unmaximize();
-                    console.log("✅ Window unmaximized successfully");
-                } else {
-                    await window.maximize();
-                    console.log("✅ Window maximized successfully");
-                }
-            } catch (error) {
-                console.error("❌ Failed to toggle window zoom:", error);
-                addSystemMessage(`Failed to toggle window zoom: ${error}`);
-            }
-        });
-
-        const unlistenFullscreen = listen("toggle-fullscreen-requested", async () => {
-            console.log("Toggle fullscreen requested from menu");
-            try {
-                const window = getCurrentWindow();
-                const isFullscreen = await window.isFullscreen();
-                await window.setFullscreen(!isFullscreen);
-                console.log(`✅ Window fullscreen ${!isFullscreen ? "enabled" : "disabled"} successfully`);
-            } catch (error) {
-                console.error("❌ Failed to toggle fullscreen:", error);
-                addSystemMessage(`Failed to toggle fullscreen: ${error}`);
-            }
-        });
-
-        const unlistenUpdate = listen("update-check-requested", () => {
-            console.log("Update check requested from menu");
-            handleUpdateCheck();
-        });
-
-        return () => {
-            unlistenMinimize.then((unlistenFn) => unlistenFn());
-            unlistenZoom.then((unlistenFn) => unlistenFn());
-            unlistenFullscreen.then((unlistenFn) => unlistenFn());
-            unlistenUpdate.then((unlistenFn) => unlistenFn());
-        };
-    }, [addSystemMessage, handleUpdateCheck]);
-
-    // Listen for dictation toggle requests
-    useEffect(() => {
-        const unlisten = listen("toggle-dictation-request", async () => {
-            console.log("Received toggle-dictation-request event");
-            try {
-                const isNowDictating = await toggleDictation();
-                console.log("Toggled dictation, now dictating:", isNowDictating);
-            } catch (error) {
-                console.error("Failed to toggle dictation:", error);
-                addSystemMessage(`Failed to toggle dictation: ${error}`);
-            }
-        });
-
-        return () => {
-            unlisten.then((unlistenFn) => unlistenFn());
-        };
-    }, [addSystemMessage]);
+    }, [
+        setCurrentView,
+        setIsDevPanelOpen,
+        setActiveModal,
+        setFeedbackData,
+        startNewChat,
+        clearConversation,
+        addSystemMessage,
+        handleUpdateCheck,
+    ]);
 }
