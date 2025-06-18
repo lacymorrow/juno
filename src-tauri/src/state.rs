@@ -622,10 +622,9 @@ impl AppState {
         self.tool_config_manager.clone()
     }
 
-    // Method to load tool configuration from file
+    // Method to load tool configuration from store
     pub async fn load_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let config_path = ToolConfigManager::get_config_path(app_handle)?;
-        let loaded_config = ToolConfigManager::load_from_file(&config_path)?;
+        let loaded_config = ToolConfigManager::load_from_store(app_handle)?;
 
         let mut config_guard = self.tool_config_manager.lock().await;
         *config_guard = loaded_config;
@@ -633,11 +632,10 @@ impl AppState {
         Ok(())
     }
 
-    // Method to save tool configuration to file
+    // Method to save tool configuration to store
     pub async fn save_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let config_path = ToolConfigManager::get_config_path(app_handle)?;
         let config_guard = self.tool_config_manager.lock().await;
-        config_guard.save_to_file(&config_path)
+        config_guard.save_to_store(app_handle)
     }
 
     // Cloud connectivity methods

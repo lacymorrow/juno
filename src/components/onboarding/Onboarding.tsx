@@ -597,29 +597,6 @@ export default function OnboardingFlow({
                   {/* Keyboard shortcut for shortcut step */}
                   {step.id === "shortcut" && (
                     <div className="relative">
-                      {/* Backend shortcuts status indicator */}
-                      <div className="mb-4 p-3 rounded-lg bg-gray-50 border">
-                        <div className="flex items-center gap-2 text-sm">
-                          <div
-                            className={`w-2 h-2 rounded-full ${
-                              backendShortcutsWorking
-                                ? "bg-green-500"
-                                : "bg-yellow-500"
-                            }`}
-                          ></div>
-                          <span className="font-medium">
-                            {backendShortcutsWorking
-                              ? "✓ Global shortcuts active"
-                              : "⚠ Using window-focused detection"}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-600 mt-1">
-                          {backendShortcutsWorking
-                            ? "Shortcuts work even when this window is not focused"
-                            : "Keep this window focused while testing the shortcut"}
-                        </p>
-                      </div>
-
                       <KeyboardShortcut
                         onShortcutPressed={handleShortcutPressed}
                         shortcutString={keyboardShortcuts?.agent_mode_toggle}

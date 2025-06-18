@@ -5,6 +5,8 @@ use serde_json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use tauri::AppHandle;
+use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
 
 /// Manages prompt templates, configuration, and generation
@@ -22,21 +24,29 @@ impl PromptManager {
         }
     }
 
-    /// Load configuration from file system
-    pub fn load() -> Result<Self, AgentError> {
-        let config_path = Self::get_config_path()?;
+    /// Load configuration from Tauri store or create default.
+    /// Attempts to load existing configuration, creates default if missing.
+    /// Used by: Agent initialization and prompt management.
+    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, AgentError> {
+        let store = app_handle.store("prompt_config.json").map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to access prompt config store: {}", e))
+        })?;
 
-        let config = match fs::read_to_string(&config_path) {
-            Ok(contents) => {
-                serde_json::from_str(&contents).unwrap_or_else(|e| {
-                    warn!("Failed to parse prompt config: {}. Using default.", e);
+        // Try to load the configuration from store
+        let config = if let Some(config_value) = store.get("prompt_config") {
+            match serde_json::from_value::<PromptConfig>(config_value) {
+                Ok(config) => {
+                    info!("Loaded prompt configuration from store");
+                    config
+                }
+                Err(e) => {
+                    warn!("Failed to parse stored prompt config ({}), creating default", e);
                     PromptConfig::default()
-                })
+                }
             }
-            Err(_) => {
-                info!("Prompt config not found, creating default");
-                PromptConfig::default()
-            }
+        } else {
+            info!("No prompt configuration found in store, creating default");
+            PromptConfig::default()
         };
 
         let mut manager = Self {
@@ -51,30 +61,46 @@ impl PromptManager {
             }
         }
 
-        manager.save_config()?;
+        manager.save_config_to_store(app_handle)?;
         Ok(manager)
     }
 
-    /// Save configuration to file system
-    pub fn save_config(&self) -> Result<(), AgentError> {
-        let config_path = Self::get_config_path()?;
+    /// Load configuration from file system
+    /// DEPRECATED: Use load_from_store() instead. Kept for backwards compatibility during migration.
+    pub fn load() -> Result<Self, AgentError> {
+        // For backwards compatibility, return a default configuration
+        // This method should no longer be used in production code
+        warn!("DEPRECATED: PromptManager::load() called. Use load_from_store() instead.");
+        Ok(Self::new())
+    }
 
-        // Ensure the directory exists
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                AgentError::ConfigurationError(format!("Failed to create config directory: {}", e))
-            })?;
-        }
+    /// Save configuration to Tauri store.
+    /// Serializes current configuration to JSON and saves to store.
+    /// Used by: Settings UI and prompt configuration updates.
+    pub fn save_config_to_store(&self, app_handle: &AppHandle) -> Result<(), AgentError> {
+        let store = app_handle.store("prompt_config.json").map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to access prompt config store: {}", e))
+        })?;
 
-        let contents = serde_json::to_string_pretty(&self.config).map_err(|e| {
+        let config_value = serde_json::to_value(&self.config).map_err(|e| {
             AgentError::ConfigurationError(format!("Failed to serialize prompt config: {}", e))
         })?;
 
-        fs::write(&config_path, contents).map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to write prompt config: {}", e))
+        store.set("prompt_config", config_value);
+        store.save().map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to save prompt config store: {}", e))
         })?;
 
-        info!("Saved prompt configuration to {:?}", config_path);
+        info!("Saved prompt configuration to store");
+        Ok(())
+    }
+
+    /// Save configuration to file system
+    /// DEPRECATED: Use save_config_to_store() instead. Kept for backwards compatibility during migration.
+    pub fn save_config(&self) -> Result<(), AgentError> {
+        // For backwards compatibility, do nothing
+        // This method should no longer be used in production code
+        warn!("DEPRECATED: PromptManager::save_config() called. Use save_config_to_store() instead.");
         Ok(())
     }
 
@@ -157,7 +183,7 @@ impl PromptManager {
     }
 
     /// Update a prompt template
-    pub fn update_prompt(&mut self, prompt_type: PromptType, content: String) -> Result<(), AgentError> {
+    pub fn update_prompt(&mut self, prompt_type: PromptType, content: String, app_handle: &AppHandle) -> Result<(), AgentError> {
         if let Some(template) = self.templates.get_mut(&prompt_type) {
             if template.customizable {
                 template.content = content.clone();
@@ -168,7 +194,7 @@ impl PromptManager {
                     template.clone()
                 );
 
-                self.save_config()?;
+                self.save_config_to_store(app_handle)?;
                 info!("Updated prompt template: {:?}", prompt_type);
             } else {
                 return Err(AgentError::ConfigurationError(
@@ -199,11 +225,11 @@ impl PromptManager {
     }
 
     /// Reset a prompt to its default value
-    pub fn reset_prompt(&mut self, prompt_type: PromptType) -> Result<(), AgentError> {
+    pub fn reset_prompt(&mut self, prompt_type: PromptType, app_handle: &AppHandle) -> Result<(), AgentError> {
         if let Some(default_template) = DefaultPrompts::get_all().get(&prompt_type) {
             self.templates.insert(prompt_type.clone(), default_template.clone());
             self.config.custom_prompts.remove(prompt_type.as_str());
-            self.save_config()?;
+            self.save_config_to_store(app_handle)?;
             info!("Reset prompt template to default: {:?}", prompt_type);
             Ok(())
         } else {
@@ -214,9 +240,9 @@ impl PromptManager {
     }
 
     /// Set global variables
-    pub fn set_global_variables(&mut self, variables: HashMap<String, String>) -> Result<(), AgentError> {
+    pub fn set_global_variables(&mut self, variables: HashMap<String, String>, app_handle: &AppHandle) -> Result<(), AgentError> {
         self.config.global_variables = variables;
-        self.save_config()?;
+        self.save_config_to_store(app_handle)?;
         Ok(())
     }
 

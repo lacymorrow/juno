@@ -5,7 +5,9 @@ use std::{env, fs::File, io::Write};
 use std::io::ErrorKind;
 use tracing::{info, error, warn};
 use crate::agent::structs::AgentError;
-use crate::agent::prompts::PromptManager;
+use crate::agent::prompts::manager::PromptManager;
+use tauri::AppHandle;
+use tauri_plugin_store::StoreExt;
 
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -111,116 +113,123 @@ impl Default for ProviderConfig {
 }
 
 impl ProviderConfig {
-    /// Load configuration from the file system or create default
-    pub fn load() -> Result<Self, AgentError> {
-        let config_path = Self::get_config_path()?;
-        match fs::read_to_string(&config_path) {
-            Ok(contents) => {
-                let mut config: ProviderConfig = serde_json::from_str(&contents).map_err(|e| {
-                    error!("Failed to parse config file: {}. Using default.", e);
+    /// Load configuration from Tauri store or create default.
+    /// Attempts to load existing configuration, creates default if missing.
+    /// Used by: Agent initialization and settings management.
+    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, AgentError> {
+        let store = app_handle.store("provider_config.json").map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to access provider config store: {}", e))
+        })?;
+
+        // Try to load the configuration from store
+        if let Some(config_value) = store.get("provider_config") {
+            match serde_json::from_value::<Self>(config_value) {
+                Ok(mut config) => {
+                    // Perform configuration migration - add missing providers
+                    let mut needs_save = false;
                     let default_config = Self::default();
-                    // Attempt to save the default config if parsing failed, but don't error out if save fails here.
-                    let _ = default_config.save();
-                    AgentError::ConfigurationError(format!("Failed to parse config: {}", e))
-                }).or_else(|_agent_err: crate::agent::structs::AgentError|{
-                     info!("Creating default configuration as parsing failed or to ensure structure.");
-                     let default_config = Self::default();
-                     default_config.save()?;
-                     Ok::<ProviderConfig, crate::agent::structs::AgentError>(default_config)
-                })?;
 
-                // Perform configuration migration - add missing providers
-                let mut needs_save = false;
-                let default_config = Self::default();
-
-                for default_provider in &default_config.providers {
-                    if !config.providers.iter().any(|p| p.id == default_provider.id) {
-                        info!("Adding missing provider to config: {}", default_provider.id);
-                        config.providers.push(default_provider.clone());
-                        needs_save = true;
+                    for default_provider in &default_config.providers {
+                        if !config.providers.iter().any(|p| p.id == default_provider.id) {
+                            info!("Adding missing provider to config: {}", default_provider.id);
+                            config.providers.push(default_provider.clone());
+                            needs_save = true;
+                        }
                     }
-                }
 
-                if needs_save {
-                    config.save()?;
-                }
+                    if needs_save {
+                        config.save_to_store(app_handle)?;
+                    }
 
-                Ok(config)
-            },
-            Err(e) if e.kind() == ErrorKind::NotFound => {
-                info!("Config file not found at {:?}, creating default.", config_path);
-                let default_config = Self::default();
-                default_config.save()?;
-                Ok(default_config)
-            }
-            Err(e) => {
-                error!("Failed to read config file at {:?}: {}. Using in-memory default.", config_path, e);
-                Ok(Self::default()) // Return in-memory default if read fails for other reasons
+                    info!("Loaded provider configuration from store");
+                    return Ok(config);
+                }
+                Err(e) => {
+                    error!("Failed to parse stored provider config ({}), creating default", e);
+                }
             }
         }
+
+        // No valid configuration found, create and save default
+        info!("No provider configuration found in store, creating default");
+        let default_config = Self::default();
+        default_config.save_to_store(app_handle)?;
+        Ok(default_config)
+    }
+
+    /// Load configuration from the file system or create default
+    /// DEPRECATED: Use load_from_store() instead. Kept for backwards compatibility during migration.
+    pub fn load() -> Result<Self, AgentError> {
+        // For backwards compatibility, return a default config
+        // This method should no longer be used in production code
+        warn!("DEPRECATED: ProviderConfig::load() called. Use load_from_store() instead.");
+        Ok(Self::default())
+    }
+
+    /// Save configuration to Tauri store.
+    /// Serializes current configuration to JSON and saves to store.
+    /// Used by: Settings UI and provider configuration updates.
+    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), AgentError> {
+        let store = app_handle.store("provider_config.json").map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to access provider config store: {}", e))
+        })?;
+
+        let config_value = serde_json::to_value(self).map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to serialize provider config: {}", e))
+        })?;
+
+        store.set("provider_config", config_value);
+        store.save().map_err(|e| {
+            AgentError::ConfigurationError(format!("Failed to save provider config store: {}", e))
+        })?;
+
+        info!("Saved provider configuration to store");
+        Ok(())
     }
 
     /// Save configuration to file
+    /// DEPRECATED: Use save_to_store() instead. Kept for backwards compatibility during migration.
     pub fn save(&self) -> Result<(), AgentError> {
-        let config_path = Self::get_config_path()?;
-
-        // Ensure the directory exists
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                AgentError::ConfigurationError(format!("Failed to create config directory: {}", e))
-            })?;
-        }
-
-        let contents = serde_json::to_string_pretty(self).map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to serialize config: {}", e))
-        })?;
-
-        let mut file = File::create(&config_path).map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to create config file: {}", e))
-        })?;
-
-        file.write_all(contents.as_bytes()).map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to write config file: {}", e))
-        })?;
-
-        info!("Saved provider configuration to {:?}", config_path);
+        // For backwards compatibility, do nothing
+        // This method should no longer be used in production code
+        warn!("DEPRECATED: ProviderConfig::save() called. Use save_to_store() instead.");
         Ok(())
     }
 
     /// Update provider API key
-    pub fn update_api_key(&mut self, provider_id: &str, api_key: String) -> Result<(), AgentError> {
+    pub fn update_api_key(&mut self, provider_id: &str, api_key: String, app_handle: &AppHandle) -> Result<(), AgentError> {
         if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
             provider.api_key = Some(api_key);
-            self.save()
+            self.save_to_store(app_handle)
         } else {
             Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
         }
     }
 
     /// Update provider model
-    pub fn update_model(&mut self, provider_id: &str, model: String) -> Result<(), AgentError> {
+    pub fn update_model(&mut self, provider_id: &str, model: String, app_handle: &AppHandle) -> Result<(), AgentError> {
         if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
             provider.model = Some(model);
-            self.save()
+            self.save_to_store(app_handle)
         } else {
             Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
         }
     }
 
     /// Set active provider
-    pub fn set_active_provider(&mut self, provider_id: String) -> Result<(), AgentError> {
+    pub fn set_active_provider(&mut self, provider_id: String, app_handle: &AppHandle) -> Result<(), AgentError> {
         // Verify the provider exists
         if !self.providers.iter().any(|p| p.id == provider_id) {
             return Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)));
         }
         self.active_provider = provider_id;
-        self.save()
+        self.save_to_store(app_handle)
     }
 
     /// Set agent mode
-    pub fn set_agent_mode(&mut self, mode: AgentMode) -> Result<(), AgentError> {
+    pub fn set_agent_mode(&mut self, mode: AgentMode, app_handle: &AppHandle) -> Result<(), AgentError> {
         self.agent_mode = mode;
-        self.save()
+        self.save_to_store(app_handle)
     }
 
     /// Get agent mode
