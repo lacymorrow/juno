@@ -37,45 +37,24 @@ pub async fn stop_all_operations(app_handle: AppHandle) -> Result<String, String
     info!("[StopOperations] Force resetting agent input state");
     crate::agent_monitor::force_reset_agent_input_state().await;
 
-    // Check if dictation is active and stop it PROPERLY
-    if let Some(voice_controller_state) = app_handle.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-        // Check if dictation is active and stop it synchronously if possible
-        if let Ok(mut voice_controller) = voice_controller_state.lock() {
-            if voice_controller.is_dictating() {
-                info!("[StopOperations] Dictation active - forcing immediate stop");
-
-                // Call the actual stop_dictation method instead of just emitting an event
-                match voice_controller.stop_dictation() {
-                    Ok(stopped) => {
-                        if stopped {
-                            info!("[StopOperations] Voice controller stopped successfully");
-                        } else {
-                            info!("[StopOperations] Voice controller was not dictating");
-                        }
-                    }
-                    Err(e) => {
-                        error!("[StopOperations] Failed to stop voice controller: {}", e);
-                    }
-                }
-            }
-        }
-    }
-
-    // Force reset dictation input state for comprehensive cleanup
-    info!("[StopOperations] Force resetting dictation input state");
-    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-    // Clean up app state flags
-    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-        if *dictation_active {
-            info!("[StopOperations] Resetting dictation active flag");
-            *dictation_active = false;
-        }
+    // Stop dictation using the comprehensive state manager
+    info!("[StopOperations] Stopping dictation through dictation state manager");
+    if let Err(e) = crate::commands::dictation_state_manager::force_reset_dictation_state(
+        app_handle.clone(),
+        Some("Stop all operations requested".to_string())
+    ).await {
+        warn!("[StopOperations] Failed to stop dictation through state manager: {}", e);
     }
 
     // Mark agent execution as finished for clean state
     app_state.mark_agent_execution_finished();
     info!("[StopOperations] Agent execution marked as finished");
+    
+    // Perform comprehensive emergency state cleanup
+    info!("[StopOperations] Performing emergency state cleanup");
+    if let Err(e) = crate::state_management::handle_emergency_state_cleanup(&app_handle).await {
+        warn!("[StopOperations] Failed to perform emergency state cleanup: {}", e);
+    }
 
     // Emit agent stopping event for any running AI agents
     if let Err(e) = app_handle.emit(constants::events::AGENT_STOPPING, ()) {

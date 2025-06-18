@@ -379,8 +379,9 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
 pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
-    // Increment the user count
+    // Increment the user count atomically
     let user_count = ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst) + 1;
+    info!("[EscapeKey] Registering escape key handler, user count: {}", user_count);
 
     // Only register if not already registered
     if !ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
@@ -388,17 +389,17 @@ pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), St
         match app_handle.global_shortcut().register(escape_shortcut) {
             Ok(()) => {
                 ESCAPE_KEY_REGISTERED.store(true, Ordering::SeqCst);
-                info!("Dynamically registered escape key for cancellation (users: {})", user_count);
+                info!("[EscapeKey] Successfully registered escape key for cancellation (users: {})", user_count);
             },
             Err(e) => {
                 // Rollback user count on failure
                 ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst);
-                error!("Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
+                error!("[EscapeKey] Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
                 return Err(format!("Failed to register escape key: {}", e));
             }
         }
     } else {
-        info!("Escape key already registered, increased user count to: {}", user_count);
+        info!("[EscapeKey] Escape key already registered, increased user count to: {}", user_count);
     }
 
     Ok(())
@@ -408,8 +409,16 @@ pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), St
 pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
-    // Decrement the user count
-    let user_count = ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
+    // Get current user count before decrementing
+    let current_count = ESCAPE_KEY_USERS.load(Ordering::SeqCst);
+    if current_count == 0 {
+        warn!("[EscapeKey] Attempted to unregister escape key with zero users");
+        return Ok(());
+    }
+
+    // Decrement the user count atomically
+    let user_count = ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst) - 1;
+    info!("[EscapeKey] Unregistering escape key handler, user count: {}", user_count);
 
     // Only unregister if no more users and currently registered
     if user_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
@@ -417,17 +426,17 @@ pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), 
         match app_handle.global_shortcut().unregister(escape_shortcut) {
             Ok(()) => {
                 ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
-                info!("Dynamically unregistered escape key - no more active users");
+                info!("[EscapeKey] Successfully unregistered escape key - no more active users");
             },
             Err(e) => {
                 // Rollback user count on failure
                 ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
-                warn!("Failed to unregister escape key shortcut: {} - continuing anyway", e);
+                warn!("[EscapeKey] Failed to unregister escape key shortcut: {} - rolling back user count", e);
                 // Don't return error for unregistration failures as it's not critical
             }
         }
     } else {
-        info!("Escape key still has {} users, keeping registered", user_count);
+        info!("[EscapeKey] Escape key still has {} users, keeping registered", user_count);
     }
 
     Ok(())

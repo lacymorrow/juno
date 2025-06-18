@@ -34,7 +34,7 @@
         "alwaysOnTop": true,
         "resizable": true,
         "skipTaskbar": true,
-        "visible": true,
+        "visible": false,
         "shadow": false,
         "center": false
       },
@@ -56,7 +56,7 @@
         "title": "Welcome to Juno",
         "url": "/onboarding",
         "width": 440,
-        "height": 500,
+        "height": 700,
         "minWidth": 200,
         "minHeight": 300,
         "hiddenTitle": false,
