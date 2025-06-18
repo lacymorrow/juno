@@ -90,6 +90,67 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         }
     });
 
+    // Listen for app-dictation-finished events to trigger the agent (CRITICAL FOR AGENT MODE)
+    let app_handle_for_agent_listener = app_handle.clone();
+    app_handle.listen("app-dictation-finished", move |event| {
+        info!("[Event] Received app-dictation-finished event - triggering agent");
+
+        let app_handle_clone = app_handle_for_agent_listener.clone();
+        tauri::async_runtime::spawn(async move {
+            // Parse the query from the event payload
+            let payload_str = event.payload();
+            match serde_json::from_str::<serde_json::Value>(payload_str) {
+                Ok(payload_json) => {
+                    if let Some(query_value) = payload_json.get("query") {
+                        if let Some(query_text) = query_value.as_str() {
+                            let trimmed_query = query_text.trim();
+                            if !trimmed_query.is_empty() {
+                                info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
+
+                                // Emit user message event for frontend to add to conversation
+                                let user_message_data = serde_json::json!({
+                                    "content": trimmed_query,
+                                    "timestamp": std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as u64
+                                });
+                                if let Err(e) = app_handle_clone.emit(crate::constants::events::USER_MESSAGE_SUBMITTED, user_message_data) {
+                                    error!("[Agent Mode] Failed to emit user-message-submitted event: {}", e);
+                                }
+
+                                // Submit the query to the agent system
+                                let app_state = app_handle_clone.state::<crate::state::AppState>();
+                                match crate::anthropic::submit_query(
+                                    trimmed_query.to_string(),
+                                    app_state,
+                                    app_handle_clone.clone()
+                                ).await {
+                                    Ok(_) => {
+                                        info!("[Agent Mode] Agent query submitted successfully");
+                                    }
+                                    Err(e) => {
+                                        error!("[Agent Mode] Failed to submit query to agent: {}", e);
+                                        crate::error_handling::utils::handle_agent_error(&app_handle_clone, &format!("Failed to submit query: {}", e)).await;
+                                    }
+                                }
+                            } else {
+                                info!("[Agent Mode] Query text was empty - ignoring");
+                            }
+                        } else {
+                            error!("[Agent Mode] Query field in payload is not a string: {:?}", query_value);
+                        }
+                    } else {
+                        error!("[Agent Mode] No 'query' field found in app-dictation-finished payload: {}", payload_str);
+                    }
+                }
+                Err(e) => {
+                    error!("[Agent Mode] Failed to parse app-dictation-finished payload: {}", e);
+                }
+            }
+        });
+    });
+
     // Listen for partial result events from the plugin
     let app_handle_for_listener = app_handle.clone();
     app_handle.listen("voice-transcription:partial-result", move |event| {

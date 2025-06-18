@@ -492,6 +492,30 @@ export function useBackendEvents({
             unlisten.then((unlistenFn) => unlistenFn());
         };
     }, [setIsProcessing, stopCurrentAudio]);
+
+    // Listen for user message submitted events (from voice input)
+    useEffect(() => {
+        const unlisten = listen<{ content: string; timestamp: number }>(
+            "user-message-submitted",
+            (event) => {
+                console.log("User message submitted event received:", event.payload);
+                const { content, timestamp } = event.payload;
+
+                setConversationWithPruning((prev) => [
+                    ...prev,
+                    {
+                        role: "user",
+                        content,
+                        timestamp,
+                    }
+                ]);
+            }
+        );
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [setConversationWithPruning]);
 }
 
 // Helper functions for notifications

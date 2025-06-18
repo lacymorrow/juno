@@ -8,8 +8,8 @@ use tracing::{info, error, warn};
 use serde_json;
 
 // Global escape key management
-static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Get the current keyboard shortcuts configuration
 #[tauri::command]
