@@ -56,7 +56,7 @@
         "title": "Welcome to Juno",
         "url": "/onboarding",
         "width": 440,
-        "height": 600,
+        "height": 700,
         "minWidth": 200,
         "minHeight": 300,
         "hiddenTitle": false,
