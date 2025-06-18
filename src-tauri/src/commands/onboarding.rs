@@ -3,9 +3,28 @@ use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
 use serde_json::Value;
 
+/// Check if we're running in development mode
+fn is_development_mode() -> bool {
+    #[cfg(debug_assertions)]
+    {
+        true
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        false
+    }
+}
+
 /// Check if the user has completed onboarding
+/// In development mode, this will always return false to show onboarding
 #[tauri::command]
 pub async fn check_onboarding_status(app: AppHandle) -> Result<bool, String> {
+    // In development mode, always show onboarding
+    if is_development_mode() {
+        info!("Development mode detected - onboarding will always be shown");
+        return Ok(false);
+    }
+
     let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
 
     // Check if onboarding has been completed
@@ -53,7 +72,7 @@ pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Reset onboarding (for testing/development)
+/// Reset onboarding (for testing/development and user-requested restart)
 #[tauri::command]
 pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
     let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
@@ -67,6 +86,24 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
     store.save().map_err(|e| e.to_string())?;
 
     info!("Onboarding reset");
+    Ok(())
+}
+
+/// Restart onboarding flow (reset and open onboarding window)
+#[tauri::command]
+pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
+    info!("Restarting onboarding flow...");
+
+    // Reset onboarding status
+    reset_onboarding(app.clone()).await?;
+
+    // Open the onboarding window
+    if let Err(e) = crate::window_management::open_onboarding_window(app.clone()).await {
+        warn!("Failed to open onboarding window: {}", e);
+        return Err(format!("Failed to open onboarding window: {}", e));
+    }
+
+    info!("Onboarding flow restarted successfully");
     Ok(())
 }
 
@@ -89,6 +126,7 @@ pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, St
         "completed": completed,
         "skip_count": skip_count,
         "completed_at": completed_at,
+        "is_development_mode": is_development_mode(),
         "shortcuts": {
             "agent_mode_toggle": shortcuts.agent_mode_toggle,
             "dictation_input": shortcuts.dictation_input
@@ -128,11 +166,12 @@ pub async fn test_global_shortcuts_working(app: AppHandle) -> Result<bool, Strin
 pub async fn initialize_onboarding_system(app_handle: AppHandle) -> Result<(), String> {
     info!("Initializing onboarding system...");
 
-    // Check if onboarding has been completed
+    // Check if onboarding has been completed (respects development mode)
     let onboarding_completed = check_onboarding_status(app_handle.clone()).await?;
 
     if !onboarding_completed {
-        info!("Onboarding not completed, opening onboarding window");
+        let mode = if is_development_mode() { "development" } else { "production" };
+        info!("Onboarding not completed in {} mode, opening onboarding window", mode);
 
         // Open the onboarding window
         if let Err(e) = crate::window_management::open_onboarding_window(app_handle.clone()).await {

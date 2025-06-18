@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { useSettings } from "@/hooks/useSettings";
-import { ChevronDown, Brain, Settings2, Zap, Users, User } from "lucide-react";
+import { ChevronDown, Brain, Settings2, Users, User } from "lucide-react";
 
 interface MobileAIControlsProps {
   className?: string;

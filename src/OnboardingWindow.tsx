@@ -6,11 +6,13 @@ import { useEffect, useState } from "react";
 export default function OnboardingWindow() {
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [permissionsChecked, setPermissionsChecked] = useState(false);
+  const [isDevelopmentMode, setIsDevelopmentMode] = useState(false);
 
-  // Check permissions on mount
+  // Check permissions and onboarding info on mount
   useEffect(() => {
-    const checkPermissions = async () => {
+    const checkInitialData = async () => {
       try {
+        // Check permissions
         const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
           screenRecording: { granted: boolean; required: boolean };
@@ -19,14 +21,19 @@ export default function OnboardingWindow() {
         }>("check_permissions_status");
 
         setPermissionsGranted(permissionsResult.allGranted);
+
+        // Get onboarding info including development mode status
+        const onboardingInfo = await invoke<any>("get_onboarding_info");
+        setIsDevelopmentMode(onboardingInfo?.is_development_mode || false);
+
         setPermissionsChecked(true);
       } catch (error) {
-        console.error("Error checking permissions:", error);
+        console.error("Error checking initial data:", error);
         setPermissionsChecked(true);
       }
     };
 
-    checkPermissions();
+    checkInitialData();
   }, []);
 
   const handleOnboardingComplete = async () => {
@@ -95,6 +102,7 @@ export default function OnboardingWindow() {
       onComplete={handleOnboardingComplete}
       onSkip={handleOnboardingSkip}
       permissionsAlreadyGranted={permissionsGranted}
+      isDevelopmentMode={isDevelopmentMode}
     />
   );
 }

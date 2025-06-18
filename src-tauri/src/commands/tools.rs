@@ -11,7 +11,8 @@ pub async fn get_tool_configurations(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    info!("Getting tool configurations");
+    // Reduced logging frequency - only log at debug level
+    tracing::debug!("Getting tool configurations");
 
     // Load tool configuration from file if needed
     if let Err(e) = state.load_tool_config(&app_handle).await {
