@@ -133,16 +133,7 @@ pub async fn input_control_handler(
             info!("clicking mouse button: {}", button);
 
             // Get current mouse position for click
-            let current_location = unsafe {
-                let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).unwrap();
-                let mouse_event = CGEvent::new_mouse_event(
-                    event_source,
-                    CGEventType::MouseMoved,
-                    CGPoint::new(0.0, 0.0),
-                    core_graphics::event::CGMouseButton::Left,
-                ).unwrap();
-                mouse_event.location()
-            };
+            let current_location = CGEvent::mouse_location();
 
             let (cg_button, down_event_type, up_event_type) = match button.as_str() {
                 "left" => (
