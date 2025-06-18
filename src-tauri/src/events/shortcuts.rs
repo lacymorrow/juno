@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, ShortcutEvent};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 
 use crate::{constants, state};
 
@@ -38,14 +38,17 @@ pub fn handle_global_shortcut(app: &AppHandle, shortcut: &Shortcut, event: &Shor
     let agent_shortcut: Option<Shortcut> = parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
     let dictation_shortcut: Option<Shortcut> = parse_shortcut_string(&current_shortcuts.dictation_input);
 
-    // Handle each shortcut type
+    // Handle each shortcut type (use separate conditions to check all shortcuts)
     if *shortcut == escape_shortcut {
         handle_escape_key_shortcut(app, event);
     } else if let Some(agent_shortcut_obj) = agent_shortcut {
         if *shortcut == agent_shortcut_obj {
             handle_agent_mode_shortcut(app, event);
         }
-    } else if let Some(dictation_shortcut_obj) = dictation_shortcut {
+    }
+
+    // Check dictation shortcut separately (not as else-if to avoid exclusion)
+    if let Some(dictation_shortcut_obj) = dictation_shortcut {
         if *shortcut == dictation_shortcut_obj {
             handle_dictation_input_shortcut(app, event);
         }
@@ -176,7 +179,7 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     }
 }
 
-/// Handle dictation input shortcut (Space bar by default)
+/// Handle dictation input shortcut (Option+Space by default)
 fn handle_dictation_input_shortcut(app: &AppHandle, event: &ShortcutEvent) {
     let app_clone = app.clone();
     let event_state = event.state();
