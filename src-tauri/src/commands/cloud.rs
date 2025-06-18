@@ -111,7 +111,7 @@ pub async fn get_cloud_status(
         "message": "Not connected to cloud"
     });
     let mut device_id = None;
-    let last_error = None; // TODO: Track last error
+            let last_error = None; // Note: Error tracking not implemented yet
 
     // Get connection state if cloud client exists
     if enabled {
@@ -779,7 +779,7 @@ async fn run_basic_connection_test() -> serde_json::Value {
             "test": "basic_connection",
             "success": true,
             "response": response,
-            "duration_ms": 0 // TODO: Measure actual duration
+            "duration_ms": 0 // Note: Duration measurement not implemented yet
         }),
         Err(e) => serde_json::json!({
             "test": "basic_connection",

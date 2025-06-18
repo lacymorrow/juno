@@ -275,7 +275,7 @@ impl CloudClient {
         ws_sender.send(Message::Text(message_json)).await
             .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
 
-        // TODO: Wait for auth response and validate
+        // Note: Auth response validation not implemented yet
         // For now, assume authentication succeeds
         self.set_connection_state(ConnectionState::Authenticated).await;
         info!("Authentication completed");
@@ -354,7 +354,7 @@ impl CloudClient {
 
         if response.success {
             self.set_connection_state(ConnectionState::Authenticated).await;
-            // TODO: Store auth credentials
+            // Note: Auth credential storage not implemented yet
         } else {
             let error_msg = response.error.unwrap_or_else(|| "Authentication failed".to_string());
             error!("Authentication failed: {}", error_msg);

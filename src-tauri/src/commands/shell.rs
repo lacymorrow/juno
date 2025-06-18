@@ -170,7 +170,7 @@ pub type ShellSessions = Arc<Mutex<HashMap<String, ShellSession>>>;
 
 // Initialize shell sessions in app state
 pub fn init_shell_state(app_state: &AppState) {
-    app_state.insert(ShellSessions::default());
+    let _ = app_state.insert(ShellSessions::default());
 }
 
 #[tauri::command]

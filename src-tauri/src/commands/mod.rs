@@ -40,7 +40,7 @@ pub mod onboarding;
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
 pub use self::core::*;
-pub use self::dev::*;
+// Removed unused dev import: pub use self::dev::*;
 pub use self::dictation::*;
 pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
 pub use self::dictation_state_manager::{

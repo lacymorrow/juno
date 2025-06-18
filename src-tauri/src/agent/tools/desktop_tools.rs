@@ -1480,7 +1480,7 @@ pub async fn setup_tools(
     let provider_arc = std::sync::Arc::new(tokio::sync::Mutex::new(provider.clone()));
 
     // Register this tool provider with the AppState for future MCP refresh notifications
-    state.register_tool_provider(provider_arc.clone());
+    let _ = state.register_tool_provider(provider_arc.clone());
     log::debug!("Tool provider registered with AppState for MCP refresh notifications");
 
     // Return the Arc so the caller can use the same instance that's registered

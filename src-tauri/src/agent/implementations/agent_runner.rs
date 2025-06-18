@@ -194,7 +194,7 @@ where
 
             // Update AppState with current step progress
             let app_state = self.app_handle.state::<crate::state::AppState>();
-            app_state.update_agent_current_step(self.current_step);
+            let _ = app_state.update_agent_current_step(self.current_step);
 
             // Execute one step of the agent loop, passing the cloned receiver
             let action = self.step(step_cancel_rx.clone()).await?;
@@ -212,7 +212,7 @@ where
 
                     // Store the spoken content in app state for TTS retrieval
                     let app_state = self.app_handle.state::<crate::state::AppState>();
-                    app_state.set_last_spoken_content(Some(spoken_content));
+                    let _ = app_state.set_last_spoken_content(Some(spoken_content));
 
                     self.transition_state(AgentState::Finished).await;
                     // Return typed content for display, spoken content will be handled by TTS separately
