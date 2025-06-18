@@ -5,7 +5,7 @@ export const TIMEOUTS = {
   // UI Animation and Debounce
   SOUND_DEBOUNCE_MS: 300,
   HEARTBEAT_INTERVAL_MS: 30000,
-  
+
   // Cloud connection timeouts
   CLOUD_CONNECTION_TIMEOUT_MS: 10000,
   CLOUD_RECONNECT_DELAY_MS: 5000,
@@ -15,8 +15,8 @@ export const PORTS = {
   // Development server ports
   VITE_DEV_PORT: 1420,
   VITE_HMR_PORT: 1421,
-  
-  // Backend service ports  
+
+  // Backend service ports
   MCP_SERVER_PORT: 8080,
   WEBSOCKET_TEST_PORT: 8080,
 } as const;
@@ -24,10 +24,10 @@ export const PORTS = {
 export const UI = {
   // Responsive breakpoints
   MOBILE_BREAKPOINT: 768,
-  
+
   // CSS values
   PERCENTAGE_MULTIPLIER: 100.0,
-  
+
   // Animation durations (CSS compatible)
   ANIMATION_FAST_MS: 150,
   ANIMATION_NORMAL_MS: 300,
@@ -38,7 +38,7 @@ export const APP_IDENTITY = {
   APP_NAME: 'Juno',
   PRODUCT_NAME: 'Juno',
   BUNDLE_IDENTIFIER: 'com.juno.app',
-  
+
   // Cloud service identifiers
   CLOUD_WS_GLOBAL_VAR: '__JUNO_CLOUD_WS',
 } as const;
@@ -50,7 +50,7 @@ export const EVENTS = {
   APP_DICTATION_FINISHED: 'app-dictation-finished',
   APP_DICTATION_PARTIAL_RESULT: 'app-dictation-partial-result',
   APP_DICTATION_ERROR: 'app-dictation-error',
-  
+
   // Agent events
   AGENT_PROCESSING_COMPLETE: 'agent-processing-complete',
   AGENT_PROCESSING_ERROR: 'agent-processing-error',
@@ -59,17 +59,20 @@ export const EVENTS = {
   AGENT_THOUGHT_PROCESS: 'agent-thought-process',
   AGENT_STOPPING: 'agent-stopping',
   AGENT_STATUS_UPDATE: 'agent-status-update',
-  
+
   // Streaming events
   AGENT_TEXT_STREAM: 'agent-text-stream',
   AGENT_STREAM_START: 'agent-stream-start',
   AGENT_STREAM_END: 'agent-stream-end',
-  
+
+  // User Message Events
+  USER_MESSAGE_SUBMITTED: 'user-message-submitted',
+
   // UI events
   BAR_STATE_CHANGED: 'bar-state-changed',
   DICTATION_STATE_CHANGED: 'dictation-state-changed',
   REQUEST_AUDIO_PLAYBACK_TEST: 'request-audio-playback-test',
-  
+
   // Menu and settings events
   SETTINGS_REQUESTED: 'settings-requested',
   DEVTOOLS_REQUESTED: 'devtools-requested',
@@ -97,7 +100,7 @@ export const AUDIO = {
   // Audio processing constants
   WHISPER_SAMPLE_RATE: 16000,
   DEFAULT_SENSITIVITY: 0.5,
-  
+
   // Wake word defaults
   DEFAULT_WAKE_WORDS: ['hey juno', 'computer'],
 
@@ -112,10 +115,10 @@ export const API_ENDPOINTS = {
   ANTHROPIC_API_URL: 'https://api.anthropic.com/v1/messages',
   OPENAI_API_URL: 'https://api.openai.com/v1/chat/completions',
   GEMINI_API_BASE: 'https://generativelanguage.googleapis.com/v1beta/models',
-  
+
   // External URLs
   GITHUB_URL: 'https://github.com/juno-ai',
-  
+
   // Local development URLs
   LOCALHOST_BASE: 'http://localhost',
   get LOCALHOST_MCP_SERVER() { return `${this.LOCALHOST_BASE}:${PORTS.MCP_SERVER_PORT}` },
@@ -148,7 +151,7 @@ export const CSS_CLASSES = {
   LOADING: 'loading',
   ERROR: 'error',
   SUCCESS: 'success',
-  
+
   // Animation classes
   FADE_IN: 'fade-in',
   FADE_OUT: 'fade-out',
@@ -162,7 +165,7 @@ export const ERROR_MESSAGES = {
   NETWORK_ERROR: 'Network connection error',
   TIMEOUT_ERROR: 'Request timed out',
   PERMISSION_DENIED: 'Permission denied',
-  
+
   // App-specific errors
   VOICE_UNAVAILABLE: 'Voice transcription unavailable',
   AGENT_BUSY: 'Agent is currently processing another request',
@@ -191,7 +194,7 @@ export const REGEX_PATTERNS = {
   URL: /^https?:\/\/.+/,
   JSON: /^[\s]*[{\[]/,
   WHITESPACE_ONLY: /^\s*$/,
-  
+
   // App-specific patterns
   WAKE_WORD: /^[a-zA-Z\s]{2,20}$/,
   COMMAND_PREFIX: /^[\/!@#]/,
@@ -203,7 +206,7 @@ export const LIMITS = {
   MAX_FILENAME_LENGTH: 255,
   MAX_CHAT_HISTORY_ITEMS: 1000,
   MAX_WAKE_WORDS: 10,
-  
+
   // UI limitations
   MAX_RECENT_FILES: 20,
   MAX_SEARCH_RESULTS: 100,
@@ -222,7 +225,7 @@ export const CHROME_DEBUG = {
   PRIMARY_PORT: 9222,
   ALT_PORT_1: 9223,
   ALT_PORT_2: 9224,
-  
+
   // Helper to get all debug URLs
   getAllUrls: () => [
     `${API_ENDPOINTS.LOCALHOST_BASE}:${CHROME_DEBUG.PRIMARY_PORT}`,
