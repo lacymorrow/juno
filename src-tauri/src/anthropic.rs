@@ -22,7 +22,7 @@ use crate::agent::providers::config::AgentMode;
 use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
-use crate::constants::{agent_config, tool_names, timeouts};
+use crate::constants::{agent, timeouts};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -141,8 +141,8 @@ pub async fn submit_query(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-    let _ = state.mark_agent_execution_started_with_steps(execution_id.clone(), agent_config::MAX_ITERATIONS);
-    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, agent_config::MAX_ITERATIONS);
+    let _ = state.mark_agent_execution_started_with_steps(execution_id.clone(), agent::config::MAX_ITERATIONS);
+    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, agent::config::MAX_ITERATIONS);
 
     // Register escape key for cancellation during agent execution
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
@@ -165,7 +165,7 @@ pub async fn submit_query(
 
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
     let memory_manager_arc = state.get_memory_manager().await;
-    
+
     // Clean up any orphaned tool calls from previous cancelled executions
     // This prevents LLM errors when tool calls don't have corresponding results
     {
@@ -266,7 +266,7 @@ pub async fn submit_query(
                 },
                 agent_tool_provider,
                 brain,
-                agent_config::MAX_ITERATIONS,
+                agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
             info!("Single agent runner created with all tools.");
@@ -317,7 +317,7 @@ pub async fn submit_query(
                 },
                 orchestrator_tool_provider,
                 orchestrator_brain,
-                agent_config::MAX_ITERATIONS,
+                agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
             info!("Orchestrator agent runner created with personality and delegation capabilities.");
@@ -530,7 +530,7 @@ async fn register_orchestrator_delegation_tools(
 
     // Delegate to Browser Agent
     let browser_delegation_def = crate::agent::structs::ToolDefinition {
-        name: tool_names::DELEGATE_TO_BROWSER_AGENT.to_string(),
+        name: agent::tool_names::DELEGATE_TO_BROWSER_AGENT.to_string(),
         description: "Delegate web browsing, navigation, and web interaction tasks to the browser specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -579,7 +579,7 @@ async fn register_orchestrator_delegation_tools(
 
     // Delegate to Desktop Agent
     let desktop_delegation_def = crate::agent::structs::ToolDefinition {
-        name: tool_names::DELEGATE_TO_DESKTOP_AGENT.to_string(),
+        name: agent::tool_names::DELEGATE_TO_DESKTOP_AGENT.to_string(),
         description: "Delegate desktop automation, clicking, typing, and system interaction tasks to the desktop specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -628,7 +628,7 @@ async fn register_orchestrator_delegation_tools(
 
     // Delegate to File Agent
     let file_delegation_def = crate::agent::structs::ToolDefinition {
-        name: tool_names::DELEGATE_TO_FILE_AGENT.to_string(),
+        name: agent::tool_names::DELEGATE_TO_FILE_AGENT.to_string(),
         description: "Delegate file operations, code editing, terminal commands, and development tasks to the file specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -708,7 +708,7 @@ async fn execute_specialized_agent_task(
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
     };
 
-    // Create specialist agent runner with focused system prompt  
+    // Create specialist agent runner with focused system prompt
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
         specialist_memory,
         (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc

@@ -165,7 +165,7 @@ async fn handle_dictation_mode_result(app_handle: AppHandle, extracted_text: Opt
     }
 
     // Emit state change event for UI
-    if let Err(e) = app_handle.emit(constants::events::DICTATION_ACTIVE, false) {
+    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
     }
 
@@ -190,7 +190,7 @@ async fn handle_agent_mode_result(app_handle: AppHandle, extracted_text: Option<
                 let transformed_payload = serde_json::json!({
                     "query": text_value
                 });
-                if let Err(e) = app_handle.emit(constants::events::APP_DICTATION_FINISHED, transformed_payload) {
+                if let Err(e) = app_handle.emit(constants::events::dictation::FINISHED, transformed_payload) {
                     error!("[Event] Failed to rebroadcast final-result event: {}", e);
                 }
             } else {
@@ -199,7 +199,7 @@ async fn handle_agent_mode_result(app_handle: AppHandle, extracted_text: Option<
         }
         Err(e) => {
             error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
-            if let Err(e) = app_handle.emit(constants::events::APP_DICTATION_FINISHED, payload_str) {
+            if let Err(e) = app_handle.emit(constants::events::dictation::FINISHED, payload_str) {
                 error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
             }
         }
@@ -254,7 +254,7 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
             Ok(()) => {
                 info!("[Dictation Mode] Started immediate transcription successfully");
 
-                if let Err(e) = app_handle.emit(constants::events::DICTATION_ACTIVE, true) {
+                if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, true) {
                     error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
                 }
 
@@ -278,7 +278,7 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
                 }
 
                 // Emit state change event for UI
-                if let Err(e) = app_handle.emit(constants::events::DICTATION_ACTIVE, false) {
+                if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
                     error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
                 }
 
@@ -298,7 +298,7 @@ async fn handle_dictation_transcription_start(app_handle: AppHandle) {
         }
 
         // Emit state change event for UI
-        if let Err(e) = app_handle.emit(constants::events::DICTATION_ACTIVE, false) {
+        if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
             error!("[Dictation Mode] Failed to emit dictation-active event after error: {}", e);
         }
     }
@@ -346,7 +346,7 @@ async fn handle_dictation_stop(app_handle: AppHandle) {
     // Update floating bar manager
     crate::commands::floating_bar::handle_dictation_mode_change(&app_handle, false).await;
 
-    if let Err(e) = app_handle.emit(constants::events::DICTATION_ACTIVE, false) {
+    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
     }
 }

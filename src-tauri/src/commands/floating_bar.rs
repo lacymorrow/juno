@@ -25,7 +25,7 @@ impl Default for FloatingBarConfig {
             show_voice_indicator: true,
             enable_animations: true,
             auto_hide: false,
-            auto_hide_delay: 3000,
+            auto_hide_delay: crate::constants::timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
             opacity: 0.95,
         }
     }
@@ -390,18 +390,13 @@ impl FloatingBarManager {
             "Finished" => {
                 self.set_state(BarState::Finishing).await;
 
+                // Schedule completion state transition without recursive manager access
                 let app_handle = self.app_handle.clone();
+                let transition_id_clone = transition_id.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
-                    if let Some(manager) = get_bar_manager(&app_handle).await {
-                        let mut manager = manager.lock().await;
-
-                        // Only proceed if this is still the active transition
-                        if manager.current_transition_id.as_ref() == Some(&transition_id) {
-                            manager.set_state(BarState::Default).await;
-                            manager.current_transition_id = None;
-                        }
-                    }
+                    // Emit event to complete transition instead of direct manager access
+                    let _ = app_handle.emit("floating-bar-complete-transition", transition_id_clone);
                 });
             }
             "Failed" | "Cancelled" => {
@@ -414,19 +409,13 @@ impl FloatingBarManager {
                 );
                 self.set_state(BarState::Error).await;
 
+                // Schedule error state cleanup without recursive manager access
                 let app_handle = self.app_handle.clone();
+                let transition_id_clone = transition_id.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_millis(timeouts::UI_NOTIFICATION_DISPLAY_MS)).await;
-                    if let Some(manager) = get_bar_manager(&app_handle).await {
-                        let mut manager = manager.lock().await;
-
-                        // Only proceed if this is still the active transition
-                        if manager.current_transition_id.as_ref() == Some(&transition_id) {
-                            manager.current_error = None;
-                            manager.set_state(BarState::Default).await;
-                            manager.current_transition_id = None;
-                        }
-                    }
+                    // Emit event to clear error state instead of direct manager access
+                    let _ = app_handle.emit("floating-bar-clear-error", transition_id_clone);
                 });
             }
             _ => {
@@ -640,6 +629,112 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
             let mut manager = manager.lock().await;
             if let Err(e) = manager.handle_agent_cancelled().await {
                 error!("Failed to handle agent cancelled: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-processing-complete to reset state
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-processing-complete", move |_event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            if let Err(e) = manager.handle_agent_completion("Finished", None).await {
+                error!("Failed to handle agent completion: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-processing-error to reset state
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-processing-error", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            let error_message = event.payload().to_string();
+            if let Err(e) = manager.handle_agent_completion("Failed", Some(error_message)).await {
+                error!("Failed to handle agent error: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-stopping to reset state
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-stopping", move |_event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            if let Err(e) = manager.handle_agent_stopped().await {
+                error!("Failed to handle agent stopping: {}", e);
+            }
+        });
+    });
+
+    // Listen for voice-transcription:final-result to handle dictation completion
+    let manager_clone = manager.clone();
+    app_handle.listen("voice-transcription:final-result", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+
+            // Parse the final result to extract query text
+            let payload_str = event.payload();
+            let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
+                Ok(payload_json) => {
+                    payload_json.get("text")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                }
+                Err(_) => None,
+            };
+
+            if let Err(e) = manager.handle_dictation_finished(extracted_text).await {
+                error!("Failed to handle dictation finished: {}", e);
+            }
+        });
+    });
+
+        // Listen for error state cleanup
+    let manager_clone = manager.clone();
+    app_handle.listen("floating-bar-clear-error", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+
+            // Parse transition ID from event payload
+            let transition_id = if let Ok(payload) = serde_json::from_str::<String>(event.payload()) {
+                Some(payload)
+            } else {
+                None
+            };
+
+            // Only proceed if this is still the active transition
+            if manager.current_transition_id.as_ref() == transition_id.as_ref() {
+                manager.current_error = None;
+                manager.set_state(BarState::Default).await;
+                manager.current_transition_id = None;
+            }
+        });
+    });
+
+    // Listen for completion state transition
+    let manager_clone = manager.clone();
+    app_handle.listen("floating-bar-complete-transition", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+
+            // Parse transition ID from event payload
+            let transition_id = if let Ok(payload) = serde_json::from_str::<String>(event.payload()) {
+                Some(payload)
+            } else {
+                None
+            };
+
+            // Only proceed if this is still the active transition
+            if manager.current_transition_id.as_ref() == transition_id.as_ref() {
+                manager.set_state(BarState::Default).await;
+                manager.current_transition_id = None;
             }
         });
     });

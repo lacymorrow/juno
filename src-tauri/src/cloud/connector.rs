@@ -16,7 +16,7 @@ use serde_json::json;
 use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
 };
-use crate::constants::{permission_types, cloud_networking};
+use crate::constants::{permissions, api};
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -432,8 +432,8 @@ impl ProductionCloudConnector {
     /// Main connector loop
     async fn run_connector_loop(&self) {
         let mut retry_count = 0u32;
-        let max_retries = cloud_networking::MAX_CONNECTION_RETRIES;
-        let base_delay = Duration::from_millis(cloud_networking::BASE_RETRY_DELAY_MS);
+        let max_retries = api::cloud_networking::MAX_CONNECTION_RETRIES;
+        let base_delay = Duration::from_millis(api::cloud_networking::BASE_RETRY_DELAY_MS);
 
         loop {
             // Check if we should connect
@@ -464,14 +464,14 @@ impl ProductionCloudConnector {
                         self.set_connection_state(ConnectorState::Reconnecting(retry_count)).await;
 
                         // Exponential backoff
-                        let delay = base_delay * cloud_networking::BACKOFF_MULTIPLIER.pow(retry_count.min(cloud_networking::MAX_BACKOFF_EXPONENT));
+                        let delay = base_delay * api::cloud_networking::BACKOFF_MULTIPLIER.pow(retry_count.min(api::cloud_networking::MAX_BACKOFF_EXPONENT));
                         info!("Retrying connection in {:?}", delay);
                         tokio::time::sleep(delay).await;
                     }
                 }
             } else {
                 // Wait before checking again
-                tokio::time::sleep(Duration::from_millis(cloud_networking::CONNECTION_CHECK_INTERVAL_MS)).await;
+                tokio::time::sleep(Duration::from_millis(api::cloud_networking::CONNECTION_CHECK_INTERVAL_MS)).await;
             }
         }
     }
@@ -782,8 +782,8 @@ impl ProductionCloudConnector {
         let mut permissions = Vec::new();
 
         if app_state.is_desktop_available() {
-            permissions.push(permission_types::ACCESSIBILITY.to_string());
-            permissions.push(permission_types::SCREEN_RECORDING.to_string());
+            permissions.push(permissions::types::ACCESSIBILITY.to_string());
+            permissions.push(permissions::types::SCREEN_RECORDING.to_string());
         }
 
         let voice_enabled = {
@@ -792,7 +792,7 @@ impl ProductionCloudConnector {
         };
 
         if voice_enabled {
-            permissions.push(permission_types::MICROPHONE.to_string());
+            permissions.push(permissions::types::MICROPHONE.to_string());
         }
 
         permissions
