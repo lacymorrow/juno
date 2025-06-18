@@ -18,24 +18,28 @@ import type {
 // Types are now imported from shared types
 
 // Global cache to prevent duplicate API calls during startup
+interface CachedValue<T> {
+	value: T;
+	timestamp: number;
+}
+
 interface SettingsCache {
-	ttsProvider?: string;
-	dictationClipboardEnabled?: boolean;
-	soundEnabled?: boolean;
-	toolConfigurations?: Record<string, ToolCategory>;
-	providers?: ProviderInfo[];
-	activeProvider?: string;
-	agentMode?: string;
-	agentTriggerMode?: string;
-	alwaysListeningActive?: boolean;
-	alwaysListeningSensitivity?: number;
-	alwaysListeningWakeWords?: string[];
-	performanceMonitoringEnabled?: boolean;
-	permissionsState?: PermissionsState;
-	keyboardShortcuts?: KeyboardShortcuts;
-	mcpServers?: MCPServerConfig[];
-	mcpServerStatuses?: Record<string, MCPServerStatus>;
-	lastUpdated?: number;
+	ttsProvider?: CachedValue<string>;
+	dictationClipboardEnabled?: CachedValue<boolean>;
+	soundEnabled?: CachedValue<boolean>;
+	toolConfigurations?: CachedValue<Record<string, ToolCategory>>;
+	providers?: CachedValue<ProviderInfo[]>;
+	activeProvider?: CachedValue<string>;
+	agentMode?: CachedValue<string>;
+	agentTriggerMode?: CachedValue<string>;
+	alwaysListeningActive?: CachedValue<boolean>;
+	alwaysListeningSensitivity?: CachedValue<number>;
+	alwaysListeningWakeWords?: CachedValue<string[]>;
+	performanceMonitoringEnabled?: CachedValue<boolean>;
+	permissionsState?: CachedValue<PermissionsState>;
+	keyboardShortcuts?: CachedValue<KeyboardShortcuts>;
+	mcpServers?: CachedValue<MCPServerConfig[]>;
+	mcpServerStatuses?: CachedValue<Record<string, MCPServerStatus>>;
 }
 
 // Cache with 30-second TTL to prevent excessive API calls
@@ -45,8 +49,9 @@ const ongoingRequests = new Map<string, Promise<any>>();
 
 // Helper to check if cache is valid
 const isCacheValid = (cacheKey: keyof SettingsCache): boolean => {
-	const lastUpdated = settingsCache.lastUpdated || 0;
-	return Date.now() - lastUpdated < CACHE_TTL && settingsCache[cacheKey] !== undefined;
+	const cachedItem = settingsCache[cacheKey];
+	if (!cachedItem) return false;
+	return Date.now() - cachedItem.timestamp < CACHE_TTL;
 };
 
 // Helper to get cached value or make API call
@@ -56,7 +61,7 @@ const getCachedOrFetch = async <T>(
 ): Promise<T> => {
 	// Return cached value if valid
 	if (isCacheValid(cacheKey)) {
-		return settingsCache[cacheKey] as T;
+		return (settingsCache[cacheKey] as CachedValue<T>).value;
 	}
 
 	// Check if request is already in progress
@@ -66,8 +71,10 @@ const getCachedOrFetch = async <T>(
 
 	// Start new request
 	const request = apiCall().then((result) => {
-		(settingsCache as any)[cacheKey] = result;
-		settingsCache.lastUpdated = Date.now();
+		(settingsCache as any)[cacheKey] = {
+			value: result,
+			timestamp: Date.now()
+		};
 		ongoingRequests.delete(cacheKey);
 		return result;
 	}).catch((error) => {

@@ -6,11 +6,10 @@
 use clap::Parser;
 use computer_use_ai_sdk::Desktop;
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Builder, App, Manager, State};
-use tracing::{info, warn, error};
+use tracing::{debug, info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{state, cli, agent, commands};
@@ -105,29 +104,35 @@ pub fn validate_environment_variables() {
     }
 }
 
-// Rate limiter for desktop engine initialization
-static LAST_DESKTOP_INIT: AtomicU64 = AtomicU64::new(0);
+// Rate limiter and cache for desktop engine initialization
+// Stores (last_init_timestamp, cached_desktop_instance)
+static DESKTOP_CACHE: OnceLock<Mutex<(u64, Option<Arc<Desktop>>)>> = OnceLock::new();
 const DESKTOP_INIT_COOLDOWN_MS: u64 = 5000; // 5 seconds
 
 /// Initialize the Desktop Automation Engine with proper error handling and rate limiting
 pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
+    let cache = DESKTOP_CACHE.get_or_init(|| Mutex::new((0, None)));
+    let mut cache_guard = cache.lock().unwrap();
+    let (last_init, cached_desktop) = &mut *cache_guard;
+
     // Rate limiting check
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
 
-    let last_init = LAST_DESKTOP_INIT.load(Ordering::Relaxed);
-    if now - last_init < DESKTOP_INIT_COOLDOWN_MS {
-        // Use cached result or return None if too recent
-        tracing::debug!("Desktop engine initialization rate limited, skipping duplicate call");
-        return None;
+    // Fix underflow issue by using saturating_sub to prevent integer underflow
+    // if system clock is adjusted backwards or if last_init > now
+    if now.saturating_sub(*last_init) < DESKTOP_INIT_COOLDOWN_MS {
+        debug!("Desktop engine initialization rate limited, returning cached result");
+        return cached_desktop.clone();
     }
 
-    LAST_DESKTOP_INIT.store(now, Ordering::Relaxed);
+    // Update timestamp before attempting initialization
+    *last_init = now;
 
     let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, false);
-    match desktop_instance_result {
+    let result = match desktop_instance_result {
         Ok(instance) => {
             info!("Desktop Automation Engine initialized successfully with auto-redirect disabled");
             Some(Arc::new(instance))
@@ -147,7 +152,12 @@ pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
             }
             None
         }
-    }
+    };
+
+    // Update cache with the new result (whether success or failure)
+    *cached_desktop = result.clone();
+
+    result
 }
 
 /// Initialize AI provider settings
