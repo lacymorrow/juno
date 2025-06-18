@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Juno",
-        "width": 500,
-        "height": 600,
+        "width": 600,
+        "height": 700,
         "visible": false,
         "decorations": true,
         "transparent": false,
