@@ -44,14 +44,29 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
 
 /// Initialize default MCP servers for common tools
 async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
-    // Add essential MCP servers that provide intelligent capabilities
+    // Add essential MCP servers that provide intelligent capabilities with improved configurations
     let default_servers = vec![
         // Core filesystem operations (this package exists)
-        MCPServerConfig::new(
-            "filesystem".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-filesystem".to_string(), "/Users".to_string()]
-        ).with_description("Secure file system operations and management".to_string()),
+        MCPServerConfig {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "filesystem".to_string(),
+            description: Some("Secure file system operations and management".to_string()),
+            command: "npx".to_string(),
+            args: vec!["@modelcontextprotocol/server-filesystem".to_string(), "/Users".to_string()],
+            working_directory: None,
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                // Prevent TLS warnings and improve stability
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=512".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                env
+            },
+            enabled: true,
+            auto_start: true,
+            timeout_seconds: 60, // Increased timeout
+            max_retries: 2, // Reduced retries to prevent spam
+        },
 
         // Everything server for comprehensive testing and development (confirmed to exist)
         MCPServerConfig {
@@ -61,26 +76,62 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
             command: "npx".to_string(),
             args: vec!["@modelcontextprotocol/server-everything".to_string()],
             working_directory: None,
-            environment_variables: std::collections::HashMap::new(),
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=512".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                // Limit event listeners to prevent memory leaks
+                env.insert("NODE_MAX_LISTENERS".to_string(), "20".to_string());
+                env
+            },
             enabled: true,
             auto_start: true,
-            timeout_seconds: 45,
-            max_retries: 5,
+            timeout_seconds: 75, // Longer timeout for complex server
+            max_retries: 2,
         },
 
         // Memory and sequential thinking (confirmed to exist)
-        MCPServerConfig::new(
-            "memory".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-memory".to_string()]
-        ).with_description("Knowledge graph-based persistent memory system".to_string()),
+        MCPServerConfig {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "memory".to_string(),
+            description: Some("Knowledge graph-based persistent memory system".to_string()),
+            command: "npx".to_string(),
+            args: vec!["@modelcontextprotocol/server-memory".to_string()],
+            working_directory: None,
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=256".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                env
+            },
+            enabled: true,
+            auto_start: true,
+            timeout_seconds: 45,
+            max_retries: 2,
+        },
 
         // Sequential thinking for problem solving (confirmed to exist)
-        MCPServerConfig::new(
-            "sequential-thinking".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-sequential-thinking".to_string()]
-        ).with_description("Sequential thinking and problem-solving capabilities".to_string()),
+        MCPServerConfig {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "sequential-thinking".to_string(),
+            description: Some("Sequential thinking and problem-solving capabilities".to_string()),
+            command: "npx".to_string(),
+            args: vec!["@modelcontextprotocol/server-sequential-thinking".to_string()],
+            working_directory: None,
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=256".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                env
+            },
+            enabled: true,
+            auto_start: true,
+            timeout_seconds: 45,
+            max_retries: 2,
+        },
     ];
 
     tracing::info!("Initializing {} default MCP servers...", default_servers.len());

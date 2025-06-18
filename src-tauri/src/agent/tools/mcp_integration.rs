@@ -123,15 +123,15 @@ impl MCPServerConnection {
     fn calculate_backoff_delay(&self) -> Duration {
         let base_delay = Duration::from_millis(500); // Start with 500ms
         let max_delay = Duration::from_secs(30); // Cap at 30s
-        
+
         if self.consecutive_failures == 0 {
             return Duration::from_millis(0);
         }
-        
+
         // Exponential backoff: 500ms, 1s, 2s, 4s, 8s, 16s, 30s (capped)
         let delay_ms = 500_u64.saturating_mul(2_u64.saturating_pow(self.consecutive_failures.saturating_sub(1)));
         let delay = Duration::from_millis(delay_ms);
-        
+
         if delay > max_delay {
             max_delay
         } else {
@@ -145,7 +145,7 @@ impl MCPServerConnection {
         if self.connection_attempts >= self.config.max_retries {
             return false;
         }
-        
+
         // If we have a recent failure, respect backoff delay
         if let Some(last_failure) = self.last_failure_time {
             let backoff_delay = self.calculate_backoff_delay();
@@ -153,7 +153,7 @@ impl MCPServerConnection {
                 return false;
             }
         }
-        
+
         true
     }
 
@@ -162,8 +162,8 @@ impl MCPServerConnection {
         self.connection_attempts += 1;
         self.consecutive_failures += 1;
         self.last_failure_time = Some(std::time::Instant::now());
-        
-        debug!("MCP server '{}' failure recorded: attempt {}/{}, consecutive failures: {}", 
+
+        debug!("MCP server '{}' failure recorded: attempt {}/{}, consecutive failures: {}",
                self.config.name, self.connection_attempts, self.config.max_retries, self.consecutive_failures);
     }
 
@@ -171,7 +171,7 @@ impl MCPServerConnection {
     fn record_success(&mut self) {
         self.consecutive_failures = 0;
         self.last_successful_communication = Some(std::time::Instant::now());
-        
+
         debug!("MCP server '{}' success recorded, consecutive failures reset", self.config.name);
     }
 
@@ -468,30 +468,74 @@ impl MCPServerConnection {
         })
     }
 
-    /// Send a JSON-RPC request and wait for response
+    /// Send request with enhanced error handling for EPIPE and connection issues
     async fn send_request(&mut self, request: Value) -> Result<Value, String> {
         let request_str = serde_json::to_string(&request)
             .map_err(|e| format!("Failed to serialize request: {}", e))?;
 
         debug!("Sending MCP request to '{}': {}", self.config.name, request_str);
 
-        // Send request
+        // Check if process is still alive before attempting to write
+        if let Some(ref mut process) = self.process {
+            match process.try_wait() {
+                Ok(Some(exit_status)) => {
+                    let err = format!("MCP server '{}' has exited with status: {}", self.config.name, exit_status);
+                    error!("{}", err);
+                    self.status = MCPServerStatus::Error(err.clone());
+                    return Err(err);
+                }
+                Ok(None) => {
+                    // Process is still running, continue
+                }
+                Err(e) => {
+                    let err = format!("Failed to check MCP server '{}' process status: {}", self.config.name, e);
+                    warn!("{}", err);
+                    // Continue anyway - might be a temporary check failure
+                }
+            }
+        }
+
+        // Send request with EPIPE handling
         if let Some(ref mut writer) = self.stdin_writer {
-            writer.write_all(request_str.as_bytes()).await
-                .map_err(|e| format!("Failed to write request: {}", e))?;
-            writer.write_all(b"\n").await
-                .map_err(|e| format!("Failed to write newline: {}", e))?;
-            writer.flush().await
-                .map_err(|e| format!("Failed to flush request: {}", e))?;
+            // Enhanced error handling for broken pipes
+            if let Err(e) = writer.write_all(request_str.as_bytes()).await {
+                let error_msg = format!("Failed to write request to MCP server '{}': {}", self.config.name, e);
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    warn!("Broken pipe detected for MCP server '{}' - server may have crashed", self.config.name);
+                    self.status = MCPServerStatus::Error("Broken pipe - server crashed".to_string());
+                } else {
+                    error!("{}", error_msg);
+                }
+                return Err(error_msg);
+            }
+
+            if let Err(e) = writer.write_all(b"\n").await {
+                let error_msg = format!("Failed to write newline to MCP server '{}': {}", self.config.name, e);
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    warn!("Broken pipe during newline write for MCP server '{}'", self.config.name);
+                    self.status = MCPServerStatus::Error("Broken pipe during write".to_string());
+                }
+                return Err(error_msg);
+            }
+
+            if let Err(e) = writer.flush().await {
+                let error_msg = format!("Failed to flush request to MCP server '{}': {}", self.config.name, e);
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    warn!("Broken pipe during flush for MCP server '{}'", self.config.name);
+                    self.status = MCPServerStatus::Error("Broken pipe during flush".to_string());
+                }
+                return Err(error_msg);
+            }
         } else {
             return Err("No stdin writer available".to_string());
         }
 
-        // Read response with timeout and retry logic
+        // Read response with timeout and enhanced error handling
         let response_future = async {
             if let Some(ref mut reader) = self.stdout_reader {
                 // Try to read multiple lines until we get a valid JSON response
                 let mut attempts = 0;
+                let mut consecutive_empty_lines = 0;
 
                 while attempts < agent_config::MAX_RETRY_ATTEMPTS {
                     let mut line = String::new();
@@ -502,9 +546,16 @@ impl MCPServerConnection {
                         Ok(_) => {
                             let trimmed = line.trim();
                             if trimmed.is_empty() {
+                                consecutive_empty_lines += 1;
+                                if consecutive_empty_lines > 5 {
+                                    warn!("Too many empty lines from MCP server '{}', may be unresponsive", self.config.name);
+                                    return Err(format!("MCP server '{}' appears unresponsive (too many empty lines)", self.config.name));
+                                }
                                 attempts += 1;
+                                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
                                 continue;
                             }
+                            consecutive_empty_lines = 0; // Reset counter on non-empty line
 
                             debug!("Received MCP response from '{}': {}", self.config.name, trimmed);
 
@@ -518,12 +569,16 @@ impl MCPServerConnection {
                                         return Err(format!("Failed to parse response JSON from '{}' after {} attempts: {} (last response: '{}')",
                                                          self.config.name, agent_config::MAX_RETRY_ATTEMPTS, e, trimmed));
                                     }
-                                    // Small delay before retry
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                    // Exponential backoff for retries
+                                    let delay_ms = std::cmp::min(100 * (2_u64.pow(attempts as u32)), 1000);
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                                 }
                             }
                         }
                         Err(e) => {
+                            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                                return Err(format!("MCP server '{}' pipe broken during read", self.config.name));
+                            }
                             return Err(format!("Failed to read response from '{}': {}", self.config.name, e));
                         }
                     }
@@ -539,6 +594,7 @@ impl MCPServerConnection {
             .await
             .map_err(|_| {
                 self.status = MCPServerStatus::Timeout;
+                self.record_failure();
                 format!("Request timeout for MCP server '{}' ({}s)", self.config.name, self.config.timeout_seconds)
             })?
     }
@@ -556,12 +612,12 @@ impl MCPServerConnection {
                 }
                 Err(e) => {
                     warn!("Failed to terminate MCP server '{}' gracefully: {}", self.config.name, e);
-                    
+
                     // Second attempt: Force kill with timeout
                     let kill_future = async {
                         process.kill().await
                     };
-                    
+
                     match tokio::time::timeout(Duration::from_secs(5), kill_future).await {
                         Ok(Ok(_)) => {
                             warn!("✅ MCP server '{}' force-killed successfully", self.config.name);
@@ -575,12 +631,12 @@ impl MCPServerConnection {
                     }
                 }
             }
-            
+
             // Wait for process to actually exit (with timeout)
             let wait_future = async {
                 process.wait().await
             };
-            
+
             match tokio::time::timeout(Duration::from_secs(3), wait_future).await {
                 Ok(Ok(exit_status)) => {
                     info!("MCP server '{}' exited with status: {}", self.config.name, exit_status);
@@ -593,13 +649,13 @@ impl MCPServerConnection {
                 }
             }
         }
-        
+
         // Clean up all resources
         self.stdin_writer = None;
         self.stdout_reader = None;
         self.stderr_reader = None;
         self.status = MCPServerStatus::Disconnected;
-        
+
         info!("✅ MCP server '{}' disconnected and cleaned up", self.config.name);
     }
 
@@ -651,12 +707,12 @@ impl MCPManager {
         {
             let mut configs = self.configs.write().await;
             let mut servers = self.servers.write().await;
-            
+
             // Double-check in case another thread added it between our check and lock
             if configs.contains_key(&server_id) {
                 return Err(format!("MCP server with ID '{}' already exists", server_id));
             }
-            
+
             // Store configuration and create connection atomically
             configs.insert(server_id.clone(), config.clone());
             let connection = MCPServerConnection::new(config.clone());
@@ -753,14 +809,14 @@ impl MCPManager {
             let configs = self.configs.read().await;
             configs.contains_key(server_id)
         };
-        
+
         if !server_exists {
             return Err(format!("MCP server '{}' not found", server_id));
         }
 
         // Stop the server with timeout to prevent hanging
         match tokio::time::timeout(
-            Duration::from_secs(10), 
+            Duration::from_secs(10),
             self.stop_server(server_id)
         ).await {
             Ok(Ok(_)) => {
@@ -778,7 +834,7 @@ impl MCPManager {
         let (removed_config, removed_server) = {
             let mut configs = self.configs.write().await;
             let mut servers = self.servers.write().await;
-            
+
             let config = configs.remove(server_id);
             let server = servers.remove(server_id);
             (config, server)

@@ -399,7 +399,7 @@ impl AppState {
             }
             Ok(())
         })();
-        
+
         if let Err(e) = result {
             log::error!("Error marking agent execution as finished: {}", e);
         }
@@ -865,50 +865,54 @@ impl AppState {
             .collect();
 
         if !enabled_servers.is_empty() {
-            log::info!("Starting {} enabled MCP servers concurrently", enabled_servers.len());
-            
+            log::info!("Starting {} MCP servers with staggered startup to prevent race conditions", enabled_servers.len());
+
             let manager = self.get_mcp_manager().await;
-            let start_futures = enabled_servers.iter().map(|config| {
-                let manager = manager.clone();
-                let server_id = config.id.clone();
-                let server_name = config.name.clone();
-                
-                async move {
-                    let manager_guard = manager.lock().await;
-                    let start_result = tokio::time::timeout(
-                        Duration::from_secs(15),
-                        manager_guard.start_server(&server_id)
-                    ).await;
-                    drop(manager_guard);
-                    
-                    match start_result {
-                        Ok(Ok(_)) => {
-                            log::info!("✅ MCP server '{}' started successfully", server_name);
-                            Ok(server_name)
-                        }
-                        Ok(Err(e)) => {
-                            log::warn!("❌ MCP server '{}' failed to start: {}", server_name, e);
-                            Err(format!("{}: {}", server_name, e))
-                        }
-                        Err(_) => {
-                            log::warn!("⏰ MCP server '{}' startup timed out", server_name);
-                            Err(format!("{}: timeout", server_name))
-                        }
+            let mut successful_servers = Vec::new();
+            let mut failed_servers = Vec::new();
+
+            // Start servers one by one with delays to prevent resource conflicts
+            for (index, config) in enabled_servers.iter().enumerate() {
+                if index > 0 {
+                    // Add staggered delay between server starts (2 seconds each)
+                    tokio::time::sleep(Duration::from_millis(2000)).await;
+                }
+
+                log::info!("Starting MCP server {} of {}: '{}'", index + 1, enabled_servers.len(), config.name);
+
+                let manager_guard = manager.lock().await;
+                let start_result = tokio::time::timeout(
+                    Duration::from_secs(45), // Increased timeout for individual servers
+                    manager_guard.start_server(&config.id)
+                ).await;
+                drop(manager_guard);
+
+                match start_result {
+                    Ok(Ok(_)) => {
+                        log::info!("✅ MCP server '{}' started successfully", config.name);
+                        successful_servers.push(config.name.clone());
+
+                        // Give server additional time to fully initialize before starting next
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
+                    }
+                    Ok(Err(e)) => {
+                        log::warn!("❌ MCP server '{}' failed to start: {}", config.name, e);
+                        failed_servers.push(format!("{}: {}", config.name, e));
+                    }
+                    Err(_) => {
+                        log::warn!("⏰ MCP server '{}' startup timed out after 45s", config.name);
+                        failed_servers.push(format!("{}: timeout", config.name));
                     }
                 }
-            });
-
-            // Wait for all servers to attempt startup
-            let results = futures::future::join_all(start_futures).await;
-            
-            let successful: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
-            let failed: Vec<_> = results.iter().filter_map(|r| r.as_ref().err()).collect();
-            
-            log::info!("MCP initialization complete: {} succeeded, {} failed", successful.len(), failed.len());
-            if !failed.is_empty() {
-                let failed_list: Vec<String> = failed.iter().map(|s| s.to_string()).collect();
-                log::warn!("Failed servers: {}", failed_list.join(", "));
             }
+
+            log::info!("MCP initialization complete: {} succeeded, {} failed", successful_servers.len(), failed_servers.len());
+
+            if !failed_servers.is_empty() {
+                log::warn!("Failed MCP servers: {}", failed_servers.join(", "));
+            }
+        } else {
+            log::info!("No enabled MCP servers found to start");
         }
 
         // Sync tools once at the end
@@ -923,7 +927,7 @@ impl AppState {
     pub async fn retry_failed_mcp_servers(&self) -> Result<(), String> {
         let mcp_manager = self.get_mcp_manager().await;
         let manager_guard = mcp_manager.lock().await;
-        
+
         let statuses = manager_guard.get_server_statuses().await;
         let failed_servers: Vec<String> = statuses.iter()
             .filter_map(|(id, status)| {
@@ -933,14 +937,14 @@ impl AppState {
                 }
             })
             .collect();
-        
+
         if failed_servers.is_empty() {
             log::debug!("No failed MCP servers to retry");
             return Ok(());
         }
-        
+
         log::info!("Attempting to retry {} failed MCP servers", failed_servers.len());
-        
+
         let mut retry_count = 0;
         for server_id in failed_servers {
             // Each server manages its own backoff timing
@@ -954,7 +958,7 @@ impl AppState {
                 }
             }
         }
-        
+
         if retry_count > 0 {
             log::info!("Retried {} MCP servers, syncing tools", retry_count);
             drop(manager_guard);
@@ -962,7 +966,7 @@ impl AppState {
         } else {
             drop(manager_guard);
         }
-        
+
         Ok(())
     }
 
@@ -1015,24 +1019,24 @@ impl AppState {
     pub async fn emit_mcp_state_update(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         let mcp_manager = self.get_mcp_manager().await;
         let manager_guard = mcp_manager.lock().await;
-        
+
         let servers = manager_guard.get_server_configs().await;
         let statuses = manager_guard.get_server_statuses().await;
         let tools = manager_guard.get_all_tools().await;
-        
+
         drop(manager_guard);
-        
+
         let payload = serde_json::json!({
             "servers": servers,
             "statuses": statuses,
             "tools": tools
         });
-        
+
         if let Err(e) = app_handle.emit("mcp_state_updated", payload) {
             log::warn!("Failed to emit MCP state update: {}", e);
             return Err(format!("Failed to emit MCP state update: {}", e));
         }
-        
+
         log::debug!("Emitted MCP state update to frontend");
         Ok(())
     }
@@ -1101,10 +1105,10 @@ impl AppState {
     /// Cleanup all MCP servers and resources
     pub async fn cleanup_mcp_resources(&self) -> Result<(), String> {
         log::info!("🧹 Cleaning up MCP resources...");
-        
+
         let mcp_manager = self.get_mcp_manager().await;
         let manager_guard = mcp_manager.lock().await;
-        
+
         // Stop all servers
         let configs = manager_guard.get_server_configs().await;
         for config in configs {
@@ -1112,44 +1116,44 @@ impl AppState {
                 log::warn!("Failed to stop MCP server '{}': {}", config.name, e);
             }
         }
-        
+
         drop(manager_guard);
         log::info!("✅ MCP resources cleaned up");
         Ok(())
     }
-    
+
     /// Initialize MCP servers with atomic deduplication
     pub async fn initialize_mcp_servers_once(&self) -> Result<(), String> {
         use std::sync::atomic::{AtomicBool, Ordering};
         use tokio::sync::Mutex as AsyncMutex;
-        
+
         static INIT_FLAG: AtomicBool = AtomicBool::new(false);
         static INIT_RESULT: std::sync::OnceLock<AsyncMutex<Option<Result<(), String>>>> = std::sync::OnceLock::new();
-        
+
         // Fast path: if already initialized, return immediately
         if INIT_FLAG.load(Ordering::Acquire) {
             let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
             let guard = result_mutex.lock().await;
             return guard.as_ref().unwrap().clone();
         }
-        
+
         // Try to claim initialization responsibility
         if INIT_FLAG.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
             // We're responsible for initialization
             log::info!("Starting MCP servers initialization (first time)");
             let init_result = self.initialize_mcp_servers().await;
-            
+
             // Store the result
             let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
             let mut guard = result_mutex.lock().await;
             *guard = Some(init_result.clone());
-            
+
             init_result
         } else {
             // Someone else is/was initializing, wait for their result
             log::debug!("MCP servers initialization already in progress, waiting for result");
             let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
-            
+
             // Wait for initialization to complete
             loop {
                 let guard = result_mutex.lock().await;
@@ -1157,7 +1161,7 @@ impl AppState {
                     return result.clone();
                 }
                 drop(guard);
-                
+
                 // Brief yield to avoid busy waiting
                 tokio::task::yield_now().await;
             }
@@ -1289,7 +1293,7 @@ pub(crate) fn update_undo_state(
     let mut previous = state.previous_content.lock()
         .map_err(|e| format!("Failed to acquire previous_content lock: {}", e))?;
     *previous = Some(previous_content);
-    
+
     Ok(())
 }
 
