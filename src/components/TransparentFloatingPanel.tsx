@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { LogicalSize, Window } from "@tauri-apps/api/window";
 import {
   Brain,
@@ -15,26 +14,18 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useVoice,
+  useAgentState,
+  useRecentMessages,
+} from "@/contexts/VoiceContext";
 
 // Enhanced state management for the transparent panel
 interface PanelState {
   mode: "compact" | "expanded" | "chat" | "settings";
   agentStatus: "idle" | "listening" | "thinking" | "responding" | "error";
-  voiceMode: "dictation" | "agent" | "idle";
-  isListening: boolean;
-  isTranscribing: boolean;
-  isSpeaking: boolean;
-  transcriptionText?: string;
   currentResponse?: string;
   error?: string;
-  audioLevel: number;
-}
-
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  isStreaming?: boolean;
 }
 
 interface TransparentFloatingPanelProps {
@@ -54,40 +45,20 @@ export function TransparentFloatingPanel({
   disableWindowManagement = false,
   onModeChange,
 }: TransparentFloatingPanelProps) {
-  // State management
+  // Use context hooks instead of local state
+  const { voiceState } = useVoice();
+  const agentState = useAgentState();
+  const { recentMessages } = useRecentMessages();
+
   const [panelState, setPanelState] = useState<PanelState>({
     mode: "compact",
     agentStatus: "idle",
-    voiceMode: "idle",
-    isListening: false,
-    isTranscribing: false,
-    isSpeaking: false,
-    audioLevel: 0,
   });
 
-  const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isHovered, setIsHovered] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [_isTransitioning, setIsTransitioning] = useState(false);
   const [isClickThroughEnabled, setIsClickThroughEnabled] = useState(true); // Start with click-through enabled
-  // Debug: Add some test messages for development
-  useEffect(() => {
-    if (recentMessages.length === 0) {
-      setRecentMessages([
-        {
-          role: "user",
-          content: "Hello Juno!",
-          timestamp: Date.now() - 60000,
-        },
-        {
-          role: "assistant",
-          content:
-            "Hi! I'm ready to help you. Try clicking the buttons or typing a message!",
-          timestamp: Date.now() - 30000,
-        },
-      ]);
-    }
-  }, []);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -144,157 +115,15 @@ export function TransparentFloatingPanel({
     };
   }, [panelState.mode, disableWindowManagement]);
 
-  // Listen for agent events and update panel state
+  // Sync local panel state with context agent state
   useEffect(() => {
-    const listeners: Array<() => void> = [];
-
-    const setupListeners = async () => {
-      // Agent status events
-      listeners.push(
-        await listen("agent-started", () => {
-          setPanelState((prev) => ({ ...prev, agentStatus: "listening" }));
-        })
-      );
-
-      listeners.push(
-        await listen("agent-thinking", () => {
-          setPanelState((prev) => ({ ...prev, agentStatus: "thinking" }));
-        })
-      );
-
-      listeners.push(
-        await listen("agent-responding", () => {
-          setPanelState((prev) => ({ ...prev, agentStatus: "responding" }));
-        })
-      );
-
-      // Voice events
-      listeners.push(
-        await listen("dictation-active", (event) => {
-          const isActive = event.payload as boolean;
-          setPanelState((prev) => ({
-            ...prev,
-            voiceMode: isActive ? "dictation" : "idle",
-            isListening: isActive,
-          }));
-        })
-      );
-
-      listeners.push(
-        await listen("app-dictation-started", () => {
-          setPanelState((prev) => ({
-            ...prev,
-            voiceMode: "agent",
-            isListening: true,
-          }));
-        })
-      );
-
-      listeners.push(
-        await listen("app-dictation-finished", () => {
-          setPanelState((prev) => ({
-            ...prev,
-            isListening: false,
-          }));
-        })
-      );
-
-      // Transcription events
-      listeners.push(
-        await listen("dictation-transcription-partial", (event) => {
-          const text = event.payload as string;
-          setPanelState((prev) => ({
-            ...prev,
-            isTranscribing: true,
-            transcriptionText: text,
-          }));
-        })
-      );
-
-      listeners.push(
-        await listen("dictation-transcription-final", (event) => {
-          const text = event.payload as string;
-          setPanelState((prev) => ({
-            ...prev,
-            isTranscribing: false,
-            transcriptionText: text,
-          }));
-
-          // Add user message to recent messages
-          setRecentMessages((prev) => [
-            ...prev.slice(-4), // Keep last 4 messages
-            {
-              role: "user",
-              content: text,
-              timestamp: Date.now(),
-            },
-          ]);
-        })
-      );
-
-      // AI response streaming
-      listeners.push(
-        await listen("streaming-text", (event) => {
-          const chunk = event.payload as { chunk: string; message_id: string };
-          setPanelState((prev) => ({
-            ...prev,
-            currentResponse: (prev.currentResponse || "") + chunk.chunk,
-          }));
-        })
-      );
-
-      listeners.push(
-        await listen("stream-end", (event) => {
-          const data = event.payload as {
-            message_id: string;
-            complete_text: string;
-          };
-
-          // Add assistant message to recent messages
-          setRecentMessages((prev) => [
-            ...prev.slice(-4),
-            {
-              role: "assistant",
-              content: data.complete_text,
-              timestamp: Date.now(),
-            },
-          ]);
-
-          setPanelState((prev) => ({
-            ...prev,
-            currentResponse: undefined,
-            agentStatus: "idle",
-          }));
-        })
-      );
-
-      // Audio level updates
-      listeners.push(
-        await listen<number>("audio-level", (event) => {
-          setPanelState((prev) => ({ ...prev, audioLevel: event.payload }));
-        })
-      );
-
-      // TTS events
-      listeners.push(
-        await listen("tts-started", () => {
-          setPanelState((prev) => ({ ...prev, isSpeaking: true }));
-        })
-      );
-
-      listeners.push(
-        await listen("tts-finished", () => {
-          setPanelState((prev) => ({ ...prev, isSpeaking: false }));
-        })
-      );
-    };
-
-    setupListeners();
-
-    return () => {
-      listeners.forEach((unlisten) => unlisten());
-    };
-  }, []);
+    setPanelState((prev) => ({
+      ...prev,
+      agentStatus: agentState.status,
+      currentResponse: agentState.currentResponse,
+      error: agentState.error,
+    }));
+  }, [agentState]);
 
   // PRODUCTION READY: Manage click-through behavior based on panel state and hover
   useEffect(() => {
@@ -302,9 +131,9 @@ export function TransparentFloatingPanel({
       isHovered ||
       isWindowHovered ||
       panelState.mode !== "compact" ||
-      panelState.isListening ||
-      panelState.isTranscribing ||
-      panelState.isSpeaking ||
+      voiceState.isListening ||
+      voiceState.isTranscribing ||
+      voiceState.isSpeaking ||
       panelState.agentStatus !== "idle";
 
     const newClickThroughState = !shouldBeInteractive;
@@ -323,9 +152,9 @@ export function TransparentFloatingPanel({
     isHovered,
     isWindowHovered,
     panelState.mode,
-    panelState.isListening,
-    panelState.isTranscribing,
-    panelState.isSpeaking,
+    voiceState.isListening,
+    voiceState.isTranscribing,
+    voiceState.isSpeaking,
     panelState.agentStatus,
     isClickThroughEnabled,
   ]);
@@ -333,9 +162,9 @@ export function TransparentFloatingPanel({
   // Auto-expand panel when there's activity or hover
   useEffect(() => {
     const hasActivity =
-      panelState.isListening ||
-      panelState.isTranscribing ||
-      panelState.isSpeaking ||
+      voiceState.isListening ||
+      voiceState.isTranscribing ||
+      voiceState.isSpeaking ||
       panelState.agentStatus !== "idle";
 
     if ((hasActivity || isHovered) && panelState.mode === "compact") {
@@ -348,9 +177,9 @@ export function TransparentFloatingPanel({
       return () => clearTimeout(timer);
     }
   }, [
-    panelState.isListening,
-    panelState.isTranscribing,
-    panelState.isSpeaking,
+    voiceState.isListening,
+    voiceState.isTranscribing,
+    voiceState.isSpeaking,
     panelState.agentStatus,
     isHovered,
   ]);
@@ -393,11 +222,11 @@ export function TransparentFloatingPanel({
 
   // Get main status icon
   const getStatusIcon = () => {
-    if (panelState.error) {
+    if (panelState.error || voiceState.error) {
       return <X className="h-4 w-4 text-red-400" />;
     }
 
-    if (panelState.isSpeaking) {
+    if (voiceState.isSpeaking) {
       return <Volume2 className="h-4 w-4 text-purple-400 animate-pulse" />;
     }
 
@@ -409,15 +238,15 @@ export function TransparentFloatingPanel({
       return <Brain className="h-4 w-4 text-blue-400 animate-pulse" />;
     }
 
-    if (panelState.isListening) {
-      return panelState.voiceMode === "dictation" ? (
+    if (voiceState.isListening) {
+      return voiceState.mode === "dictation" ? (
         <Type className="h-4 w-4 text-orange-400" />
       ) : (
         <Mic className="h-4 w-4 text-green-400" />
       );
     }
 
-    if (panelState.isTranscribing) {
+    if (voiceState.isTranscribing) {
       return <Loader2 className="h-4 w-4 text-orange-400 animate-spin" />;
     }
 
@@ -440,7 +269,7 @@ export function TransparentFloatingPanel({
 
   // Audio level visualization
   const AudioLevelIndicator = () => {
-    if (!panelState.isListening) return null;
+    if (!voiceState.isListening) return null;
 
     return (
       <div className="flex items-center gap-1">
@@ -449,7 +278,7 @@ export function TransparentFloatingPanel({
             key={i}
             className={cn(
               "w-1 rounded-full transition-all duration-150 audio-bar",
-              panelState.audioLevel > (i + 1) * 20
+              voiceState.audioLevel > (i + 1) * 20
                 ? "bg-white/80 h-3"
                 : "bg-white/70 h-1"
             )}
@@ -545,11 +374,11 @@ export function TransparentFloatingPanel({
             "rounded-2xl border border-white/60 backdrop-blur-xl glass-panel-dark",
             "panel-transition pointer-events-auto",
             getBackgroundColor(),
-            panelState.voiceMode === "dictation" && "panel-glow-orange",
-            (panelState.voiceMode === "agent" ||
+            voiceState.mode === "dictation" && "panel-glow-orange",
+            (voiceState.mode === "agent" ||
               panelState.agentStatus !== "idle") &&
               "panel-glow-blue",
-            panelState.isSpeaking && "panel-glow-purple"
+            voiceState.isSpeaking && "panel-glow-purple"
           )}
           style={{
             width: dimensions.width,
@@ -568,7 +397,7 @@ export function TransparentFloatingPanel({
             >
               <div className="flex items-center gap-2">
                 {getStatusIcon()}
-                {panelState.audioLevel > 0 && <AudioLevelIndicator />}
+                {voiceState.audioLevel > 0 && <AudioLevelIndicator />}
               </div>
             </DraggableHeader>
           )}
@@ -581,16 +410,16 @@ export function TransparentFloatingPanel({
                 <div className="flex items-center gap-2">
                   {getStatusIcon()}
                   <span className="text-xs font-medium">
-                    {panelState.isSpeaking
+                    {voiceState.isSpeaking
                       ? "Speaking"
                       : panelState.agentStatus === "thinking"
                       ? "Thinking"
                       : panelState.agentStatus === "responding"
                       ? "Responding"
-                      : panelState.isTranscribing
+                      : voiceState.isTranscribing
                       ? "Transcribing"
-                      : panelState.isListening
-                      ? panelState.voiceMode === "dictation"
+                      : voiceState.isListening
+                      ? voiceState.mode === "dictation"
                         ? "Dictating"
                         : "Listening"
                       : "Juno AI"}
@@ -636,12 +465,12 @@ export function TransparentFloatingPanel({
               {/* Interactive Content Area */}
               <InteractiveContent className="space-y-2">
                 {/* Current Activity */}
-                {(panelState.transcriptionText ||
+                {(voiceState.transcriptionText ||
                   panelState.currentResponse) && (
                   <div className="bg-black/70 rounded-lg p-2 text-xs">
                     {panelState.transcriptionText && (
                       <div className="text-orange-200">
-                        "{panelState.transcriptionText}"
+                        "{voiceState.transcriptionText}"
                       </div>
                     )}
                     {panelState.currentResponse && (
@@ -653,7 +482,7 @@ export function TransparentFloatingPanel({
                 )}
 
                 {/* Audio Level Indicator */}
-                {panelState.isListening && (
+                {voiceState.isListening && (
                   <div className="flex items-center justify-center">
                     <AudioLevelIndicator />
                   </div>

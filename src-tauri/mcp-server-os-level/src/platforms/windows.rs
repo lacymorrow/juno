@@ -16,7 +16,16 @@ impl WindowsEngine {
 
 impl AccessibilityEngine for WindowsEngine {
     fn get_root_element(&self) -> UIElement {
-        panic!("Windows implementation is not yet available")
+        UIElement {
+            element_id: "unsupported".to_string(),
+            name: "Windows not supported".to_string(),
+            role: "unsupported".to_string(),
+            value: None,
+            bounds: (0, 0, 0, 0),
+            is_enabled: false,
+            is_focused: false,
+            children: vec![],
+        }
     }
 
     fn get_element_by_id(&self, _id: &str) -> Result<UIElement, AutomationError> {

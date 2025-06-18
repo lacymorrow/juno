@@ -26,12 +26,12 @@ impl CloudSecurity {
     pub fn new(config: CloudConfig, auth: DeviceAuth) -> Self {
         Self { config, auth }
     }
-    
+
     /// Validate incoming command
     pub fn validate_command(&self, command: &CloudCommand) -> Result<(), CloudError> {
         // Check timestamp to prevent replay attacks
         self.validate_timestamp(command.timestamp)?;
-        
+
         // Verify command signature if present
         if let Some(signature) = &command.signature {
             let command_data = serde_json::to_string(command)?;
@@ -39,47 +39,47 @@ impl CloudSecurity {
                 return Err(CloudError::SecurityError("Invalid command signature".to_string()));
             }
         }
-        
+
         // Check if command type is allowed
         self.validate_command_type(&command.command_type)?;
-        
+
         // Validate specific command parameters
         self.validate_command_payload(command)?;
-        
+
         Ok(())
     }
-    
+
     /// Validate command timestamp
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let time_diff = if now > timestamp {
             now - timestamp
         } else {
             timestamp - now
         };
-        
+
         // Allow 5 minutes of clock skew
         if time_diff > 300 {
             return Err(CloudError::SecurityError("Command timestamp too old or too far in future".to_string()));
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate command type
     fn validate_command_type(&self, command_type: &CloudCommandType) -> Result<(), CloudError> {
         let command_str = self.command_type_to_string(command_type);
-        
+
         if !self.config.is_command_allowed(&command_str) {
             return Err(CloudError::SecurityError(format!("Command type '{}' is not allowed", command_str)));
         }
-        
+
         let security_level = self.get_command_security_level(command_type);
-        
+
         match (&self.config.security_level, &security_level) {
             (SecurityLevel::High, OperationSecurity::Dangerous) => {
                 return Err(CloudError::SecurityError("Dangerous commands not allowed in high security mode".to_string()));
@@ -96,7 +96,7 @@ impl CloudSecurity {
             _ => Ok(()),
         }
     }
-    
+
     /// Validate command payload
     fn validate_command_payload(&self, command: &CloudCommand) -> Result<(), CloudError> {
         match command.command_type {
@@ -104,14 +104,14 @@ impl CloudSecurity {
                 if command.payload.query.is_none() && command.payload.audio_base64.is_none() {
                     return Err(CloudError::ValidationFailed("Query commands require either text or audio".to_string()));
                 }
-                
+
                 // Validate query length
                 if let Some(query) = &command.payload.query {
                     if query.len() > 10000 {
                         return Err(CloudError::ValidationFailed("Query text too long".to_string()));
                     }
                 }
-                
+
                 // Validate audio data
                 if let Some(audio) = &command.payload.audio_base64 {
                     if audio.len() > 10_000_000 { // ~7.5MB base64 encoded
@@ -137,10 +137,10 @@ impl CloudSecurity {
                 // Other commands are generally safe
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get security level for command type
     fn get_command_security_level(&self, command_type: &CloudCommandType) -> OperationSecurity {
         match command_type {
@@ -152,7 +152,7 @@ impl CloudSecurity {
             CloudCommandType::ConfigUpdate => OperationSecurity::Sensitive,
         }
     }
-    
+
     /// Convert command type to string
     fn command_type_to_string(&self, command_type: &CloudCommandType) -> String {
         match command_type {
@@ -164,11 +164,11 @@ impl CloudSecurity {
             CloudCommandType::ConfigUpdate => "config_update".to_string(),
         }
     }
-    
+
     /// Check if command requires user confirmation
     pub fn requires_confirmation(&self, command: &CloudCommand) -> bool {
         let security_level = self.get_command_security_level(&command.command_type);
-        
+
         match (&self.config.security_level, &security_level) {
             (SecurityLevel::Medium, OperationSecurity::Sensitive) => true,
             (SecurityLevel::Medium, OperationSecurity::Dangerous) => true,
@@ -176,29 +176,29 @@ impl CloudSecurity {
             _ => false,
         }
     }
-    
+
     /// Sanitize command payload for logging
     pub fn sanitize_for_logging(&self, command: &CloudCommand) -> CloudCommand {
         let mut sanitized = command.clone();
-        
+
         // Remove sensitive data from logs
         if let Some(_) = &sanitized.payload.audio_base64 {
             sanitized.payload.audio_base64 = Some("[AUDIO_DATA_REDACTED]".to_string());
         }
-        
+
         // Truncate long queries
         if let Some(query) = &sanitized.payload.query {
             if query.len() > 200 {
                 sanitized.payload.query = Some(format!("{}...[TRUNCATED]", &query[..200]));
             }
         }
-        
+
         // Remove signature for logging
         sanitized.signature = Some("[SIGNATURE_REDACTED]".to_string());
-        
+
         sanitized
     }
-    
+
     /// Create audit log entry
     pub fn create_audit_log(&self, command: &CloudCommand, result: &Result<(), CloudError>) -> AuditLogEntry {
         AuditLogEntry {
@@ -216,10 +216,10 @@ impl CloudSecurity {
             security_level: format!("{:?}", self.config.security_level),
         }
     }
-    
+
     /// Rate limiting check
     pub fn check_rate_limit(&self, _command_type: &CloudCommandType) -> Result<(), CloudError> {
-        // TODO: Implement rate limiting based on command type and time window
+        // Note: Rate limiting by command type not implemented yet
         // For now, always allow
         Ok(())
     }

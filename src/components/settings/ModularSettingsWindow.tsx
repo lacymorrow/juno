@@ -9,8 +9,8 @@ import {
   Network,
   Settings,
   Bell,
-	Shield,
-	Terminal,
+  Shield,
+  Terminal,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -22,9 +22,9 @@ import {
   NetworkSettings,
   ShortcutsSettings,
   ToolsSettings,
-	NotificationSettings
-} from './index';
-import { SettingsCategory } from './types';
+  NotificationSettings,
+} from "./index";
+import { SettingsCategory } from "./types";
 
 const settingsCategories: SettingsCategory[] = [
   {
@@ -138,11 +138,13 @@ export default function ModularSettingsWindow() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex w-full min-w-0 h-screen bg-gray-50">
       {/* Sidebar with categories - macOS style */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+          <h1 className="text-xl font-semibold text-gray-900">
+            MODULAR Settings
+          </h1>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
@@ -204,9 +206,7 @@ export default function ModularSettingsWindow() {
 
         {/* Settings content */}
         <div className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-2xl">
-            {renderCategoryContent()}
-          </div>
+          <div className="max-w-2xl">{renderCategoryContent()}</div>
         </div>
       </div>
     </div>

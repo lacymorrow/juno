@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { 
-  AlertCircle, 
-  CheckCircle, 
-  RefreshCw, 
-  Server, 
+import {
+  AlertCircle,
+  CheckCircle,
+  RefreshCw,
+  Server,
   Square,
   Save,
-  ExternalLink
+  ExternalLink,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,11 +29,61 @@ import { SettingsSectionProps } from "../types";
 export default function NetworkSettings({ settings }: SettingsSectionProps) {
   const [newServerJson, setNewServerJson] = useState("");
 
+  // JSON coercion function to fix common JSON issues
+  const coerceJson = (jsonStr: string): string => {
+    try {
+      // First try to parse as-is
+      JSON.parse(jsonStr);
+      return jsonStr;
+    } catch (error) {
+      // Try to fix common JSON issues
+      let fixed = jsonStr.trim();
+
+      // Remove comments
+      fixed = fixed.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+
+      // Fix unquoted keys
+      fixed = fixed.replace(
+        /([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$-]*)\s*:/g,
+        '$1"$2":'
+      );
+
+      // Fix single quotes to double quotes
+      fixed = fixed.replace(/'/g, '"');
+
+      // Remove trailing commas
+      fixed = fixed.replace(/,(\s*[}\]])/g, "$1");
+
+      // Try to complete incomplete JSON
+      if (!fixed.startsWith("{") && !fixed.startsWith("[")) {
+        fixed = "{" + fixed + "}";
+      }
+
+      // Fix missing braces/brackets
+      let openBraces = (fixed.match(/\{/g) || []).length;
+      let closeBraces = (fixed.match(/\}/g) || []).length;
+      while (openBraces > closeBraces) {
+        fixed += "}";
+        closeBraces++;
+      }
+
+      try {
+        JSON.parse(fixed);
+        toast.info("JSON format was automatically corrected", {
+          duration: 3000,
+        });
+        return fixed;
+      } catch (secondError) {
+        throw error; // Return original error
+      }
+    }
+  };
+
   const getMcpServerStatusBadge = (status: any) => {
     if (!status) {
       return <Badge variant="outline">Disconnected</Badge>;
     }
-    
+
     if (status.Connected !== undefined) {
       return (
         <Badge variant="default" className="bg-green-500">
@@ -55,7 +105,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     if (!status) {
       return <Square className="h-4 w-4 text-gray-400" />;
     }
-    
+
     if (status.Connected !== undefined) {
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     } else if (status.Connecting !== undefined) {
@@ -69,25 +119,70 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleAddMcpServer = async () => {
     try {
-      const parsedEnvVars = JSON.parse(newServerJson);
+      const correctedJson = coerceJson(newServerJson);
+      const parsedConfig = JSON.parse(correctedJson);
+
+      // Update the textarea with corrected JSON if it was changed
+      if (correctedJson !== newServerJson) {
+        setNewServerJson(correctedJson);
+      }
+
+      // Support standard MCP format (Claude Desktop format) where server name is the key
+      // Example: { "mcp-server-firecrawl": { "command": "pnpm dlx", "args": ["firecrawl-mcp"], "env": { "FIRECRAWL_API_KEY": "..." } } }
+      const serverEntries = Object.entries(parsedConfig);
+
+      // Check if this is the standard format (server name as key)
+      if (
+        serverEntries.length === 1 &&
+        typeof serverEntries[0][1] === "object" &&
+        serverEntries[0][1] !== null &&
+        "command" in serverEntries[0][1]
+      ) {
+        const [serverName, serverConfig] = serverEntries[0];
+        const config = serverConfig as any;
+
+        const newServer = {
+          id: `mcp-${Date.now()}`,
+          name: serverName,
+          description: config.description || `MCP Server: ${serverName}`,
+          command: config.command || "",
+          args: config.args || [],
+          working_directory: config.working_directory || "",
+          environment_variables:
+            config.env || config.environment_variables || {},
+          enabled: true,
+          auto_start: config.auto_start || false,
+          timeout_seconds: config.timeout_seconds || 30,
+          max_retries: config.max_retries || 3,
+        };
+
+        await invoke("add_mcp_server", { config: newServer });
+        toast.success(`MCP server "${serverName}" added successfully`);
+        setNewServerJson("");
+        // Backend will emit mcp_state_updated event automatically
+        return;
+      }
+
+      // Support legacy format (single server object)
       const newServer = {
         id: `mcp-${Date.now()}`,
-        name: parsedEnvVars.name || "Unnamed Server",
-        description: parsedEnvVars.description || "",
-        command: parsedEnvVars.command || "",
-        args: parsedEnvVars.args || [],
-        working_directory: parsedEnvVars.working_directory || "",
-        environment_variables: parsedEnvVars.environment_variables || {},
+        name: parsedConfig.name || "Unnamed Server",
+        description: parsedConfig.description || "",
+        command: parsedConfig.command || "",
+        args: parsedConfig.args || [],
+        working_directory: parsedConfig.working_directory || "",
+        environment_variables:
+          parsedConfig.env || parsedConfig.environment_variables || {},
         enabled: true,
-        auto_start: parsedEnvVars.auto_start || false,
-        timeout_seconds: parsedEnvVars.timeout_seconds || 30,
-        max_retries: parsedEnvVars.max_retries || 3,
+        auto_start: parsedConfig.auto_start || false,
+        timeout_seconds: parsedConfig.timeout_seconds || 30,
+        max_retries: parsedConfig.max_retries || 3,
       };
 
       await invoke("add_mcp_server", { config: newServer });
       toast.success("MCP server added successfully");
       setNewServerJson("");
-      await settings.loadMcpServers();
+      // Backend will emit mcp_state_updated event automatically
     } catch (error) {
       console.error("Error adding MCP server:", error);
       if (error instanceof SyntaxError) {
@@ -100,20 +195,28 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleToggleServer = async (serverId: string, enabled: boolean) => {
     try {
-      await invoke("toggle_mcp_server", { serverId, enabled });
-      await settings.loadMcpServers();
+      await invoke("toggle_mcp_server", { server_id: serverId, enabled });
       toast.success(`Server ${enabled ? "enabled" : "disabled"}`);
+      // Backend will emit mcp_state_updated event automatically
     } catch (error) {
       console.error("Failed to toggle server:", error);
       toast.error("Failed to toggle server");
     }
   };
 
-  const handleToggleTool = async (serverId: string, toolName: string, enabled: boolean) => {
+  const handleToggleTool = async (
+    serverId: string,
+    toolName: string,
+    enabled: boolean
+  ) => {
     try {
-      await invoke("toggle_mcp_tool", { serverId, toolName, enabled });
-      await settings.loadMcpServers();
+      await invoke("toggle_mcp_tool", {
+        server_id: serverId,
+        tool_name: toolName,
+        enabled,
+      });
       toast.success(`Tool ${toolName} ${enabled ? "enabled" : "disabled"}`);
+      // Backend will emit mcp_state_updated event automatically
     } catch (error) {
       console.error("Failed to toggle tool:", error);
       toast.error("Failed to toggle tool");
@@ -138,30 +241,46 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="mcp-json-config">Server Configuration (JSON)</Label>
+              <Label htmlFor="mcp-json-config">
+                Server Configuration (JSON)
+              </Label>
               <Textarea
                 id="mcp-json-config"
                 value={newServerJson}
                 onChange={(e) => setNewServerJson(e.target.value)}
                 placeholder={`{
-  "name": "File System Server",
-  "description": "Access local file system",
-  "command": "npx",
-  "args": ["@modelcontextprotocol/server-filesystem", "/Users/username/Documents"],
-  "working_directory": "",
-  "environment_variables": {},
-  "auto_start": true,
-  "timeout_seconds": 30,
-  "max_retries": 3
+  "mcp-server-firecrawl": {
+    "command": "pnpm dlx",
+    "args": ["firecrawl-mcp"],
+    "env": {
+      "FIRECRAWL_API_KEY": "your-api-key-here"
+    }
+  }
 }`}
                 className="h-64 font-mono text-sm"
               />
               <div className="text-xs text-muted-foreground space-y-1">
-                <p>• <strong>name</strong>: Display name for the server</p>
-                <p>• <strong>command</strong>: Executable command (required)</p>
-                <p>• <strong>args</strong>: Command arguments (array)</p>
-                <p>• <strong>environment_variables</strong>: Environment variables (object)</p>
-                <p>• <strong>auto_start</strong>: Start automatically on app launch</p>
+                <p className="font-medium">
+                  Standard Format (Claude Desktop compatible):
+                </p>
+                <p>• Server name as JSON key (e.g. "mcp-server-firecrawl")</p>
+                <p>
+                  • <strong>command</strong>: Executable command (required)
+                </p>
+                <p>
+                  • <strong>args</strong>: Command arguments (array)
+                </p>
+                <p>
+                  • <strong>env</strong>: Environment variables (object)
+                </p>
+                <p>
+                  • <strong>auto_start</strong>: Start automatically on app
+                  launch
+                </p>
+                <p className="pt-2 font-medium">
+                  Legacy format also supported with "name" field and
+                  "environment_variables"
+                </p>
               </div>
             </div>
 
@@ -180,7 +299,11 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 disabled={settings.mcpLoading}
                 className="flex items-center gap-2"
               >
-                <RefreshCw className={`h-4 w-4 ${settings.mcpLoading ? "animate-spin" : ""}`} />
+                <RefreshCw
+                  className={`h-4 w-4 ${
+                    settings.mcpLoading ? "animate-spin" : ""
+                  }`}
+                />
                 Refresh
               </Button>
             </div>
@@ -190,10 +313,18 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
               <div className="space-y-2">
                 <p className="font-medium">Common MCP Servers:</p>
                 <div className="space-y-1 text-xs font-mono bg-muted/50 p-3 rounded">
-                  <div><strong>File System:</strong> npx @modelcontextprotocol/server-filesystem /path</div>
-                  <div><strong>SQLite:</strong> npx @modelcontextprotocol/server-sqlite /path/to/db.sqlite</div>
-                  <div><strong>Git:</strong> npx @modelcontextprotocol/server-git /path/to/repo</div>
-                  <div><strong>Brave Search:</strong> npx @modelcontextprotocol/server-brave-search</div>
+                  <div>
+                    <strong>File System:</strong> npx
+                    @modelcontextprotocol/server-filesystem /path
+                  </div>
+                  <div>
+                    <strong>Everything Server:</strong> npx
+                    @modelcontextprotocol/server-everything
+                  </div>
+                  <div>
+                    <strong>Memory:</strong> npx
+                    @modelcontextprotocol/server-memory
+                  </div>
                 </div>
                 <a
                   href="https://github.com/modelcontextprotocol/servers"
@@ -226,9 +357,13 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
             ) : settings.mcpServers.length > 0 ? (
               <div className="space-y-2">
                 {settings.mcpServers.map((server) => {
-                  const status = settings.mcpServerStatuses[server.id] || { Disconnected: null };
+                  const status = settings.mcpServerStatuses[server.id] || {
+                    Disconnected: null,
+                  };
                   const hasError = status.Error !== undefined;
-                  const serverTools = settings.mcpTools.filter(tool => tool.server_id === server.id);
+                  const serverTools = settings.mcpTools.filter(
+                    (tool) => tool.server_id === server.id
+                  );
 
                   return (
                     <div
@@ -272,7 +407,9 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                         )}
                         <Switch
                           checked={server.enabled}
-                          onCheckedChange={(enabled) => handleToggleServer(server.id, enabled)}
+                          onCheckedChange={(enabled) =>
+                            handleToggleServer(server.id, enabled)
+                          }
                         />
                       </div>
                     </div>
@@ -282,8 +419,12 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
             ) : (
               <div className="text-center py-8 text-gray-500">
                 <Server className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-lg font-medium mb-2">No MCP servers configured</p>
-                <p className="text-sm">Add your first MCP server using the configuration above</p>
+                <p className="text-lg font-medium mb-2">
+                  No MCP servers configured
+                </p>
+                <p className="text-sm">
+                  Add your first MCP server using the configuration above
+                </p>
               </div>
             )}
           </CardContent>
@@ -295,7 +436,8 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
             <CardHeader>
               <CardTitle>Available MCP Tools</CardTitle>
               <CardDescription>
-                Tools provided by connected MCP servers. Toggle individual tools on or off.
+                Tools provided by connected MCP servers. Toggle individual tools
+                on or off.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -306,7 +448,9 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                     className="flex items-center justify-between p-3 border rounded-lg"
                   >
                     <div className="flex-1">
-                      <div className="font-medium">{tool.tool_definition.name}</div>
+                      <div className="font-medium">
+                        {tool.tool_definition.name}
+                      </div>
                       <div className="text-sm text-gray-500 mb-1">
                         from <strong>{tool.server_name}</strong>
                       </div>
@@ -318,8 +462,12 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                     </div>
                     <Switch
                       checked={tool.enabled}
-                      onCheckedChange={(enabled) => 
-                        handleToggleTool(tool.server_id, tool.tool_definition.name, enabled)
+                      onCheckedChange={(enabled) =>
+                        handleToggleTool(
+                          tool.server_id,
+                          tool.tool_definition.name,
+                          enabled
+                        )
                       }
                     />
                   </div>

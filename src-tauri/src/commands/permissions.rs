@@ -1,27 +1,23 @@
 // macOS permissions management for accessibility, screen recording, and microphone
 
 use serde::{Deserialize, Serialize};
+use std::process::Command;
+use std::time::Duration;
+use crate::constants::{timeouts, platform::macos};
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::permissions::{
-    check_accessibility_permissions,
-    check_accessibility_permissions_with_auto_redirect,
-    open_system_settings_for_permission
+    check_accessibility_permissions_with_auto_redirect
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn, error, debug};
-use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
 use lazy_static::lazy_static;
-use tauri::State;
 use tokio_util::sync::CancellationToken;
 use std::sync::atomic::{AtomicBool, Ordering};
-use crate::constants::permission_types;
-use std::process::Command;
-use chrono::{DateTime, Utc};
-use crate::state::AppState;
-use serde_json::Value as JsonValue;
+// Removed unused import: use chrono::Utc;
+use crate::constants::permissions;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,7 +136,7 @@ pub async fn request_accessibility_permission() -> Result<bool, String> {
                     info!("Accessibility permissions prompt shown to user");
 
                     // Wait a moment and check again without prompt
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
 
                     match check_accessibility_permissions(false) {
                         Ok(now_granted) => {
@@ -192,7 +188,7 @@ pub async fn request_accessibility_permission_with_auto_redirect(auto_open_setti
                     info!("Accessibility permissions prompt shown to user with auto-redirect");
 
                     // Wait a moment and check again
-                    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::SCREEN_RECORDING_CHECK_DELAY_MS)).await;
 
                     match check_accessibility_permissions_with_auto_redirect(false, false) {
                         Ok(now_granted) => {
@@ -518,7 +514,7 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
             .unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted,
             required: true,
             description: if granted {
@@ -537,7 +533,7 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted: true,
             required: false,
             description: "Accessibility controls are not required on this platform.".to_string(),
@@ -555,7 +551,7 @@ async fn check_accessibility_permission_with_auto_redirect(auto_open_settings: b
             .unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted,
             required: true,
             description: if granted {
@@ -578,7 +574,7 @@ async fn check_accessibility_permission_with_auto_redirect(auto_open_settings: b
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted: true,
             required: false,
             description: "Accessibility controls are not required on this platform.".to_string(),
@@ -595,7 +591,7 @@ async fn check_screen_recording_permission() -> Result<PermissionStatus, String>
         let granted = test_screen_recording_access().await.unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::SCREEN_RECORDING.to_string(),
+            permission_type: permissions::types::SCREEN_RECORDING.to_string(),
             granted,
             required: true,
             description: if granted {
@@ -614,7 +610,7 @@ async fn check_screen_recording_permission() -> Result<PermissionStatus, String>
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::SCREEN_RECORDING.to_string(),
+            permission_type: permissions::types::SCREEN_RECORDING.to_string(),
             granted: true,
             required: false,
             description: "Screen recording controls are not required on this platform.".to_string(),
@@ -631,7 +627,7 @@ async fn test_screen_recording_access() -> Result<bool, String> {
         use std::time::Duration;
 
         // Try to take a screenshot using the Desktop API
-        let result = tokio::time::timeout(Duration::from_secs(5), async {
+        let result = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_CHECK_TIMEOUT_MS), async {
             // Try creating a minimal Desktop instance just for screenshot test
             match Desktop::new(false, false) {
                 Ok(desktop) => {
@@ -684,7 +680,7 @@ pub async fn request_microphone_permission() -> Result<bool, String> {
             info!("Successfully triggered microphone permission dialog");
 
             // Wait a moment for user to interact with the dialog
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+            tokio::time::sleep(Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
 
             // Check if permission was granted
             match test_microphone_access().await {
@@ -725,11 +721,10 @@ pub async fn request_microphone_permission() -> Result<bool, String> {
 async fn trigger_microphone_permission_dialog() -> bool {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         // Try to trigger microphone permission using a simple audio recording test
         // This should cause macOS to show the permission dialog if not already granted
-        let result = tokio::time::timeout(Duration::from_secs(3), async {
+        let result = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS), async {
             // Use osascript to trigger microphone access which should show the permission dialog
             let output = Command::new("osascript")
                 .args(&[
@@ -780,13 +775,12 @@ async fn trigger_microphone_permission_dialog() -> bool {
 async fn open_microphone_system_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         info!("Opening System Settings to Microphone privacy section");
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"])
+            .args(&[permissions::urls::MICROPHONE_PRIVACY_URL])
             .status();
 
         match result {
@@ -869,13 +863,12 @@ pub async fn request_screen_recording_permission() -> Result<bool, String> {
 async fn open_screen_recording_system_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         info!("Opening System Settings to Screen Recording privacy section");
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+            .args(&[permissions::urls::SCREEN_RECORDING_PRIVACY_URL])
             .status();
 
         match result {
@@ -950,13 +943,12 @@ pub async fn request_input_monitoring_permission() -> Result<bool, String> {
 async fn open_input_monitoring_system_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         info!("Opening System Settings to Input Monitoring privacy section");
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"])
+            .args(&[permissions::urls::INPUT_MONITORING_PRIVACY_URL])
             .status();
 
         match result {
@@ -1005,7 +997,7 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
         let granted = test_microphone_access().await.unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::MICROPHONE.to_string(),
+            permission_type: permissions::types::MICROPHONE.to_string(),
             granted,
             required: false, // Microphone is optional - voice features gracefully degrade without it
             description: if granted {
@@ -1024,7 +1016,7 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::MICROPHONE.to_string(),
+            permission_type: permissions::types::MICROPHONE.to_string(),
             granted: true,
             required: false,
             description: "Microphone access is handled by the system on this platform.".to_string(),
@@ -1037,7 +1029,6 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
 async fn test_microphone_access() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
         use std::time::Duration;
 
         info!("Testing microphone access using enhanced voice transcription detection");
@@ -1051,7 +1042,7 @@ async fn test_microphone_access() -> Result<bool, String> {
         }
 
         // Fallback to original detection methods with improved error handling
-        let audio_devices_detected = tokio::time::timeout(Duration::from_secs(3), async {
+        let audio_devices_detected = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS), async {
             // Try to query audio input devices using system_profiler
             let output = Command::new("system_profiler")
                 .args(&["SPAudioDataType", "-json"])
@@ -1121,19 +1112,19 @@ async fn test_voice_transcription_availability() -> bool {
         // Import necessary types for the voice transcription plugin
         use std::sync::{Arc, Mutex};
         use tauri_plugin_voice_transcription::VoiceController;
-        
+
         info!("Testing voice transcription availability through plugin initialization status");
-        
+
         // Attempt to create a test VoiceController to verify Whisper functionality
         // This is similar to what the plugin does during initialization
         let test_model_path = "models/whisper-base.en.bin";
-        
+
         // Check if model file exists first
         if !std::path::Path::new(test_model_path).exists() {
             debug!("Voice transcription test: Model file not found at {}", test_model_path);
             return false;
         }
-        
+
         // Try to create a VoiceController instance to test initialization
         match VoiceController::new(test_model_path) {
             Ok(controller) => {
@@ -1146,7 +1137,7 @@ async fn test_voice_transcription_availability() -> bool {
             }
         }
     }
-    
+
     #[cfg(not(target_os = "macos"))]
     {
         // On non-macOS platforms, voice transcription may not be available
@@ -1158,7 +1149,6 @@ async fn test_voice_transcription_availability() -> bool {
 fn test_applescript_microphone_access() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         // Use a more robust osascript test
         let output = Command::new("osascript")
@@ -1178,12 +1168,12 @@ fn test_applescript_microphone_access() -> Result<bool, String> {
             Ok(output) => {
                 let result = String::from_utf8_lossy(&output.stdout);
                 let result_clean = result.trim();
-                
+
                 if result_clean.starts_with("error:") {
                     warn!("AppleScript microphone check returned error: {}", result_clean);
                     return Err(result_clean.to_string());
                 }
-                
+
                 let granted = result_clean == "true" || result_clean == "authorized" || result_clean == "1";
                 info!("AppleScript microphone authorization result: '{}' (granted: {})", result_clean, granted);
                 Ok(granted)
@@ -1209,7 +1199,7 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
         let granted = test_input_monitoring_access().await;
 
         Ok(PermissionStatus {
-            permission_type: permission_types::INPUT_MONITORING.to_string(),
+            permission_type: permissions::types::INPUT_MONITORING.to_string(),
             granted,
             required: false, // Input monitoring is optional - only needed for global shortcuts
             description: if granted {
@@ -1228,7 +1218,7 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::INPUT_MONITORING.to_string(),
+            permission_type: permissions::types::INPUT_MONITORING.to_string(),
             granted: true,
             required: false,
             description: "Input monitoring is not required on this platform.".to_string(),
@@ -1241,7 +1231,6 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
 async fn test_input_monitoring_access() -> bool {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
 
         // Test using ioreg to check if we can monitor input events
         let output = Command::new("ioreg")
@@ -1284,7 +1273,7 @@ pub async fn test_microphone_functionality(app: AppHandle) -> Result<serde_json:
         Some(controller_state) => {
             let controller = controller_state.lock()
                 .map_err(|e| format!("Failed to lock VoiceController: {}", e))?;
-            
+
             serde_json::json!({
                 "voice_controller_available": true,
                 "is_initialized": controller.is_initialized(),
@@ -1306,7 +1295,7 @@ pub async fn test_microphone_functionality(app: AppHandle) -> Result<serde_json:
         Some(controller_state) => {
             let controller = controller_state.lock()
                 .map_err(|e| format!("Failed to lock AlwaysListeningController: {}", e))?;
-            
+
             // Try to run the whisper model test
             match controller.test_whisper_model() {
                 Ok(test_result) => {
@@ -1352,10 +1341,9 @@ pub async fn test_microphone_functionality(app: AppHandle) -> Result<serde_json:
 async fn check_audio_devices_system() -> serde_json::Value {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
         use std::time::Duration;
 
-        let system_audio_check = tokio::time::timeout(Duration::from_secs(3), async {
+        let system_audio_check = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS), async {
             let output = Command::new("system_profiler")
                 .args(&["SPAudioDataType", "-json"])
                 .output();
@@ -1440,14 +1428,14 @@ mod tests {
     #[test]
     fn test_permission_status_creation() {
         let status = PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted: true,
             required: true,
             description: "Test description".to_string(),
             instructions: "Test instructions".to_string(),
         };
 
-        assert_eq!(status.permission_type, permission_types::ACCESSIBILITY);
+        assert_eq!(status.permission_type, permissions::types::ACCESSIBILITY);
         assert!(status.granted);
         assert!(status.required);
         assert!(!status.description.is_empty());
@@ -1458,28 +1446,28 @@ mod tests {
     fn test_permissions_state_all_granted_logic() {
         let permissions_state = PermissionsState {
             accessibility: PermissionStatus {
-                permission_type: permission_types::ACCESSIBILITY.to_string(),
+                permission_type: permissions::types::ACCESSIBILITY.to_string(),
                 granted: true,
                 required: true,
                 description: "Test".to_string(),
                 instructions: "Test".to_string(),
             },
             screen_recording: PermissionStatus {
-                permission_type: permission_types::SCREEN_RECORDING.to_string(),
+                permission_type: permissions::types::SCREEN_RECORDING.to_string(),
                 granted: true,
                 required: true,
                 description: "Test".to_string(),
                 instructions: "Test".to_string(),
             },
             microphone: PermissionStatus {
-                permission_type: permission_types::MICROPHONE.to_string(),
+                permission_type: permissions::types::MICROPHONE.to_string(),
                 granted: false,
                 required: false,
                 description: "Test".to_string(),
                 instructions: "Test".to_string(),
             },
             input_monitoring: PermissionStatus {
-                permission_type: permission_types::INPUT_MONITORING.to_string(),
+                permission_type: permissions::types::INPUT_MONITORING.to_string(),
                 granted: true,
                 required: true,
                 description: "Test".to_string(),
@@ -1490,18 +1478,18 @@ mod tests {
         };
 
         assert!(permissions_state.all_granted);
-        assert_eq!(permissions_state.accessibility.permission_type, permission_types::ACCESSIBILITY);
-        assert_eq!(permissions_state.input_monitoring.permission_type, permission_types::INPUT_MONITORING);
+        assert_eq!(permissions_state.accessibility.permission_type, permissions::types::ACCESSIBILITY);
+        assert_eq!(permissions_state.input_monitoring.permission_type, permissions::types::INPUT_MONITORING);
     }
 
     #[test]
     fn test_system_settings_url_safety() {
         // Test that we only accept valid permission type strings
         let valid_permissions = [
-            permission_types::ACCESSIBILITY,
-            permission_types::SCREEN_RECORDING,
-            permission_types::MICROPHONE,
-            permission_types::INPUT_MONITORING,
+            permissions::types::ACCESSIBILITY,
+            permissions::types::SCREEN_RECORDING,
+            permissions::types::MICROPHONE,
+            permissions::types::INPUT_MONITORING,
         ];
 
         for permission in &valid_permissions {

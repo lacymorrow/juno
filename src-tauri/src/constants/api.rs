@@ -1,0 +1,70 @@
+//! # API Constants
+//!
+//! API endpoints, headers, and content types.
+
+// Core API endpoints
+pub mod endpoints {
+    pub const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+    pub const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
+    pub const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+
+    // Cloud services
+    pub const CLOUD_SERVER_URL: &str = "wss://juno-cloud-backend.fly.dev/ws";
+    pub const GITHUB_URL: &str = "https://github.com/juno-ai";
+
+    // Local development
+    pub const LOCALHOST_BASE: &str = "http://localhost";
+    pub const LOCALHOST_CHROME_DEBUG: &str = "http://localhost:9222";
+    pub const LOCALHOST_MCP_SERVER: &str = "http://localhost:8080";
+    pub const WEBSOCKET_LOCALHOST: &str = "ws://localhost:8080";
+
+    // Third-party services
+    pub const ELEVENLABS_TTS_BASE: &str = "https://api.elevenlabs.io/v1/text-to-speech";
+    pub const REPLICATE_API_BASE: &str = "https://api.replicate.com";
+    pub const JUNO_CLOUD_WEBSOCKET: &str = "wss://juno-cloud-backend.fly.dev/ws";
+
+    // Development server
+    pub const DEV_SERVER_BASE: &str = "http://localhost:1420";
+    pub const HMR_WEBSOCKET: &str = "ws://localhost:1421";
+}
+
+// HTTP headers
+pub mod http_headers {
+    pub const CONTENT_TYPE: &str = "Content-Type";
+    pub const X_API_KEY: &str = "x-api-key";
+    pub const APPLICATION_JSON: &str = "application/json";
+    pub const AUTHORIZATION: &str = "Authorization";
+    pub const USER_AGENT: &str = "User-Agent";
+}
+
+// Anthropic content types
+pub mod anthropic_content_types {
+    pub const MESSAGE_START: &str = "message_start";
+    pub const CONTENT_BLOCK_START: &str = "content_block_start";
+    pub const CONTENT_BLOCK_DELTA: &str = "content_block_delta";
+    pub const CONTENT_BLOCK_STOP: &str = "content_block_stop";
+    pub const TEXT_DELTA: &str = "text_delta";
+    pub const INPUT_JSON_DELTA: &str = "input_json_delta";
+    pub const TOOL_USE: &str = "tool_use";
+    pub const TOOL_RESULT: &str = "tool_result";
+    pub const TEXT: &str = "text";
+}
+
+// Provider names
+pub mod provider_names {
+    pub const ANTHROPIC: &str = "anthropic";
+    pub const OPENAI: &str = "openai";
+    pub const GEMINI: &str = "gemini";
+    pub const ELEVENLABS: &str = "elevenlabs";
+    pub const REPLICATE: &str = "replicate";
+    pub const SYSTEM: &str = "system";
+}
+
+// Cloud networking constants
+pub mod cloud_networking {
+    pub const MAX_CONNECTION_RETRIES: u32 = 5;
+    pub const BASE_RETRY_DELAY_MS: u64 = 1000;
+    pub const BACKOFF_MULTIPLIER: u32 = 2;
+    pub const MAX_BACKOFF_EXPONENT: u32 = 4;
+    pub const CONNECTION_CHECK_INTERVAL_MS: u64 = 100;
+}

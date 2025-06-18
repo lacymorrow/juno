@@ -32,6 +32,18 @@ pub enum AgentError {
     Unknown(String),
 }
 
+impl From<&str> for AgentError {
+    fn from(error: &str) -> Self {
+        AgentError::Unknown(error.to_string())
+    }
+}
+
+impl From<String> for AgentError {
+    fn from(error: String) -> Self {
+        AgentError::Unknown(error)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Role {
     User,
@@ -231,7 +243,7 @@ mod tests {
         let state = AgentState::Failed("Test error".to_string());
         match state {
             AgentState::Failed(msg) => assert_eq!(msg, "Test error"),
-            _ => panic!("Expected Failed state"),
+            _ => assert!(false, "Expected Failed state"),
         }
     }
 
@@ -264,19 +276,19 @@ mod tests {
                 assert_eq!(calls.len(), 1);
                 assert_eq!(calls[0], tool_call);
             }
-            _ => panic!("Expected ExecuteTool action"),
+            _ => assert!(false, "Expected ExecuteTool action"),
         }
 
         let action = AgentAction::RespondToUser("Hello".to_string());
         match action {
             AgentAction::RespondToUser(msg) => assert_eq!(msg, "Hello"),
-            _ => panic!("Expected RespondToUser action"),
+            _ => assert!(false, "Expected RespondToUser action"),
         }
 
         let action = AgentAction::Finish("Done".to_string());
         match action {
             AgentAction::Finish(msg) => assert_eq!(msg, "Done"),
-            _ => panic!("Expected Finish action"),
+            _ => assert!(false, "Expected Finish action"),
         }
 
         let action = AgentAction::FinishWithDualContent {
@@ -288,14 +300,14 @@ mod tests {
                 assert_eq!(typed_content, "Detailed response with lots of information");
                 assert_eq!(spoken_content, "Task completed");
             }
-            _ => panic!("Expected FinishWithDualContent action"),
+            _ => assert!(false, "Expected FinishWithDualContent action"),
         }
 
         let error = AgentError::MaxStepsReached;
         let action = AgentAction::Error(error.clone());
         match action {
             AgentAction::Error(e) => assert_eq!(e, error),
-            _ => panic!("Expected Error action"),
+            _ => assert!(false, "Expected Error action"),
         }
     }
 

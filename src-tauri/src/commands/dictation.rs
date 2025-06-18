@@ -23,6 +23,7 @@ pub async fn get_dictation_clipboard_enabled(
     let enabled = state.dictation_clipboard_enabled.lock()
         .map_err(|e| format!("Failed to lock dictation_clipboard_enabled: {}", e))?
         .clone();
-    info!("Current Dictation Mode clipboard setting: {}", enabled);
+    // Reduced logging frequency - only log at debug level
+    tracing::debug!("Current Dictation Mode clipboard setting: {}", enabled);
     Ok(enabled)
 }

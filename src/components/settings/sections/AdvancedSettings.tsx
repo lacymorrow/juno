@@ -50,16 +50,16 @@ export default function AdvancedSettings({
     useState<PermissionsState | null>(null);
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
-  
+
   // Visualization settings state
   const [showKeyPressOverlay, setShowKeyPressOverlay] = useState(
-    localStorage.getItem('juno-show-key-press-overlay') === 'true'
+    localStorage.getItem("juno-show-key-press-overlay") === "true"
   );
   const [showCommandOverlay, setShowCommandOverlay] = useState(
-    localStorage.getItem('juno-show-command-overlay') === 'true'
+    localStorage.getItem("juno-show-command-overlay") === "true"
   );
   const [showClickVisualization, setShowClickVisualization] = useState(
-    localStorage.getItem('juno-show-click-visualization') !== 'false' // Default to true
+    localStorage.getItem("juno-show-click-visualization") !== "false" // Default to true
   );
 
   // Load debug mode status on mount
@@ -186,9 +186,14 @@ export default function AdvancedSettings({
               <Switch
                 checked={showKeyPressOverlay}
                 onCheckedChange={(enabled) => {
-                  localStorage.setItem('juno-show-key-press-overlay', enabled.toString());
+                  localStorage.setItem(
+                    "juno-show-key-press-overlay",
+                    enabled.toString()
+                  );
                   setShowKeyPressOverlay(enabled);
-                  toast.success(`Key press overlay ${enabled ? "enabled" : "disabled"}`);
+                  toast.success(
+                    `Key press overlay ${enabled ? "enabled" : "disabled"}`
+                  );
                 }}
               />
             </div>
@@ -203,9 +208,14 @@ export default function AdvancedSettings({
               <Switch
                 checked={showCommandOverlay}
                 onCheckedChange={(enabled) => {
-                  localStorage.setItem('juno-show-command-overlay', enabled.toString());
+                  localStorage.setItem(
+                    "juno-show-command-overlay",
+                    enabled.toString()
+                  );
                   setShowCommandOverlay(enabled);
-                  toast.success(`Command overlay ${enabled ? "enabled" : "disabled"}`);
+                  toast.success(
+                    `Command overlay ${enabled ? "enabled" : "disabled"}`
+                  );
                 }}
               />
             </div>
@@ -220,17 +230,31 @@ export default function AdvancedSettings({
               <Switch
                 checked={showClickVisualization}
                 onCheckedChange={(enabled) => {
-                  localStorage.setItem('juno-show-click-visualization', enabled.toString());
+                  localStorage.setItem(
+                    "juno-show-click-visualization",
+                    enabled.toString()
+                  );
                   setShowClickVisualization(enabled);
-                  toast.success(`Click visualization ${enabled ? "enabled" : "disabled"}`);
+                  toast.success(
+                    `Click visualization ${enabled ? "enabled" : "disabled"}`
+                  );
                 }}
               />
             </div>
 
             <div className="text-sm text-muted-foreground">
-              <p><strong>Key Press Overlay:</strong> Shows keyboard input in the top-right corner</p>
-              <p><strong>Command Execution:</strong> Shows active tools and commands in the top-left corner</p>
-              <p><strong>Click Visualization:</strong> Shows animated circles where mouse clicks occur</p>
+              <p>
+                <strong>Key Press Overlay:</strong> Shows keyboard input in the
+                top-right corner
+              </p>
+              <p>
+                <strong>Command Execution:</strong> Shows active tools and
+                commands in the top-left corner
+              </p>
+              <p>
+                <strong>Click Visualization:</strong> Shows animated circles
+                where mouse clicks occur
+              </p>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -238,23 +262,13 @@ export default function AdvancedSettings({
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  toast.info("Visualization features help you see what the AI agent is doing in real-time");
+                  toast.info(
+                    "Visualization features help you see what the AI agent is doing in real-time"
+                  );
                 }}
               >
                 <AlertCircle className="h-4 w-4 mr-1" />
                 Help
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  // Test the visualization overlays
-                  // This could trigger demo events to show all overlays
-                  toast.success("Test visualization features by using the AI agent!");
-                }}
-              >
-                <RefreshCw className="h-4 w-4 mr-1" />
-                Test Overlays
               </Button>
             </div>
           </CardContent>

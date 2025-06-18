@@ -1,16 +1,15 @@
 // Commands for managing keyboard shortcuts configuration
 
 use crate::state::{AppState, KeyboardShortcuts};
-use tauri::{State, AppHandle, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code, Modifiers, ShortcutState};
+use tauri::{State, AppHandle};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, error, warn};
 use serde_json;
-use std::sync::Arc;
 
 // Global escape key management
-static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static ESCAPE_KEY_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static ESCAPE_KEY_USERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Get the current keyboard shortcuts configuration
 #[tauri::command]
@@ -93,7 +92,7 @@ pub async fn set_keyboard_shortcuts(
     for (i, (name1, shortcut1)) in shortcut_pairs.iter().enumerate() {
         for (name2, shortcut2) in shortcut_pairs.iter().skip(i + 1) {
             if shortcut1.to_lowercase().replace(" ", "") == shortcut2.to_lowercase().replace(" ", "") {
-                return Err(format!("Shortcuts '{}' and '{}' cannot have the same value: '{}'", 
+                return Err(format!("Shortcuts '{}' and '{}' cannot have the same value: '{}'",
                     get_shortcut_display_name_for_validation(name1),
                     get_shortcut_display_name_for_validation(name2),
                     shortcut1
@@ -222,9 +221,9 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
     // Check for potentially problematic shortcuts with enhanced platform-specific detection
     let lower_shortcut = shortcut.to_lowercase().replace(" ", "");
-    
+
     // Enhanced system shortcuts detection with platform awareness
-    let mut system_shortcuts = vec![
+    let system_shortcuts = vec![
         ("cmd+q", "Quit application", true),        // Critical on macOS
         ("ctrl+q", "Quit application", false),      // Critical on Linux/Windows
         ("cmd+w", "Close window", true),            // Critical on macOS
@@ -267,7 +266,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
     // Check current platform for more specific warnings
     let is_macos = cfg!(target_os = "macos");
-    
+
     for (system_shortcut, description, is_macos_specific) in &system_shortcuts {
         if lower_shortcut == system_shortcut.replace(" ", "") {
             // Provide platform-specific warnings
@@ -285,7 +284,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
     // Enhanced standalone key validation with more specific guidance
     if !shortcut.contains('+') {
         let single_key = shortcut.to_lowercase();
-        
+
         // Expanded list of allowed standalone keys
         let allowed_standalone = [
             "escape", "esc",
@@ -294,10 +293,10 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
             "home", "end", "pageup", "pagedown", "insert", "delete",
             "printscreen", "print", "scrolllock", "pause"
         ];
-        
+
         if !allowed_standalone.contains(&single_key.as_str()) {
             // Provide more specific guidance based on key type
-            if single_key.len() == 1 && single_key.chars().next().unwrap().is_alphabetic() {
+            if single_key.len() == 1 && single_key.chars().next().map_or(false, |c| c.is_alphabetic()) {
                 return Err(format!("Letter keys like '{}' should include a modifier (Alt, Ctrl, Cmd, Shift) to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut.to_uppercase(), shortcut.to_uppercase()));
             } else if single_key.chars().all(|c| c.is_ascii_digit()) {
                 return Err(format!("Number keys like '{}' should include a modifier to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut, shortcut));
@@ -324,7 +323,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
             "shift" => "shift",
             _ => modifier,
         };
-        
+
         if !seen_modifiers.insert(normalized_modifier) {
             return Err(format!("Duplicate modifier '{}' in shortcut '{}'. Each modifier should only appear once.", modifier, shortcut));
         }
@@ -341,27 +340,27 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 /// Check for conflicts between shortcuts
 fn check_shortcut_conflicts(new_shortcut: &str, current_shortcuts: &crate::state::KeyboardShortcuts, exclude_key: Option<&str>) -> Result<(), String> {
     let normalized_new = new_shortcut.to_lowercase().replace(" ", "");
-    
+
     let shortcuts_to_check = [
         ("agent_mode_toggle", &current_shortcuts.agent_mode_toggle),
         ("dictation_input", &current_shortcuts.dictation_input),
         ("stop_current_task", &current_shortcuts.stop_current_task),
         ("open_settings", &current_shortcuts.open_settings),
     ];
-    
+
     for (key, existing_shortcut) in &shortcuts_to_check {
         if let Some(exclude) = exclude_key {
             if *key == exclude {
                 continue; // Skip the one we're currently editing
             }
         }
-        
+
         let normalized_existing = existing_shortcut.to_lowercase().replace(" ", "");
         if normalized_new == normalized_existing {
             return Err(format!("Shortcut '{}' is already assigned to '{}'", new_shortcut, get_shortcut_display_name_for_validation(key)));
         }
     }
-    
+
     Ok(())
 }
 
@@ -379,58 +378,75 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
 /// Register the escape key for cancellation (only when something can be cancelled)
 pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    
-    // Increment the user count
+
+    // Increment the user count atomically
     let user_count = ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst) + 1;
-    
+    info!("[EscapeKey] Registering escape key handler, user count: {}", user_count);
+
     // Only register if not already registered
     if !ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
         let escape_shortcut = Shortcut::new(None, Code::Escape);
         match app_handle.global_shortcut().register(escape_shortcut) {
             Ok(()) => {
                 ESCAPE_KEY_REGISTERED.store(true, Ordering::SeqCst);
-                info!("Dynamically registered escape key for cancellation (users: {})", user_count);
+                info!("[EscapeKey] Successfully registered escape key for cancellation (users: {})", user_count);
             },
             Err(e) => {
                 // Rollback user count on failure
                 ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst);
-                error!("Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
+                error!("[EscapeKey] Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
                 return Err(format!("Failed to register escape key: {}", e));
             }
         }
     } else {
-        info!("Escape key already registered, increased user count to: {}", user_count);
+        info!("[EscapeKey] Escape key already registered, increased user count to: {}", user_count);
     }
-    
+
     Ok(())
 }
 
 /// Unregister the escape key (when nothing needs to be cancelled)
 pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    
-    // Decrement the user count
-    let user_count = ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst).saturating_sub(1);
-    
-    // Only unregister if no more users and currently registered
-    if user_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
-        let escape_shortcut = Shortcut::new(None, Code::Escape);
-        match app_handle.global_shortcut().unregister(escape_shortcut) {
-            Ok(()) => {
-                ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
-                info!("Dynamically unregistered escape key - no more active users");
-            },
-            Err(e) => {
-                // Rollback user count on failure
-                ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
-                warn!("Failed to unregister escape key shortcut: {} - continuing anyway", e);
-                // Don't return error for unregistration failures as it's not critical
-            }
+
+    // Atomically decrement the user count, preventing underflow
+    let user_count = ESCAPE_KEY_USERS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+        if current > 0 {
+            Some(current - 1)
+        } else {
+            None
         }
-    } else {
-        info!("Escape key still has {} users, keeping registered", user_count);
+    });
+
+    match user_count {
+        Ok(previous_count) => {
+            let new_count = previous_count - 1;
+            info!("[EscapeKey] Unregistering escape key handler, user count: {} -> {}", previous_count, new_count);
+
+            // Only unregister if no more users and currently registered
+            if new_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
+                let escape_shortcut = Shortcut::new(None, Code::Escape);
+                match app_handle.global_shortcut().unregister(escape_shortcut) {
+                    Ok(()) => {
+                        ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
+                        info!("[EscapeKey] Successfully unregistered escape key - no more active users");
+                    },
+                    Err(e) => {
+                        // Rollback user count on failure
+                        ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
+                        warn!("[EscapeKey] Failed to unregister escape key shortcut: {} - rolling back user count", e);
+                        // Don't return error for unregistration failures as it's not critical
+                    }
+                }
+            } else {
+                info!("[EscapeKey] Escape key still has {} users, keeping registered", new_count);
+            }
+        },
+        Err(_) => {
+            warn!("[EscapeKey] Attempted to unregister escape key with zero users");
+        }
     }
-    
+
     Ok(())
 }
 
@@ -462,7 +478,7 @@ pub async fn get_escape_key_status() -> Result<serde_json::Value, String> {
             format!("ERROR: {} users but not registered", user_count)
         }
     };
-    
+
     Ok(serde_json::json!({
         "escape_key_registered": is_registered,
         "user_count": user_count,
@@ -557,9 +573,10 @@ pub async fn update_global_shortcuts(app: &AppHandle, state: &AppState) -> Resul
     Ok(())
 }
 
-/// Check if Input Monitoring permissions are granted (macOS only)
+/// Check if input monitoring permissions are granted (macOS only)
+/// This is required for global shortcuts to work
 #[cfg(target_os = "macos")]
-fn check_input_monitoring_permissions() -> Result<bool, String> {
+pub fn check_input_monitoring_permissions() -> Result<bool, String> {
     // This is a basic check - in a real implementation you would use proper macOS APIs
     // For now, we'll assume permissions are needed and return true to avoid blocking
     // A proper implementation would use IOHIDRequestAccess() or similar APIs
@@ -609,7 +626,7 @@ pub async fn get_shortcut_suggestions(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
     let is_macos = cfg!(target_os = "macos");
-    
+
     // Get current shortcuts to avoid suggesting conflicts
     let current_shortcuts = {
         let shortcuts = state.keyboard_shortcuts.lock()
@@ -731,7 +748,7 @@ pub async fn get_shortcut_suggestions(
 #[tauri::command]
 pub async fn get_shortcut_best_practices() -> Result<serde_json::Value, String> {
     let is_macos = cfg!(target_os = "macos");
-    
+
     let best_practices = serde_json::json!({
         "platform": if is_macos { "macOS" } else { "Windows/Linux" },
         "recommendations": {

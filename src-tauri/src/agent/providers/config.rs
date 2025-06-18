@@ -97,6 +97,14 @@ impl Default for ProviderConfig {
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
+                ProviderSettings {
+                    id: "gemini".to_string(),
+                    api_key: None,
+                    model: Some("gemini-1.5-pro".to_string()),
+                    max_tokens: Some(4096),
+                    temperature: Some(0.7),
+                    system_prompt: None,
+                },
             ],
         }
     }
@@ -107,18 +115,38 @@ impl ProviderConfig {
     pub fn load() -> Result<Self, AgentError> {
         let config_path = Self::get_config_path()?;
         match fs::read_to_string(&config_path) {
-            Ok(contents) => serde_json::from_str(&contents).map_err(|e| {
-                error!("Failed to parse config file: {}. Using default.", e);
+            Ok(contents) => {
+                let mut config: ProviderConfig = serde_json::from_str(&contents).map_err(|e| {
+                    error!("Failed to parse config file: {}. Using default.", e);
+                    let default_config = Self::default();
+                    // Attempt to save the default config if parsing failed, but don't error out if save fails here.
+                    let _ = default_config.save();
+                    AgentError::ConfigurationError(format!("Failed to parse config: {}", e))
+                }).or_else(|_agent_err: crate::agent::structs::AgentError|{
+                     info!("Creating default configuration as parsing failed or to ensure structure.");
+                     let default_config = Self::default();
+                     default_config.save()?;
+                     Ok::<ProviderConfig, crate::agent::structs::AgentError>(default_config)
+                })?;
+
+                // Perform configuration migration - add missing providers
+                let mut needs_save = false;
                 let default_config = Self::default();
-                // Attempt to save the default config if parsing failed, but don't error out if save fails here.
-                let _ = default_config.save();
-                AgentError::ConfigurationError(format!("Failed to parse config: {}", e))
-            }).or_else(|_parse_err|{
-                 info!("Creating default configuration as parsing failed or to ensure structure.");
-                 let default_config = Self::default();
-                 default_config.save()?;
-                 Ok(default_config)
-            }),
+
+                for default_provider in &default_config.providers {
+                    if !config.providers.iter().any(|p| p.id == default_provider.id) {
+                        info!("Adding missing provider to config: {}", default_provider.id);
+                        config.providers.push(default_provider.clone());
+                        needs_save = true;
+                    }
+                }
+
+                if needs_save {
+                    config.save()?;
+                }
+
+                Ok(config)
+            },
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 info!("Config file not found at {:?}, creating default.", config_path);
                 let default_config = Self::default();
@@ -307,6 +335,26 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
                     .filter(|s| !s.is_empty())
                     .unwrap_or(&default_prompt);
                 env::set_var("RIG_SYSTEM_PROMPT", prompt_to_set);
+            },
+            "gemini" => {
+                if let Some(api_key) = &settings.api_key {
+                    env::set_var("GEMINI_API_KEY", api_key);
+                }
+                if let Some(model) = &settings.model {
+                    env::set_var("GEMINI_MODEL", model);
+                }
+                if let Some(max_tokens) = settings.max_tokens {
+                    env::set_var("GEMINI_MAX_TOKENS", max_tokens.to_string());
+                }
+                if let Some(temperature) = settings.temperature {
+                    env::set_var("GEMINI_TEMPERATURE", temperature.to_string());
+                }
+                // Use prompt manager for default system prompt
+                let default_prompt = prompt_manager.get_default_system_prompt();
+                let prompt_to_set = settings.system_prompt.as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(&default_prompt);
+                env::set_var("GEMINI_SYSTEM_PROMPT", prompt_to_set);
             },
             _ => {
                 warn!("Attempted to apply settings for an unknown provider ID: {}", settings.id);

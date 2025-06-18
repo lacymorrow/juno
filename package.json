@@ -1,13 +1,15 @@
 {
   "name": "Juno",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "build:universal": "bun run tauri build --target universal-apple-darwin",
     "preview": "vite preview",
+    "generate-constants": "node scripts/generate-ts-constants.js",
+    "prebuild": "npm run generate-constants",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:dev:multi": "node scripts/dev-multi-instance.js",

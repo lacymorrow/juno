@@ -18,6 +18,8 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
 
     // Strategy 1: Try bundled resources (production apps)
     tracing::info!("Strategy 1: Checking bundled resources...");
+    
+    // First try the direct resource resolution
     if let Ok(resource_path) = app.path().resolve(model_path, tauri::path::BaseDirectory::Resource) {
         tracing::info!("  Resource path resolved to: {}", resource_path.display());
         if resource_path.exists() {
@@ -28,6 +30,39 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
         }
     } else {
         tracing::info!("  Failed to resolve resource path");
+    }
+
+    // Try the _up_ directory pattern used by other bundled resources in production
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        tracing::info!("  Resource directory: {:?}", resource_dir);
+        
+        // Try multiple possible paths in the bundled resources following the pattern from sound files
+        let possible_bundled_paths = vec![
+            // Primary bundled path in production builds (_up_ directory)
+            resource_dir.join("_up_").join(model_path),                         // resources/_up_/models/ggml-tiny.en.bin
+            resource_dir.join("_up_").join("tauri-plugin-voice-transcription").join(model_path), // resources/_up_/tauri-plugin-voice-transcription/models/...
+            // Try without the models prefix in case the bundling flattens the structure
+            if model_path.starts_with("models/") {
+                resource_dir.join("_up_").join(&model_path[7..])                // resources/_up_/ggml-tiny.en.bin
+            } else {
+                resource_dir.join("_up_").join(model_path)
+            },
+            // Legacy direct paths for backward compatibility
+            resource_dir.join(model_path),                                      // resources/models/ggml-tiny.en.bin
+            resource_dir.join("tauri-plugin-voice-transcription").join(model_path), // resources/tauri-plugin-voice-transcription/models/...
+        ];
+
+        for test_path in possible_bundled_paths.iter() {
+            tracing::info!("  Checking bundled path: {:?}", test_path);
+            if test_path.exists() {
+                tracing::info!("Found model in bundled resources: {:?}", test_path);
+                return test_path.to_string_lossy().to_string();
+            } else {
+                tracing::info!("  Bundled path does not exist");
+            }
+        }
+    } else {
+        tracing::warn!("  Failed to get resource directory");
     }
 
     // Strategy 2: Try app data directory (user-installed models)
@@ -88,6 +123,7 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
     // Strategy 6: Final fallback - return original path (will likely fail, but preserves error handling)
     tracing::warn!("Model file '{}' not found in any standard location. Locations checked:", model_path);
     tracing::warn!("  - Bundled resources: {}", model_path);
+    tracing::warn!("  - Bundled resources (_up_ pattern): _up_/{}", model_path);
     tracing::warn!("  - App data directory: [app_data]/{}", model_path);
     tracing::warn!("  - App local data directory: [local_data]/{}", model_path);
     if cfg!(debug_assertions) {

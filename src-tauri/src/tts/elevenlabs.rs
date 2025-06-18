@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use tracing::{error, info};
+use crate::constants::http_headers;
 
 // --- ElevenLabs API Structures ---
 #[derive(Deserialize, Debug)]
@@ -69,7 +70,7 @@ pub async fn invoke_elevenlabs_tts(
 
     let response = client
         .post(&url)
-        .header("Content-Type", "application/json")
+        .header(http_headers::CONTENT_TYPE, http_headers::APPLICATION_JSON)
         .header("xi-api-key", api_key)
         .json(&payload)
         .send()

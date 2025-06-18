@@ -1,17 +1,18 @@
-import { OnboardingFlow } from "@/components/OnboardingFlow";
+import OnboardingFlow from "@/components/onboarding/Onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
-import { Toaster } from "sonner";
 
 export default function OnboardingWindow() {
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [permissionsChecked, setPermissionsChecked] = useState(false);
+  const [isDevelopmentMode, setIsDevelopmentMode] = useState(false);
 
-  // Check permissions on mount
+  // Check permissions and onboarding info on mount
   useEffect(() => {
-    const checkPermissions = async () => {
+    const checkInitialData = async () => {
       try {
+        // Check permissions
         const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
           screenRecording: { granted: boolean; required: boolean };
@@ -20,20 +21,26 @@ export default function OnboardingWindow() {
         }>("check_permissions_status");
 
         setPermissionsGranted(permissionsResult.allGranted);
+
+        // Get onboarding info including development mode status
+        const onboardingInfo = await invoke<any>("get_onboarding_info");
+        setIsDevelopmentMode(onboardingInfo?.is_development_mode || false);
+
         setPermissionsChecked(true);
       } catch (error) {
-        console.error("Error checking permissions:", error);
+        console.error("Error checking initial data:", error);
         setPermissionsChecked(true);
       }
     };
 
-    checkPermissions();
+    checkInitialData();
   }, []);
 
   const handleOnboardingComplete = async () => {
     try {
-      // Mark onboarding as completed
-      localStorage.setItem("juno-onboarding-completed", "true");
+      // Use backend command to mark onboarding as completed
+      await invoke("complete_onboarding");
+      console.log("Onboarding completed via backend");
 
       // Notify main window of completion
       const mainWindow = await Window.getByLabel("main");
@@ -41,7 +48,7 @@ export default function OnboardingWindow() {
         await mainWindow.emit("onboarding-complete", {});
       }
 
-      // Close the onboarding window
+      // Close the onboarding window via backend
       await invoke("close_onboarding_window");
     } catch (error) {
       console.error("Error completing onboarding:", error);
@@ -56,8 +63,9 @@ export default function OnboardingWindow() {
 
   const handleOnboardingSkip = async () => {
     try {
-      // Mark onboarding as completed even if skipped
-      localStorage.setItem("juno-onboarding-completed", "true");
+      // Use backend command to skip onboarding (still marks as completed)
+      await invoke("skip_onboarding");
+      console.log("Onboarding skipped via backend");
 
       // Notify main window that onboarding was skipped
       const mainWindow = await Window.getByLabel("main");
@@ -65,7 +73,7 @@ export default function OnboardingWindow() {
         await mainWindow.emit("onboarding-skipped", {});
       }
 
-      // Close the onboarding window
+      // Close the onboarding window via backend
       await invoke("close_onboarding_window");
     } catch (error) {
       console.error("Error skipping onboarding:", error);
@@ -90,13 +98,11 @@ export default function OnboardingWindow() {
   }
 
   return (
-    <>
-      <OnboardingFlow
-        onComplete={handleOnboardingComplete}
-        onSkip={handleOnboardingSkip}
-        permissionsAlreadyGranted={permissionsGranted}
-      />
-      <Toaster position="top-right" />
-    </>
+    <OnboardingFlow
+      onComplete={handleOnboardingComplete}
+      onSkip={handleOnboardingSkip}
+      permissionsAlreadyGranted={permissionsGranted}
+      isDevelopmentMode={isDevelopmentMode}
+    />
   );
 }

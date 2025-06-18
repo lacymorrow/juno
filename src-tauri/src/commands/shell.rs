@@ -72,11 +72,12 @@ impl ShellSession {
                     break;
                 }
 
-                // Read outputs with separate lock scopes to avoid multiple mutable borrows
+                // FIXED: Single lock scope to prevent race conditions between stdout/stderr reads
+                // This eliminates the risk of other operations interleaving between reads
                 {
                     let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
 
-                    // Read available stdout
+                    // Read both stdout and stderr in single critical section
                     if let Some(stdout) = process.stdout.as_mut() {
                         let mut buffer = [0; 1024];
                         if let Ok(n) = stdout.read(&mut buffer) {
@@ -85,12 +86,7 @@ impl ShellSession {
                             }
                         }
                     }
-                }
 
-                {
-                    let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
-
-                    // Read available stderr
                     if let Some(stderr) = process.stderr.as_mut() {
                         let mut buffer = [0; 1024];
                         if let Ok(n) = stderr.read(&mut buffer) {
@@ -112,11 +108,12 @@ impl ShellSession {
         } else {
             // No timeout, read until sentinel
             loop {
-                // Read outputs with separate lock scopes
+                // FIXED: Single lock scope to prevent race conditions between stdout/stderr reads
+                // This eliminates the risk of other operations interleaving between reads
                 {
                     let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
 
-                    // Read available stdout
+                    // Read both stdout and stderr in single critical section
                     if let Some(stdout) = process.stdout.as_mut() {
                         let mut buffer = [0; 1024];
                         if let Ok(n) = stdout.read(&mut buffer) {
@@ -125,12 +122,7 @@ impl ShellSession {
                             }
                         }
                     }
-                }
 
-                {
-                    let mut process = self.process.lock().map_err(|e| format!("Failed to lock process mutex: {}", e))?;
-
-                    // Read available stderr
                     if let Some(stderr) = process.stderr.as_mut() {
                         let mut buffer = [0; 1024];
                         if let Ok(n) = stderr.read(&mut buffer) {
@@ -178,7 +170,7 @@ pub type ShellSessions = Arc<Mutex<HashMap<String, ShellSession>>>;
 
 // Initialize shell sessions in app state
 pub fn init_shell_state(app_state: &AppState) {
-    app_state.insert(ShellSessions::default());
+    let _ = app_state.insert(ShellSessions::default());
 }
 
 #[tauri::command]

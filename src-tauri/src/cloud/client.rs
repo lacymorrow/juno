@@ -17,23 +17,31 @@ use super::config::CloudConfig;
 use super::auth::DeviceAuth;
 use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
-use crate::constants::permission_types;
+use crate::constants::permissions;
 
-// Type alias for WebSocket sender to simplify function signatures
+#[allow(dead_code)]
 type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
 
 /// Cloud client for WebSocket communication
 #[derive(Debug)]
 pub struct CloudClient {
+    #[allow(dead_code)]
     config: CloudConfig,
+    #[allow(dead_code)]
     auth: DeviceAuth,
+    #[allow(dead_code)]
     security: CloudSecurity,
+    #[allow(dead_code)]
     command_processor: CloudCommandProcessor,
+    #[allow(dead_code)]
     connection_state: Arc<TokioMutex<ConnectionState>>,
+    #[allow(dead_code)]
     app_handle: AppHandle,
 
     // Communication channels
+    #[allow(dead_code)]
     command_tx: mpsc::UnboundedSender<CloudCommand>,
+    #[allow(dead_code)]
     command_rx: Arc<TokioMutex<mpsc::UnboundedReceiver<CloudCommand>>>,
 }
 
@@ -93,7 +101,7 @@ impl CloudClient {
         Ok(())
     }
 
-    /// Main connection loop
+    #[allow(dead_code)]
     async fn connection_loop(&self) {
         let mut retry_interval = Duration::from_secs(self.config.reconnect_interval);
 
@@ -116,7 +124,7 @@ impl CloudClient {
         }
     }
 
-    /// Connect to cloud and run main loop
+    #[allow(dead_code)]
     async fn connect_and_run(&self) -> Result<(), CloudError> {
         self.set_connection_state(ConnectionState::Connecting).await;
 
@@ -137,7 +145,7 @@ impl CloudClient {
         self.handle_websocket(ws_stream).await
     }
 
-    /// Handle WebSocket communication
+    #[allow(dead_code)]
     async fn handle_websocket(&self, ws_stream: WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>) -> Result<(), CloudError> {
         let (ws_sender, mut ws_receiver) = ws_stream.split();
         let ws_sender = Arc::new(TokioMutex::new(ws_sender));
@@ -252,7 +260,7 @@ impl CloudClient {
         Ok(())
     }
 
-    /// Authenticate with the cloud server
+    #[allow(dead_code)]
     async fn authenticate(&self, ws_sender: &mut WsSender) -> Result<(), CloudError> {
         info!("Authenticating with cloud server");
 
@@ -267,7 +275,7 @@ impl CloudClient {
         ws_sender.send(Message::Text(message_json)).await
             .map_err(|e| CloudError::NetworkError(format!("Failed to send auth message: {}", e)))?;
 
-        // TODO: Wait for auth response and validate
+        // Note: Auth response validation not implemented yet
         // For now, assume authentication succeeds
         self.set_connection_state(ConnectionState::Authenticated).await;
         info!("Authentication completed");
@@ -275,7 +283,7 @@ impl CloudClient {
         Ok(())
     }
 
-    /// Handle incoming WebSocket message
+    #[allow(dead_code)]
     async fn handle_message(&self, text: String, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
         debug!("Received message: {}", text);
 
@@ -319,7 +327,7 @@ impl CloudClient {
         Ok(())
     }
 
-    /// Handle incoming command from cloud
+    #[allow(dead_code)]
     async fn handle_command(&self, command: CloudCommand, ws_sender: Arc<TokioMutex<WsSender>>) -> Result<(), CloudError> {
         info!("Processing command from cloud: {}", command.id);
 
@@ -340,13 +348,13 @@ impl CloudClient {
         Ok(())
     }
 
-    /// Handle authentication response
+    #[allow(dead_code)]
     async fn handle_auth_response(&self, response: AuthResponse) -> Result<(), CloudError> {
         info!("Received authentication response: success={}", response.success);
 
         if response.success {
             self.set_connection_state(ConnectionState::Authenticated).await;
-            // TODO: Store auth credentials
+            // Note: Auth credential storage not implemented yet
         } else {
             let error_msg = response.error.unwrap_or_else(|| "Authentication failed".to_string());
             error!("Authentication failed: {}", error_msg);
@@ -356,7 +364,7 @@ impl CloudClient {
         Ok(())
     }
 
-    /// Create device status report
+    #[allow(dead_code)]
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
         let _app_state = self.app_handle.state::<crate::state::AppState>();
 
@@ -382,14 +390,14 @@ impl CloudClient {
         Ok(status)
     }
 
-    /// Get permission status
+    #[allow(dead_code)]
     async fn get_permission_status(&self) -> Vec<String> {
         let app_state = self.app_handle.state::<crate::state::AppState>();
         let mut permissions = Vec::new();
 
         if app_state.is_desktop_available() {
-            permissions.push(permission_types::ACCESSIBILITY.to_string());
-            permissions.push(permission_types::SCREEN_RECORDING.to_string());
+            permissions.push(permissions::types::ACCESSIBILITY.to_string());
+            permissions.push(permissions::types::SCREEN_RECORDING.to_string());
         }
 
         let voice_enabled = {
@@ -398,13 +406,13 @@ impl CloudClient {
         };
 
         if voice_enabled {
-            permissions.push(permission_types::MICROPHONE.to_string());
+            permissions.push(permissions::types::MICROPHONE.to_string());
         }
 
         permissions
     }
 
-    /// Get device capabilities
+    #[allow(dead_code)]
     fn get_device_capabilities(&self) -> Vec<String> {
         vec![
             "text_processing".to_string(),
@@ -416,7 +424,7 @@ impl CloudClient {
         ]
     }
 
-    /// Get hardware information
+    #[allow(dead_code)]
     async fn get_hardware_info(&self) -> HardwareInfo {
         // Use the same comprehensive hardware monitoring as the connector
         log::info!("🔍 Collecting real-time hardware information...");
@@ -436,7 +444,7 @@ impl CloudClient {
         hardware_info
     }
 
-    /// Get comprehensive hardware information with real system monitoring
+    #[allow(dead_code)]
     async fn get_comprehensive_hardware_info(&self) -> HardwareInfo {
         log::debug!("🔍 Gathering comprehensive hardware information...");
 
@@ -460,7 +468,7 @@ impl CloudClient {
         }
     }
 
-    /// Get current CPU usage percentage
+    #[allow(dead_code)]
     async fn get_cpu_usage() -> Option<f32> {
         #[cfg(target_os = "macos")]
         {
@@ -488,8 +496,7 @@ impl CloudClient {
         }
     }
 
-    /// Parse CPU usage from top command output
-    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
     fn parse_cpu_usage(output: &str) -> Option<f32> {
         use regex::Regex;
 
@@ -512,7 +519,7 @@ impl CloudClient {
         None
     }
 
-    /// Get current memory usage percentage
+    #[allow(dead_code)]
     async fn get_memory_usage() -> Option<f32> {
         #[cfg(target_os = "macos")]
         {
@@ -575,7 +582,7 @@ impl CloudClient {
         }
     }
 
-    /// Get current disk usage percentage for the main drive
+    #[allow(dead_code)]
     async fn get_disk_usage() -> Option<f32> {
         #[cfg(target_os = "macos")]
         {
@@ -617,7 +624,7 @@ impl CloudClient {
         }
     }
 
-    /// Get screen resolution as a formatted string
+    #[allow(dead_code)]
     async fn get_screen_resolution() -> Option<String> {
         #[cfg(target_os = "macos")]
         {
@@ -652,7 +659,7 @@ impl CloudClient {
         }
     }
 
-    /// Set connection state
+    #[allow(dead_code)]
     async fn set_connection_state(&self, state: ConnectionState) {
         let mut current_state = self.connection_state.lock().await;
         *current_state = state.clone();
@@ -689,20 +696,28 @@ impl CloudClient {
 /// Simplified version of CloudClient for async tasks
 #[derive(Debug, Clone)]
 struct CloudClientTask {
+    #[allow(dead_code)]
     config: CloudConfig,
+    #[allow(dead_code)]
     auth: DeviceAuth,
+    #[allow(dead_code)]
     security: CloudSecurity,
+    #[allow(dead_code)]
     command_processor: CloudCommandProcessor,
+    #[allow(dead_code)]
     connection_state: Arc<TokioMutex<ConnectionState>>,
+    #[allow(dead_code)]
     app_handle: AppHandle,
 }
 
 impl CloudClientTask {
+    #[allow(dead_code)]
     async fn connection_loop(&self) {
         // Implementation would be the same as CloudClient::connection_loop
         // This is a placeholder to show the pattern
     }
 
+    #[allow(dead_code)]
     async fn create_device_status(&self) -> Result<DeviceStatus, CloudError> {
         // Implementation would be the same as CloudClient::create_device_status
         // This is a placeholder

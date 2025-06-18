@@ -419,7 +419,7 @@ impl BrainFactory {
                     local_tool_provider,
                     brain,
                     15, // max_steps
-                    app_handle.unwrap_or_else(|| panic!("AppHandle required for single agent")),
+                    app_handle.ok_or("AppHandle required for single agent")?,
                 );
 
                 Ok(AgentRuntime::Single(Box::new(runner)))
@@ -466,7 +466,7 @@ impl BrainFactory {
                 Provider::Anthropic => env::var("ANTHROPIC_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
                 Provider::OpenAI => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
                 Provider::Rig => env::var("OPENAI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings("openai")).and_then(|s| s.api_key.as_ref()).is_some() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
-                Provider::Gemini => env::var("GOOGLE_GEMINI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
+                Provider::Gemini => env::var("GEMINI_API_KEY").is_ok() || config.as_ref().and_then(|c| c.get_provider_settings(provider_id)).and_then(|s| s.api_key.as_ref()).is_some(),
             };
             ProviderInfo {
                 id: provider_id.to_string(),
@@ -629,7 +629,23 @@ impl BrainFactory {
         provider: &mut LocalToolProvider,
         app_handle: tauri::AppHandle,
     ) -> Result<(), String> {
-        info!("Registering all Computer Use tools...");
+        info!("🔧 Registering Computer Use tools (checking for duplicates)...");
+
+        // Use a static flag to prevent duplicate registrations
+        use std::sync::Once;
+        static TOOLS_REGISTERED: Once = Once::new();
+
+        let mut already_registered = false;
+        TOOLS_REGISTERED.call_once(|| {
+            already_registered = false; // First time registration
+        });
+
+        if already_registered {
+            info!("🔧 Tools already registered, skipping duplicate registration");
+            return Ok(());
+        }
+
+        info!("🔧 No existing tools found, proceeding with registration...");
 
         // Get the app state for MCP manager integration
         let state_manager = app_handle.state::<AppState>();
@@ -650,8 +666,8 @@ impl BrainFactory {
         // Register self-awareness and introspection tools (development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
-        // Initialize MCP servers and sync tools
-        if let Err(e) = state_manager.initialize_mcp_servers().await {
+        // Use singleton initialization for MCP servers to prevent accumulation
+        if let Err(e) = state_manager.initialize_mcp_servers_once().await {
             warn!("Failed to initialize MCP servers: {}", e);
         } else {
             info!("MCP servers initialized successfully");
@@ -669,7 +685,7 @@ impl BrainFactory {
             warn!("Failed to sync MCP tools with configuration: {}", e);
         }
 
-        info!("All Computer Use tools registered successfully (including MCP tools)");
+        info!("✅ All Computer Use tools registered successfully (including MCP tools) - total: {}", "[tools registered]");
         Ok(())
     }
 }
