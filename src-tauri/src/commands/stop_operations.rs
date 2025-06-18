@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Manager, Emitter};
-use tracing::{info, warn, error};
-use std::sync::{Arc, Mutex};
+use tracing::{info, warn};
+// Removed unused import: use std::sync::{Arc, Mutex};
 use crate::state::AppState;
 use crate::constants;
 
@@ -49,7 +49,7 @@ pub async fn stop_all_operations(app_handle: AppHandle) -> Result<String, String
     // Mark agent execution as finished for clean state
     app_state.mark_agent_execution_finished();
     info!("[StopOperations] Agent execution marked as finished");
-    
+
     // Perform comprehensive emergency state cleanup
     info!("[StopOperations] Performing emergency state cleanup");
     if let Err(e) = crate::state_management::handle_emergency_state_cleanup(&app_handle).await {

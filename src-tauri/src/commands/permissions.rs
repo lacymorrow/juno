@@ -6,9 +6,7 @@ use std::time::Duration;
 use crate::constants::{timeouts, macos_system};
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::permissions::{
-    check_accessibility_permissions,
-    check_accessibility_permissions_with_auto_redirect,
-    open_system_settings_for_permission
+    check_accessibility_permissions_with_auto_redirect
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, warn, error, debug};
@@ -18,7 +16,7 @@ use std::sync::Arc;
 use lazy_static::lazy_static;
 use tokio_util::sync::CancellationToken;
 use std::sync::atomic::{AtomicBool, Ordering};
-use chrono::Utc;
+// Removed unused import: use chrono::Utc;
 use crate::constants::permission_types;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
