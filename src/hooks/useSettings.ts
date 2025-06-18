@@ -17,6 +17,77 @@ import type {
 
 // Types are now imported from shared types
 
+// Global cache to prevent duplicate API calls during startup
+interface SettingsCache {
+  ttsProvider?: string;
+  dictationClipboardEnabled?: boolean;
+  soundEnabled?: boolean;
+  toolConfigurations?: Record<string, ToolCategory>;
+  providers?: ProviderInfo[];
+  activeProvider?: string;
+  agentMode?: string;
+  agentTriggerMode?: string;
+  alwaysListeningActive?: boolean;
+  alwaysListeningSensitivity?: number;
+  alwaysListeningWakeWords?: string[];
+  performanceMonitoringEnabled?: boolean;
+  permissionsState?: PermissionsState;
+  keyboardShortcuts?: KeyboardShortcuts;
+  mcpServers?: MCPServerConfig[];
+  mcpServerStatuses?: Record<string, MCPServerStatus>;
+  lastUpdated?: number;
+}
+
+// Cache with 30-second TTL to prevent excessive API calls
+const CACHE_TTL = 30000; // 30 seconds
+let settingsCache: SettingsCache = {};
+const ongoingRequests = new Map<string, Promise<any>>();
+
+// Helper to check if cache is valid
+const isCacheValid = (cacheKey: keyof SettingsCache): boolean => {
+  const lastUpdated = settingsCache.lastUpdated || 0;
+  return Date.now() - lastUpdated < CACHE_TTL && settingsCache[cacheKey] !== undefined;
+};
+
+// Helper to get cached value or make API call
+const getCachedOrFetch = async <T>(
+  cacheKey: keyof SettingsCache,
+  apiCall: () => Promise<T>
+): Promise<T> => {
+  // Return cached value if valid
+  if (isCacheValid(cacheKey)) {
+    return settingsCache[cacheKey] as T;
+  }
+
+  // Check if request is already in progress
+  if (ongoingRequests.has(cacheKey)) {
+    return ongoingRequests.get(cacheKey) as Promise<T>;
+  }
+
+  // Start new request
+  const request = apiCall().then((result) => {
+    settingsCache[cacheKey] = result;
+    settingsCache.lastUpdated = Date.now();
+    ongoingRequests.delete(cacheKey);
+    return result;
+  }).catch((error) => {
+    ongoingRequests.delete(cacheKey);
+    throw error;
+  });
+
+  ongoingRequests.set(cacheKey, request);
+  return request;
+};
+
+// Helper to invalidate cache when settings change
+const invalidateCache = (cacheKey?: keyof SettingsCache) => {
+  if (cacheKey) {
+    delete settingsCache[cacheKey];
+  } else {
+    settingsCache = {};
+  }
+};
+
 export function useSettings() {
   const { invokeCommand } = useInvoke();
   // TTS Settings
@@ -118,45 +189,44 @@ export function useSettings() {
   const loadAllSettings = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Load TTS settings
-      const currentTtsProvider = await invokeCommand<string>("get_tts_provider_command");
+      // Load all settings with caching to prevent duplicate API calls during startup
+      const [
+        currentTtsProvider,
+        availableProviders,
+        currentActiveProvider,
+        currentAgentMode,
+        currentAgentTriggerMode,
+        currentClipboardEnabled,
+        currentSoundEnabled,
+        currentPerformanceMonitoringEnabled,
+        alwaysListeningStatus,
+        sensitivity,
+        wakeWords
+      ] = await Promise.all([
+        getCachedOrFetch('ttsProvider', () => invokeCommand<string>("get_tts_provider_command")),
+        getCachedOrFetch('providers', () => invokeCommand<ProviderInfo[]>("get_providers")),
+        getCachedOrFetch('activeProvider', () => invokeCommand<string>("get_active_provider")),
+        getCachedOrFetch('agentMode', () => invokeCommand<string>("get_agent_mode")),
+        getCachedOrFetch('agentTriggerMode', () => invokeCommand<string>("get_agent_trigger_mode")),
+        getCachedOrFetch('dictationClipboardEnabled', () => invokeCommand<boolean>("get_dictation_clipboard_enabled")),
+        getCachedOrFetch('soundEnabled', () => invokeCommand<boolean>("get_sound_enabled")),
+        getCachedOrFetch('performanceMonitoringEnabled', () => invokeCommand<boolean>("get_performance_monitoring")),
+        getCachedOrFetch('alwaysListeningActive', () => invokeCommand<boolean>("get_always_listening_status")),
+        getCachedOrFetch('alwaysListeningSensitivity', () => invokeCommand<number>("get_always_listening_sensitivity")),
+        getCachedOrFetch('alwaysListeningWakeWords', () => invokeCommand<string[]>("get_always_listening_wake_words"))
+      ]);
+
+      // Set all state values
       setTtsProvider(currentTtsProvider);
-
-      // Load AI provider settings
-      const availableProviders = await invokeCommand<ProviderInfo[]>("get_providers");
       setProviders(availableProviders);
-
-      const currentActiveProvider = await invokeCommand<string>("get_active_provider");
       setActiveProvider(currentActiveProvider);
-
-      // Load agent mode settings
-      const currentAgentMode = await invokeCommand<string>("get_agent_mode");
       setAgentMode(currentAgentMode);
-
-      // Load agent trigger mode settings
-      const currentAgentTriggerMode = await invokeCommand<string>("get_agent_trigger_mode");
       setAgentTriggerMode(currentAgentTriggerMode);
-
-      // Load dictation settings
-      const currentClipboardEnabled = await invokeCommand<boolean>("get_dictation_clipboard_enabled");
       setDictationClipboardEnabled(currentClipboardEnabled);
-
-      // Load sound settings
-      const currentSoundEnabled = await invokeCommand<boolean>("get_sound_enabled");
       setSoundEnabled(currentSoundEnabled);
-
-      // Load performance monitoring settings
-      const currentPerformanceMonitoringEnabled = await invokeCommand<boolean>("get_performance_monitoring");
       setPerformanceMonitoringEnabled(currentPerformanceMonitoringEnabled);
-
-      // Load always listening settings
-      const alwaysListeningStatus = await invokeCommand<boolean>("get_always_listening_status");
       setAlwaysListeningActive(alwaysListeningStatus);
-
-      const sensitivity = await invokeCommand<number>("get_always_listening_sensitivity");
       setAlwaysListeningSensitivity(sensitivity);
-
-      const wakeWords = await invokeCommand<string[]>("get_always_listening_wake_words");
       setAlwaysListeningWakeWords(wakeWords);
       setWakeWordsInput(wakeWords.join(", "));
 
@@ -174,17 +244,19 @@ export function useSettings() {
         });
       }
 
-      // Load permissions status
+      // Load permissions status with caching
       await loadPermissionsStatus();
 
-      // Load tool configurations
+      // Load tool configurations with caching
       await loadToolConfigurations();
 
-      // Load keyboard shortcuts
+      // Load keyboard shortcuts with caching
       await loadKeyboardShortcuts();
 
-      // Load MCP server configurations - Only load current state, don't initialize
+      // Load MCP server configurations with caching
       await loadMcpServers();
+
+      console.log("All settings loaded successfully with caching");
     } catch (error) {
       console.error("Error loading settings:", error);
       toast.error("Failed to load some settings");
@@ -196,7 +268,9 @@ export function useSettings() {
   const loadPermissionsStatus = useCallback(async () => {
     setPermissionsLoading(true);
     try {
-      const permissions = await invokeCommand<PermissionsState>("check_permissions_status");
+      const permissions = await getCachedOrFetch('permissionsState', () =>
+        invokeCommand<PermissionsState>("check_permissions_status")
+      );
       setPermissionsState(permissions);
     } catch (error) {
       console.error("Error loading permissions status:", error);
@@ -209,7 +283,9 @@ export function useSettings() {
   const loadKeyboardShortcuts = useCallback(async () => {
     setShortcutsLoading(true);
     try {
-      const shortcuts = await invokeCommand<KeyboardShortcuts>("get_keyboard_shortcuts");
+      const shortcuts = await getCachedOrFetch('keyboardShortcuts', () =>
+        invokeCommand<KeyboardShortcuts>("get_keyboard_shortcuts")
+      );
       setKeyboardShortcuts(shortcuts);
     } catch (error) {
       console.error("Error loading keyboard shortcuts:", error);
@@ -222,7 +298,9 @@ export function useSettings() {
   const loadToolConfigurations = useCallback(async () => {
     setToolConfigLoading(true);
     try {
-      const configs = await invokeCommand<Record<string, ToolCategory>>("get_tool_configurations");
+      const configs = await getCachedOrFetch('toolConfigurations', () =>
+        invokeCommand<Record<string, ToolCategory>>("get_tool_configurations")
+      );
       setToolConfigurations(configs);
     } catch (error) {
       console.error("Error loading tool configurations:", error);
@@ -265,6 +343,7 @@ export function useSettings() {
         errorMessage: "Failed to set TTS provider"
       }
     );
+    invalidateCache('ttsProvider');
     setTtsProvider(newProvider);
   }, [invokeCommand]);
 
@@ -395,6 +474,7 @@ export function useSettings() {
   const handleDictationClipboardChange = async (enabled: boolean) => {
     try {
       await invoke("set_dictation_clipboard_enabled", { enabled });
+      invalidateCache('dictationClipboardEnabled');
       setDictationClipboardEnabled(enabled);
       toast.success(`Dictation clipboard ${enabled ? "enabled" : "disabled"}`);
     } catch (error) {

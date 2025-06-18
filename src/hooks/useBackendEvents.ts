@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
@@ -90,6 +90,7 @@ export function useBackendEvents({
     setServerStatus,
     throttledAutoScroll,
 }: UseBackendEventsProps) {
+    const hasCheckedServer = useRef(false);
 
     // Handle backend responses via event listener
     const handleBackendResponse = useCallback(
@@ -146,9 +147,12 @@ export function useBackendEvents({
         [setConversationWithPruning, playAudioFromBase64, setIsProcessing]
     );
 
-    // Server status check
+    // Server status check (with duplicate prevention for React Strict Mode)
     useEffect(() => {
         const checkServer = async () => {
+            if (hasCheckedServer.current) return;
+            hasCheckedServer.current = true;
+
             try {
                 const isConnected: boolean = await invoke("check_server_status");
                 if (isConnected) {

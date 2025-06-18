@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Builder, App, Manager, State};
 use tracing::{info, warn, error};
 use tracing_subscriber::{fmt, EnvFilter};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{state, cli, agent, commands};
 
@@ -103,8 +105,27 @@ pub fn validate_environment_variables() {
     }
 }
 
-/// Initialize the Desktop Automation Engine with proper error handling
+// Rate limiter for desktop engine initialization
+static LAST_DESKTOP_INIT: AtomicU64 = AtomicU64::new(0);
+const DESKTOP_INIT_COOLDOWN_MS: u64 = 5000; // 5 seconds
+
+/// Initialize the Desktop Automation Engine with proper error handling and rate limiting
 pub fn init_desktop_engine() -> Option<Arc<Desktop>> {
+    // Rate limiting check
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let last_init = LAST_DESKTOP_INIT.load(Ordering::Relaxed);
+    if now - last_init < DESKTOP_INIT_COOLDOWN_MS {
+        // Use cached result or return None if too recent
+        tracing::debug!("Desktop engine initialization rate limited, skipping duplicate call");
+        return None;
+    }
+
+    LAST_DESKTOP_INIT.store(now, Ordering::Relaxed);
+
     let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, false);
     match desktop_instance_result {
         Ok(instance) => {
