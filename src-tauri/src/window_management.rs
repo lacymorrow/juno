@@ -198,13 +198,13 @@ pub async fn handle_window_menu_event(app: &AppHandle, event_id: &str) {
     match event_id {
         constants::app_menu_ids::MINIMIZE => {
             info!("[Menu] Minimize menu item clicked");
-            if let Err(e) = app.emit(constants::events::MINIMIZE_WINDOW_REQUESTED, ()) {
+            if let Err(e) = app.emit(constants::events::menu::MINIMIZE_WINDOW_REQUESTED, ()) {
                 error!("[Menu] Failed to emit minimize event: {}", e);
             }
         }
         constants::app_menu_ids::ZOOM => {
             info!("[Menu] Zoom menu item clicked");
-            if let Err(e) = app.emit(constants::events::ZOOM_WINDOW_REQUESTED, ()) {
+            if let Err(e) = app.emit(constants::events::menu::ZOOM_WINDOW_REQUESTED, ()) {
                 error!("[Menu] Failed to emit zoom event: {}", e);
             }
         }
@@ -215,7 +215,7 @@ pub async fn handle_window_menu_event(app: &AppHandle, event_id: &str) {
         }
         constants::app_menu_ids::TOGGLE_FULLSCREEN => {
             info!("[Menu] Toggle Fullscreen menu item clicked");
-            if let Err(e) = app.emit(constants::events::TOGGLE_FULLSCREEN_REQUESTED, ()) {
+            if let Err(e) = app.emit(constants::events::menu::TOGGLE_FULLSCREEN_REQUESTED, ()) {
                 error!("[Menu] Failed to emit toggle fullscreen event: {}", e);
             }
         }

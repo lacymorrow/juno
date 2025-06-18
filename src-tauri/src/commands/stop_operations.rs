@@ -67,8 +67,8 @@ pub async fn stop_all_operations(app_handle: AppHandle) -> Result<String, String
     }
 
     // Emit agent stopping event for any running AI agents
-    if let Err(e) = app_handle.emit(constants::events::AGENT_STOPPING, ()) {
-        warn!("[StopOperations Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
+    if let Err(e) = app_handle.emit(constants::events::agent::STOPPING, ()) {
+        warn!("[StopOperations Error] Failed to emit {} event: {}", constants::events::agent::STOPPING, e);
     }
 
     // Emit comprehensive agent-stop-all event for broader compatibility

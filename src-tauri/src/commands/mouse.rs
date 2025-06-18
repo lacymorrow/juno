@@ -10,7 +10,7 @@ use super::send_dev_tool_notification;
 // Helper function to create a visual indicator for mouse clicks
 fn create_click_visualization(app: &AppHandle, x: f64, y: f64, color: &str) -> Result<(), String> {
     // Send an event to the frontend to display a visual indicator
-    app.emit(events::CLICK_VISUALIZATION, (x, y, color))
+    app.emit(events::ui::CLICK_VISUALIZATION, (x, y, color))
         .map_err(|e| format!("Failed to emit click visualization event: {}", e))?;
     Ok(())
 }

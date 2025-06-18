@@ -263,7 +263,7 @@ pub async fn handle_dictation_state_transition(app_handle: &AppHandle, active: b
     }
 
     // Emit state change event for UI
-    if let Err(e) = app_handle.emit(crate::constants::events::DICTATION_ACTIVE, active) {
+    if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, active) {
         error!("Failed to emit dictation-active event: {}", e);
         return Err(format!("Failed to emit dictation state event: {}", e));
     }
@@ -294,7 +294,7 @@ pub async fn handle_agent_execution_state_transition(
     }
 
     // Emit state change event for UI
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_ACTIVE, active) {
+    if let Err(e) = app_handle.emit(crate::constants::events::agent::ACTIVE, active) {
         error!("Failed to emit agent-active event: {}", e);
         return Err(format!("Failed to emit agent state event: {}", e));
     }

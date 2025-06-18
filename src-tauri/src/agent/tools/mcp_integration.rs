@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::agent::structs::{AgentError, ToolDefinition, ToolResult};
-use crate::constants::agent_config;
+use crate::constants::agent;
 
 /// Configuration for an external MCP server
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -537,7 +537,7 @@ impl MCPServerConnection {
                 let mut attempts = 0;
                 let mut consecutive_empty_lines = 0;
 
-                while attempts < agent_config::MAX_RETRY_ATTEMPTS {
+                while attempts < agent::config::MAX_RETRY_ATTEMPTS {
                     let mut line = String::new();
                     match reader.read_line(&mut line).await {
                         Ok(0) => {
@@ -565,9 +565,9 @@ impl MCPServerConnection {
                                     warn!("Failed to parse JSON from MCP server '{}' (attempt {}): {} - Response: '{}'",
                                           self.config.name, attempts + 1, e, trimmed);
                                     attempts += 1;
-                                    if attempts >= agent_config::MAX_RETRY_ATTEMPTS {
+                                    if attempts >= agent::config::MAX_RETRY_ATTEMPTS {
                                         return Err(format!("Failed to parse response JSON from '{}' after {} attempts: {} (last response: '{}')",
-                                                         self.config.name, agent_config::MAX_RETRY_ATTEMPTS, e, trimmed));
+                                                         self.config.name, agent::config::MAX_RETRY_ATTEMPTS, e, trimmed));
                                     }
                                     // Exponential backoff for retries
                                     let delay_ms = std::cmp::min(100 * (2_u64.pow(attempts as u32)), 1000);
@@ -584,7 +584,7 @@ impl MCPServerConnection {
                     }
                 }
 
-                Err(format!("No valid response received from MCP server '{}' after {} attempts", self.config.name, agent_config::MAX_RETRY_ATTEMPTS))
+                Err(format!("No valid response received from MCP server '{}' after {} attempts", self.config.name, agent::config::MAX_RETRY_ATTEMPTS))
             } else {
                 Err("No stdout reader available".to_string())
             }
