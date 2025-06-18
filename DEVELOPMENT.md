@@ -147,7 +147,7 @@ tool_provider.register_async_tool(definition, executor).await;
 
 ### Anthropic API Handling
 
-- All API communication in `src-tauri/src/agent/implementations/agent_brain.rs`
+- All API communication in `src-tauri/src/agent/providers/anthropic.rs`
 - Tool results must be properly formatted for Anthropic API spec
 - Handle tool_use and end_turn stop reasons correctly
 - Log request payloads at debug level only
