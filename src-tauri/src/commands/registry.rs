@@ -35,7 +35,9 @@ macro_rules! generate_invoke_handler {
             execute_mcp_task,
 
             // MCP Diagnostics Commands
-            get_mcp_diagnostics,
+            get_mcp_system_diagnostics,
+            force_restart_all_mcp_servers,
+            check_mcp_prerequisites,
             restart_mcp_server_with_diagnostics,
             troubleshoot_mcp_issues,
             apply_mcp_quick_fixes,

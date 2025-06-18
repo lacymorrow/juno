@@ -62,7 +62,7 @@ export function AppHeader({
 
         {/* AI Configuration Selectors - only show in chat view */}
         {currentView === "chat" && (
-          <div className="hidden md:flex items-center gap-1 ml-2 border-l border-border pl-2 flex-shrink-0">
+          <div className="flex items-center gap-1 ml-2 border-l border-border pl-2 flex-shrink-0">
             <ProviderSelector variant="compact" />
             <div className="w-px h-4 bg-border" />
             <ModelSelector variant="compact" />
