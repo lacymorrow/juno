@@ -55,20 +55,4 @@ pub mod recovery {
     pub const MAX_BACKOFF_EXPONENT: u32 = 5;
 }
 
-// Cloud networking error handling
-pub mod cloud_networking {
-    pub const MAX_CONNECTION_RETRIES: u32 = 10;
-    pub const BASE_RETRY_DELAY_MS: u64 = 2000;
-    pub const CONNECTION_CHECK_INTERVAL_MS: u64 = 5000;
-    pub const WATCHDOG_TIMEOUT_MS: u64 = 60000;
-    pub const MAX_RETRY_INTERVAL_MS: u64 = 300000; // 5 minutes
 
-    // Heartbeat and status configuration
-    pub const HEARTBEAT_SEND_INTERVAL_MS: u64 = 30000;
-    pub const STATUS_CHECK_INTERVAL_MS: u64 = 30000;
-    pub const RECONNECTION_DELAY_MS: u64 = 5000;
-
-    // Backoff configuration
-    pub const BACKOFF_MULTIPLIER: u32 = 2;
-    pub const MAX_BACKOFF_EXPONENT: u32 = 5;
-}
