@@ -17,7 +17,7 @@ use crate::constants;
 use crate::commands;
 
 // Embed tray icon data directly in the binary - no file system dependencies
-const TRAY_ICON_DATA: &[u8] = include_bytes!("../../icons/32x32.png");
+const TRAY_ICON_DATA: &[u8] = include_bytes!("../../icons/tray/32x32.png");
 
 /// Get current window states for tray menu display
 async fn get_window_states(app_handle: &AppHandle) -> (bool, bool) {
