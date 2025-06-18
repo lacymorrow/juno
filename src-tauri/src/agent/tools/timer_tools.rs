@@ -25,7 +25,7 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use std::path::PathBuf;
 use tokio::fs;
-use tracing::{info, error, debug};
+use tracing::{info, error, debug, warn};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -229,19 +229,23 @@ impl TimerManager {
         timers.values().cloned().collect()
     }
 
-    /// Returns timers that have reached their trigger time.
+    /// Gets all expired timers from the active timer collection.
     ///
-    /// Only applies to simple time-based timers, not monitoring timers.
     /// Used by: Timer expiration checking, cleanup processes
     ///
     /// # Returns
     /// Vector of expired `TimerTask` instances
     pub async fn get_expired_timers(&self) -> Vec<TimerTask> {
         let timers = self.active_timers.lock().await;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+
+        // Get current time, or return empty vector if system time error
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(e) => {
+                warn!("System time error in get_expired_timers: {}", e);
+                return Vec::new(); // Return empty vector if we can't get current time
+            }
+        };
 
         timers
             .values()
@@ -329,7 +333,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| format!("System time error: {}", e))?
             .as_secs();
         let trigger_time = now + delay_seconds;
 
@@ -476,7 +480,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| format!("System time error: {}", e))?
             .as_secs();
 
         let timer_task = TimerTask {
@@ -516,14 +520,14 @@ mod timer_tools_impl {
         let monitoring_task = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
             let mut previous_screenshot = initial_screenshot;
-            let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
             loop {
                 interval.tick().await;
 
                 // Check if we've exceeded max duration
                 if let Some(max_duration) = max_duration_seconds {
-                    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - start_time;
+                    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() - start_time;
                     if elapsed >= max_duration {
                         info!("Screen monitor {} reached max duration, stopping", timer_id_clone);
                         timer_manager_clone.remove_timer(&timer_id_clone).await;
@@ -693,7 +697,7 @@ mod timer_tools_impl {
         let timer_id = Uuid::new_v4().to_string();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| format!("System time error: {}", e))?
             .as_secs();
 
         let timer_task = TimerTask {
@@ -739,14 +743,14 @@ mod timer_tools_impl {
             let mut interval = tokio::time::interval(Duration::from_secs(check_interval_seconds));
             let mut last_exists = initial_exists;
             let mut last_size = initial_size;
-            let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
             loop {
                 interval.tick().await;
 
                 // Check if we've exceeded max duration
                 if let Some(max_duration) = max_duration_seconds {
-                    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - start_time;
+                    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() - start_time;
                     if elapsed >= max_duration {
                         info!("File monitor {} reached max duration, stopping", timer_id_clone);
                         timer_manager_clone.remove_timer(&timer_id_clone).await;
@@ -932,7 +936,7 @@ mod timer_tools_impl {
         let active_timers = timer_manager.list_active_timers().await;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .map_err(|e| format!("System time error: {}", e))?
             .as_secs();
 
         let timer_info: Vec<Value> = active_timers

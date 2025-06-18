@@ -573,7 +573,8 @@ impl MemoryManager for AdvancedMemoryManager {
     }
 
     async fn clean_orphaned_tool_calls(&mut self) -> Result<(), AgentError> {
-        self.clean_orphaned_tool_calls().await
+        // Call the actual implementation method
+        AdvancedMemoryManager::clean_orphaned_tool_calls(self).await
     }
 }
 

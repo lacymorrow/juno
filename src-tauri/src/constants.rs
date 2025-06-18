@@ -19,6 +19,9 @@ pub mod events {
     pub const AGENT_STREAM_START: &str = "agent-stream-start";
     pub const AGENT_STREAM_END: &str = "agent-stream-end";
 
+    // User Message Events
+    pub const USER_MESSAGE_SUBMITTED: &str = "user-message-submitted";
+
     // Window/UI events
     pub const BAR_STATE_CHANGED: &str = "bar-state-changed";
 
