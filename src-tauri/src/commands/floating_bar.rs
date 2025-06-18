@@ -601,7 +601,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("agent-transcription-start", move |_event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
             if let Err(e) = manager.handle_agent_started().await {
                 error!("Failed to handle agent started: {}", e);
@@ -613,7 +613,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("agent-stop", move |_event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
             if let Err(e) = manager.handle_agent_stopped().await {
                 error!("Failed to handle agent stopped: {}", e);
@@ -625,7 +625,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("agent-cancel", move |_event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
             if let Err(e) = manager.handle_agent_cancelled().await {
                 error!("Failed to handle agent cancelled: {}", e);
@@ -637,7 +637,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("agent-processing-complete", move |_event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
             if let Err(e) = manager.handle_agent_completion("Finished", None).await {
                 error!("Failed to handle agent completion: {}", e);
@@ -649,7 +649,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("agent-processing-error", move |event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
             let error_message = event.payload().to_string();
             if let Err(e) = manager.handle_agent_completion("Failed", Some(error_message)).await {
@@ -662,7 +662,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("agent-stopping", move |_event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
             if let Err(e) = manager.handle_agent_stopped().await {
                 error!("Failed to handle agent stopping: {}", e);
@@ -674,7 +674,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("voice-transcription:final-result", move |event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
 
             // Parse the final result to extract query text
@@ -698,7 +698,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("floating-bar-clear-error", move |event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
 
             // Parse transition ID from event payload
@@ -721,7 +721,7 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("floating-bar-complete-transition", move |event| {
         let manager = manager_clone.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut manager = manager.lock().await;
 
             // Parse transition ID from event payload
