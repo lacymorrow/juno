@@ -68,6 +68,36 @@ Project MUST compile with exit code 0. No exceptions.
 - Follow async/await patterns consistently throughout
 - **NEW**: Safe mutex handling with lock poisoning protection
 
+### 🚫 Error Handling Rules (MANDATORY) 🚫
+**CRITICAL**: No string-based error detection patterns allowed!
+
+**Anti-Pattern Detection**: Run `./scripts/detect-string-error-patterns.sh` before commits.
+
+**Forbidden Patterns**:
+```rust
+❌ error_msg.to_lowercase().contains("network")
+❌ if error_string.contains("timeout")
+❌ match error_message { ... } // String matching
+```
+
+**Required Patterns**:
+```rust
+✅ impl From<reqwest::Error> for NetworkError
+✅ impl ErrorClassifiable for MyError
+✅ match error.downcast_ref::<IoError>()
+✅ Use structured error types with enums
+```
+
+**Why String-Based Error Detection is Forbidden**:
+1. **Fragile**: Error messages change across library versions
+2. **Localization**: Messages may be in different languages
+3. **Incomplete**: New error types won't be caught
+4. **Brittle**: Formatting changes break detection
+5. **Unmaintainable**: Hard to test and update
+6. **Performance**: String operations are slower than type matching
+
+**Required Migration**: See `docs/rules/ERROR_HANDLING_BEST_PRACTICES.md` for complete structured error handling guide.
+
 ## Enhanced Security Framework 🔒 NEW
 
 ### Production-Grade Security System
@@ -454,7 +484,7 @@ struct MCPServerConfig {
 ```rust
 // Auto-launch management commands
 enable_autostart()     // Enable auto-launch on login
-disable_autostart()    // Disable auto-launch functionality  
+disable_autostart()    // Disable auto-launch functionality
 is_autostart_enabled() // Check current auto-launch status
 toggle_autostart()     // Toggle current state
 init_autostart()       // Sync settings on app startup
