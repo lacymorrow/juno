@@ -1,5 +1,6 @@
-use log::{info, error, warn};
+use tracing::{info, error, warn};
 use uuid;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,13 +22,7 @@ use crate::agent::providers::config::AgentMode;
 use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
-
-
-// --- Agent State ---
-
-
-// --- Anthropic API Structs ---
-
+use crate::constants::{agent, timeouts};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -114,6 +109,13 @@ pub async fn submit_query(
 ) -> Result<(), String> {
     info!("Received query: {}", query);
 
+    // --- Validate query text ---
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        warn!("Received empty or whitespace-only query, ignoring");
+        return Ok(());
+    }
+
     // --- Check if an agent is already running and cancel it ---
     if state.is_agent_executing() {
         let current_execution_id = state.get_current_agent_execution_id();
@@ -124,7 +126,7 @@ pub async fn submit_query(
         info!("Signaled cancellation for existing agent execution");
 
         // Give existing agent a brief moment to clean up gracefully
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MEDIUM_DELAY_MS)).await;
 
         // Reset the cancellation signal for the new agent
         state.reset_cancel();
@@ -139,9 +141,8 @@ pub async fn submit_query(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-    const MAX_ITERATIONS: u32 = 15;
-    state.mark_agent_execution_started_with_steps(execution_id.clone(), MAX_ITERATIONS);
-    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, MAX_ITERATIONS);
+    let _ = state.mark_agent_execution_started_with_steps(execution_id.clone(), agent::config::MAX_ITERATIONS);
+    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, agent::config::MAX_ITERATIONS);
 
     // Register escape key for cancellation during agent execution
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
@@ -164,17 +165,15 @@ pub async fn submit_query(
 
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
     let memory_manager_arc = state.get_memory_manager().await;
-    let memory_manager_clone = {
-        let mut memory_manager = memory_manager_arc.lock().await;
 
-        // Clean up any orphaned tool calls from previous cancelled executions
-        // This prevents LLM errors when tool calls don't have corresponding results
+    // Clean up any orphaned tool calls from previous cancelled executions
+    // This prevents LLM errors when tool calls don't have corresponding results
+    {
+        let mut memory_manager = memory_manager_arc.lock().await;
         if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
             warn!("Failed to clean orphaned tool calls: {}", e);
         }
-
-        memory_manager.clone()
-    };
+    }
 
     // --- Setup Tool Provider for Specialized Agents ---
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
@@ -261,10 +260,13 @@ pub async fn submit_query(
 
             // Create single agent runner with all tools
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
-                memory_manager_clone,
+                {
+                    let memory_guard = memory_manager_arc.lock().await;
+                    memory_guard.clone()
+                },
                 agent_tool_provider,
                 brain,
-                MAX_ITERATIONS,
+                agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
             info!("Single agent runner created with all tools.");
@@ -273,9 +275,9 @@ pub async fn submit_query(
 
             // Prepare the query with system context
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
             } else {
-                query.clone()
+                trimmed_query.to_string()
             };
 
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
@@ -309,10 +311,13 @@ pub async fn submit_query(
 
             // Create the orchestrator agent runner with personality-focused system prompt
             let mut orchestrator_runner = DefaultAgentRunner::with_boxed_brain(
-                memory_manager_clone,
+                {
+                    let memory_guard = memory_manager_arc.lock().await;
+                    memory_guard.clone()
+                },
                 orchestrator_tool_provider,
                 orchestrator_brain,
-                MAX_ITERATIONS,
+                agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
             info!("Orchestrator agent runner created with personality and delegation capabilities.");
@@ -321,9 +326,9 @@ pub async fn submit_query(
 
             // Prepare the query with system context for orchestrator
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), query)
+                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
             } else {
-                query.clone()
+                trimmed_query.to_string()
             };
 
             let result = orchestrator_runner.run(contextual_query, cancel_rx).await;
@@ -400,9 +405,9 @@ pub async fn submit_query(
     let tts_content = final_response.spoken_text.as_ref().unwrap_or(&final_response.text).clone();
 
     // Clear spoken content from app state now that we've used it
-    state.clear_last_spoken_content();
+    let _ = state.clear_last_spoken_content();
 
-    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone()).await {
+    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone(), app_handle.clone()).await {
         Ok(audio_result) => {
             if audio_result != "TTS_DISABLED_BY_SETTING" {
                 final_response.audio_base64 = Some(audio_result.clone());
@@ -466,11 +471,12 @@ pub async fn submit_query(
         let error_event_handle = app_handle.clone();
         let error_state = final_response.agent_state.clone();
         let error_text = final_response.text.clone();
+        let trimmed_query = query.trim().to_string();
         tauri::async_runtime::spawn(async move {
             let event_data = serde_json::json!({
                 "agent_state": error_state,
                 "error_message": error_text,
-                "original_query": query
+                "original_query": trimmed_query
             });
             if let Err(e) = error_event_handle.emit("agent-error", event_data) {
                 warn!("Failed to emit agent-error event: {}", e);
@@ -524,7 +530,7 @@ async fn register_orchestrator_delegation_tools(
 
     // Delegate to Browser Agent
     let browser_delegation_def = crate::agent::structs::ToolDefinition {
-        name: "delegate_to_browser_agent".to_string(),
+        name: agent::tool_names::DELEGATE_TO_BROWSER_AGENT.to_string(),
         description: "Delegate web browsing, navigation, and web interaction tasks to the browser specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -551,14 +557,29 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx).await
+
+            // Execute the specialist agent task with proper error handling
+            match execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx).await {
+                Ok(result) => Ok(result),
+                Err(error_msg) => {
+                    // Convert any specialist agent error into a proper error response
+                    // This ensures that delegation tool failures are handled gracefully
+                    warn!("Browser agent delegation failed: {}", error_msg);
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "agent_type": "browser",
+                        "error": error_msg,
+                        "message": format!("Browser agent failed: {}", error_msg)
+                    }))
+                }
+            }
         }
     };
     orchestrator_provider.register_async_tool(browser_delegation_def, browser_executor).await;
 
     // Delegate to Desktop Agent
     let desktop_delegation_def = crate::agent::structs::ToolDefinition {
-        name: "delegate_to_desktop_agent".to_string(),
+        name: agent::tool_names::DELEGATE_TO_DESKTOP_AGENT.to_string(),
         description: "Delegate desktop automation, clicking, typing, and system interaction tasks to the desktop specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -585,14 +606,29 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx).await
+
+            // Execute the specialist agent task with proper error handling
+            match execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx).await {
+                Ok(result) => Ok(result),
+                Err(error_msg) => {
+                    // Convert any specialist agent error into a proper error response
+                    // This ensures that delegation tool failures are handled gracefully
+                    warn!("Desktop agent delegation failed: {}", error_msg);
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "agent_type": "desktop",
+                        "error": error_msg,
+                        "message": format!("Desktop agent failed: {}", error_msg)
+                    }))
+                }
+            }
         }
     };
     orchestrator_provider.register_async_tool(desktop_delegation_def, desktop_executor).await;
 
     // Delegate to File Agent
     let file_delegation_def = crate::agent::structs::ToolDefinition {
-        name: "delegate_to_file_agent".to_string(),
+        name: agent::tool_names::DELEGATE_TO_FILE_AGENT.to_string(),
         description: "Delegate file operations, code editing, terminal commands, and development tasks to the file specialist agent".to_string(),
         input_schema: json!({
             "type": "object",
@@ -619,7 +655,22 @@ async fn register_orchestrator_delegation_tools(
             // Get the current cancellation receiver from app state to pass to specialist
             let app_state = handle.state::<crate::state::AppState>();
             let cancel_rx = app_state.cancel_rx.clone();
-            execute_specialized_agent_task(provider, "file", input, handle, cancel_rx).await
+
+            // Execute the specialist agent task with proper error handling
+            match execute_specialized_agent_task(provider, "file", input, handle, cancel_rx).await {
+                Ok(result) => Ok(result),
+                Err(error_msg) => {
+                    // Convert any specialist agent error into a proper error response
+                    // This ensures that delegation tool failures are handled gracefully
+                    log::warn!("File agent delegation failed: {}", error_msg);
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "agent_type": "file",
+                        "error": error_msg,
+                        "message": format!("File agent failed: {}", error_msg)
+                    }))
+                }
+            }
         }
     };
     orchestrator_provider.register_async_tool(file_delegation_def, file_executor).await;
@@ -642,7 +693,13 @@ async fn execute_specialized_agent_task(
     info!("Executing {} agent task: {}", agent_type, task);
 
     // Create a simple memory manager for the specialized agent
-    let specialist_memory = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+    let mut specialist_memory = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+
+    // Clean up any orphaned tool calls that might exist from previous failed executions
+    // This provides additional safety against conversation state issues
+    if let Err(e) = specialist_memory.clean_orphaned_tool_calls().await {
+        warn!("Failed to clean orphaned tool calls for {} agent: {}", agent_type, e);
+    }
 
     // Create appropriate brain for the specialist agent with focused system prompt
     let system_prompt = get_specialist_system_prompt(agent_type);
@@ -654,7 +711,7 @@ async fn execute_specialized_agent_task(
     // Create specialist agent runner with focused system prompt
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
         specialist_memory,
-        (*tool_provider).clone(),
+        (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc
         specialist_brain,
         10, // Reduced iterations for focused tasks
         app_handle,
@@ -697,8 +754,30 @@ async fn execute_specialized_agent_task(
             }
         }
         Err(e) => {
-            error!("Specialist {} agent failed: {}", agent_type, e);
-            Err(format!("{} agent failed: {}", agent_type, e))
+            // Enhanced error handling for different types of failures
+            let error_msg = match &e {
+                AgentError::Terminated => {
+                    format!("{} agent was cancelled or terminated", agent_type)
+                }
+                AgentError::MaxStepsReached => {
+                    format!("{} agent reached maximum steps", agent_type)
+                }
+                AgentError::LlmError(msg) if msg.contains("Tool calls without results") => {
+                    format!("{} agent failed due to timeout - some tool operations did not complete within the time limit", agent_type)
+                }
+                AgentError::LlmError(msg) if msg.contains("timed out") => {
+                    format!("{} agent failed due to timeout - operation exceeded time limit", agent_type)
+                }
+                AgentError::ToolError(msg) if msg.contains("timed out") => {
+                    format!("{} agent failed due to tool timeout: {}", agent_type, msg)
+                }
+                _ => {
+                    format!("{} agent failed: {}", agent_type, e)
+                }
+            };
+
+            error!("Specialist {} agent failed: {}", agent_type, error_msg);
+            Err(error_msg)
         }
     }
 }
@@ -714,7 +793,7 @@ fn get_specialist_system_prompt(agent_type: &str) -> String {
 
 #[tauri::command]
 pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String> {
-    log::info!("Cleaning up browser resources...");
+    info!("Cleaning up browser resources...");
 
     // Get the app state to access the browser controller
     let state = app_handle.state::<AppState>();
@@ -725,24 +804,24 @@ pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String>
     // If we have a browser controller, clean it up
     if let Some(controller) = controller_guard.take() {
         if let Err(e) = controller.cleanup().await {
-            log::error!("Failed to clean up browser controller: {}", e);
+            error!("Failed to clean up browser controller: {}", e);
             return Err(format!("Failed to clean up browser: {}", e));
         }
-        log::info!("Browser controller cleaned up successfully");
+        info!("Browser controller cleaned up successfully");
     } else {
-        log::info!("No browser controller to clean up");
+        info!("No browser controller to clean up");
     }
 
-    log::info!("Browser cleanup completed successfully");
+    info!("Browser cleanup completed successfully");
     Ok(())
 }
 
 // --- TTS Function ---
 
 #[tauri::command]
-pub async fn get_tts_audio(text: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn get_tts_audio(text: String, state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<String, String> {
     // Call the invoke_tts function with the text and state
-    crate::tts::invoke_tts(text, state).await
+    crate::tts::invoke_tts(text, state, app_handle).await
 }
 
 // --- Clear Conversation History ---

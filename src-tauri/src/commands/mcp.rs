@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use tauri::{AppHandle, State};
 use tracing::{error, info, warn};
 use chrono;
+use crate::constants::timeouts;
 
 use crate::state::AppState;
 use crate::agent::tools::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
@@ -25,7 +26,7 @@ pub async fn add_mcp_server(
 
     // Add to tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.add_mcp_server(config);
     }
@@ -35,6 +36,9 @@ pub async fn add_mcp_server(
 
     // Sync tools
     state.sync_mcp_tools().await?;
+
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
 
     Ok(())
 }
@@ -57,7 +61,7 @@ pub async fn remove_mcp_server(
 
     // Remove from tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.remove_mcp_server(&server_id);
     }
@@ -65,12 +69,16 @@ pub async fn remove_mcp_server(
     // Save configuration
     state.save_tool_config(&app_handle).await?;
 
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
+
     Ok(())
 }
 
 /// Start an MCP server
 #[tauri::command]
 pub async fn start_mcp_server(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<(), String> {
@@ -84,12 +92,16 @@ pub async fn start_mcp_server(
     drop(manager_guard);
     state.sync_mcp_tools().await?;
 
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
+
     Ok(())
 }
 
 /// Stop an MCP server
 #[tauri::command]
 pub async fn stop_mcp_server(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<(), String> {
@@ -98,6 +110,10 @@ pub async fn stop_mcp_server(
     let mcp_manager = state.get_mcp_manager().await;
     let manager_guard = mcp_manager.lock().await;
     manager_guard.stop_server(&server_id).await?;
+    drop(manager_guard);
+
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
 
     Ok(())
 }
@@ -143,7 +159,7 @@ pub async fn update_mcp_server(
 
     // Update in tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.update_mcp_server(config.clone());
     }
@@ -169,7 +185,7 @@ pub async fn set_mcp_server_enabled(
 
     // Update in tool configuration
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         config_guard.set_mcp_server_enabled(&server_id, enabled);
     }
@@ -179,14 +195,61 @@ pub async fn set_mcp_server_enabled(
 
     // Start or stop the server based on enabled status
     if enabled {
-        if let Err(e) = start_mcp_server(state.clone(), server_id).await {
+        if let Err(e) = start_mcp_server(app_handle.clone(), state.clone(), server_id.clone()).await {
             error!("Failed to start MCP server: {}", e);
         }
     } else {
-        if let Err(e) = stop_mcp_server(state, server_id).await {
+        if let Err(e) = stop_mcp_server(app_handle.clone(), state.clone(), server_id).await {
             error!("Failed to stop MCP server: {}", e);
         }
     }
+
+    // The start/stop functions will emit their own updates, but emit one more to be sure
+    // This handles cases where the start/stop might fail but we still want to update the UI
+    state.emit_mcp_state_update(&app_handle).await.unwrap_or_else(|e| {
+        warn!("Failed to emit final MCP state update: {}", e);
+    });
+
+    Ok(())
+}
+
+/// Toggle an MCP server on/off (alias for set_mcp_server_enabled for frontend compatibility)
+#[tauri::command]
+pub async fn toggle_mcp_server(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    server_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    set_mcp_server_enabled(app_handle, state, server_id, enabled).await
+}
+
+/// Toggle an MCP tool on/off
+#[tauri::command]
+pub async fn toggle_mcp_tool(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    server_id: String,
+    tool_name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    info!("Toggling MCP tool {} from server {} enabled: {}", tool_name, server_id, enabled);
+
+    // Update in tool configuration
+    {
+        let tool_config = state.get_tool_config_manager().await;
+        let mut config_guard = tool_config.lock().await;
+        config_guard.set_tool_enabled(&format!("{}:{}", server_id, tool_name), enabled);
+    }
+
+    // Save configuration
+    state.save_tool_config(&app_handle).await?;
+
+    // Sync tools to update the MCP tool information
+    state.sync_mcp_tools().await?;
+
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
 
     Ok(())
 }
@@ -194,7 +257,7 @@ pub async fn set_mcp_server_enabled(
 /// Test MCP server connection (without adding it permanently)
 #[tauri::command]
 pub async fn test_mcp_server_connection(
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     config: MCPServerConfig,
 ) -> Result<String, String> {
     info!("Testing MCP server connection: {}", config.name);
@@ -208,7 +271,7 @@ pub async fn test_mcp_server_connection(
             info!("Test server added successfully");
 
             // Wait a moment for the server to start
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(timeouts::MCP_SERVER_STARTUP_DELAY_MS)).await;
 
             // Check the status
             let statuses = test_manager.get_server_statuses().await;
@@ -347,13 +410,13 @@ pub async fn restart_mcp_server_with_diagnostics(
     }
 
     // Wait a moment
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(timeouts::MCP_SERVER_STARTUP_DELAY_MS)).await;
 
     // Try to start the server
     match manager_guard.start_server(&server_id).await {
         Ok(_) => {
             // Wait for startup
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(timeouts::MCP_SERVER_RESTART_DELAY_MS)).await;
 
             // Check final status
             let statuses = manager_guard.get_server_statuses().await;
@@ -501,7 +564,7 @@ pub async fn apply_mcp_quick_fixes(
 
     // Fix 1: Remove any remaining system-info server configurations
     {
-        let mut tool_config = state.get_tool_config_manager().await;
+        let tool_config = state.get_tool_config_manager().await;
         let mut config_guard = tool_config.lock().await;
         let servers = config_guard.get_mcp_servers();
 
@@ -538,4 +601,322 @@ pub async fn apply_mcp_quick_fixes(
     } else {
         Ok(format!("Applied {} fixes:\n{}", fixes_applied.len(), fixes_applied.join("\n")))
     }
+}
+
+/// Manually retry failed MCP servers
+#[tauri::command]
+pub async fn retry_failed_mcp_servers(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    info!("Manual retry of failed MCP servers requested");
+
+    match state.retry_failed_mcp_servers().await {
+        Ok(_) => {
+            // Emit state update to frontend
+            state.emit_mcp_state_update(&app_handle).await?;
+            Ok("Failed MCP servers retry completed".to_string())
+        }
+        Err(e) => {
+            error!("Failed to retry MCP servers: {}", e);
+            Err(format!("Failed to retry MCP servers: {}", e))
+        }
+    }
+}
+
+/// Get comprehensive MCP system diagnostics
+#[tauri::command]
+pub async fn get_mcp_system_diagnostics(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    info!("Generating comprehensive MCP system diagnostics");
+
+    let mcp_manager = state.get_mcp_manager().await;
+    let manager_guard = mcp_manager.lock().await;
+
+    let servers = manager_guard.get_server_configs().await;
+    let statuses = manager_guard.get_server_statuses().await;
+    let tools = manager_guard.get_all_tools().await;
+    drop(manager_guard);
+
+    let mut diagnostics = serde_json::json!({
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "total_servers": servers.len(),
+        "server_summary": {},
+        "health_check": {},
+        "recommendations": [],
+        "system_info": {}
+    });
+
+    // Server status summary
+    let mut status_counts = std::collections::HashMap::new();
+    let mut problematic_servers = Vec::new();
+
+    for (server_id, status) in &statuses {
+        let status_str = match status {
+            MCPServerStatus::Connected => "connected",
+            MCPServerStatus::Connecting => "connecting",
+            MCPServerStatus::Disconnected => "disconnected",
+            MCPServerStatus::Error(_) => "error",
+            MCPServerStatus::Timeout => "timeout",
+        };
+
+        *status_counts.entry(status_str.to_string()).or_insert(0) += 1;
+
+        if matches!(status, MCPServerStatus::Error(_) | MCPServerStatus::Timeout) {
+            if let Some(server) = servers.iter().find(|s| s.id == *server_id) {
+                problematic_servers.push(serde_json::json!({
+                    "id": server_id,
+                    "name": server.name,
+                    "status": status_str,
+                    "error": match status {
+                        MCPServerStatus::Error(e) => e.clone(),
+                        MCPServerStatus::Timeout => "Server startup/communication timeout".to_string(),
+                        _ => "Unknown error".to_string()
+                    },
+                    "timeout_seconds": server.timeout_seconds,
+                    "max_retries": server.max_retries
+                }));
+            }
+        }
+    }
+
+    diagnostics["server_summary"] = serde_json::json!({
+        "status_counts": status_counts,
+        "problematic_servers": problematic_servers,
+        "total_tools": tools.len(),
+        "enabled_tools": tools.iter().filter(|t| t.enabled).count()
+    });
+
+    // Health check
+    let connected_count = status_counts.get("connected").unwrap_or(&0);
+    let error_count = status_counts.get("error").unwrap_or(&0);
+    let timeout_count = status_counts.get("timeout").unwrap_or(&0);
+
+    let health_score = if servers.is_empty() {
+        100 // No servers configured is technically "healthy"
+    } else {
+        ((*connected_count as f64 / servers.len() as f64) * 100.0) as u32
+    };
+
+    diagnostics["health_check"] = serde_json::json!({
+        "overall_health_score": health_score,
+        "status": if health_score >= 80 { "healthy" } else if health_score >= 50 { "degraded" } else { "critical" },
+        "connected_servers": connected_count,
+        "error_servers": error_count,
+        "timeout_servers": timeout_count
+    });
+
+    // Generate recommendations
+    let mut recommendations = Vec::new();
+
+    if *error_count > 0 {
+        recommendations.push("Some MCP servers have errors. Check server logs and configurations.".to_string());
+    }
+
+    if *timeout_count > 0 {
+        recommendations.push("Some MCP servers are timing out. Consider increasing timeout values or checking network connectivity.".to_string());
+    }
+
+    if servers.len() > 4 {
+        recommendations.push("Many MCP servers configured. Consider disabling unused servers to improve performance.".to_string());
+    }
+
+    if problematic_servers.len() > 2 {
+        recommendations.push("Multiple servers failing. Try restarting servers with staggered delays.".to_string());
+    }
+
+    diagnostics["recommendations"] = serde_json::Value::Array(
+        recommendations.into_iter().map(|r| serde_json::Value::String(r)).collect()
+    );
+
+    // System info
+    diagnostics["system_info"] = serde_json::json!({
+        "platform": std::env::consts::OS,
+        "node_available": which::which("node").is_ok(),
+        "npm_available": which::which("npm").is_ok(),
+        "npx_available": which::which("npx").is_ok(),
+        "process_id": std::process::id()
+    });
+
+    Ok(diagnostics)
+}
+
+/// Force cleanup all MCP servers and restart them with proper delays
+#[tauri::command]
+pub async fn force_restart_all_mcp_servers(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    info!("Force restarting all MCP servers with cleanup");
+
+    let mcp_manager = state.get_mcp_manager().await;
+    let manager_guard = mcp_manager.lock().await;
+
+    // Get all server IDs first
+    let server_configs = manager_guard.get_server_configs().await;
+    let server_ids: Vec<String> = server_configs.iter().map(|s| s.id.clone()).collect();
+    drop(manager_guard);
+
+    let mut results = Vec::new();
+
+    // Step 1: Stop all servers first
+    for server_id in &server_ids {
+        let manager_guard = mcp_manager.lock().await;
+        match manager_guard.stop_server(server_id).await {
+            Ok(_) => results.push(format!("✅ Stopped server: {}", server_id)),
+            Err(e) => results.push(format!("⚠️ Error stopping server {}: {}", server_id, e)),
+        }
+        drop(manager_guard);
+    }
+
+    // Step 2: Wait for cleanup
+    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+    results.push("🧹 Cleanup delay completed".to_string());
+
+    // Step 3: Start servers with staggered delays
+    for (index, server_id) in server_ids.iter().enumerate() {
+        if index > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+        }
+
+        let manager_guard = mcp_manager.lock().await;
+        match manager_guard.start_server(server_id).await {
+            Ok(_) => results.push(format!("✅ Restarted server: {}", server_id)),
+            Err(e) => results.push(format!("❌ Failed to restart server {}: {}", server_id, e)),
+        }
+        drop(manager_guard);
+    }
+
+    // Step 4: Sync tools and emit updates
+    state.sync_mcp_tools().await?;
+    state.emit_mcp_state_update(&app_handle).await?;
+
+    results.push("🔄 Tool synchronization completed".to_string());
+    Ok(results.join("\n"))
+}
+
+/// Check MCP server prerequisites (Node.js, npm packages, etc.)
+#[tauri::command]
+pub async fn check_mcp_prerequisites() -> Result<serde_json::Value, String> {
+    info!("Checking MCP server prerequisites");
+
+    let mut checks = serde_json::json!({
+        "node_js": {},
+        "package_manager": {},
+        "mcp_packages": {},
+        "overall_status": "unknown"
+    });
+
+    // Check Node.js
+    let node_version = std::process::Command::new("node")
+        .arg("--version")
+        .output();
+
+    match node_version {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            checks["node_js"] = serde_json::json!({
+                "available": true,
+                "version": version,
+                "status": "ok"
+            });
+        }
+        _ => {
+            checks["node_js"] = serde_json::json!({
+                "available": false,
+                "status": "error",
+                "message": "Node.js not found or not working"
+            });
+        }
+    }
+
+    // Check npm
+    let npm_version = std::process::Command::new("npm")
+        .arg("--version")
+        .output();
+
+    match npm_version {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            checks["package_manager"]["npm"] = serde_json::json!({
+                "available": true,
+                "version": version,
+                "status": "ok"
+            });
+        }
+        _ => {
+            checks["package_manager"]["npm"] = serde_json::json!({
+                "available": false,
+                "status": "error"
+            });
+        }
+    }
+
+    // Check npx
+    let npx_check = std::process::Command::new("npx")
+        .arg("--version")
+        .output();
+
+    match npx_check {
+        Ok(output) if output.status.success() => {
+            checks["package_manager"]["npx"] = serde_json::json!({
+                "available": true,
+                "status": "ok"
+            });
+        }
+        _ => {
+            checks["package_manager"]["npx"] = serde_json::json!({
+                "available": false,
+                "status": "error"
+            });
+        }
+    }
+
+    // Check if common MCP packages are available
+    let mcp_packages = [
+        "@modelcontextprotocol/server-filesystem",
+        "@modelcontextprotocol/server-memory",
+        "@modelcontextprotocol/server-everything",
+        "@modelcontextprotocol/server-sequential-thinking"
+    ];
+
+    for package in &mcp_packages {
+        let package_check = std::process::Command::new("npm")
+            .args(&["info", package, "version"])
+            .output();
+
+        match package_check {
+            Ok(output) if output.status.success() => {
+                let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                checks["mcp_packages"][package] = serde_json::json!({
+                    "available": true,
+                    "version": version,
+                    "status": "ok"
+                });
+            }
+            _ => {
+                checks["mcp_packages"][package] = serde_json::json!({
+                    "available": false,
+                    "status": "warning",
+                    "message": "Package not found in npm registry or npm error"
+                });
+            }
+        }
+    }
+
+    // Determine overall status
+    let node_ok = checks["node_js"]["available"].as_bool().unwrap_or(false);
+    let npm_ok = checks["package_manager"]["npm"]["available"].as_bool().unwrap_or(false);
+    let npx_ok = checks["package_manager"]["npx"]["available"].as_bool().unwrap_or(false);
+
+    if node_ok && npm_ok && npx_ok {
+        checks["overall_status"] = serde_json::json!("ready");
+    } else if node_ok {
+        checks["overall_status"] = serde_json::json!("partial");
+    } else {
+        checks["overall_status"] = serde_json::json!("not_ready");
+    }
+
+    Ok(checks)
 }

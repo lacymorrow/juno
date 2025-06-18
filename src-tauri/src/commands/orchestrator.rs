@@ -3,11 +3,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use once_cell::sync::OnceCell;
+use tracing::warn;
 
 use crate::agents::{
     AgentFactory, AgentStatus, Orchestrator, OrchestratorConfig, Task, TaskResult, TaskPriority
 };
-use crate::agent::tools::mcp_integration::{MCPManager, MCPServerConfig, MCPToolInfo};
+use crate::agent::tools::mcp_integration::{MCPManager, MCPServerConfig};
 use crate::state::AppState;
 
 /// Global orchestrator instance
@@ -29,7 +30,15 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
 
     // Initialize MCP manager
     let mcp_manager = Arc::new(MCPManager::new());
-    initialize_default_mcp_servers(&mcp_manager).await?;
+
+    // Initialize default MCP servers in the background to not block app startup
+    let mcp_manager_bg = mcp_manager.clone();
+    tokio::spawn(async move {
+        if let Err(e) = initialize_default_mcp_servers_safely(&mcp_manager_bg).await {
+            tracing::warn!("Background MCP server initialization had issues: {}", e);
+            tracing::info!("MCP servers can be configured and started manually via Settings");
+        }
+    });
 
     // Store globally
     ORCHESTRATOR.set(Arc::new(Mutex::new(orchestrator)))
@@ -37,71 +46,130 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
     MCP_MANAGER.set(mcp_manager)
         .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
 
-    tracing::info!("Enhanced multi-agent orchestrator system with MCP integration initialized successfully");
+    tracing::info!("Enhanced multi-agent orchestrator system initialized successfully");
+    tracing::info!("MCP server initialization continues in background");
     Ok(())
 }
 
-/// Initialize default MCP servers for common tools
-async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
-    // Add common MCP servers that would be useful for orchestration
+/// Initialize default MCP servers safely without blocking app startup
+async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Result<(), String> {
+    // Add essential MCP servers that provide intelligent capabilities with improved configurations
     let default_servers = vec![
-        MCPServerConfig::new(
-            "file-operations".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-filesystem".to_string(), "~/Documents".to_string()]
-        ).with_description("File system operations and management".to_string()),
+        // Core filesystem operations (this package exists) - DISABLED by default to prevent startup issues
+        MCPServerConfig {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "filesystem".to_string(),
+            description: Some("Secure file system operations and management".to_string()),
+            command: "npx".to_string(),
+            args: vec!["@modelcontextprotocol/server-filesystem".to_string(), "/Users".to_string()],
+            working_directory: None,
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                // Prevent TLS warnings and improve stability
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=512".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                env
+            },
+            enabled: false, // Disabled by default to prevent startup blocking
+            auto_start: false,
+            timeout_seconds: 60,
+            max_retries: 1, // Reduced retries to prevent spam
+        },
 
-        MCPServerConfig::new(
-            "web-browser".to_string(),
-            "npx".to_string(),
-            vec!["@modelcontextprotocol/server-puppeteer".to_string()]
-        ).with_description("Web browser automation and scraping".to_string()),
-
-        // Note: @modelcontextprotocol/server-system-info package does not exist
-        // Alternative: Use a custom system info server or the everything server
+        // Everything server for comprehensive testing and development - DISABLED by default
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "everything".to_string(),
-            description: Some("Everything MCP server with system tools and comprehensive features".to_string()),
+            description: Some("Reference server with comprehensive MCP features for testing".to_string()),
             command: "npx".to_string(),
             args: vec!["@modelcontextprotocol/server-everything".to_string()],
             working_directory: None,
-            environment_variables: std::collections::HashMap::new(),
-            enabled: true,
-            auto_start: true,
-            timeout_seconds: 45, // Longer timeout for complex server
-            max_retries: 5,
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=512".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                // Limit event listeners to prevent memory leaks
+                env.insert("NODE_MAX_LISTENERS".to_string(), "20".to_string());
+                env
+            },
+            enabled: false, // Disabled by default to prevent EPIPE errors
+            auto_start: false,
+            timeout_seconds: 75,
+            max_retries: 1,
+        },
+
+        // Memory and sequential thinking - DISABLED by default
+        MCPServerConfig {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "memory".to_string(),
+            description: Some("Knowledge graph-based persistent memory system".to_string()),
+            command: "npx".to_string(),
+            args: vec!["@modelcontextprotocol/server-memory".to_string()],
+            working_directory: None,
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=256".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                env
+            },
+            enabled: false, // Disabled by default
+            auto_start: false,
+            timeout_seconds: 45,
+            max_retries: 1,
+        },
+
+        // Sequential thinking for problem solving - DISABLED by default
+        MCPServerConfig {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "sequential-thinking".to_string(),
+            description: Some("Sequential thinking and problem-solving capabilities".to_string()),
+            command: "npx".to_string(),
+            args: vec!["@modelcontextprotocol/server-sequential-thinking".to_string()],
+            working_directory: None,
+            environment_variables: {
+                let mut env = std::collections::HashMap::new();
+                env.insert("NODE_TLS_REJECT_UNAUTHORIZED".to_string(), "1".to_string());
+                env.insert("NODE_OPTIONS".to_string(), "--max-old-space-size=256".to_string());
+                env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
+                env
+            },
+            enabled: false, // Disabled by default
+            auto_start: false,
+            timeout_seconds: 45,
+            max_retries: 1,
         },
     ];
 
+    tracing::info!("Adding {} default MCP server configurations (disabled by default)...", default_servers.len());
+
+    let mut successful_configs = 0;
     for config in default_servers {
-        if let Err(e) = mcp_manager.add_server(config.clone()).await {
-            tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
-
-            // For the everything server, try to continue without it if it fails
-            if config.name == "everything" {
-                tracing::info!("Continuing without everything MCP server - it may not be available");
-                continue;
+        match mcp_manager.add_server(config.clone()).await {
+            Ok(_) => {
+                successful_configs += 1;
+                tracing::info!("Successfully added MCP server configuration '{}'", config.name);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
+                // Continue with other servers - don't let one failure block everything
             }
         }
     }
 
-    // Start all enabled servers with staggered startup to avoid overwhelming npm
-    let configs = mcp_manager.get_server_configs().await;
-    for (i, config) in configs.iter().enumerate() {
-        if config.enabled && config.auto_start {
-            // Add a small delay between server starts
-            if i > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-            }
-
-            if let Err(e) = mcp_manager.start_server(&config.id).await {
-                tracing::warn!("Failed to start MCP server '{}': {}", config.name, e);
-            }
-        }
-    }
+    tracing::info!("Successfully configured {}/{} default MCP servers", successful_configs, 4);
+    tracing::info!("MCP servers are disabled by default - enable them in Settings if needed");
+    tracing::info!("To prevent app startup delays, MCP servers must be manually enabled in Settings");
 
     Ok(())
+}
+
+/// Initialize default MCP servers for common tools (legacy function - now redirects to safe version)
+async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
+    tracing::info!("Redirecting to safe MCP server initialization...");
+    initialize_default_mcp_servers_safely(mcp_manager).await
 }
 
 /// Get the global orchestrator instance
@@ -204,11 +272,18 @@ pub async fn submit_orchestrated_query(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    // --- Validate query text ---
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        warn!("Received empty or whitespace-only query for orchestrator, ignoring");
+        return Ok("No query provided".to_string());
+    }
+
     if !use_orchestrator {
         // Fall back to the existing single-agent system
-        crate::anthropic::submit_query(query.clone(), state, app_handle).await
+        crate::anthropic::submit_query(trimmed_query.to_string(), state, app_handle).await
             .map_err(|e| e)?;
-        return Ok(format!("Query processed: {}", query));
+        return Ok(format!("Query processed: {}", trimmed_query));
     }
 
     let orchestrator = get_orchestrator().await?;
@@ -224,7 +299,7 @@ pub async fn submit_orchestrated_query(
 
     // Create enhanced task request
     let task_request = TaskCreationRequest {
-        description: query.clone(),
+        description: trimmed_query.to_string(),
         agent_type: None, // Let orchestrator decide
         priority: Some(format!("{:?}", task_priority)),
         dependencies: None,
@@ -604,7 +679,7 @@ pub async fn execute_workflow_template(
         .ok_or_else(|| format!("Workflow template '{}' not found", template_id))?;
 
     let orchestrator = get_orchestrator().await?;
-    let orchestrator_guard = orchestrator.lock().await;
+    let _orchestrator_guard = orchestrator.lock().await;
 
     // Execute each task in the template based on dependencies
     let mut task_results = HashMap::new();
@@ -624,7 +699,7 @@ pub async fn execute_workflow_template(
 
                 // Replace variables in context
                 if let Some(context_obj) = context.as_object_mut() {
-                    for (key, value) in context_obj.iter_mut() {
+                    for (_key, value) in context_obj.iter_mut() {
                         if let Some(value_str) = value.as_str() {
                             let mut replaced_value = value_str.to_string();
                             for (var_name, var_value) in &variables {
@@ -639,7 +714,7 @@ pub async fn execute_workflow_template(
                 }
 
                 // Create task request
-                let task_request = TaskCreationRequest {
+                let _task_request = TaskCreationRequest {
                     description: task_template.description.clone(),
                     agent_type: Some(task_template.agent_type.clone()),
                     priority: Some("Normal".to_string()),

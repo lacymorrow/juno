@@ -102,7 +102,7 @@ pub fn position_floating_panel_properly(app: AppHandle, x: Option<f64>, y: Optio
 
         if let Some(monitor) = monitor {
             let screen_size = monitor.size();
-            let work_area = monitor.position(); // This gives us the usable area excluding dock/menu bar
+            let _work_area = monitor.position(); // This gives us the usable area excluding dock/menu bar
 
             // Default position: top-right corner of usable screen area, with padding
             let final_x = x.unwrap_or(screen_size.width as f64 - 200.0); // 200px from right edge

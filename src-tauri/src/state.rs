@@ -1,12 +1,15 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
+use std::time::Duration;
+use tracing::{info, error, warn, debug};
+use tauri::Emitter;
 
 pub mod desktop_wrapper;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
-use log;
 use playwright::Playwright; // Import Playwright
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,11 +27,10 @@ use crate::agent::tools::tool_config::ToolConfigManager;
 // Import cloud client
 use crate::cloud::{CloudClient, CloudConfig, ProductionCloudConnector};
 // Import MCP manager for external MCP server support
-use crate::agent::tools::mcp_integration::MCPManager;
+use crate::agent::tools::mcp_integration::{MCPManager, MCPServerStatus};
 // Import LocalToolProvider for tool provider registry
 use crate::agent::implementations::tool_provider::LocalToolProvider;
-use crate::constants::app_identity;
-use crate::constants::permission_types;
+use crate::constants::app;
 
 /// Keyboard shortcut configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +107,33 @@ type CancelSender = watch::Sender<bool>;
 // Define a type alias for the cancellation receiver for clarity
 pub type CancelReceiver = watch::Receiver<bool>;
 
+/// Tool approval request structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolApprovalRequest {
+    pub tool_id: String,
+    pub tool_name: String,
+    pub tool_input: Value,
+    pub description: String,
+    pub timestamp: u64,
+    pub approved: Option<bool>, // None = pending, Some(true) = approved, Some(false) = denied
+}
+
+impl ToolApprovalRequest {
+    pub fn new(tool_id: String, tool_name: String, tool_input: Value, description: String) -> Self {
+        Self {
+            tool_id,
+            tool_name,
+            tool_input,
+            description,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            approved: None,
+        }
+    }
+}
+
 // Application state structure
 #[derive(Clone)] // AppState needs to be Clone
 pub struct AppState {
@@ -172,6 +201,10 @@ pub struct AppState {
     pub last_spoken_content: Arc<Mutex<Option<String>>>, // Store spoken content separate from displayed text
     // Debug mode tracking
     pub debug_mode: Arc<Mutex<bool>>, // Track if debug mode is enabled
+    // Tool approval setting
+    pub tool_approval_required: Arc<Mutex<bool>>, // Track if tool approval is required before execution
+    // Pending tool approvals
+    pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>, // Track pending approval requests
 }
 
 impl AppState {
@@ -188,7 +221,20 @@ impl AppState {
             browser_controller: Arc::new(TokioMutex::new(None)),
             memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
             state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            tts_provider: Arc::new(Mutex::new("system".to_string())), // Initialize TTS provider to "system" (was "off")
+            tts_provider: Arc::new(Mutex::new({
+                #[cfg(debug_assertions)]
+                {
+                    // In development, default to 'system' TTS
+                    info!("Initializing TTS provider to 'system' (development mode)");
+                    "system".to_string()
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    // In production, default to 'elevenlabs' TTS
+                    info!("Initializing TTS provider to 'elevenlabs' (production mode)");
+                    "elevenlabs".to_string()
+                }
+            })),
             bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
             dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
             dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
@@ -218,7 +264,7 @@ impl AppState {
             always_listening_active: Arc::new(Mutex::new(false)),
             always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
             always_listening_wake_words: Arc::new(Mutex::new(
-                app_identity::DEFAULT_WAKE_WORDS
+                app::DEFAULT_WAKE_WORDS
                     .iter()
                     .map(|s| s.to_string())
                     .collect(),
@@ -241,6 +287,10 @@ impl AppState {
             last_spoken_content: Arc::new(Mutex::new(None)),
             // Initialize debug mode tracking
             debug_mode: Arc::new(Mutex::new(false)),
+            // Initialize tool approval setting as disabled by default
+            tool_approval_required: Arc::new(Mutex::new(false)),
+            // Initialize pending tool approvals
+            pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
         }
     }
 
@@ -256,115 +306,152 @@ impl AppState {
         // Send `false` to indicate cancellation is no longer requested.
         // Check if the current value is true before sending false to avoid unnecessary updates.
         let is_currently_cancelled = *self.cancel_rx.borrow();
-        log::info!(
+        info!(
             "[AppState] Attempting reset_cancel. Current state (is_cancelled): {}",
             is_currently_cancelled
         );
         if is_currently_cancelled {
             let send_result = self.cancel_tx.send(false);
-            log::info!(
+            info!(
                 "[AppState] reset_cancel: Sent 'false'. Result: {:?}",
                 send_result.is_ok()
             );
         } else {
-            log::info!("[AppState] reset_cancel: No reset needed (already false).");
+            info!("[AppState] reset_cancel: No reset needed (already false).");
         }
     }
 
-    // Method to mark agent execution as started
-    pub fn mark_agent_execution_started(&self, execution_id: String) {
+    // Method to mark agent execution started
+    pub fn mark_agent_execution_started(&self, execution_id: String) -> Result<(), String> {
         {
-            let mut active_guard = self.agent_execution_active.lock().unwrap();
+            let mut active_guard = self.agent_execution_active.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
             *active_guard = true;
         }
         {
-            let mut id_guard = self.agent_execution_id.lock().unwrap();
+            let mut id_guard = self.agent_execution_id.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
             *id_guard = Some(execution_id.clone());
         }
-        log::info!(
+        info!(
             "[AppState] Agent execution started with ID: {}",
             execution_id
         );
+        Ok(())
     }
 
-    // Method to mark agent execution as started with iteration info
-    pub fn mark_agent_execution_started_with_steps(&self, execution_id: String, max_steps: u32) {
+    // Method to mark agent execution started with iteration info
+    pub fn mark_agent_execution_started_with_steps(&self, execution_id: String, max_steps: u32) -> Result<(), String> {
         {
-            let mut active_guard = self.agent_execution_active.lock().unwrap();
+            let mut active_guard = self.agent_execution_active.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
             *active_guard = true;
         }
         {
-            let mut id_guard = self.agent_execution_id.lock().unwrap();
+            let mut id_guard = self.agent_execution_id.lock()
+                .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
             *id_guard = Some(execution_id.clone());
         }
         {
-            let mut max_steps_guard = self.agent_max_steps.lock().unwrap();
+            let mut max_steps_guard = self.agent_max_steps.lock()
+                .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
             *max_steps_guard = Some(max_steps);
         }
         {
-            let mut current_step_guard = self.agent_current_step.lock().unwrap();
+            let mut current_step_guard = self.agent_current_step.lock()
+                .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
             *current_step_guard = Some(0); // Start at step 0
         }
-        log::info!(
+        info!(
             "[AppState] Agent execution started with ID: {} (max steps: {})",
             execution_id,
             max_steps
         );
+        Ok(())
     }
 
     // Method to mark agent execution as finished
     pub fn mark_agent_execution_finished(&self) {
-        {
-            let mut active_guard = self.agent_execution_active.lock().unwrap();
-            *active_guard = false;
-        }
-        {
-            let mut id_guard = self.agent_execution_id.lock().unwrap();
-            let execution_id = id_guard.take();
-            log::info!(
-                "[AppState] Agent execution finished for ID: {:?}",
-                execution_id
-            );
-        }
-        {
-            let mut current_step_guard = self.agent_current_step.lock().unwrap();
-            *current_step_guard = None;
-        }
-        {
-            let mut max_steps_guard = self.agent_max_steps.lock().unwrap();
-            *max_steps_guard = None;
+        let result = (|| -> Result<(), String> {
+            {
+                let mut active_guard = self.agent_execution_active.lock()
+                    .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
+                *active_guard = false;
+            }
+            {
+                let mut id_guard = self.agent_execution_id.lock()
+                    .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
+                let execution_id = id_guard.take();
+                info!(
+                    "[AppState] Agent execution finished for ID: {:?}",
+                    execution_id
+                );
+            }
+            {
+                let mut current_step_guard = self.agent_current_step.lock()
+                    .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
+                *current_step_guard = None;
+            }
+            {
+                let mut max_steps_guard = self.agent_max_steps.lock()
+                    .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
+                *max_steps_guard = None;
+            }
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            error!("Error marking agent execution as finished: {}", e);
         }
     }
 
     // Method to check if an agent is currently executing
     pub fn is_agent_executing(&self) -> bool {
-        let active_guard = self.agent_execution_active.lock().unwrap();
-        *active_guard
+        self.agent_execution_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to check agent execution status: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Method to get the current agent execution ID
     pub fn get_current_agent_execution_id(&self) -> Option<String> {
-        let id_guard = self.agent_execution_id.lock().unwrap();
-        id_guard.clone()
+        self.agent_execution_id.lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|e| {
+                error!("Failed to get current agent execution ID: {}", e);
+                None // Safe fallback
+            })
     }
 
     // Method to update the current agent step
-    pub fn update_agent_current_step(&self, step: u32) {
-        let mut current_step_guard = self.agent_current_step.lock().unwrap();
+    pub fn update_agent_current_step(&self, step: u32) -> Result<(), String> {
+        let mut current_step_guard = self.agent_current_step.lock()
+            .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
         *current_step_guard = Some(step);
-        log::debug!("[AppState] Agent current step updated to: {}", step);
+        debug!("[AppState] Agent current step updated to: {}", step);
+        Ok(())
     }
 
     // Method to get the current agent step
     pub fn get_agent_current_step(&self) -> Option<u32> {
-        let current_step_guard = self.agent_current_step.lock().unwrap();
-        *current_step_guard
+        self.agent_current_step.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to get current agent step: {}", e);
+                None // Safe fallback
+            })
     }
 
     // Method to get the agent max steps
     pub fn get_agent_max_steps(&self) -> Option<u32> {
-        let max_steps_guard = self.agent_max_steps.lock().unwrap();
-        *max_steps_guard
+        self.agent_max_steps.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to get agent max steps: {}", e);
+                None // Safe fallback
+            })
     }
 
     // Method to get agent step progress info
@@ -376,35 +463,47 @@ impl AppState {
 
     /// Check if agent mode is currently active
     pub fn is_agent_mode_active(&self) -> bool {
-        *self.agent_execution_active.lock().unwrap()
+        self.agent_execution_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to check agent mode status: {}", e);
+                false // Safe fallback
+            })
     }
 
     /// Check if dictation mode is currently active
     pub fn is_dictation_active(&self) -> bool {
-        *self.dictation_active.lock().unwrap()
+        self.dictation_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to check dictation status: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Method to get or initialize the Playwright driver
     async fn get_or_init_playwright_driver(&self) -> Result<Arc<Playwright>, String> {
         let mut driver_guard = self.playwright_driver.lock().await;
         if driver_guard.is_none() {
-            log::info!("Initializing Playwright driver instance...");
+            info!("Initializing Playwright driver instance...");
             match Playwright::initialize().await {
                 Ok(pw_instance) => {
                     let arc_pw = Arc::new(pw_instance);
                     *driver_guard = Some(arc_pw.clone());
-                    log::info!("Playwright driver initialized and stored in AppState.");
+                    info!("Playwright driver initialized and stored in AppState.");
                     Ok(arc_pw)
                 }
                 Err(e) => {
                     let err_msg = format!("Failed to initialize Playwright driver: {}", e);
-                    log::error!("{}", err_msg);
+                    error!("{}", err_msg);
                     Err(err_msg)
                 }
             }
         } else {
-            log::debug!("Reusing existing Playwright driver instance from AppState.");
-            Ok(driver_guard.as_ref().unwrap().clone())
+            debug!("Reusing existing Playwright driver instance from AppState.");
+            driver_guard.as_ref()
+                .ok_or_else(|| "Playwright driver is None despite check".to_string())
+                .map(|driver| driver.clone())
         }
     }
 
@@ -413,7 +512,7 @@ impl AppState {
         let mut controller_guard = self.browser_controller.lock().await;
 
         if controller_guard.is_none() {
-            log::info!("Initializing persistent browser controller (was None in AppState)");
+            info!("Initializing persistent browser controller (was None in AppState)");
             // Get or initialize the Playwright driver first
             let playwright_arc = self.get_or_init_playwright_driver().await.map_err(|e| {
                 format!(
@@ -425,18 +524,20 @@ impl AppState {
             match BrowserController::new(playwright_arc).await {
                 Ok(controller) => {
                     *controller_guard = Some(controller.clone());
-                    log::info!("BrowserController initialized and stored in AppState.");
+                    info!("BrowserController initialized and stored in AppState.");
                     Ok(controller)
                 }
                 Err(e) => {
                     let err_msg = format!("Failed to initialize browser controller: {}", e);
-                    log::error!("{}", err_msg);
+                    error!("{}", err_msg);
                     Err(err_msg)
                 }
             }
         } else {
-            log::debug!("Reusing existing browser controller from AppState.");
-            Ok(controller_guard.as_ref().unwrap().clone())
+            debug!("Reusing existing browser controller from AppState.");
+            controller_guard.as_ref()
+                .ok_or_else(|| "Browser controller is None despite check".to_string())
+                .map(|controller| controller.clone())
         }
     }
 
@@ -446,16 +547,22 @@ impl AppState {
     }
 
     // Insert a component into the state
-    pub fn insert<T: 'static + Send + Sync>(&self, component: T) {
+    pub fn insert<T: 'static + Send + Sync>(&self, component: T) -> Result<(), String> {
         let type_id = TypeId::of::<T>();
-        let mut components_lock = self.state_components.lock().unwrap();
+        let mut components_lock = self.state_components.lock()
+            .map_err(|e| format!("Failed to acquire state_components lock: {}", e))?;
         components_lock.insert(type_id, Box::new(component));
+        Ok(())
     }
 
     // Get a reference to a component from the state
     pub fn get<T: 'static + Send + Sync + Clone>(&self) -> Option<Arc<T>> {
         let type_id = TypeId::of::<T>();
-        let components_lock = self.state_components.lock().unwrap();
+        let components_lock = self.state_components.lock()
+            .map_err(|e| {
+                error!("Failed to acquire state_components lock: {}", e);
+            })
+            .ok()?;
 
         components_lock.get(&type_id).and_then(|boxed| {
             boxed.downcast_ref::<T>().map(|value| {
@@ -478,15 +585,21 @@ impl AppState {
     }
 
     // Method to mark permissions as checked
-    pub fn mark_permissions_checked(&self) {
-        let mut checked_guard = self.permissions_checked.lock().unwrap();
+    pub fn mark_permissions_checked(&self) -> Result<(), String> {
+        let mut checked_guard = self.permissions_checked.lock()
+            .map_err(|e| format!("Failed to acquire permissions_checked lock: {}", e))?;
         *checked_guard = true;
+        Ok(())
     }
 
     // Method to check if permissions have been checked
     pub fn are_permissions_checked(&self) -> bool {
-        let checked_guard = self.permissions_checked.lock().unwrap();
-        *checked_guard
+        self.permissions_checked.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to check permissions status: {}", e);
+                false // Safe fallback
+            })
     }
 
     // Helper method to get desktop instance or return an error
@@ -543,9 +656,13 @@ impl AppState {
 
         // Update enabled status
         {
-            let enabled_guard = self.cloud_enabled.lock();
-            if let Ok(mut enabled) = enabled_guard {
-                *enabled = config.enabled;
+            match self.cloud_enabled.lock() {
+                Ok(mut enabled) => {
+                    *enabled = config.enabled;
+                }
+                Err(e) => {
+                    error!("Failed to update cloud enabled status: {}", e);
+                }
             }
         }
 
@@ -585,7 +702,10 @@ impl AppState {
         self.cloud_enabled
             .lock()
             .map(|enabled| *enabled)
-            .unwrap_or(false)
+            .unwrap_or_else(|e| {
+                error!("Failed to check cloud enabled status: {}", e);
+                false // Safe fallback
+            })
     }
 
     /// Get cloud configuration
@@ -613,9 +733,13 @@ impl AppState {
 
         // Update enabled status
         {
-            let enabled_guard = self.cloud_enabled.lock();
-            if let Ok(mut enabled) = enabled_guard {
-                *enabled = config.enabled;
+            match self.cloud_enabled.lock() {
+                Ok(mut enabled) => {
+                    *enabled = config.enabled;
+                }
+                Err(e) => {
+                    error!("Failed to update cloud enabled status: {}", e);
+                }
             }
         }
 
@@ -638,18 +762,22 @@ impl AppState {
         self.performance_monitoring_enabled
             .lock()
             .map(|enabled| *enabled)
-            .unwrap_or(false)
+            .unwrap_or_else(|e| {
+                error!("Failed to check performance monitoring status: {}", e);
+                false // Safe fallback
+            })
     }
 
     /// Set performance monitoring enabled state
-    pub fn set_performance_monitoring_enabled(&self, enabled: bool) {
-        if let Ok(mut monitoring_guard) = self.performance_monitoring_enabled.lock() {
-            *monitoring_guard = enabled;
-            log::info!(
-                "Performance monitoring {}",
-                if enabled { "enabled" } else { "disabled" }
-            );
-        }
+    pub fn set_performance_monitoring_enabled(&self, enabled: bool) -> Result<(), String> {
+        let mut monitoring_guard = self.performance_monitoring_enabled.lock()
+            .map_err(|e| format!("Failed to acquire performance_monitoring_enabled lock: {}", e))?;
+        *monitoring_guard = enabled;
+        info!(
+            "Performance monitoring {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        Ok(())
     }
 
     // Production cloud connector methods
@@ -662,16 +790,20 @@ impl AppState {
 
     /// Get production cloud connector
     pub fn get_production_cloud_connector(&self) -> Option<ProductionCloudConnector> {
-        // We need to use try_lock here since this method is not async
-        // and we want to avoid blocking the caller
-        if let Ok(connector_guard) = self.production_cloud_connector.try_lock() {
-            connector_guard.clone()
-        } else {
-            None
+        // FIXED: Use try_lock but with proper error handling
+        // This maintains the non-blocking behavior while providing better error information
+        match self.production_cloud_connector.try_lock() {
+            Ok(connector_guard) => connector_guard.clone(),
+            Err(_) => {
+                // Lock is busy - log this for debugging but don't error
+                // This is expected behavior when another operation is in progress
+                debug!("Production cloud connector is busy, returning None (non-blocking call)");
+                None
+            }
         }
     }
 
-    /// Get production cloud connector (async version)
+    /// Get production cloud connector (async version) - RECOMMENDED
     pub async fn get_production_cloud_connector_async(&self) -> Option<ProductionCloudConnector> {
         let connector_guard = self.production_cloud_connector.lock().await;
         connector_guard.clone()
@@ -702,21 +834,143 @@ impl AppState {
         let mcp_configs = config_guard.get_mcp_servers();
         drop(config_guard);
 
+        if mcp_configs.is_empty() {
+            debug!("No MCP servers configured, skipping initialization");
+            return Ok(());
+        }
+
         let mcp_manager = self.get_mcp_manager().await;
         let manager_guard = mcp_manager.lock().await;
 
+        // Add all servers first (fast operation)
+        let mut added_servers = Vec::new();
         for config in mcp_configs {
-            if let Err(e) = manager_guard.add_server(config.clone()).await {
-                log::error!("Failed to add MCP server '{}': {}", config.name, e);
+            match manager_guard.add_server(config.clone()).await {
+                Ok(_) => {
+                    added_servers.push(config.clone());
+                    debug!("Added MCP server configuration: {}", config.name);
+                }
+                Err(e) => {
+                    warn!("Failed to add MCP server '{}': {}", config.name, e);
+                }
             }
         }
 
-        // Start all enabled servers
-        if let Err(e) = manager_guard.start_all_enabled_servers().await {
-            log::error!("Failed to start MCP servers: {}", e);
+        drop(manager_guard); // Release lock before starting servers
+
+        if added_servers.is_empty() {
+            warn!("No MCP servers were successfully added");
+            return Ok(());
         }
 
-        drop(manager_guard);
+        // Start enabled servers concurrently with timeout
+        let enabled_servers: Vec<_> = added_servers.into_iter()
+            .filter(|config| config.enabled && config.auto_start)
+            .collect();
+
+        if !enabled_servers.is_empty() {
+            info!("Starting {} MCP servers with staggered startup to prevent race conditions", enabled_servers.len());
+
+            let manager = self.get_mcp_manager().await;
+            let mut successful_servers = Vec::new();
+            let mut failed_servers = Vec::new();
+
+            // Start servers one by one with delays to prevent resource conflicts
+            for (index, config) in enabled_servers.iter().enumerate() {
+                if index > 0 {
+                    // Add staggered delay between server starts (2 seconds each)
+                    tokio::time::sleep(Duration::from_millis(2000)).await;
+                }
+
+                info!("Starting MCP server {} of {}: '{}'", index + 1, enabled_servers.len(), config.name);
+
+                let manager_guard = manager.lock().await;
+                let start_result = tokio::time::timeout(
+                    Duration::from_secs(45), // Increased timeout for individual servers
+                    manager_guard.start_server(&config.id)
+                ).await;
+                drop(manager_guard);
+
+                match start_result {
+                    Ok(Ok(_)) => {
+                        info!("✅ MCP server '{}' started successfully", config.name);
+                        successful_servers.push(config.name.clone());
+
+                        // Give server additional time to fully initialize before starting next
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
+                    }
+                    Ok(Err(e)) => {
+                        warn!("❌ MCP server '{}' failed to start: {}", config.name, e);
+                        failed_servers.push(format!("{}: {}", config.name, e));
+                    }
+                    Err(_) => {
+                        warn!("⏰ MCP server '{}' startup timed out after 45s", config.name);
+                        failed_servers.push(format!("{}: timeout", config.name));
+                    }
+                }
+            }
+
+            info!("MCP initialization complete: {} succeeded, {} failed", successful_servers.len(), failed_servers.len());
+
+            if !failed_servers.is_empty() {
+                warn!("Failed MCP servers: {}", failed_servers.join(", "));
+            }
+        } else {
+            info!("No enabled MCP servers found to start");
+        }
+
+        // Sync tools once at the end
+        if let Err(e) = self.sync_mcp_tools().await {
+            warn!("Failed to sync MCP tools after initialization: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// Retry failed MCP servers with exponential backoff
+    pub async fn retry_failed_mcp_servers(&self) -> Result<(), String> {
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+
+        let statuses = manager_guard.get_server_statuses().await;
+        let failed_servers: Vec<String> = statuses.iter()
+            .filter_map(|(id, status)| {
+                match status {
+                    MCPServerStatus::Error(_) | MCPServerStatus::Timeout => Some(id.clone()),
+                    _ => None
+                }
+            })
+            .collect();
+
+        if failed_servers.is_empty() {
+            debug!("No failed MCP servers to retry");
+            return Ok(());
+        }
+
+        info!("Attempting to retry {} failed MCP servers", failed_servers.len());
+
+        let mut retry_count = 0;
+        for server_id in failed_servers {
+            // Each server manages its own backoff timing
+            match manager_guard.start_server(&server_id).await {
+                Ok(_) => {
+                    info!("✅ Successfully retried MCP server: {}", server_id);
+                    retry_count += 1;
+                }
+                Err(e) => {
+                    debug!("⏭️ MCP server {} not ready for retry: {}", server_id, e);
+                }
+            }
+        }
+
+        if retry_count > 0 {
+            info!("Retried {} MCP servers, syncing tools", retry_count);
+            drop(manager_guard);
+            self.sync_mcp_tools().await?;
+        } else {
+            drop(manager_guard);
+        }
+
         Ok(())
     }
 
@@ -760,81 +1014,272 @@ impl AppState {
         if let Ok(controller_guard) = self.browser_controller.try_lock() {
             if let Some(ref _controller) = *controller_guard {
                 // Just emit without trying to get app handle from controller
-                log::debug!("MCP tools updated, notifying frontend");
+                debug!("MCP tools updated, notifying frontend");
             }
         }
     }
 
-    /// Register a tool provider for MCP tool refresh notifications
-    pub fn register_tool_provider(&self, provider: Arc<tokio::sync::Mutex<LocalToolProvider>>) {
-        if let Ok(mut registry) = self.tool_provider_registry.lock() {
-            registry.push(provider);
-            log::debug!("Registered tool provider for MCP refresh notifications");
+    /// Emit MCP state update to frontend
+    pub async fn emit_mcp_state_update(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+
+        let servers = manager_guard.get_server_configs().await;
+        let statuses = manager_guard.get_server_statuses().await;
+        let tools = manager_guard.get_all_tools().await;
+
+        drop(manager_guard);
+
+        let payload = serde_json::json!({
+            "servers": servers,
+            "statuses": statuses,
+            "tools": tools
+        });
+
+        if let Err(e) = app_handle.emit("mcp_state_updated", payload) {
+            warn!("Failed to emit MCP state update: {}", e);
+            return Err(format!("Failed to emit MCP state update: {}", e));
         }
+
+        debug!("Emitted MCP state update to frontend");
+        Ok(())
+    }
+
+    /// Register a tool provider for MCP tool refresh notifications
+    pub fn register_tool_provider(&self, provider: Arc<tokio::sync::Mutex<LocalToolProvider>>) -> Result<(), String> {
+        let mut registry = self.tool_provider_registry.lock()
+            .map_err(|e| format!("Failed to acquire tool_provider_registry lock: {}", e))?;
+        registry.push(provider);
+        debug!("Registered tool provider for MCP refresh notifications");
+        Ok(())
     }
 
     /// Refresh all registered tool providers when MCP tools are updated
     pub async fn refresh_all_tool_providers(&self) -> Result<(), String> {
         let registry = {
-            if let Ok(registry_guard) = self.tool_provider_registry.lock() {
-                registry_guard.clone()
-            } else {
-                log::warn!("Failed to access tool provider registry");
-                return Ok(());
+            match self.tool_provider_registry.lock() {
+                Ok(registry_guard) => registry_guard.clone(),
+                Err(e) => {
+                    error!("Failed to access tool provider registry: {}", e);
+                    return Err(format!("Failed to access tool provider registry: {}", e));
+                }
             }
         };
 
-        log::info!(
+        info!(
             "Refreshing {} registered tool providers with updated MCP tools",
             registry.len()
         );
 
+        // FIXED: Use blocking locks to ensure all providers are refreshed
+        // Previously try_lock could skip busy providers, causing inconsistent state
         for provider_arc in registry.iter() {
-            if let Ok(mut provider) = provider_arc.try_lock() {
-                if let Err(e) = provider.refresh_mcp_tools().await {
-                    log::warn!("Failed to refresh MCP tools for tool provider: {}", e);
-                } else {
-                    log::debug!("Successfully refreshed MCP tools for tool provider");
+            match provider_arc.try_lock() {
+                Ok(mut provider) => {
+                    if let Err(e) = provider.refresh_mcp_tools().await {
+                        warn!("Failed to refresh MCP tools for tool provider: {}", e);
+                    } else {
+                        debug!("Successfully refreshed MCP tools for tool provider");
+                    }
                 }
-            } else {
-                log::warn!("Tool provider is busy, skipping MCP refresh");
+                Err(_) => {
+                    // Provider is busy, schedule retry instead of skipping
+                    warn!("Tool provider is busy, will retry MCP refresh in background");
+
+                    // Clone for background retry
+                    let provider_clone = provider_arc.clone();
+                    tokio::spawn(async move {
+                        // Wait a bit and retry
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        // FIXED: Use .lock().await instead of creating a Result pattern
+                        let mut provider = provider_clone.lock().await;
+                        if let Err(e) = provider.refresh_mcp_tools().await {
+                            error!("Background MCP refresh retry failed: {}", e);
+                        } else {
+                            debug!("Background MCP refresh retry succeeded");
+                        }
+                    });
+                }
             }
         }
 
         Ok(())
     }
 
+    /// Cleanup all MCP servers and resources
+    pub async fn cleanup_mcp_resources(&self) -> Result<(), String> {
+        info!("🧹 Cleaning up MCP resources...");
 
+        let mcp_manager = self.get_mcp_manager().await;
+        let manager_guard = mcp_manager.lock().await;
+
+        // Stop all servers
+        let configs = manager_guard.get_server_configs().await;
+        for config in configs {
+            if let Err(e) = manager_guard.stop_server(&config.id).await {
+                warn!("Failed to stop MCP server '{}': {}", config.name, e);
+            }
+        }
+
+        drop(manager_guard);
+        info!("✅ MCP resources cleaned up");
+        Ok(())
+    }
+
+    /// Initialize MCP servers with atomic deduplication
+    pub async fn initialize_mcp_servers_once(&self) -> Result<(), String> {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::sync::Mutex as AsyncMutex;
+
+        static INIT_FLAG: AtomicBool = AtomicBool::new(false);
+        static INIT_RESULT: std::sync::OnceLock<AsyncMutex<Option<Result<(), String>>>> = std::sync::OnceLock::new();
+
+        // Fast path: if already initialized, return immediately
+        if INIT_FLAG.load(Ordering::Acquire) {
+            let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
+            let guard = result_mutex.lock().await;
+            return guard.as_ref()
+                .ok_or_else(|| "MCP initialization result is None".to_string())?
+                .clone();
+        }
+
+        // Try to claim initialization responsibility
+        if INIT_FLAG.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            // We're responsible for initialization
+            info!("Starting MCP servers initialization (first time)");
+            let init_result = self.initialize_mcp_servers().await;
+
+            // Store the result
+            let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
+            let mut guard = result_mutex.lock().await;
+            *guard = Some(init_result.clone());
+
+            init_result
+        } else {
+            // Someone else is/was initializing, wait for their result
+            debug!("MCP servers initialization already in progress, waiting for result");
+            let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
+
+            // Wait for initialization to complete
+            loop {
+                let guard = result_mutex.lock().await;
+                if let Some(result) = guard.as_ref() {
+                    return result.clone();
+                }
+                drop(guard);
+
+                // Brief yield to avoid busy waiting
+                tokio::task::yield_now().await;
+            }
+        }
+    }
 
     // Dual content communication methods
 
     /// Set the last spoken content for TTS
-    pub fn set_last_spoken_content(&self, content: Option<String>) {
-        let mut spoken_guard = self.last_spoken_content.lock().unwrap();
+    pub fn set_last_spoken_content(&self, content: Option<String>) -> Result<(), String> {
+        let mut spoken_guard = self.last_spoken_content.lock()
+            .map_err(|e| format!("Failed to acquire last_spoken_content lock: {}", e))?;
         *spoken_guard = content;
+        Ok(())
     }
 
     /// Get the last spoken content for TTS
     pub fn get_last_spoken_content(&self) -> Option<String> {
-        let spoken_guard = self.last_spoken_content.lock().unwrap();
-        spoken_guard.clone()
+        self.last_spoken_content.lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|e| {
+                error!("Failed to get last spoken content: {}", e);
+                None // Safe fallback
+            })
     }
 
     /// Clear the last spoken content
-    pub fn clear_last_spoken_content(&self) {
-        let mut spoken_guard = self.last_spoken_content.lock().unwrap();
+    pub fn clear_last_spoken_content(&self) -> Result<(), String> {
+        let mut spoken_guard = self.last_spoken_content.lock()
+            .map_err(|e| format!("Failed to acquire last_spoken_content lock: {}", e))?;
         *spoken_guard = None;
+        Ok(())
     }
 
     // Debug mode methods
-    pub fn set_debug_mode(&self, enabled: bool) {
-        let mut debug_guard = self.debug_mode.lock().unwrap();
+    pub fn set_debug_mode(&self, enabled: bool) -> Result<(), String> {
+        let mut debug_guard = self.debug_mode.lock()
+            .map_err(|e| format!("Failed to acquire debug_mode lock: {}", e))?;
         *debug_guard = enabled;
+        Ok(())
     }
 
     pub fn is_debug_mode(&self) -> bool {
-        let debug_guard = self.debug_mode.lock().unwrap();
-        *debug_guard
+        self.debug_mode.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to check debug mode status: {}", e);
+                false // Safe fallback
+            })
+    }
+
+    // Methods for tool approval setting
+    pub fn set_tool_approval_required(&self, required: bool) -> Result<(), String> {
+        let mut approval_guard = self.tool_approval_required.lock()
+            .map_err(|e| format!("Failed to acquire tool_approval_required lock: {}", e))?;
+        *approval_guard = required;
+        Ok(())
+    }
+
+    pub fn is_tool_approval_required(&self) -> bool {
+        self.tool_approval_required.lock()
+            .map(|guard| *guard)
+            .unwrap_or_else(|e| {
+                error!("Failed to check tool approval requirement: {}", e);
+                false // Safe fallback
+            })
+    }
+
+    // Methods for managing tool approval requests
+    pub async fn add_pending_tool_approval(&self, request: ToolApprovalRequest) {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.insert(request.tool_id.clone(), request);
+    }
+
+    pub async fn approve_tool(&self, tool_id: &str) -> bool {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        if let Some(request) = pending_guard.get_mut(tool_id) {
+            request.approved = Some(true);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn deny_tool(&self, tool_id: &str) -> bool {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        if let Some(request) = pending_guard.get_mut(tool_id) {
+            request.approved = Some(false);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn get_tool_approval_status(&self, tool_id: &str) -> Option<bool> {
+        let pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.get(tool_id).and_then(|request| request.approved)
+    }
+
+    pub async fn remove_tool_approval(&self, tool_id: &str) -> Option<ToolApprovalRequest> {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.remove(tool_id)
+    }
+
+    pub async fn get_pending_tool_approvals(&self) -> Vec<ToolApprovalRequest> {
+        let pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.values().cloned().collect()
+    }
+
+    pub async fn clear_pending_tool_approvals(&self) {
+        let mut pending_guard = self.pending_tool_approvals.lock().await;
+        pending_guard.clear();
     }
 }
 
@@ -844,19 +1289,18 @@ pub(crate) fn update_undo_state(
     state: &AppState,
     file_path: PathBuf,
     previous_content: Option<String>,
-) {
-    // Safely handle potential lock poisoning
-    if let Ok(mut last_edited) = state.last_edited_file.lock() {
-        *last_edited = Some(file_path);
-    } else {
-        log::error!("Failed to acquire lock for last_edited_file - lock may be poisoned");
-    }
+) -> Result<(), String> {
+    // Safely handle potential lock poisoning with proper error handling
+    let mut last_edited = state.last_edited_file.lock()
+        .map_err(|e| format!("Failed to acquire last_edited_file lock: {}", e))?;
+    *last_edited = Some(file_path);
+    drop(last_edited);
 
-    if let Ok(mut previous) = state.previous_content.lock() {
-        *previous = Some(previous_content);
-    } else {
-        log::error!("Failed to acquire lock for previous_content - lock may be poisoned");
-    }
+    let mut previous = state.previous_content.lock()
+        .map_err(|e| format!("Failed to acquire previous_content lock: {}", e))?;
+    *previous = Some(previous_content);
+
+    Ok(())
 }
 
 // DesktopWrapper implementation moved to desktop_wrapper.rs
@@ -941,7 +1385,7 @@ mod tests {
         assert!(!state.are_permissions_checked());
         assert!(!state.is_cloud_enabled());
 
-        // Test Arc-wrapped values
+        // Test Arc-wrapped values - using unwrap in tests is acceptable
         {
             let tts_provider = state.tts_provider.lock().unwrap();
             assert_eq!(*tts_provider, "system");
@@ -973,7 +1417,7 @@ mod tests {
         assert!(state.get_current_agent_execution_id().is_none());
 
         // Mark as started
-        state.mark_agent_execution_started(execution_id.clone());
+        state.mark_agent_execution_started(execution_id.clone()).unwrap();
         assert!(state.is_agent_executing());
         assert_eq!(state.get_current_agent_execution_id(), Some(execution_id));
 
@@ -1043,7 +1487,7 @@ mod tests {
         assert!(!state.are_permissions_checked());
 
         // Mark as checked
-        state.mark_permissions_checked();
+        state.mark_permissions_checked().unwrap();
         assert!(state.are_permissions_checked());
     }
 
@@ -1136,7 +1580,7 @@ mod tests {
         };
 
         // Insert component
-        state.insert(test_component.clone());
+        state.insert(test_component.clone()).unwrap();
 
         // Retrieve component
         let retrieved = state.get::<TestComponent>();
@@ -1230,8 +1674,8 @@ mod tests {
         {
             let wake_words = state.always_listening_wake_words.lock().unwrap();
             assert_eq!(wake_words.len(), 2);
-            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[0].to_string()));
-            assert!(wake_words.contains(&app_identity::DEFAULT_WAKE_WORDS[1].to_string()));
+            assert!(wake_words.contains(&app::DEFAULT_WAKE_WORDS[0].to_string()));
+            assert!(wake_words.contains(&app::DEFAULT_WAKE_WORDS[1].to_string()));
         }
 
         // Update configuration
@@ -1274,7 +1718,7 @@ mod tests {
         let state2 = state1.clone();
 
         // Both should track the same agent execution state
-        state1.mark_agent_execution_started("test-123".to_string());
+        state1.mark_agent_execution_started("test-123".to_string()).unwrap();
         assert!(state2.is_agent_executing());
         assert_eq!(
             state2.get_current_agent_execution_id(),

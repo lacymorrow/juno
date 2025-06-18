@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -17,25 +18,35 @@ import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { SettingsSectionProps } from "../types";
+import { RotateCcw, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 export default function GeneralSettings({ settings }: SettingsSectionProps) {
   const [autoLaunchEnabled, setAutoLaunchEnabled] = useState(false);
   const [autoLaunchLoading, setAutoLaunchLoading] = useState(false);
+  const [restartOnboardingLoading, setRestartOnboardingLoading] =
+    useState(false);
+  const [onboardingInfo, setOnboardingInfo] = useState<any>(null);
 
-  // Load auto-launch status on component mount
+  // Load auto-launch status and onboarding info on component mount
   useEffect(() => {
-    const loadAutoLaunchStatus = async () => {
+    const loadInitialData = async () => {
       try {
+        // Load auto-launch status
         const enabled = await invoke<boolean>("is_autostart_enabled");
         setAutoLaunchEnabled(enabled);
+
+        // Load onboarding info
+        const info = await invoke("get_onboarding_info");
+        setOnboardingInfo(info);
       } catch (error) {
-        console.error("Failed to load auto-launch status:", error);
+        console.error("Failed to load initial data:", error);
         // Default to false if unable to determine status
         setAutoLaunchEnabled(false);
       }
     };
 
-    loadAutoLaunchStatus();
+    loadInitialData();
   }, []);
 
   const handleAutoLaunchChange = async (enabled: boolean) => {
@@ -62,6 +73,30 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
       setAutoLaunchEnabled(currentStatus);
     } finally {
       setAutoLaunchLoading(false);
+    }
+  };
+
+  const handleRestartOnboarding = async () => {
+    if (restartOnboardingLoading) return;
+
+    setRestartOnboardingLoading(true);
+
+    try {
+      await invoke("restart_onboarding");
+      toast.success("Onboarding restarted successfully", {
+        description: "The onboarding window has been opened",
+      });
+
+      // Refresh onboarding info
+      const info = await invoke("get_onboarding_info");
+      setOnboardingInfo(info);
+    } catch (error) {
+      console.error("Failed to restart onboarding:", error);
+      toast.error("Failed to restart onboarding", {
+        description: error as string,
+      });
+    } finally {
+      setRestartOnboardingLoading(false);
     }
   };
 
@@ -95,6 +130,59 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                 onCheckedChange={handleAutoLaunchChange}
                 disabled={autoLaunchLoading}
               />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-blue-500" />
+              Onboarding
+            </CardTitle>
+            <CardDescription>
+              Restart the onboarding flow to learn about Juno's features
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm font-medium">
+                  Restart Onboarding Flow
+                </Label>
+                <p className="text-xs text-gray-500">
+                  Go through the welcome guide and setup process again
+                  {onboardingInfo?.is_development_mode && (
+                    <span className="block text-blue-600 mt-1">
+                      Development mode: Onboarding always shows on restart
+                    </span>
+                  )}
+                </p>
+                {onboardingInfo?.completed_at && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Last completed:{" "}
+                    {new Date(onboardingInfo.completed_at).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+              <Button
+                onClick={handleRestartOnboarding}
+                disabled={restartOnboardingLoading}
+                variant="outline"
+                size="sm"
+              >
+                {restartOnboardingLoading ? (
+                  <>
+                    <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
+                    Restarting...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                    Restart Onboarding
+                  </>
+                )}
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -175,18 +263,16 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
                   <SelectValue placeholder="Select trigger mode" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="tap">
-                    Tap to Toggle (Default)
-                  </SelectItem>
-                  <SelectItem value="hold">
-                    Hold to Activate
-                  </SelectItem>
+                  <SelectItem value="tap">Tap to Toggle (Default)</SelectItem>
+                  <SelectItem value="hold">Hold to Activate</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-gray-500">
-                <strong>Tap to Toggle:</strong> Press and release to toggle agent mode on/off.
+                <strong>Tap to Toggle:</strong> Press and release to toggle
+                agent mode on/off.
                 <br />
-                <strong>Hold to Activate:</strong> Hold key to activate agent, release to stop (like dictation mode).
+                <strong>Hold to Activate:</strong> Hold key to activate agent,
+                release to stop (like dictation mode).
               </p>
             </div>
           </CardContent>

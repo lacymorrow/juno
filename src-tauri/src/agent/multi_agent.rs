@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tracing::{info, debug, warn, error};
+use tracing::{debug, warn};
 use uuid;
 
 use crate::agent::structs::{

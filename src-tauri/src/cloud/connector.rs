@@ -15,9 +15,8 @@ use serde_json::json;
 
 use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, WebSocketMessage, MessageType,
-    ConnectionState as CloudConnectionState, ResponseStatus, ResponseData,
 };
-use crate::constants::permission_types;
+use crate::constants::{permissions, api};
 
 /// Production-ready cloud connector using official Tauri WebSocket plugin
 #[derive(Debug)]
@@ -187,23 +186,43 @@ impl HardwareMonitor {
                     for line in output_str.lines() {
                         if line.contains("Pages free:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                free_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    free_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse free pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages active:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                active_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    active_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse active pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages inactive:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                inactive_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    inactive_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse inactive pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages speculative:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                speculative_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    speculative_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse speculative pages: {}", num_str);
+                                }
                             }
                         } else if line.contains("Pages wired down:") {
                             if let Some(num_str) = line.split(':').nth(1) {
-                                wired_pages = num_str.trim().trim_end_matches('.').parse().unwrap_or(0);
+                                if let Ok(parsed) = num_str.trim().trim_end_matches('.').parse() {
+                                    wired_pages = parsed;
+                                } else {
+                                    tracing::warn!("Failed to parse wired pages: {}", num_str);
+                                }
                             }
                         }
                     }
@@ -413,8 +432,8 @@ impl ProductionCloudConnector {
     /// Main connector loop
     async fn run_connector_loop(&self) {
         let mut retry_count = 0u32;
-        let max_retries = 10;
-        let base_delay = Duration::from_secs(2);
+        let max_retries = api::cloud_networking::MAX_CONNECTION_RETRIES;
+        let base_delay = Duration::from_millis(api::cloud_networking::BASE_RETRY_DELAY_MS);
 
         loop {
             // Check if we should connect
@@ -445,14 +464,14 @@ impl ProductionCloudConnector {
                         self.set_connection_state(ConnectorState::Reconnecting(retry_count)).await;
 
                         // Exponential backoff
-                        let delay = base_delay * 2_u32.pow(retry_count.min(5));
+                        let delay = base_delay * api::cloud_networking::BACKOFF_MULTIPLIER.pow(retry_count.min(api::cloud_networking::MAX_BACKOFF_EXPONENT));
                         info!("Retrying connection in {:?}", delay);
                         tokio::time::sleep(delay).await;
                     }
                 }
             } else {
                 // Wait before checking again
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(Duration::from_millis(api::cloud_networking::CONNECTION_CHECK_INTERVAL_MS)).await;
             }
         }
     }
@@ -513,7 +532,10 @@ impl ProductionCloudConnector {
         let auth_message = WebSocketMessage {
             message_type: MessageType::Auth,
             data: auth_data,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         };
 
         self.send_websocket_message(auth_message).await?;
@@ -607,7 +629,10 @@ impl ProductionCloudConnector {
         let command_message = WebSocketMessage {
             message_type: MessageType::Command,
             data: serde_json::to_value(command)?,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         };
 
         let result = self.send_websocket_message(command_message).await;
@@ -643,7 +668,10 @@ impl ProductionCloudConnector {
         let status_message = WebSocketMessage {
             message_type: MessageType::Status,
             data: serde_json::to_value(status)?,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         };
 
         self.send_websocket_message(status_message).await
@@ -673,7 +701,10 @@ impl ProductionCloudConnector {
                 let heartbeat = WebSocketMessage {
                     message_type: MessageType::Heartbeat,
                     data: json!({
-                        "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                        "timestamp": SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
                         "device_id": self.auth.get_credentials().map(|c| c.device_id.clone()).unwrap_or_default(),
                         "connection_stats": self.get_connection_stats().await,
                         "system_health": {
@@ -684,7 +715,10 @@ impl ProductionCloudConnector {
                             "performance": "optimal"
                         }
                     }),
-                    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
                 };
 
                 if let Err(e) = self.send_websocket_message(heartbeat).await {
@@ -750,7 +784,9 @@ impl ProductionCloudConnector {
         // Check if any agent is currently active
         if app_state.is_agent_executing() {
             Some("Agent interaction in progress".to_string())
-        } else if *app_state.dictation_active.lock().unwrap() {
+        } else if app_state.dictation_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or(false) {
             Some("Voice dictation active".to_string())
         } else {
             None
@@ -763,17 +799,16 @@ impl ProductionCloudConnector {
         let mut permissions = Vec::new();
 
         if app_state.is_desktop_available() {
-            permissions.push(permission_types::ACCESSIBILITY.to_string());
-            permissions.push(permission_types::SCREEN_RECORDING.to_string());
+            permissions.push(permissions::types::ACCESSIBILITY.to_string());
+            permissions.push(permissions::types::SCREEN_RECORDING.to_string());
         }
 
-        let voice_enabled = {
-            let always_listening = app_state.always_listening_active.lock().unwrap();
-            *always_listening
-        };
+        let voice_enabled = app_state.always_listening_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or(false);
 
         if voice_enabled {
-            permissions.push(permission_types::MICROPHONE.to_string());
+            permissions.push(permissions::types::MICROPHONE.to_string());
         }
 
         permissions
@@ -992,8 +1027,9 @@ PhysMem: 8192M used (1234M wired), 567M unused.
         {
             let result = HardwareMonitor::parse_cpu_usage(sample_output);
             assert!(result.is_some());
-            let cpu_usage = result.unwrap();
-            assert_eq!(cpu_usage, 23.84); // 15.38 + 8.46
+            if let Some(cpu_usage) = result {
+                assert_eq!(cpu_usage, 23.84); // 15.38 + 8.46
+            }
         }
     }
 
@@ -1016,8 +1052,9 @@ PhysMem: 8192M used (1234M wired), 567M unused.
         {
             let result = HardwareMonitor::parse_cpu_usage(different_output);
             assert!(result.is_some());
-            let cpu_usage = result.unwrap();
-            assert_eq!(cpu_usage, 18.0); // 5.2 + 12.8
+            if let Some(cpu_usage) = result {
+                assert_eq!(cpu_usage, 18.0); // 5.2 + 12.8
+            }
         }
     }
 }

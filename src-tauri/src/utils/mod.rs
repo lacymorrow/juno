@@ -1,6 +1,7 @@
 // Add coordinates module
 pub mod coordinates;
 pub mod command_macros;
+pub mod key_parsing;
 
 use computer_use_ai_sdk::Desktop;
 

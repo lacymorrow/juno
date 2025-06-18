@@ -1,0 +1,565 @@
+import { useEffect, useCallback, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
+import { stopTTS } from "@/lib/ttsService";
+import { isJsxContent } from "@/components/ui/jsx-message-renderer";
+import type { ChatMessage } from "@/components/ChatMessage";
+
+// Type definitions for backend events
+type SubmitQueryResult = {
+    text: string;
+    spoken_text?: string;
+    audio_base64?: string;
+    agent_state: string;
+    screenshot_base64?: string;
+};
+
+type BackendResponsePayload = {
+    query: string;
+    response: SubmitQueryResult;
+};
+
+type StreamingTextEvent = {
+    chunk: string;
+    message_id?: string;
+};
+
+type StreamStartEvent = {
+    message_id: string;
+};
+
+type StreamEndEvent = {
+    message_id: string;
+    complete_text: string;
+};
+
+interface AgentEventTauri {
+    type: string;
+    payload: {
+        content?: string;
+        tool_name?: string;
+        tool_args?: any;
+        tool_output?: any;
+        success?: boolean;
+        screenshot_base64?: string;
+        tool_category?: string;
+        notification_level?: string;
+        estimated_duration?: string;
+        [key: string]: any;
+    };
+}
+
+interface UseBackendEventsProps {
+    // Conversation management
+    addSystemMessage: (content: string) => void;
+    addAssistantMessage: (content: string, metadata?: Partial<ChatMessage>) => void;
+    setConversationWithPruning: (updateFn: React.SetStateAction<ChatMessage[]>) => void;
+
+    // Audio management
+    playAudioFromBase64: (base64Audio: string) => void;
+    stopCurrentAudio: () => void;
+
+    // State management
+    setIsProcessing: (processing: boolean) => void;
+    setServerStatus: (status: "connected" | "error" | "connecting") => void;
+    setUserHasScrolledUp: (scrolled: boolean) => void;
+
+    // Auto-scroll function
+    throttledAutoScroll: () => void;
+}
+
+// Simple debounce function
+function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    return (...args: Parameters<F>): void => {
+        if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+        }
+        timeoutId = setTimeout(() => func(...args), waitFor);
+    };
+}
+
+export function useBackendEvents({
+    addSystemMessage,
+    setConversationWithPruning,
+    playAudioFromBase64,
+    stopCurrentAudio,
+    setIsProcessing,
+    setServerStatus,
+    throttledAutoScroll,
+}: UseBackendEventsProps) {
+    const hasCheckedServer = useRef(false);
+
+    // Handle backend responses via event listener
+    const handleBackendResponse = useCallback(
+        debounce((payload: BackendResponsePayload) => {
+            console.log("Debounced handler executing for:", payload.query);
+            const { response } = payload;
+
+            // Check if we have any streaming assistant messages in progress or recently completed
+            setConversationWithPruning((prevConversation) => {
+                const hasStreamingMessage = prevConversation.some(
+                    (msg: ChatMessage) => msg.isStreaming && msg.role === "assistant"
+                );
+
+                // Check if this response matches a recently streamed message (to prevent duplicates)
+                const now = Date.now();
+                const isRecentlyStreamed = prevConversation.some(
+                    (msg: ChatMessage) =>
+                        msg.role === "assistant" &&
+                        msg.content === response.text &&
+                        msg.timestamp &&
+                        now - msg.timestamp < 2000 // Within last 2 seconds
+                );
+
+                // Only add assistant response message if we're not currently streaming
+                if (!hasStreamingMessage && !isRecentlyStreamed) {
+                    console.log("Adding assistant message from backend response");
+                    const assistantMessage: ChatMessage = {
+                        role: "assistant",
+                        content: response.text,
+                        isJsx: isJsxContent(response.text),
+                        screenshot_base64: response.screenshot_base64,
+                        timestamp: Date.now(),
+                    };
+
+                    // Play audio if available (only when not streaming)
+                    if (response.audio_base64) {
+                        playAudioFromBase64(response.audio_base64);
+                    }
+
+                    return [...prevConversation, assistantMessage];
+                } else {
+                    if (hasStreamingMessage) {
+                        console.log("Skipping assistant message addition - streaming in progress");
+                    } else if (isRecentlyStreamed) {
+                        console.log("Skipping assistant message addition - recently streamed duplicate");
+                    }
+                    return prevConversation;
+                }
+            });
+
+            // Reset processing state
+            setIsProcessing(false);
+        }, 100),
+        [setConversationWithPruning, playAudioFromBase64, setIsProcessing]
+    );
+
+    // Server status check (with duplicate prevention for React Strict Mode)
+    useEffect(() => {
+        const checkServer = async () => {
+            if (hasCheckedServer.current) return;
+            hasCheckedServer.current = true;
+
+            try {
+                const isConnected: boolean = await invoke("check_server_status");
+                if (isConnected) {
+                    setServerStatus("connected");
+                    addSystemMessage("Connected. Enter your query below.");
+                } else {
+                    setServerStatus("error");
+                    addSystemMessage("Failed to connect to backend. Please check logs.");
+                }
+            } catch (error) {
+                setServerStatus("error");
+                addSystemMessage(`Error connecting to backend: ${error}. Check console logs.`);
+            }
+        };
+        checkServer();
+    }, [setServerStatus, addSystemMessage]);
+
+    // Listen for responses broadcast from the backend
+    useEffect(() => {
+        let unlisten: (() => void) | undefined;
+
+        const setupListener = async () => {
+            unlisten = await listen<BackendResponsePayload>(
+                "backend-response",
+                (event) => {
+                    console.log("Received backend-response event (raw):", event.payload);
+                    handleBackendResponse(event.payload);
+                }
+            );
+        };
+
+        setupListener();
+        return () => unlisten?.();
+    }, [handleBackendResponse]);
+
+    // Listen for agent stopping events
+    useEffect(() => {
+        const unlisten = listen("agent-stopping", async () => {
+            console.log("Agent stopping event received - stopping TTS");
+            try {
+                await stopTTS((msg, level) =>
+                    console.log(`[TTS-${level || "info"}] ${msg}`)
+                );
+            } catch (error) {
+                console.error("Error stopping TTS:", error);
+            }
+        });
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, []);
+
+    // Listen for TTS audio ready events
+    useEffect(() => {
+        const unlisten = listen<{ audio_base64: string }>(
+            "tts-audio-ready",
+            (event) => {
+                console.log("TTS audio ready event received");
+                const { audio_base64 } = event.payload;
+                if (audio_base64) {
+                    playAudioFromBase64(audio_base64);
+                }
+            }
+        );
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [playAudioFromBase64]);
+
+    // Listen for TTS stop requests
+    useEffect(() => {
+        const unlisten = listen("tts-stop-requested", async () => {
+            console.log("TTS stop requested event received - stopping TTS immediately");
+            try {
+                stopCurrentAudio();
+                await stopTTS((msg, level) =>
+                    console.log(`[TTS-${level || "info"}] ${msg}`)
+                );
+            } catch (error) {
+                console.error("Error stopping TTS:", error);
+            }
+        });
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [stopCurrentAudio]);
+
+    // Listen for agent events (thinking, tool calls, etc.)
+    useEffect(() => {
+        const unlistenPromise = listen<AgentEventTauri>("agent-event", (event) => {
+            const { type, payload } = event.payload;
+            const currentTime = Date.now();
+
+            setConversationWithPruning((prev) => {
+                let newMessage: ChatMessage | null = null;
+
+                if (type === "thinking" && payload.content) {
+                    newMessage = {
+                        role: "thinking",
+                        content: payload.content || "Thinking...",
+                        timestamp: currentTime,
+                    };
+                } else if (type === "tool_call_request" && payload.tool_name) {
+                    newMessage = {
+                        role: "tool_call_request",
+                        tool_name: payload.tool_name,
+                        tool_args: payload.tool_args,
+                        content: payload.content || `Using tool: ${payload.tool_name}`,
+                        timestamp: currentTime,
+                    };
+                } else if (type === "tool_call_result" && payload.tool_name) {
+                    newMessage = {
+                        role: "tool_call_result",
+                        tool_name: payload.tool_name,
+                        tool_output: payload.tool_output,
+                        success: payload.success,
+                        content: payload.content ||
+                            (payload.success
+                                ? `Tool ${payload.tool_name} executed successfully.`
+                                : `Tool ${payload.tool_name} failed.`),
+                        screenshot_base64: payload.screenshot_base64,
+                        timestamp: currentTime,
+                    };
+                } else if (type === "generic_content" && payload.content) {
+                    newMessage = {
+                        role: "system",
+                        content: payload.content || "System message",
+                        timestamp: currentTime,
+                    };
+                }
+
+                if (newMessage) {
+                    return [...prev, newMessage];
+                }
+                return prev;
+            });
+        });
+
+        return () => {
+            unlistenPromise.then((unlistenFn) => unlistenFn());
+        };
+    }, [setConversationWithPruning]);
+
+    // Listen for streaming events
+    useEffect(() => {
+        const streamStartListener = listen<StreamStartEvent>(
+            "agent-stream-start",
+            (event) => {
+                console.log("Stream started:", event.payload);
+                const { message_id } = event.payload;
+
+                const streamingMessage: ChatMessage = {
+                    role: "assistant",
+                    content: "",
+                    timestamp: Date.now(),
+                    isStreaming: true,
+                    messageId: message_id,
+                };
+
+                setConversationWithPruning((prev) => [...prev, streamingMessage]);
+            }
+        );
+
+        const streamTextListener = listen<StreamingTextEvent>(
+            "agent-text-stream",
+            (event) => {
+                console.log("Stream text chunk:", event.payload);
+                const { chunk, message_id } = event.payload;
+
+                setConversationWithPruning((prev) =>
+                    prev.map((msg) => {
+                        if (msg.messageId === message_id && msg.isStreaming) {
+                            return {
+                                ...msg,
+                                content: msg.content + chunk,
+                            };
+                        }
+                        return msg;
+                    })
+                );
+
+                throttledAutoScroll();
+            }
+        );
+
+        const streamEndListener = listen<StreamEndEvent>(
+            "agent-stream-end",
+            (event) => {
+                console.log("Stream ended:", event.payload);
+                const { message_id, complete_text } = event.payload;
+
+                setConversationWithPruning((prev) =>
+                    prev.map((msg) => {
+                        if (msg.messageId === message_id && msg.isStreaming) {
+                            return {
+                                ...msg,
+                                content: complete_text,
+                                isJsx: isJsxContent(complete_text),
+                                isStreaming: false,
+                            };
+                        }
+                        return msg;
+                    })
+                );
+
+                setIsProcessing(false);
+            }
+        );
+
+        return () => {
+            streamStartListener.then((unlistenFn) => unlistenFn());
+            streamTextListener.then((unlistenFn) => unlistenFn());
+            streamEndListener.then((unlistenFn) => unlistenFn());
+        };
+    }, [setConversationWithPruning, throttledAutoScroll, setIsProcessing]);
+
+    // Enhanced agent event listener for dynamic tool notifications
+    useEffect(() => {
+        const unlistenAgentEvent = listen<AgentEventTauri>("agent-event", (event) => {
+            const { type: eventType, payload } = event.payload;
+
+            // Handle different event types with dynamic metadata
+            switch (eventType) {
+                case "tool_call_request": {
+                    const notificationLevel = payload.notification_level || "standard";
+
+                    if (notificationLevel !== "silent") {
+                        const message = payload.content || `🔧 Executing ${payload.tool_name}...`;
+                        const duration = getNotificationDuration(notificationLevel, payload.estimated_duration);
+
+                        toast.info(message, {
+                            duration,
+                            className: getNotificationClassName(payload.tool_category, "request"),
+                        });
+                    }
+                    break;
+                }
+
+                case "tool_call_result": {
+                    const notificationLevel = payload.notification_level || "standard";
+                    const success = payload.success ?? true;
+
+                    if (notificationLevel !== "silent") {
+                        const message = payload.content || (success ? `✅ Tool completed` : `❌ Tool failed`);
+                        const duration = getNotificationDuration(notificationLevel);
+                        const toastType = success ? "success" : "error";
+
+                        toast[toastType](message, {
+                            duration,
+                            className: getNotificationClassName(payload.tool_category, "result", success),
+                        });
+
+                        if (payload.screenshot_base64 && success) {
+                            toast.success("📸 Screenshot captured", {
+                                duration: 3000,
+                                className: "screenshot-notification",
+                            });
+                        }
+                    }
+                    break;
+                }
+
+                case "thinking": {
+                    if (payload.content) {
+                        toast.info(`💭 ${payload.content}`, {
+                            duration: 2000,
+                            className: "thinking-notification",
+                        });
+                    }
+                    break;
+                }
+
+                case "screenshot": {
+                    toast.success("📸 Screenshot captured", {
+                        duration: 3000,
+                        className: "screenshot-notification",
+                    });
+                    break;
+                }
+
+                case "generic_content": {
+                    if (payload.content) {
+                        toast.info(payload.content, {
+                            duration: 4000,
+                            className: "generic-content-notification",
+                        });
+                    }
+                    break;
+                }
+            }
+        });
+
+        return () => {
+            unlistenAgentEvent.then((unlisten) => unlisten());
+        };
+    }, []);
+
+    // Listen for agent error events
+    useEffect(() => {
+        const unlisten = listen<{
+            agent_state: string;
+            error_message: string;
+            original_query: string;
+        }>("agent-error", (event) => {
+            console.log("Agent error event received:", event.payload);
+            const { agent_state, error_message } = event.payload;
+
+            setIsProcessing(false);
+            addSystemMessage(`Agent ${agent_state.toLowerCase()}: ${error_message}`);
+        });
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [setIsProcessing, addSystemMessage]);
+
+    // Listen for comprehensive agent-stop-all events
+    useEffect(() => {
+        const unlisten = listen("agent-stop-all", async () => {
+            console.log("Agent stop all event received - performing comprehensive UI cleanup");
+            try {
+                await stopTTS((msg, level) =>
+                    console.log(`[Agent Stop All TTS-${level || "info"}] ${msg}`)
+                );
+                setIsProcessing(false);
+                stopCurrentAudio();
+                console.log("Agent stop all: UI cleanup completed successfully");
+            } catch (error) {
+                console.error("Error during agent stop all cleanup:", error);
+            }
+        });
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [setIsProcessing, stopCurrentAudio]);
+
+    // Listen for user message submitted events (from voice input)
+    useEffect(() => {
+        const unlisten = listen<{ content: string; timestamp: number }>(
+            "user-message-submitted",
+            (event) => {
+                console.log("User message submitted event received:", event.payload);
+                const { content, timestamp } = event.payload;
+
+                setConversationWithPruning((prev) => [
+                    ...prev,
+                    {
+                        role: "user",
+                        content,
+                        timestamp,
+                    }
+                ]);
+            }
+        );
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [setConversationWithPruning]);
+}
+
+// Helper functions for notifications
+function getNotificationDuration(notificationLevel: string, estimatedDuration?: string): number {
+    const baseDurations = {
+        minimal: 1500,
+        standard: 3000,
+        detailed: 5000,
+    };
+
+    const baseDuration = baseDurations[notificationLevel as keyof typeof baseDurations] || 3000;
+
+    if (estimatedDuration) {
+        const durationMultipliers = {
+            instant: 0.5,
+            short: 0.8,
+            medium: 1.0,
+            long: 1.5,
+        };
+        const multiplier = durationMultipliers[estimatedDuration as keyof typeof durationMultipliers] || 1.0;
+        return Math.round(baseDuration * multiplier);
+    }
+
+    return baseDuration;
+}
+
+function getNotificationClassName(
+    toolCategory?: string,
+    eventType?: string,
+    success?: boolean
+): string {
+    let className = "tool-notification";
+
+    if (toolCategory) {
+        className += ` ${toolCategory.toLowerCase()}-category`;
+    }
+
+    if (eventType) {
+        className += ` ${eventType}-event`;
+    }
+
+    if (eventType === "result" && success !== undefined) {
+        className += success ? " success-result" : " failure-result";
+    }
+
+    return className;
+}

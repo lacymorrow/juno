@@ -106,82 +106,91 @@ const WakeWordTesting: React.FC<WakeWordTestingProps> = ({
   }, []);
 
   const setupEventListeners = async () => {
-    // Listen for always listening events
-    const unlistenAlwaysListening = await listen<AlwaysListeningEvent>(
-      "always-listening-event",
-      (event) => {
-        const { type, payload } = event.payload;
-        const timestamp = new Date().toLocaleTimeString();
+    try {
+      // Listen for always listening events
+      const unlistenAlwaysListening = await listen<AlwaysListeningEvent>(
+        "always-listening-event",
+        (event) => {
+          const { type, payload } = event.payload;
+          const timestamp = new Date().toLocaleTimeString();
 
-        switch (type) {
-          case "started":
-            addEvent(`✅ Always listening started at ${timestamp}`);
-            setStatus((prev) => ({ ...prev, isActive: true }));
-            break;
-          case "stopped":
-            addEvent(`⏹️ Always listening stopped at ${timestamp}`);
-            setStatus((prev) => ({ ...prev, isActive: false }));
-            break;
-          case "wake_word_detected":
-            addEvent(
-              `🎯 Wake word detected: "${
-                payload?.word || "unknown"
-              }" at ${timestamp}`
-            );
-            setStatus((prev) => ({
-              ...prev,
-              lastActivation: timestamp,
-              activationCount: prev.activationCount + 1,
-            }));
-            break;
-          case "monitoring":
-            addEvent(`👁️ Entered monitoring state at ${timestamp}`);
-            break;
-          case "activated":
-            addEvent(`🔴 Voice activation detected at ${timestamp}`);
-            break;
-          case "error":
-            addEvent(
-              `❌ Error: ${payload?.message || "Unknown error"} at ${timestamp}`
-            );
-            break;
-          case "transcription_debug":
-            if (transcriptionDebugging && payload) {
-              const debugInfo: TranscriptionDebugInfo = payload;
+          switch (type) {
+            case "started":
+              addEvent(`✅ Always listening started at ${timestamp}`);
+              setStatus((prev) => ({ ...prev, isActive: true }));
+              break;
+            case "stopped":
+              addEvent(`⏹️ Always listening stopped at ${timestamp}`);
+              setStatus((prev) => ({ ...prev, isActive: false }));
+              break;
+            case "wake_word_detected":
               addEvent(
-                `🔍 Transcription: "${debugInfo.transcription}" (conf: ${
-                  debugInfo.confidence?.toFixed(2) || "N/A"
-                }, len: ${debugInfo.audio_length_ms}ms, vol: ${(
-                  debugInfo.volume_level * 100
-                ).toFixed(1)}%) at ${timestamp}`
+                `🎯 Wake word detected: "${
+                  payload?.word || "unknown"
+                }" at ${timestamp}`
               );
-              setRecentTranscriptions((prev) => [
-                debugInfo,
-                ...prev.slice(0, 9),
-              ]);
-            }
-            break;
-          case "audio_level":
-            if (audioLevelMonitoring && payload) {
-              setVolumeLevel(payload.level || 0);
-            }
-            break;
+              setStatus((prev) => ({
+                ...prev,
+                lastActivation: timestamp,
+                activationCount: prev.activationCount + 1,
+              }));
+              break;
+            case "monitoring":
+              addEvent(`👁️ Entered monitoring state at ${timestamp}`);
+              break;
+            case "activated":
+              addEvent(`🔴 Voice activation detected at ${timestamp}`);
+              break;
+            case "error":
+              addEvent(
+                `❌ Error: ${payload?.message || "Unknown error"} at ${timestamp}`
+              );
+              break;
+            case "transcription_debug":
+              if (transcriptionDebugging && payload) {
+                const debugInfo: TranscriptionDebugInfo = payload;
+                addEvent(
+                  `🔍 Transcription: "${debugInfo.transcription}" (conf: ${
+                    debugInfo.confidence?.toFixed(2) || "N/A"
+                  }, len: ${debugInfo.audio_length_ms}ms, vol: ${(
+                    debugInfo.volume_level * 100
+                  ).toFixed(1)}%) at ${timestamp}`
+                );
+                setRecentTranscriptions((prev) => [
+                  debugInfo,
+                  ...prev.slice(0, 9),
+                ]);
+              }
+              break;
+            case "audio_level":
+              if (audioLevelMonitoring && payload) {
+                setVolumeLevel(payload.level || 0);
+              }
+              break;
+          }
         }
-      }
-    );
+      );
 
-    // Listen for volume level updates (if available)
-    const unlistenVolume = await listen<{ level: number }>(
-      "always-listening-volume",
-      (event) => {
-        setVolumeLevel(event.payload.level);
-      }
-    );
+      // Listen for volume level updates (if available)
+      const unlistenVolume = await listen<{ level: number }>(
+        "always-listening-volume",
+        (event) => {
+          setVolumeLevel(event.payload.level);
+        }
+      );
 
-    return () => {
-      unlistenAlwaysListening();
-      unlistenVolume();
-    };
+      return () => {
+        if (typeof unlistenAlwaysListening === 'function') {
+          unlistenAlwaysListening();
+        }
+        if (typeof unlistenVolume === 'function') {
+          unlistenVolume();
+        }
+      };
+    } catch (error) {
+      console.error('Failed to setup event listeners:', error);
+      return () => {}; // Return a no-op function if setup fails
+    }
   };
 
   const addEvent = (event: string) => {

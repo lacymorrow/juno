@@ -1,9 +1,84 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, Listener};
+use tauri::{AppHandle, Emitter, Manager, Listener, State};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, info};
+use uuid::Uuid;
+use serde::{Deserialize, Serialize};
+use crate::constants::{timeouts, events};
+use crate::state::AppState;
+
+// Floating bar configuration structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FloatingBarConfig {
+    pub show_voice_indicator: bool,
+    pub enable_animations: bool,
+    pub auto_hide: bool,
+    pub auto_hide_delay: u32,
+    pub opacity: f32,
+}
+
+impl Default for FloatingBarConfig {
+    fn default() -> Self {
+        Self {
+            show_voice_indicator: true,
+            enable_animations: true,
+            auto_hide: false,
+            auto_hide_delay: crate::constants::timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
+            opacity: 0.95,
+        }
+    }
+}
+
+impl FloatingBarConfig {
+    /// Get configuration file path
+    fn get_config_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
+        let config_dir = app_handle
+            .path()
+            .app_config_dir()
+            .map_err(|e| format!("Failed to get app config directory: {}", e))?;
+
+        std::fs::create_dir_all(&config_dir)
+            .map_err(|e| format!("Failed to create config directory: {}", e))?;
+
+        Ok(config_dir.join("floating_bar_config.json"))
+    }
+
+    /// Save configuration to file
+    pub async fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let config_path = Self::get_config_path(app_handle)?;
+        let config_json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+        tokio::fs::write(&config_path, config_json)
+            .await
+            .map_err(|e| format!("Failed to write config file: {}", e))?;
+
+        debug!("Floating bar configuration saved to: {:?}", config_path);
+        Ok(())
+    }
+
+    /// Load configuration from file
+    pub async fn load(app_handle: &AppHandle) -> Result<Self, String> {
+        let config_path = Self::get_config_path(app_handle)?;
+
+        if !config_path.exists() {
+            debug!("Config file not found, using defaults: {:?}", config_path);
+            return Ok(Self::default());
+        }
+
+        let config_content = tokio::fs::read_to_string(&config_path)
+            .await
+            .map_err(|e| format!("Failed to read config file: {}", e))?;
+
+        let config: Self = serde_json::from_str(&config_content)
+            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+
+        debug!("Floating bar configuration loaded from: {:?}", config_path);
+        Ok(config)
+    }
+}
 
 // Bar states that match the frontend
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +146,7 @@ pub struct FloatingBarManager {
     audio_level: f32,
     voice_mode: String, // "idle", "agent", "dictation"
     app_handle: AppHandle,
+    current_transition_id: Option<String>,
 }
 
 impl FloatingBarManager {
@@ -88,6 +164,7 @@ impl FloatingBarManager {
             audio_level: 0.0,
             voice_mode: "idle".to_string(),
             app_handle,
+            current_transition_id: None,
         }
     }
 
@@ -134,7 +211,7 @@ impl FloatingBarManager {
         // After animation, transition to input
         let app_handle = self.app_handle.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(300)).await;
+            sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
                 manager.set_state(BarState::Input).await;
@@ -160,16 +237,26 @@ impl FloatingBarManager {
             if self.current_state == BarState::Default && !self.is_agent_working {
                 debug!("FloatingBarManager: Window gained focus, expanding to input state");
 
-                // Start expansion
+                // FIXED: Consolidated state transition to avoid race conditions
+                // First set expanding state, then schedule input state after animation
                 self.set_state(BarState::Expanding).await;
 
-                // After animation, transition to input
+                // Store transition target to prevent race conditions with other operations
+                let transition_id = Uuid::new_v4().to_string();
+                self.current_transition_id = Some(transition_id.clone());
+
+                // After animation, transition to input (if no other transitions happened)
                 let app_handle = self.app_handle.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(300)).await;
+                    sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
-                        manager.set_state(BarState::Input).await;
+
+                        // Only proceed if this is still the active transition
+                        if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                            manager.set_state(BarState::Input).await;
+                            manager.current_transition_id = None;
+                        }
                     }
                 });
             } else {
@@ -191,16 +278,26 @@ impl FloatingBarManager {
 
         // Only shrink if in input state and input is empty and agent is not working
         if self.current_state == BarState::Input && self.input_value.trim().is_empty() && !self.should_remain_expanded_for_status() {
+            // FIXED: Consolidated state transition to avoid race conditions
             self.set_state(BarState::Shrinking).await;
 
-            // After animation, return to default
+            // Store transition target to prevent race conditions with other operations
+            let transition_id = Uuid::new_v4().to_string();
+            self.current_transition_id = Some(transition_id.clone());
+
+            // After animation, return to default (if no other transitions happened)
             let app_handle = self.app_handle.clone();
             tokio::spawn(async move {
-                sleep(Duration::from_millis(300)).await;
+                sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                 if let Some(manager) = get_bar_manager(&app_handle).await {
                     let mut manager = manager.lock().await;
-                    manager.input_value.clear();
-                    manager.set_state(BarState::Default).await;
+
+                    // Only proceed if this is still the active transition
+                    if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                        manager.input_value.clear();
+                        manager.set_state(BarState::Default).await;
+                        manager.current_transition_id = None;
+                    }
                 }
             });
         }
@@ -229,33 +326,43 @@ impl FloatingBarManager {
         self.current_error = None;
         self.is_agent_working = true;
 
+        // FIXED: Consolidated state transition to avoid race conditions
         // Show success state briefly, then transition directly to loading (stay expanded)
         self.set_state(BarState::Success).await;
+
+        // Store transition target to prevent race conditions with other operations
+        let transition_id = Uuid::new_v4().to_string();
+        self.current_transition_id = Some(transition_id.clone());
 
         // Transition directly to loading without shrinking
         let app_handle = self.app_handle.clone();
         let query_for_agent = query.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(600)).await;
+            sleep(Duration::from_millis(timeouts::UI_SLIDE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
-                // Skip shrinking, go directly to loading to keep bar expanded
-                manager.set_state(BarState::Loading).await;
 
-                // Trigger the AI agent
-                let app_handle_for_agent = app_handle.clone();
-                tokio::spawn(async move {
-                    let app_handle_clone = app_handle_for_agent.clone();
-                    let state = app_handle_for_agent.state::<crate::state::AppState>();
-                    if let Err(e) = crate::anthropic::submit_query(query_for_agent, state, app_handle_clone).await {
-                        error!("Failed to submit query to AI agent: {}", e);
-                        // Handle the error by updating the floating bar
-                        if let Some(manager) = get_bar_manager(&app_handle).await {
-                            let mut manager = manager.lock().await;
-                            let _ = manager.handle_agent_completion("Failed", Some(e)).await;
+                // Only proceed if this is still the active transition
+                if manager.current_transition_id.as_ref() == Some(&transition_id) {
+                    // Skip shrinking, go directly to loading to keep bar expanded
+                    manager.set_state(BarState::Loading).await;
+                    manager.current_transition_id = None;
+
+                    // Trigger the AI agent
+                    let app_handle_for_agent = app_handle.clone();
+                    tokio::spawn(async move {
+                        let app_handle_clone = app_handle_for_agent.clone();
+                        let state = app_handle_for_agent.state::<crate::state::AppState>();
+                        if let Err(e) = crate::anthropic::submit_query(query_for_agent, state, app_handle_clone).await {
+                            error!("Failed to submit query to AI agent: {}", e);
+                            // Handle the error by updating the floating bar
+                            if let Some(manager) = get_bar_manager(&app_handle).await {
+                                let mut manager = manager.lock().await;
+                                let _ = manager.handle_agent_completion("Failed", Some(e)).await;
+                            }
                         }
-                    }
-                });
+                    });
+                }
             }
         });
 
@@ -274,17 +381,22 @@ impl FloatingBarManager {
         self.transcription_text.clear();
         self.spoken_text.clear();
 
+        // FIXED: Consolidated state transitions to avoid race conditions
+        // Store transition target to prevent race conditions with other operations
+        let transition_id = Uuid::new_v4().to_string();
+        self.current_transition_id = Some(transition_id.clone());
+
         match agent_state {
             "Finished" => {
                 self.set_state(BarState::Finishing).await;
 
+                // Schedule completion state transition without recursive manager access
                 let app_handle = self.app_handle.clone();
+                let transition_id_clone = transition_id.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(300)).await;
-                    if let Some(manager) = get_bar_manager(&app_handle).await {
-                        let mut manager = manager.lock().await;
-                        manager.set_state(BarState::Default).await;
-                    }
+                    sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
+                    // Emit event to complete transition instead of direct manager access
+                    let _ = app_handle.emit("floating-bar-complete-transition", transition_id_clone);
                 });
             }
             "Failed" | "Cancelled" => {
@@ -297,18 +409,18 @@ impl FloatingBarManager {
                 );
                 self.set_state(BarState::Error).await;
 
+                // Schedule error state cleanup without recursive manager access
                 let app_handle = self.app_handle.clone();
+                let transition_id_clone = transition_id.clone();
                 tokio::spawn(async move {
-                    sleep(Duration::from_millis(3000)).await;
-                    if let Some(manager) = get_bar_manager(&app_handle).await {
-                        let mut manager = manager.lock().await;
-                        manager.current_error = None;
-                        manager.set_state(BarState::Default).await;
-                    }
+                    sleep(Duration::from_millis(timeouts::UI_NOTIFICATION_DISPLAY_MS)).await;
+                    // Emit event to clear error state instead of direct manager access
+                    let _ = app_handle.emit("floating-bar-clear-error", transition_id_clone);
                 });
             }
             _ => {
                 self.set_state(BarState::Default).await;
+                self.current_transition_id = None;
             }
         }
 
@@ -448,8 +560,12 @@ impl FloatingBarManager {
         debug!("FloatingBarManager: Handling agent cancelled");
         self.is_agent_working = false;
         self.voice_mode = "idle".to_string();
+        self.is_dictation_mode = false; // Also reset dictation mode
         // Clear any transcription text and return to default
         self.transcription_text.clear();
+        self.input_value.clear(); // Clear any input value
+        self.last_submitted_value.clear(); // Clear submitted value
+        self.current_error = None; // Clear any errors
         self.set_state(BarState::Default).await;
         Ok(())
     }
@@ -513,6 +629,112 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
             let mut manager = manager.lock().await;
             if let Err(e) = manager.handle_agent_cancelled().await {
                 error!("Failed to handle agent cancelled: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-processing-complete to reset state
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-processing-complete", move |_event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            if let Err(e) = manager.handle_agent_completion("Finished", None).await {
+                error!("Failed to handle agent completion: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-processing-error to reset state
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-processing-error", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            let error_message = event.payload().to_string();
+            if let Err(e) = manager.handle_agent_completion("Failed", Some(error_message)).await {
+                error!("Failed to handle agent error: {}", e);
+            }
+        });
+    });
+
+    // Listen for agent-stopping to reset state
+    let manager_clone = manager.clone();
+    app_handle.listen("agent-stopping", move |_event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+            if let Err(e) = manager.handle_agent_stopped().await {
+                error!("Failed to handle agent stopping: {}", e);
+            }
+        });
+    });
+
+    // Listen for voice-transcription:final-result to handle dictation completion
+    let manager_clone = manager.clone();
+    app_handle.listen("voice-transcription:final-result", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+
+            // Parse the final result to extract query text
+            let payload_str = event.payload();
+            let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
+                Ok(payload_json) => {
+                    payload_json.get("text")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                }
+                Err(_) => None,
+            };
+
+            if let Err(e) = manager.handle_dictation_finished(extracted_text).await {
+                error!("Failed to handle dictation finished: {}", e);
+            }
+        });
+    });
+
+        // Listen for error state cleanup
+    let manager_clone = manager.clone();
+    app_handle.listen("floating-bar-clear-error", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+
+            // Parse transition ID from event payload
+            let transition_id = if let Ok(payload) = serde_json::from_str::<String>(event.payload()) {
+                Some(payload)
+            } else {
+                None
+            };
+
+            // Only proceed if this is still the active transition
+            if manager.current_transition_id.as_ref() == transition_id.as_ref() {
+                manager.current_error = None;
+                manager.set_state(BarState::Default).await;
+                manager.current_transition_id = None;
+            }
+        });
+    });
+
+    // Listen for completion state transition
+    let manager_clone = manager.clone();
+    app_handle.listen("floating-bar-complete-transition", move |event| {
+        let manager = manager_clone.clone();
+        tokio::spawn(async move {
+            let mut manager = manager.lock().await;
+
+            // Parse transition ID from event payload
+            let transition_id = if let Ok(payload) = serde_json::from_str::<String>(event.payload()) {
+                Some(payload)
+            } else {
+                None
+            };
+
+            // Only proceed if this is still the active transition
+            if manager.current_transition_id.as_ref() == transition_id.as_ref() {
+                manager.set_state(BarState::Default).await;
+                manager.current_transition_id = None;
             }
         });
     });
@@ -685,4 +907,44 @@ pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
             error!("Failed to handle agent cancelled: {}", e);
         }
     }
+}
+
+// Configuration commands
+
+/// Get the current floating bar configuration
+#[tauri::command]
+pub async fn get_floating_bar_config(
+    app_handle: AppHandle,
+) -> Result<FloatingBarConfig, String> {
+    info!("Getting floating bar configuration");
+
+    match FloatingBarConfig::load(&app_handle).await {
+        Ok(config) => {
+            debug!("Successfully loaded floating bar config: {:?}", config);
+            Ok(config)
+        },
+        Err(e) => {
+            warn!("Failed to load floating bar config, using defaults: {}", e);
+            Ok(FloatingBarConfig::default())
+        }
+    }
+}
+
+/// Set the floating bar configuration
+#[tauri::command]
+pub async fn set_floating_bar_config(
+    app_handle: AppHandle,
+    config: FloatingBarConfig,
+) -> Result<(), String> {
+    info!("Setting floating bar configuration: {:?}", config);
+
+    config.save(&app_handle).await?;
+
+    // Emit event to notify frontend of config change
+    if let Err(e) = app_handle.emit("floating-bar-config-changed", &config) {
+        warn!("Failed to emit config change event: {}", e);
+    }
+
+    info!("Floating bar configuration updated successfully");
+    Ok(())
 }

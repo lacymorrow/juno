@@ -5,13 +5,16 @@ import App from "./App";
 import { FloatingBar } from "./components/FloatingBar";
 import ModularSettingsWindow from "./components/settings/ModularSettingsWindow";
 import { Toaster } from "./components/ui/sonner";
+import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import "./styles/globals.css";
+// import SettingsWindow from "./components/OLD-SettingsWindow";
+// import Settings from "./components/OLD-Settings";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <>
+    <VoiceProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<App />} />
@@ -21,7 +24,17 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           <Route path="/onboarding" element={<OnboardingWindow />} />
         </Routes>
       </BrowserRouter>
-      <Toaster />
-    </>
+      {/* Toast notifications */}
+      <Toaster
+        position="top-center"
+        expand={true}
+        richColors={true}
+        closeButton={true}
+        duration={3000}
+        style={{
+          fontSize: "14px",
+        }}
+      />
+    </VoiceProvider>
   </React.StrictMode>
 );

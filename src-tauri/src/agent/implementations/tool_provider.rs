@@ -438,7 +438,7 @@ impl LocalToolProvider {
     /// Determine recovery strategy based on error class and history
     async fn determine_recovery_strategy(&self,
         error_class: ErrorClass,
-        tool_name: &str,
+        _tool_name: &str,
         retry_count: u32
     ) -> RecoveryStrategy {
         if retry_count >= self.recovery_config.max_retries {
@@ -708,10 +708,22 @@ impl LocalToolProvider {
         match execution_result {
             Ok(result) => result,
             Err(_) => {
-                Err(AgentError::ToolError(format!(
+                // Timeout occurred - create a proper timeout error with the correct tool call ID
+                let timeout_error = format!(
                     "Tool '{}' execution timed out after {:?}",
                     tool_name, timeout_duration
-                )))
+                );
+
+                // Return a proper ToolResult with timeout error instead of AgentError
+                // This ensures the conversation remains consistent
+                Ok(ToolResult {
+                    call_id: tool_call.id.clone(), // Use the original tool call ID
+                    output: serde_json::json!({
+                        "error": timeout_error,
+                        "timeout": true,
+                        "duration_seconds": timeout_duration.as_secs()
+                    }),
+                })
             }
         }
     }

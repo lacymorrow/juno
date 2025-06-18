@@ -1,36 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 // Import necessary external crates and standard library items
-use clap::Parser;
-use computer_use_ai_sdk::Desktop;
 use std::env;
 use std::sync::Arc;
 use tauri::{
-    Manager, // WindowEvent, // Removed WindowEvent
-    menu::{MenuItemKind, Menu, PredefinedMenuItem, SubmenuBuilder}, // Added PredefinedMenuItem, SubmenuBuilder
-    tray::{TrayIconEvent, MouseButton, MouseButtonState, TrayIconBuilder}, // Ensured TrayIconBuilder
-    image::Image as TauriImage, // Use tauri::image::Image, aliased
-    AppHandle, // Keep AppHandle
-    Emitter, // Import Emitter trait for .emit()
-    Listener, // Added Listener for .listen()
-    WebviewWindow,
-    Wry,
+    AppHandle, Listener, Emitter, Manager,
 };
-use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, Modifiers as ShortcutModifiers}; // Use ShortcutState, remove ShortcutEvent, Add Modifiers
-use tracing_subscriber::{fmt, EnvFilter}; // Add fmt and EnvFilter
-use tracing::{info, warn, error}; // Import logging macros
+use tauri_plugin_global_shortcut::{Shortcut, Code, Modifiers as ShortcutModifiers}; // Global shortcuts
+use tracing::{info, error, warn};
 use std::sync::Mutex; // Added for VoiceController state access
 
 // macOS specific imports
-#[cfg(target_os = "macos")]
-use {
-    cocoa::{
-        appkit::{NSWindow, NSWindowCollectionBehavior},
-        base::{id as cocoa_id, nil, NO, YES, BOOL},
-        foundation::{NSRect},
-    },
-    objc::{class, msg_send, runtime::{Class, Object, Sel}, sel, sel_impl, declare::ClassDecl},
-};
+// macOS-specific imports moved to platform::macos module
 
 // Declare modules
 pub mod tts;
@@ -47,9 +28,16 @@ pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod cloud; // Cloud connectivity and remote control
 pub mod voice_control;
+pub mod menu; // Menu management for app and tray menus
+pub mod platform; // Platform-specific functionality (macOS, Windows, Linux)
+pub mod events; // Event handling system for shortcuts and voice transcription
+pub mod window_management; // Window operations, state management, and positioning
+pub mod startup; // Application startup, initialization, and bootstrapping
+pub mod state_management; // Application state management, initialization, and monitoring
+pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
+pub mod integration; // Application integration patterns, component coordination, and event listeners
 
-// Embed tray icon data directly in the binary - no file system dependencies
-const TRAY_ICON_DATA: &[u8] = include_bytes!("../icons/32x32.png");
+// Tray icon data is now handled by the menu::tray_menu module
 
 /// Parse a shortcut string into a Shortcut object
 /// Examples: "Alt+D" -> Shortcut, "Option+Space" -> Shortcut, "F1" -> Shortcut, "Ctrl+Shift+F12" -> Shortcut
@@ -236,7 +224,13 @@ use crate::commands::sound::{
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
-use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status, emergency_cleanup_dictation_state};
+use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
+use crate::commands::dictation_state_manager::{
+    force_reset_dictation_state,
+    get_dictation_comprehensive_status,
+    update_dictation_component_state,
+    transition_dictation_state
+};
 
 // Import tool configuration commands explicitly
 use crate::commands::{
@@ -248,6 +242,12 @@ use crate::commands::{
     is_tool_enabled,
     reset_tool_configuration,
     get_tool_configuration_summary,
+    set_tool_approval_required,
+    get_tool_approval_required,
+    approve_tool_execution,
+    deny_tool_execution,
+    get_pending_tool_approvals,
+    clear_pending_tool_approvals,
 };
 
 // Import keyboard shortcuts commands explicitly
@@ -273,12 +273,18 @@ use crate::commands::mcp::{
     get_mcp_tools,
     update_mcp_server,
     set_mcp_server_enabled,
+    toggle_mcp_server,
+    toggle_mcp_tool,
     test_mcp_server_connection,
     initialize_mcp_servers,
     get_mcp_diagnostics,
     restart_mcp_server_with_diagnostics,
     troubleshoot_mcp_issues,
     apply_mcp_quick_fixes,
+    retry_failed_mcp_servers,
+    get_mcp_system_diagnostics,
+    force_restart_all_mcp_servers,
+    check_mcp_prerequisites,
 };
 
 // Added for selector parsing
@@ -292,54 +298,7 @@ use commands::cloud::{
     execute_remote_command, get_cloud_connection_diagnostics,
 };
 
-/// Enhanced environment variable loading for both development and production builds
-fn load_environment_variables() {
-    // Try to load from current directory first (development)
-    match dotenvy::dotenv() {
-        Ok(path) => {
-            info!("Loaded environment variables from: {:?}", path);
-        }
-        Err(_) => {
-            // Try to load from common production locations
-            let mut potential_paths = vec![
-                std::path::PathBuf::from("./.env"),
-                std::path::PathBuf::from("../.env"),
-                std::path::PathBuf::from("../../.env"),
-            ];
-
-            // Add executable directory if available
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(parent) = exe.parent() {
-                    potential_paths.push(parent.join(".env"));
-                }
-            }
-
-            let mut loaded = false;
-            for path in potential_paths.iter() {
-                if path.exists() {
-                    match dotenvy::from_path(path) {
-                        Ok(_) => {
-                            info!("Loaded environment variables from: {:?}", path);
-                            loaded = true;
-                            break;
-                        }
-                        Err(e) => {
-                            warn!("Failed to load .env from {:?}: {}", path, e);
-                        }
-                    }
-                }
-            }
-
-            if !loaded {
-                warn!("No .env file found in any expected location");
-                info!("Environment variables will be loaded from system environment");
-            }
-        }
-    }
-
-    // Validate critical environment variables
-    validate_environment_variables();
-}
+// Environment loading functions moved to startup module
 
 /// Load environment variables from bundled .env file in production
 #[tauri::command]
@@ -353,7 +312,7 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
                 match dotenvy::from_path(&bundled_env_path) {
                     Ok(_) => {
                         info!("Successfully loaded environment variables from bundled .env file: {:?}", bundled_env_path);
-                        validate_environment_variables();
+                        startup::validate_environment_variables();
                         Ok(format!("Environment variables loaded from: {:?}", bundled_env_path))
                     }
                     Err(e) => {
@@ -376,37 +335,7 @@ async fn load_bundled_environment(app: AppHandle) -> Result<String, String> {
     }
 }
 
-/// Helper function to try getting app handle in early initialization
-fn try_get_app_handle() -> Option<AppHandle> {
-    // This will be None during early initialization, which is expected
-    None
-}
-
-/// Validate that critical environment variables are available
-fn validate_environment_variables() {
-    let critical_vars = [
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "ELEVENLABS_API_KEY",
-        "GEMINI_API_KEY",
-    ];
-
-    let mut missing_vars = Vec::new();
-
-    for var in critical_vars.iter() {
-        if env::var(var).is_err() {
-            missing_vars.push(*var);
-        }
-    }
-
-    if !missing_vars.is_empty() {
-        warn!("Missing environment variables: {:?}", missing_vars);
-        warn!("Some AI provider features may not work without proper API keys");
-        info!("You can set these in a .env file or as system environment variables");
-    } else {
-        info!("All critical environment variables are available");
-    }
-}
+// Environment validation functions moved to startup module
 
 /// Test environment variable loading (for debugging)
 #[tauri::command]
@@ -444,89 +373,14 @@ async fn test_environment_variables() -> Result<serde_json::Value, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize enhanced tracing with Slack/Apple Messages style formatting
-    fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
-        .with_target(false) // Hide target module names for cleaner output
-        .with_thread_ids(false) // Hide thread IDs for cleaner output
-        .with_ansi(true) // Enable colors for better readability
-        .compact() // Use compact format instead of full
-        .init();
-
-    // Enhanced environment loading for both development and production
-    load_environment_variables();
-
-    let cli = cli::Cli::parse();
-
-    // --- Initialize Desktop Automation Engine --- (Moved before CLI handling)
-    let desktop_instance_result = Desktop::new_with_auto_redirect(false, true, false);
-    let desktop_instance = match desktop_instance_result {
-        Ok(instance) => {
-            tracing::info!("Desktop Automation Engine initialized successfully with auto-redirect disabled");
-            Some(instance)
-        },
-        Err(e) => {
-            tracing::warn!("Failed to initialize Desktop Automation Engine: {}", e);
-            tracing::info!("App will start with limited functionality - desktop automation features will be disabled");
-            tracing::info!("The app will still open and show the permission flow to guide you through setup");
-
-            // Check if this is specifically a permission error
-            let error_str = e.to_string();
-            if error_str.contains("permission") || error_str.contains("accessibility") || error_str.contains("denied") {
-                tracing::info!("Permission-related error detected - the app's permission flow will guide you through setup");
-                tracing::info!("System Settings may have opened automatically to grant permissions");
-            } else {
-                tracing::warn!("Unexpected Desktop initialization error: {}", e);
-            }
-            None
+    // --- Execute Startup Sequence ---
+    let (desktop_arc, app_state) = match startup::StartupSequence::run() {
+        Ok((desktop_arc, app_state)) => (desktop_arc, app_state),
+        Err(_) => {
+            // CLI command was executed, exit early
+            return;
         }
     };
-
-    // --- Initialize Provider Settings ---
-    if let Err(e) = agent::providers::factory::BrainFactory::init() {
-        tracing::warn!("Failed to initialize AI provider settings: {}", e);
-        tracing::info!("Continuing with environment variables or fallback defaults");
-    } else {
-        tracing::info!("Provider settings initialized from configuration");
-    }
-
-    // --- Handle CLI Commands ---
-    // If handle_cli_commands returns true, it means a command was executed
-    // and the application should exit.
-    if let Some(desktop_ref) = desktop_instance.as_ref() {
-        if cli::runner::handle_cli_commands(&cli, desktop_ref) {
-            return; // Exit early if a CLI command was handled
-        }
-    } else {
-        // Handle CLI commands without desktop instance - create minimal instance for CLI only
-        // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
-        match Desktop::new(false, false) {
-            Ok(minimal_desktop) => {
-                if cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
-                    return;
-                }
-            },
-            Err(_) => {
-                // If CLI commands require desktop and can't create minimal instance,
-                // only handle non-desktop CLI commands
-                if cli::runner::handle_non_desktop_cli_commands(&cli) {
-                    return;
-                }
-            }
-        }
-    }
-
-    // --- Proceed with Tauri Application Launch if no CLI command was run ---
-    println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
-
-    // Create desktop_arc only if we have a valid instance
-    let desktop_arc = desktop_instance.map(|instance| Arc::new(instance));
-
-    // Create the AppState with optional desktop instance
-    let app_state = state::AppState::new(desktop_arc);
-
-    // Initialize shell state
-    commands::shell::init_shell_state(&app_state);
 
     // --- Tauri Application Builder ---
     let builder = tauri::Builder::default()
@@ -538,147 +392,7 @@ pub fn run() {
         .plugin(tauri_plugin_websocket::init()) // Add the WebSocket plugin for production cloud connector
         .plugin(tauri_plugin_store::Builder::default().build()) // Add the store plugin for persistent data
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &AppHandle, shortcut: &Shortcut, event| {
-            println!("[GlobalShortcut Triggered] Shortcut: {:?}, State: {:?}", shortcut, event.state());
-
-            let app_state = app.state::<state::AppState>();
-
-            // Get current keyboard shortcuts from state
-            let current_shortcuts = match app_state.keyboard_shortcuts.lock() {
-                Ok(shortcuts) => shortcuts.clone(),
-                Err(e) => {
-                    error!("Failed to get keyboard shortcuts: {}", e);
-                    return; // Exit early if we can't get shortcuts
-                }
-            };
-
-            // Create shortcut objects from current configuration
-            let escape_shortcut = Shortcut::new(None, Code::Escape);
-            let dictation_toggle_shortcut = parse_shortcut_string(&current_shortcuts.agent_mode_toggle);
-            let dictation_input_shortcut = parse_shortcut_string(&current_shortcuts.dictation_input);
-
-            // Handle escape key press
-            if escape_shortcut.id() == shortcut.id() {
-                info!("[GlobalShortcut] Escape shortcut triggered - attempting to stop agent");
-
-                // Stop TTS immediately when escape is pressed
-                info!("[GlobalShortcut] Stopping TTS audio playback");
-                crate::tts::stop_speech();
-                info!("[GlobalShortcut] TTS stop_speech() called");
-
-                // Also emit TTS stop event for frontend audio cleanup
-                if let Err(e) = app.emit("tts-stop-requested", ()) {
-                    warn!("Failed to emit TTS stop event: {}", e);
-                } else {
-                    info!("[GlobalShortcut] tts-stop-requested event emitted successfully");
-                }
-
-                // Check if agent is active and stop it
-                let app_state = app.state::<state::AppState>();
-
-                // Check if there's an ongoing cancellation already
-                let cancel_requested = *app_state.cancel_rx.borrow();
-                if !cancel_requested {
-                    info!("[GlobalShortcut] Stopping active agent task");
-                    // Use the signal_cancel method instead of direct field access
-                    app_state.signal_cancel();
-                }
-
-                // Check if dictation is active and stop it
-                if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                    // Check if dictation is active and stop it synchronously if possible
-                    if let Ok(voice_controller) = voice_controller_state.lock() {
-                        if voice_controller.is_dictating() {
-                            info!("[GlobalShortcut] Dictation active - will attempt to stop it");
-                            drop(voice_controller); // Release the lock before the async operation
-
-                            // Instead of spawning, try to stop dictation directly using the app handle
-                            // This is a simpler approach that avoids lifetime issues
-                            let _ = app.emit("stop_dictation", serde_json::Value::Null);
-                        }
-                    }
-                }
-
-                // Emit agent stopping event for any running AI agents
-                if let Err(e) = app.emit(constants::events::AGENT_STOPPING, ()) {
-                    eprintln!("[GlobalShortcut Error] Failed to emit {} event: {}", constants::events::AGENT_STOPPING, e);
-                }
-
-                // Immediately signal floating bar manager about cancellation for quick UI feedback
-                let app_handle_for_bar = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::commands::floating_bar::handle_backend_response(
-                        &app_handle_for_bar,
-                        "Cancelled",
-                        Some("Agent execution was cancelled via escape key.".to_string())
-                    ).await;
-                });
-
-                info!("[GlobalShortcut] Escape key handling completed");
-                return; // Exit early for escape shortcut
-            }
-
-            // Handle dictation toggle shortcut (Option+D / Alt+D)
-            if let Some(ref toggle_shortcut) = dictation_toggle_shortcut {
-                if shortcut == toggle_shortcut {
-                    info!("[GlobalShortcut] Agent toggle shortcut ({:?}) triggered with state {:?}.", shortcut, event.state());
-
-                    // Check if agent should handle this key event based on trigger mode
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let key_state = match event.state() {
-                            ShortcutState::Pressed => "pressed",
-                            ShortcutState::Released => "released",
-                        };
-
-                        let should_handle = crate::agent_monitor::should_handle_agent_key(&app_clone, key_state).await;
-
-                        if should_handle {
-                            // Get the current agent trigger mode
-                            let app_state = app_clone.state::<crate::state::AppState>();
-                            let trigger_mode = app_state.agent_trigger_mode.lock()
-                                .map(|mode| mode.clone())
-                                .unwrap_or(crate::state::AgentTriggerMode::Tap);
-
-                            match trigger_mode {
-                                crate::state::AgentTriggerMode::Tap => {
-                                    // Original tap behavior - emit toggle request on release
-                                    if event.state() == ShortcutState::Released {
-                                        info!("[GlobalShortcut] Agent tap mode - emitting toggle request");
-                                        if let Err(e) = app_clone.emit("toggle-dictation-request", ()) {
-                                            tracing::error!("[GlobalShortcut] Failed to emit toggle-dictation-request event: {}", e);
-                                        }
-                                    }
-                                },
-                                crate::state::AgentTriggerMode::Hold => {
-                                    // New hold behavior - handle press and release
-                                    if event.state() == ShortcutState::Pressed {
-                                        info!("[GlobalShortcut] Hold mode - calling on_agent_input_pressed");
-                                        crate::agent_monitor::on_agent_input_pressed().await;
-                                    } else if event.state() == ShortcutState::Released {
-                                        info!("[GlobalShortcut] Hold mode - calling on_agent_input_released");
-                                        crate::agent_monitor::on_agent_input_released(&app_clone).await;
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-
-            // Handle dictation input shortcut (Alt+Space / Option+Space)
-            if let Some(ref input_shortcut) = dictation_input_shortcut {
-                if shortcut == input_shortcut {
-                    // Handle dictation input with timing logic
-                    let app_clone = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        if event.state() == ShortcutState::Pressed {
-                            crate::dictation_monitor::on_dictation_input_pressed().await;
-                        } else if event.state() == ShortcutState::Released {
-                            crate::dictation_monitor::on_dictation_input_released(&app_clone).await;
-                        }
-                    });
-                }
-            }
+            events::shortcuts::handle_global_shortcut(app, shortcut, &event);
         }).build())
         .manage(app_state) // Manage the AppState
         .invoke_handler(tauri::generate_handler![
@@ -783,10 +497,14 @@ pub fn run() {
             // Dictation Settings Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
-            // Dictation Reset Commands
+            // Dictation Reset Commands (LEGACY)
             force_reset_dictation_transcription,
             get_dictation_transcription_status,
-            emergency_cleanup_dictation_state,
+            // New Dictation State Management Commands
+            force_reset_dictation_state,
+            get_dictation_comprehensive_status,
+            update_dictation_component_state,
+            transition_dictation_state,
             // Permissions Commands
             check_permissions_status,
             request_accessibility_permission,
@@ -846,17 +564,25 @@ pub fn run() {
             is_tool_enabled,
             reset_tool_configuration,
             get_tool_configuration_summary,
+            set_tool_approval_required,
+            get_tool_approval_required,
+            approve_tool_execution,
+            deny_tool_execution,
+            get_pending_tool_approvals,
+            clear_pending_tool_approvals,
             // Autostart Commands
             enable_autostart,
             disable_autostart,
             is_autostart_enabled,
             toggle_autostart,
             // Floating Bar Commands
-            floating_bar_click,
-            floating_bar_focus_change,
-            floating_bar_input_blur,
-            floating_bar_input_change,
-            floating_bar_submit,
+                    floating_bar_click,
+        floating_bar_focus_change,
+        floating_bar_input_blur,
+        floating_bar_input_change,
+        floating_bar_submit,
+        get_floating_bar_config,
+        set_floating_bar_config,
             // Floating Panel Commands
             set_floating_panel_click_through,
             enable_floating_panel_click_through,
@@ -905,12 +631,18 @@ pub fn run() {
             get_mcp_tools,
             update_mcp_server,
             set_mcp_server_enabled,
+            toggle_mcp_server,
+            toggle_mcp_tool,
             test_mcp_server_connection,
             initialize_mcp_servers,
             get_mcp_diagnostics,
             restart_mcp_server_with_diagnostics,
             troubleshoot_mcp_issues,
             apply_mcp_quick_fixes,
+            retry_failed_mcp_servers,
+            get_mcp_system_diagnostics,
+            force_restart_all_mcp_servers,
+            check_mcp_prerequisites,
             // Always Listening Commands
             start_always_listening_mode,
             stop_always_listening_mode,
@@ -932,13 +664,20 @@ pub fn run() {
             test_environment_variables,
             // TTS Commands
             anthropic::handle_tts_completion,
-            // Settings Window Commands
-            commands::open_settings_window,
-            commands::close_settings_window,
-            // Onboarding Window Commands
-            commands::open_onboarding_window,
-            commands::close_onboarding_window,
+            // Window Management Commands
+            window_management::open_settings_window,
+            window_management::close_settings_window,
+            window_management::open_main_window,
+            window_management::open_onboarding_window,
+            window_management::close_onboarding_window,
             // Onboarding Commands
+            commands::check_onboarding_status,
+            commands::complete_onboarding,
+            commands::skip_onboarding,
+            commands::reset_onboarding,
+            commands::restart_onboarding,
+            commands::get_onboarding_info,
+            commands::test_global_shortcuts_working,
 
 
             // Debug Mode Commands
@@ -975,1816 +714,45 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // --- Load Environment Variables from Bundled Resources ---
-            let env_app_handle = app_handle.clone();
+            // --- Initialize Application State Management ---
+            let state_app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = load_bundled_environment(env_app_handle).await {
-                    tracing::warn!("Failed to load bundled environment: {}", e);
-                    tracing::info!("Using environment variables from system environment or development .env file");
+                if let Err(e) = state_management::initialize_application_state(&state_app_handle).await {
+                    tracing::error!("Failed to initialize application state: {}", e);
                 } else {
-                    tracing::info!("Successfully loaded environment variables from bundled resources");
+                    tracing::info!("Application state management initialized successfully");
                 }
             });
 
-            // --- Load Keyboard Shortcuts from Configuration ---
-            let shortcuts_app_handle = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let app_state = shortcuts_app_handle.state::<state::AppState>();
-                if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&shortcuts_app_handle, &*app_state).await {
-                    tracing::warn!("Failed to load keyboard shortcuts from store: {}", e);
-                    tracing::info!("Using default keyboard shortcuts");
-                }
-            });
-
-            // --- Setup Application Menu ---
-            // Juno Application Menu
-            let about_menu_item = tauri::menu::MenuItemBuilder::new("About Juno")
-                .id(constants::app_menu_ids::ABOUT)
-                .build(app)?;
-
-            let check_updates_menu_item = tauri::menu::MenuItemBuilder::new("Check for Updates...")
-                .id(constants::app_menu_ids::CHECK_FOR_UPDATES)
-                .build(app)?;
-
-            let settings_menu_item = tauri::menu::MenuItemBuilder::new("Settings...")
-                .id(constants::app_menu_ids::SETTINGS)
-                .accelerator("CmdOrCtrl+,")
-                .build(app)?;
-
-            let app_submenu = tauri::menu::SubmenuBuilder::new(app, "Juno")
-                .item(&about_menu_item)
-                .separator()
-                .item(&check_updates_menu_item)
-                .separator()
-                .item(&settings_menu_item)
-                .separator()
-                .services()
-                .separator()
-                .hide()
-                .hide_others()
-                .quit()
-                .build()?;
-
-            // File Menu
-            let new_chat_menu_item = tauri::menu::MenuItemBuilder::new("New Chat")
-                .id(constants::app_menu_ids::NEW_CHAT)
-                .accelerator("CmdOrCtrl+N")
-                .build(app)?;
-
-            let clear_history_menu_item = tauri::menu::MenuItemBuilder::new("Clear History")
-                .id(constants::app_menu_ids::CLEAR_HISTORY)
-                .accelerator("CmdOrCtrl+Shift+Delete")
-                .build(app)?;
-
-            let import_chat_menu_item = tauri::menu::MenuItemBuilder::new("Import Chat...")
-                .id(constants::app_menu_ids::IMPORT_CHAT)
-                .accelerator("CmdOrCtrl+O")
-                .build(app)?;
-
-            let export_chat_menu_item = tauri::menu::MenuItemBuilder::new("Export Chat...")
-                .id(constants::app_menu_ids::EXPORT_CHAT)
-                .accelerator("CmdOrCtrl+S")
-                .build(app)?;
-
-            let file_submenu = SubmenuBuilder::new(app, "File")
-                .item(&new_chat_menu_item)
-                .separator()
-                .item(&clear_history_menu_item)
-                .separator()
-                .item(&import_chat_menu_item)
-                .item(&export_chat_menu_item)
-                .build()?;
-
-            // Edit Menu with standard keyboard shortcuts
-            let edit_submenu = SubmenuBuilder::new(app, "Edit")
-                .item(&PredefinedMenuItem::undo(app, None)?)
-                .item(&PredefinedMenuItem::redo(app, None)?)
-                .separator()
-                .item(&PredefinedMenuItem::cut(app, None)?)
-                .item(&PredefinedMenuItem::copy(app, None)?)
-                .item(&PredefinedMenuItem::paste(app, None)?)
-                .separator()
-                .item(&PredefinedMenuItem::select_all(app, None)?)
-                .build()?;
-
-            // View Menu
-            let toggle_floating_bar_menu_item = tauri::menu::MenuItemBuilder::new("Toggle Floating Bar")
-                .id(constants::app_menu_ids::TOGGLE_FLOATING_BAR)
-                .accelerator("CmdOrCtrl+B")
-                .build(app)?;
-
-            let toggle_dev_panel_menu_item = tauri::menu::MenuItemBuilder::new("Toggle Developer Panel")
-                .id(constants::app_menu_ids::TOGGLE_DEV_PANEL)
-                .accelerator("CmdOrCtrl+Shift+D")
-                .build(app)?;
-
-            let show_devtools_menu_item = tauri::menu::MenuItemBuilder::new("Developer Tools")
-                .id(constants::app_menu_ids::SHOW_DEVTOOLS)
-                .accelerator("CmdOrCtrl+Alt+I")
-                .build(app)?;
-
-            let show_permissions_menu_item = tauri::menu::MenuItemBuilder::new("Permissions...")
-                .id(constants::app_menu_ids::SHOW_PERMISSIONS)
-                .build(app)?;
-
-            let toggle_fullscreen_menu_item = tauri::menu::MenuItemBuilder::new("Toggle Full Screen")
-                .id(constants::app_menu_ids::TOGGLE_FULLSCREEN)
-                .accelerator("CmdOrCtrl+Ctrl+F")
-                .build(app)?;
-
-            let view_submenu = SubmenuBuilder::new(app, "View")
-                .item(&toggle_floating_bar_menu_item)
-                .item(&toggle_dev_panel_menu_item)
-                .separator()
-                .item(&show_devtools_menu_item)
-                .item(&show_permissions_menu_item)
-                .separator()
-                .item(&toggle_fullscreen_menu_item)
-                .build()?;
-
-            // Window Menu
-            let minimize_menu_item = tauri::menu::MenuItemBuilder::new("Minimize")
-                .id(constants::app_menu_ids::MINIMIZE)
-                .accelerator("CmdOrCtrl+M")
-                .build(app)?;
-
-            let zoom_menu_item = tauri::menu::MenuItemBuilder::new("Zoom")
-                .id(constants::app_menu_ids::ZOOM)
-                .build(app)?;
-
-            let bring_all_to_front_menu_item = tauri::menu::MenuItemBuilder::new("Bring All to Front")
-                .id(constants::app_menu_ids::BRING_ALL_TO_FRONT)
-                .build(app)?;
-
-            let window_submenu = SubmenuBuilder::new(app, "Window")
-                .item(&minimize_menu_item)
-                .item(&zoom_menu_item)
-                .separator()
-                .item(&bring_all_to_front_menu_item)
-                .build()?;
-
-            // Help Menu
-            let help_menu_item = tauri::menu::MenuItemBuilder::new("Juno Help")
-                .id(constants::app_menu_ids::HELP)
-                .accelerator("CmdOrCtrl+?")
-                .build(app)?;
-
-            let keyboard_shortcuts_menu_item = tauri::menu::MenuItemBuilder::new("Keyboard Shortcuts")
-                .id(constants::app_menu_ids::KEYBOARD_SHORTCUTS)
-                .accelerator("CmdOrCtrl+/")
-                .build(app)?;
-
-            let send_feedback_menu_item = tauri::menu::MenuItemBuilder::new("Send Feedback...")
-                .id(constants::app_menu_ids::SEND_FEEDBACK)
-                .build(app)?;
-
-            let report_issue_menu_item = tauri::menu::MenuItemBuilder::new("Report Issue...")
-                .id(constants::app_menu_ids::REPORT_ISSUE)
-                .build(app)?;
-
-            let visit_website_menu_item = tauri::menu::MenuItemBuilder::new("Visit Website")
-                .id(constants::app_menu_ids::VISIT_WEBSITE)
-                .build(app)?;
-
-            let help_submenu = SubmenuBuilder::new(app, "Help")
-                .item(&help_menu_item)
-                .item(&keyboard_shortcuts_menu_item)
-                .separator()
-                .item(&send_feedback_menu_item)
-                .item(&report_issue_menu_item)
-                .separator()
-                .item(&visit_website_menu_item)
-                .build()?;
-
-            let app_menu = tauri::menu::MenuBuilder::new(app)
-                .items(&[&app_submenu, &file_submenu, &edit_submenu, &view_submenu, &window_submenu, &help_submenu])
-                .build()?;
-
-            app.set_menu(app_menu)?;
-
-            // Listen for menu events
-            let app_handle_for_menu = app_handle.clone();
-            app.on_menu_event(move |_app, event| {
-                match event.id().as_ref() {
-                    // Juno Menu
-                    constants::app_menu_ids::ABOUT => {
-                        info!("[Menu] About menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit("about-requested", ()) {
-                            tracing::error!("[Menu] Failed to emit about event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::CHECK_FOR_UPDATES => {
-                        info!("[Menu] Check for Updates menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::UPDATE_CHECK_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit update check event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::SETTINGS => {
-                        info!("[Menu] Settings menu item clicked");
-                        let app_handle_clone = app_handle_for_menu.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = commands::open_settings_window(app_handle_clone).await {
-                                tracing::error!("[Menu] Failed to open settings window: {}", e);
-                            }
-                        });
-                    }
-
-                    // File Menu
-                    constants::app_menu_ids::NEW_CHAT => {
-                        info!("[Menu] New Chat menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::NEW_CHAT_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit new chat event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::CLEAR_HISTORY => {
-                        info!("[Menu] Clear History menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::CLEAR_HISTORY_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit clear history event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::IMPORT_CHAT => {
-                        info!("[Menu] Import Chat menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::IMPORT_CHAT_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit import chat event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::EXPORT_CHAT => {
-                        info!("[Menu] Export Chat menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::EXPORT_CHAT_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit export chat event: {}", e);
-                        }
-                    }
-
-                    // View Menu
-                    constants::app_menu_ids::TOGGLE_FLOATING_BAR => {
-                        info!("[Menu] Toggle Floating Bar menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit toggle floating bar event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::TOGGLE_DEV_PANEL => {
-                        info!("[Menu] Toggle Dev Panel menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::TOGGLE_DEV_PANEL_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit toggle dev panel event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::SHOW_DEVTOOLS => {
-                        info!("[Menu] Developer Tools menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::DEVTOOLS_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit devtools event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::SHOW_PERMISSIONS => {
-                        info!("[Menu] Permissions menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::PERMISSIONS_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit permissions event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::TOGGLE_FULLSCREEN => {
-                        info!("[Menu] Toggle Fullscreen menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::TOGGLE_FULLSCREEN_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit toggle fullscreen event: {}", e);
-                        }
-                    }
-
-                    // Window Menu
-                    constants::app_menu_ids::MINIMIZE => {
-                        info!("[Menu] Minimize menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::MINIMIZE_WINDOW_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit minimize event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::ZOOM => {
-                        info!("[Menu] Zoom menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::ZOOM_WINDOW_REQUESTED, ()) {
-                            tracing::error!("[Menu] Failed to emit zoom event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::BRING_ALL_TO_FRONT => {
-                        info!("[Menu] Bring All to Front menu item clicked");
-                        // This is handled automatically by macOS for most cases
-                        info!("[Menu] Bring All to Front executed");
-                    }
-
-                    // Help Menu
-                    constants::app_menu_ids::HELP => {
-                        info!("[Menu] Help menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::HELP_REQUESTED, "general") {
-                            tracing::error!("[Menu] Failed to emit help event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::KEYBOARD_SHORTCUTS => {
-                        info!("[Menu] Keyboard Shortcuts menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::HELP_REQUESTED, "shortcuts") {
-                            tracing::error!("[Menu] Failed to emit keyboard shortcuts event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::SEND_FEEDBACK => {
-                        info!("[Menu] Send Feedback menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::FEEDBACK_REQUESTED, "feedback") {
-                            tracing::error!("[Menu] Failed to emit feedback event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::REPORT_ISSUE => {
-                        info!("[Menu] Report Issue menu item clicked");
-                        if let Err(e) = app_handle_for_menu.emit(constants::events::FEEDBACK_REQUESTED, "issue") {
-                            tracing::error!("[Menu] Failed to emit report issue event: {}", e);
-                        }
-                    }
-                    constants::app_menu_ids::VISIT_WEBSITE => {
-                        info!("[Menu] Visit Website menu item clicked");
-                        // Open website in default browser
-                        if let Err(e) = open::that("https://github.com/juno-ai") {
-                            tracing::error!("[Menu] Failed to open website: {}", e);
-                        }
-                    }
-
-                    id if id == constants::tray_menu_ids::SETTINGS => {
-                        // Handle case where app menu receives tray menu settings ID
-                        info!("[Menu] Received tray menu settings ID, redirecting to settings");
-                        let app_handle_clone = app_handle_for_menu.clone();
-                        tauri::async_runtime::spawn(async move {
-                            if let Err(e) = commands::open_settings_window(app_handle_clone).await {
-                                tracing::error!("[Menu] Failed to open settings window: {}", e);
-                            }
-                        });
-                    }
-                    _ => {
-                        info!("[Menu] Unhandled menu event: {:?}", event.id());
-                    }
-                }
-            });
-
-            // --- Setup Enhanced Tray Icon ---
-            let tray_app_handle = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                // Load the embedded icon data - no file system dependencies
-                let loaded_tauri_icon = match image::load_from_memory(TRAY_ICON_DATA) {
-                    Ok(dynamic_image) => {
-                        let width = dynamic_image.width();
-                        let height = dynamic_image.height();
-                        let rgba_image = dynamic_image.to_rgba8();
-                        let bytes = rgba_image.into_raw();
-                        let img = TauriImage::new_owned(bytes, width, height);
-                        Some(img)
-                    },
-                    Err(e) => {
-                        eprintln!("[Tray Setup Error] Failed to load embedded tray icon: {}", e);
-                        None
-                    }
-                };
-
-                // Create enhanced tray menu with state-aware items
-                let tray_menu = create_state_aware_tray_menu(&tray_app_handle).await;
-
-                let mut tray_builder = TrayIconBuilder::with_id("main_tray")
-                    .on_menu_event(move |app_handle, event| {
-                        match event.id().as_ref() {
-                            constants::tray_menu_ids::QUIT => {
-                                println!("[Tray Menu] Quit requested.");
-                                app_handle.exit(0);
-                            }
-                            constants::tray_menu_ids::SHOW_MAIN_WINDOW => {
-                                println!("[Tray Menu] Show main window requested.");
-                                if let Some(window) = app_handle.get_webview_window(constants::window_labels::MAIN) {
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                    let _ = window.unminimize();
-                                    // Update tray menu after state change
-                                    let app_handle_clone = app_handle.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        update_tray_menu(&app_handle_clone).await;
-                                    });
-                                } else {
-                                    eprintln!("[Tray Menu Error] Main window not found.");
-                                }
-                            }
-                            constants::tray_menu_ids::HIDE_MAIN_WINDOW => {
-                                println!("[Tray Menu] Hide main window requested.");
-                                if let Some(window) = app_handle.get_webview_window(constants::window_labels::MAIN) {
-                                    let _ = window.hide();
-                                    // Update tray menu after state change
-                                    let app_handle_clone = app_handle.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        update_tray_menu(&app_handle_clone).await;
-                                    });
-                                } else {
-                                    eprintln!("[Tray Menu Error] Main window not found.");
-                                }
-                            }
-                            constants::tray_menu_ids::SHOW_FLOATING_BAR => {
-                                println!("[Tray Menu] Show floating bar requested.");
-                                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                                    if let Err(e) = window.set_ignore_cursor_events(false) {
-                                        eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                                    }
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                    // Update tray menu after state change
-                                    let app_handle_clone = app_handle.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        update_tray_menu(&app_handle_clone).await;
-                                    });
-                                } else {
-                                    eprintln!("[Tray Menu Error] Floating bar window not found.");
-                                }
-                            }
-                            constants::tray_menu_ids::HIDE_FLOATING_BAR => {
-                                println!("[Tray Menu] Hide floating bar requested.");
-                                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                                    let _ = window.hide();
-                                    if let Err(e) = window.set_ignore_cursor_events(true) {
-                                        eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                                    }
-                                    // Update tray menu after state change
-                                    let app_handle_clone = app_handle.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        update_tray_menu(&app_handle_clone).await;
-                                    });
-                                } else {
-                                    eprintln!("[Tray Menu Error] Floating bar window not found.");
-                                }
-                            }
-                            constants::tray_menu_ids::NEW_CHAT => {
-                                println!("[Tray Menu] New chat requested.");
-                                if let Err(e) = app_handle.emit(constants::events::NEW_CHAT_REQUESTED, ()) {
-                                    tracing::error!("[Tray Menu] Failed to emit new chat event: {}", e);
-                                }
-                            }
-                            constants::tray_menu_ids::TOGGLE_FLOATING_BAR => {
-                                println!("[Tray Menu] Toggle floating bar requested.");
-                                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                                    match window.is_visible() {
-                                        Ok(true) => {
-                                            let _ = window.hide();
-                                            if let Err(e) = window.set_ignore_cursor_events(true) {
-                                                eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                                            }
-                                        }
-                                        Ok(false) => {
-                                            if let Err(e) = window.set_ignore_cursor_events(false) {
-                                                eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                                            }
-                                            let _ = window.show();
-                                            let _ = window.set_focus();
-                                        }
-                                        Err(e) => eprintln!("[Tray Menu Error] Checking floating bar visibility: {}", e),
-                                    }
-                                    // Update tray menu after state change
-                                    let app_handle_clone = app_handle.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        update_tray_menu(&app_handle_clone).await;
-                                    });
-                                } else {
-                                    eprintln!("[Tray Menu Error] Floating bar window not found for toggle.");
-                                }
-                            }
-                            constants::tray_menu_ids::SHOW_DEVTOOLS => {
-                                info!("[Tray Menu] Developer Tools menu item clicked");
-                                if let Err(e) = app_handle.emit(constants::events::DEVTOOLS_REQUESTED, ()) {
-                                    tracing::error!("[Tray Menu] Failed to emit devtools-requested event: {}", e);
-                                }
-                            }
-                            constants::tray_menu_ids::SETTINGS => {
-                                info!("[Tray Menu] Settings menu item clicked");
-                                let app_handle_clone = app_handle.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    if let Err(e) = commands::open_settings_window(app_handle_clone).await {
-                                        tracing::error!("[Tray Menu] Failed to open settings window: {}", e);
-                                    }
-                                });
-                            }
-                            id if id == constants::app_menu_ids::SETTINGS => {
-                                // Handle case where tray menu receives app menu settings ID
-                                info!("[Tray Menu] Received app menu settings ID, redirecting to settings");
-                                let app_handle_clone = app_handle.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    if let Err(e) = commands::open_settings_window(app_handle_clone).await {
-                                        tracing::error!("[Tray Menu] Failed to open settings window: {}", e);
-                                    }
-                                });
-                            }
-                            _ => {
-                                println!("[Tray Menu] Unhandled tray menu event: {:?}", event.id());
-                            }
-                        }
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            println!("[Tray Icon] Left click detected.");
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                                match window.is_visible() {
-                                    Ok(true) => {
-                                        window.hide().unwrap();
-                                        if let Err(e) = window.set_ignore_cursor_events(true) {
-                                            eprintln!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                                        }
-                                        println!("[Tray Icon] Floating bar hidden and ignoring clicks.");
-                                    },
-                                    Ok(false) => {
-                                        if let Err(e) = window.set_ignore_cursor_events(false) {
-                                            eprintln!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                                        }
-                                        window.show().unwrap();
-                                        window.set_focus().unwrap();
-                                        println!("[Tray Icon] Floating bar shown, focused, and accepting clicks.");
-                                    },
-                                    Err(e) => eprintln!("[Tray Icon Error] checking floating bar visibility: {}", e),
-                                }
-                                // Update tray menu after state change
-                                let app_clone = app.clone();
-                                tauri::async_runtime::spawn(async move {
-                                    update_tray_menu(&app_clone).await;
-                                });
-                            } else {
-                                 eprintln!("[Tray Icon Error] Floating bar window not found on left click.");
-                            }
-                        }
-                    });
-
-                if let Some(icon_image) = loaded_tauri_icon {
-                    tray_builder = tray_builder.icon(icon_image);
-                }
-
-                if let Some(menu) = tray_menu {
-                    tray_builder = tray_builder.menu(&menu);
-                }
-
-                match tray_builder.build(&tray_app_handle) {
-                    Ok(_) => {
-                        println!("[Tray Setup] Enhanced tray icon configured successfully.");
-                    },
-                    Err(e) => eprintln!("[Tray Setup Error] Failed to build enhanced tray icon: {}", e),
-                }
-            });
-            // --- End of Tray Icon Setup ---
+            // --- Setup All Menus (App Menu + Tray Menu + Event Handling) ---
+            menu::setup_all_menus(&app_handle)?;
+            // --- End of Menu Setup ---
 
             // --- Old bar-state-changed listener removed - now handled by floating bar manager ---
 
-            // --- macOS Specific Setup for Floating Bar ---
-            #[cfg(target_os = "macos")]
-            {
-                info!("Applying macOS specific setup...");
-                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                    info!("Found floating-bar for macOS setup.");
-                    // --- Apply Standard Window Styling ---
-                    match window.ns_window() {
-                        Ok(ns_window_ptr) => {
-                            let ns_window = ns_window_ptr as cocoa_id;
-                            unsafe {
-                                // Keep window floating above others - Use integer value for Floating level
-                                ns_window.setLevel_(5); // kCGFloatingWindowLevelKey is typically 5
-                                // Allow clicks to pass through transparent areas
-                                ns_window.setOpaque_(NO);
-                                ns_window.setHasShadow_(NO); // Optional: remove shadow if desired
-                                // Keep it visible across spaces
-                                ns_window.setCollectionBehavior_(
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary | // Keeps it stationary during space switching
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle // Exclude from Cmd+` cycle
-                                );
+            // --- Platform-Specific Setup ---
+            platform::apply_macos_setup(&app_handle);
+            // --- End Platform-Specific Setup ---
 
-                                // Enable mouse events for floating bar only when it needs them
-                                // This fixes the issue where floating bar interferes with main window clicks
-                                #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-                                info!("macOS Setup: Floating bar mouse events configured.");
+            // --- Setup All Event Listeners ---
+            // Setup basic event listeners using the events module
+            events::handlers::setup_event_listeners(&app.handle());
 
-                                info!("macOS standard styling applied to floating-bar.");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Error getting NSWindow for styling floating-bar: {}", e);
-                        }
-                    }
-                     // --- Setup Mouse Tracking ---
-                    macos_tracking::setup_tracking_area(&window, app_handle.clone());
-
-                    // --- Ensure floating bar window is properly activated after setup ---
-                    let window_clone = window.clone();
-                    tauri::async_runtime::spawn(async move {
-                        // Small delay to ensure window setup is complete
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                        // Single, safe focus attempt without aggressive looping
-                        if let Err(e) = window_clone.set_focus() {
-                            warn!("Failed to set focus on floating bar window: {}", e);
-                        } else {
-                            info!("Floating bar window focus set successfully");
-                        }
-
-                        // Simple window show to ensure visibility - much safer than NSWindow API calls
-                        if let Err(e) = window_clone.show() {
-                            warn!("Failed to show floating bar window: {}", e);
-                        } else {
-                            info!("Floating bar window shown successfully");
-                        }
-                    });
-
-                } else {
-                    eprintln!("Warning: floating-bar window not found during macOS specific setup.");
-                }
-
-                // --- macOS Specific Setup for Floating Panel ---
-                if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_PANEL) {
-                    info!("Found floating-panel for macOS setup.");
-                    // --- Apply Standard Window Styling ---
-                    match window.ns_window() {
-                        Ok(ns_window_ptr) => {
-                            let ns_window = ns_window_ptr as cocoa_id;
-                            unsafe {
-                                // PRODUCTION READY: Use appropriate window level for accessory windows
-                                // NSFloatingWindowLevel (3) is better than hardcoded 5 for production
-                                ns_window.setLevel_(3); // NSFloatingWindowLevel - appropriate for accessory windows
-
-                                // PRODUCTION READY: Proper window configuration
-                                ns_window.setOpaque_(NO);
-                                ns_window.setHasShadow_(NO); // Clean look without system shadow
-                                ns_window.setBackgroundColor_(msg_send![class!(NSColor), clearColor]);
-
-                                // PRODUCTION READY: Proper macOS window behavior
-                                ns_window.setCollectionBehavior_(
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorStationary |
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorIgnoresCycle |
-                                    NSWindowCollectionBehavior::NSWindowCollectionBehaviorTransient // Mark as transient accessory
-                                );
-
-                                // PRODUCTION READY: Start with click-through enabled (default state)
-                                // Panel should be non-interactive by default, only interactive when hovered/expanded
-                                #[allow(unexpected_cfgs)]
-                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: YES];
-
-                                // PRODUCTION READY: Proper window role for accessibility
-                                #[allow(unexpected_cfgs)]
-                                let accessibility_role_string: cocoa_id = msg_send![class!(NSString), stringWithUTF8String: "AXFloatingWindow".as_ptr()];
-                                let _: () = msg_send![ns_window, setAccessibilityRole: accessibility_role_string];
-
-                                // PRODUCTION READY: Set proper window description for accessibility
-                                #[allow(unexpected_cfgs)]
-                                let accessibility_label_string: cocoa_id = msg_send![class!(NSString), stringWithUTF8String: "Juno AI Assistant Panel".as_ptr()];
-                                let _: () = msg_send![ns_window, setAccessibilityLabel: accessibility_label_string];
-
-                                info!("macOS Setup: Floating panel configured with production-ready settings.");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Error getting NSWindow for styling floating-panel: {}", e);
-                        }
-                    }
-                     // --- Setup Mouse Tracking for Floating Panel ---
-                    macos_tracking::setup_tracking_area(&window, app_handle.clone());
-
-                } else {
-                    eprintln!("Warning: floating-panel window not found during macOS specific setup.");
-                }
-
-                // --- Fix Main Window Focus Issue ---
-                // This is the key fix: ensure the main window is properly activated and can receive clicks
-                if let Some(main_window) = app_handle.get_webview_window(constants::window_labels::MAIN) {
-                    info!("Setting up main window for proper focus handling.");
-
-                    // Apply macOS-specific fixes for the main window
-                    match main_window.ns_window() {
-                        Ok(ns_window_ptr) => {
-                            let ns_window = ns_window_ptr as cocoa_id;
-                            unsafe {
-                                // Ensure main window can receive mouse events
-                                #[allow(unexpected_cfgs)]
-                                let _: BOOL = msg_send![ns_window, setIgnoresMouseEvents: NO];
-
-                                // Make sure the window accepts first responder status
-                                #[allow(unexpected_cfgs)]
-                                let _: BOOL = msg_send![ns_window, setAcceptsMouseMovedEvents: YES];
-
-                                info!("macOS Setup: Main window mouse events enabled.");
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Error getting NSWindow for main window setup: {}", e);
-                        }
-                    }
-
-                    // Activate the main window after a short delay to ensure it receives focus
-                    let main_window_clone = main_window.clone();
-                    tauri::async_runtime::spawn(async move {
-                        // Longer delay to ensure all window setup is complete
-                        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-
-                        // Ensure main window is visible and focused
-                        if let Err(e) = main_window_clone.show() {
-                            warn!("Failed to show main window: {}", e);
-                        }
-
-                        if let Err(e) = main_window_clone.set_focus() {
-                            warn!("Failed to set focus on main window: {}", e);
-                        } else {
-                            info!("Main window focus set successfully - clicks should now work immediately");
-                        }
-
-                        // Unminimize if needed
-                        if let Err(e) = main_window_clone.unminimize() {
-                            warn!("Failed to unminimize main window: {}", e);
-                        }
-                    });
-                } else {
-                    eprintln!("Warning: main window not found during macOS specific setup.");
-                }
+            // Setup comprehensive application integration (specialized listeners, component coordination, etc.)
+            if let Err(e) = integration::setup_application_integration(app) {
+                tracing::error!("Failed to setup application integration: {}", e);
+            } else {
+                tracing::info!("Application integration setup completed successfully");
             }
-            // --- End macOS Specific Setup ---
 
-            // --- Play Application Boot Sound ---
-            let app_handle_for_boot_sound = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                // Small delay to ensure UI is ready
-                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
-                let state = app_handle_for_boot_sound.state::<crate::state::AppState>();
-                let app_handle_clone = app_handle_for_boot_sound.clone();
-                if let Err(e) = crate::commands::sound::play_boot_sound(app_handle_clone, state).await {
-                    warn!("Failed to play boot sound: {}", e);
-                } else {
-                    info!("Boot sound played successfully from backend");
-                }
-            });
-            // --- End Boot Sound ---
 
-            // --- Initialize Multi-Agent Orchestrator ---
-            let app_handle_for_orchestrator = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::orchestrator::init_orchestrator_with_app_handle(app_handle_for_orchestrator).await {
-                    tracing::error!("[Setup] Failed to initialize orchestrator system: {}", e);
-                } else {
-                    tracing::info!("[Setup] Multi-agent orchestrator system initialized successfully");
-                }
-            });
+            // NOTE: All specialized event listeners (dictation, always listening, agent mode)
+            // are now handled by the integration module to prevent code duplication
 
-            // --- Initialize Cloud Client ---
-            let app_handle_for_cloud = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let app_state = app_handle_for_cloud.state::<crate::state::AppState>();
 
-                // Initialize cloud client configuration
-                if let Err(e) = app_state.init_cloud_client(&app_handle_for_cloud).await {
-                    tracing::error!("[Setup] Failed to initialize cloud client: {}", e);
-                } else {
-                    tracing::info!("[Setup] Cloud client configuration initialized");
 
-                    // Start cloud client if enabled
-                    if app_state.is_cloud_enabled() {
-                        if let Err(e) = app_state.start_cloud_client().await {
-                            tracing::error!("[Setup] Failed to start cloud client: {}", e);
-                        } else {
-                            tracing::info!("[Setup] Cloud client started successfully");
-                        }
-                    } else {
-                        tracing::info!("[Setup] Cloud connectivity is disabled in configuration");
-                    }
-                }
-            });
 
-            // --- Initialize Floating Bar Manager ---
-            let app_handle_for_bar_manager = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                commands::floating_bar::initialize_bar_manager(app_handle_for_bar_manager).await;
-                tracing::info!("[Setup] Floating bar manager initialized successfully");
-            });
-
-            let app_handle_shortcuts = app.handle().clone(); // Use a new clone for shortcuts
-            tauri::async_runtime::spawn(async move {
-                let state = app_handle_shortcuts.state::<state::AppState>();
-
-                // Load keyboard shortcuts from persistent storage
-                if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&app_handle_shortcuts, &state).await {
-                    tracing::warn!("Failed to load keyboard shortcuts: {} - using defaults", e);
-                }
-
-                // Load agent trigger mode from persistent storage
-                if let Err(e) = crate::commands::core::load_agent_trigger_mode_from_store(&app_handle_shortcuts, &state).await {
-                    tracing::warn!("Failed to load agent trigger mode: {} - using defaults", e);
-                }
-
-                // Register global shortcuts after loading configuration
-                if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(&app_handle_shortcuts, &state).await {
-                    tracing::warn!("Failed to register global shortcuts: {} - continuing without shortcuts", e);
-                }
-
-                // Initialize dictation input monitoring system
-                if let Err(e) = crate::dictation_monitor::init_dictation_input_monitoring(app_handle_shortcuts.clone()).await {
-                    tracing::error!("[Setup] Failed to initialize dictation input monitoring: {}", e);
-                } else {
-                    info!("[Setup] Dictation input monitoring system initialized successfully");
-                }
-
-                // Start agent monitor task for hold behavior (after app is fully running)
-                let app_handle_for_agent_monitor = app_handle_shortcuts.clone();
-                let _agent_monitor_handle = crate::agent_monitor::start_agent_monitor_task(app_handle_for_agent_monitor);
-                info!("[Setup] Agent monitor task started successfully");
-            });
-
-            // Listen for dictation started events from the plugin
-            let app_handle_for_listener = app.handle().clone();
-            app.listen("voice-transcription:dictation-started", move |event| {
-                info!("[Event] Received voice-transcription:dictation-started event");
-
-                // Register escape key for dictation cancellation
-                let app_handle_for_escape = app_handle_for_listener.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_for_escape).await {
-                        warn!("Failed to register escape key for dictation: {} - continuing without escape key cancellation", e);
-                    }
-                });
-
-                // Play voice start sound automatically when dictation starts
-                let app_handle_for_sound = app_handle_for_listener.clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = app_handle_for_sound.state::<crate::state::AppState>();
-                    if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_for_sound.clone(), state).await {
-                        warn!("Failed to play voice start sound: {}", e);
-                    }
-                });
-
-                // Check if this is dictation mode and update floating bar manager accordingly
-                let app_handle_clone = app_handle_for_listener.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Check if Dictation Mode is active
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    let is_dictation_mode = app_state.dictation_active.lock()
-                        .map(|active| *active)
-                        .unwrap_or(false);
-
-                    // If it's dictation mode, set the flag in floating bar manager first
-                    if is_dictation_mode {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_clone, true).await;
-                    }
-
-                    // Then handle the dictation started event
-                    commands::floating_bar::handle_dictation_started(&app_handle_clone).await;
-                });
-
-                // Rebroadcast the event as app-dictation-started for backward compatibility
-                if let Err(e) = app_handle_for_listener.emit("app-dictation-started", event.payload()) {
-                    tracing::error!("[Event] Failed to rebroadcast dictation-started event: {}", e);
-                }
-            });
-
-            // Listen for partial result events from the plugin
-            let app_handle_for_listener = app.handle().clone();
-            app.listen("voice-transcription:partial-result", move |event| {
-                info!("[Event] Received voice-transcription:partial-result event: {:?}", event.payload());
-
-                // Extract partial text and update floating bar manager
-                let payload_str = event.payload();
-                if let Ok(payload_json) = serde_json::from_str::<serde_json::Value>(payload_str) {
-                    if let Some(text_value) = payload_json.get("text") {
-                        if let Some(text) = text_value.as_str() {
-                            let app_handle_clone = app_handle_for_listener.clone();
-                            let partial_text = text.to_string();
-                            tauri::async_runtime::spawn(async move {
-                                commands::floating_bar::handle_dictation_partial(&app_handle_clone, partial_text).await;
-                            });
-                        }
-                    }
-                }
-
-                // Rebroadcast the event as app-dictation-partial-result for backward compatibility
-                if let Err(e) = app_handle_for_listener.emit("app-dictation-partial-result", event.payload()) {
-                    tracing::error!("[Event] Failed to rebroadcast partial-result event: {}", e);
-                }
-            });
-
-            // Listen for final result events from the plugin (for AI Agent Mode only)
-            let app_handle_for_listener = app.handle().clone();
-            app.listen("voice-transcription:final-result", move |event| {
-                info!("[Event] Received voice-transcription:final-result event: {:?}", event.payload());
-
-                // Check if Dictation Mode is active - if so, skip AI agent processing
-                // This prevents AI processing when user is doing immediate voice-to-text
-                let app_state = app_handle_for_listener.state::<state::AppState>();
-                let is_dictation_active = app_state.dictation_active.lock()
-                    .map(|active| *active)
-                    .unwrap_or(false);
-
-                // Extract text from payload for floating bar manager
-                let payload_str = event.payload();
-                let extracted_text = match serde_json::from_str::<serde_json::Value>(payload_str) {
-                    Ok(payload_json) => {
-                        payload_json.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
-                    }
-                    Err(_) => None,
-                };
-
-                if is_dictation_active {
-                    info!("[Event] Processing final result for Dictation Mode");
-
-                    // Update floating bar manager for dictation mode completion
-                    let app_handle_clone = app_handle_for_listener.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, None).await;
-                    });
-                    return; // Exit early, let dictation handler process this
-                }
-
-                info!("[Event] Processing final result for AI Agent Mode");
-
-                // Update floating bar manager for agent mode query
-                if let Some(text) = &extracted_text {
-                    let app_handle_clone = app_handle_for_listener.clone();
-                    let query_text = text.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(query_text)).await;
-                    });
-                }
-
-                // Transform the payload from { "text": "..." } to { "query": "..." } format expected by frontend
-                match serde_json::from_str::<serde_json::Value>(payload_str) {
-                    Ok(payload_json) => {
-                        if let Some(text_value) = payload_json.get("text") {
-                            // Transform { "text": "..." } to { "query": "..." }
-                            let transformed_payload = serde_json::json!({
-                                "query": text_value
-                            });
-                            if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", transformed_payload) {
-                                tracing::error!("[Event] Failed to rebroadcast final-result event: {}", e);
-                            }
-                        } else {
-                            tracing::error!("[Event] No 'text' field found in final-result payload: {}", payload_str);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("[Event] Failed to parse final-result payload as JSON: {}, payload: {}", e, payload_str);
-                        // Fallback: emit with original payload
-                        if let Err(e) = app_handle_for_listener.emit("app-dictation-finished", event.payload()) {
-                            tracing::error!("[Event] Failed to rebroadcast final-result event (fallback): {}", e);
-                        }
-                    }
-                }
-            });
-
-            // Listen for dictation stopped events from the plugin
-            let app_handle_for_listener = app.handle().clone();
-            app.listen("voice-transcription:dictation-stopped", move |event| {
-                info!("[Event] Received voice-transcription:dictation-stopped event");
-
-                // Unregister escape key as dictation is complete
-                let app_handle_for_escape = app_handle_for_listener.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle_for_escape).await {
-                        warn!("Failed to unregister escape key after dictation: {} - continuing anyway", e);
-                    }
-                });
-
-                // Play voice end sound automatically when dictation stops
-                let app_handle_for_sound = app_handle_for_listener.clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = app_handle_for_sound.state::<crate::state::AppState>();
-                    if let Err(e) = crate::commands::sound::play_voice_end_sound(app_handle_for_sound.clone(), state).await {
-                        warn!("Failed to play voice end sound: {}", e);
-                    }
-                });
-
-                // Rebroadcast the event as app-dictation-stopped for backward compatibility
-                if let Err(e) = app_handle_for_listener.emit("app-dictation-stopped", event.payload()) {
-                    tracing::error!("[Event] Failed to rebroadcast dictation-stopped event: {}", e);
-                }
-            });
-
-            // Listen for voice transcription error events
-            let app_handle_for_error_listener = app.handle().clone();
-            app.listen("voice-transcription:error", move |event| {
-                info!("[Event] Received voice-transcription:error event");
-
-                // Play voice error sound automatically when transcription fails
-                let app_handle_for_sound = app_handle_for_error_listener.clone();
-                tauri::async_runtime::spawn(async move {
-                    let state = app_handle_for_sound.state::<crate::state::AppState>();
-                    if let Err(e) = crate::commands::sound::play_voice_error_sound(app_handle_for_sound.clone(), state).await {
-                        warn!("Failed to play voice error sound: {}", e);
-                    }
-                });
-            });
-
-            // Listen for dictation transcription start events (immediate)
-            let app_handle_for_dictation_start = app.handle().clone();
-            app.listen("dictation-transcription-start", move |_event| {
-                info!("[Event] Received dictation-transcription-start event - starting immediate transcription");
-
-                // Start dictation using the voice transcription plugin command
-                let app_handle_clone = app_handle_for_dictation_start.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Mark this as Dictation Mode in AppState BEFORE starting transcription
-                    // This prevents race condition where voice controller emits events before we set the flag
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = true;
-                    }
-
-                    // Update floating bar manager to set dictation mode
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, true).await;
-                    });
-
-                    // Use the plugin command to start dictation only if controller exists
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::start_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(()) => {
-                                    info!("[Dictation Mode] Started immediate transcription successfully");
-
-                                    if let Err(e) = app_handle_clone.emit("dictation-active", true) {
-                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!("[Dictation Mode] Failed to start transcription: {}", e);
-
-                                    // Clean up state if start failed
-                                    let app_state = app_handle_clone.state::<state::AppState>();
-                                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                                        *dictation_active = false;
-                                    }
-
-                                    // Update floating bar manager
-                                    let app_handle_for_bar = app_handle_clone.clone();
-                                    tauri::async_runtime::spawn(async move {
-                                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                                    });
-
-                                    // Reset dictation input monitor state
-                                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                                    // Emit failure event to UI
-                                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot start transcription");
-
-                            // Clean up state since start failed
-                            let app_state = app_handle_clone.state::<state::AppState>();
-                            if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                                *dictation_active = false;
-                            }
-
-                            // Update floating bar manager
-                            let app_handle_for_bar = app_handle_clone.clone();
-                            tauri::async_runtime::spawn(async move {
-                                commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                            });
-
-                            // Reset dictation input monitor state
-                            crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                            // Emit failure event to UI
-                            if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                                tracing::error!("[Dictation Mode] Failed to emit dictation-active event after start failure: {}", e);
-                            }
-                        }
-                    }
-                });
-            });
-
-            // Listen for Dictation Mode commitment events (threshold reached)
-            let _app_handle_for_dictation_committed = app.handle().clone();
-            app.listen("dictation-committed", move |_event| {
-                info!("[Event] Received dictation-committed event - threshold reached");
-                // This event indicates the user has held dictation input long enough to commit to dictation
-                // We can use this for additional UI feedback if needed
-                // The transcription is already running, so we just acknowledge the commitment
-            });
-
-            // Listen for dictation transcription cancellation events (released before threshold)
-            let app_handle_for_dictation_cancel = app.handle().clone();
-            app.listen("dictation-transcription-cancel", move |_event| {
-                info!("[Event] Received dictation-transcription-cancel event - cancelling transcription");
-
-                // Stop dictation and discard results
-                let app_handle_clone = app_handle_for_dictation_cancel.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Force stop the voice controller with aggressive timeout
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            // Use shorter timeout for cancellation (more aggressive)
-                            let stop_with_timeout = tokio::time::timeout(
-                                std::time::Duration::from_millis(1500), // Reduced from 2000ms to 1500ms
-                                tauri_plugin_voice_transcription::commands::stop_dictation(
-                                    app_handle_clone.clone(),
-                                    controller_state
-                                )
-                            );
-
-                            match stop_with_timeout.await {
-                                Ok(Ok(_)) => {
-                                    info!("[Dictation Mode] Transcription cancelled successfully");
-                                }
-                                Ok(Err(e)) => {
-                                    error!("[Dictation Mode] Failed to cancel transcription: {}", e);
-                                    // Force cleanup even if stop failed
-                                }
-                                Err(_) => {
-                                    error!("[Dictation Mode] Transcription cancellation timed out - forcing cleanup");
-                                    // Force cleanup after timeout
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("[Dictation Mode] Voice controller not available - cannot cancel transcription");
-                        }
-                    }
-
-                    // Always clean up state regardless of stop_dictation result
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Reset dictation input monitor state immediately
-                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                    // Update floating bar manager
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                    });
-
-                    // Emit both dictation-active false and a specific cancellation event
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                    }
-
-                    // Emit specific cancellation complete event for UI feedback
-                    if let Err(e) = app_handle_clone.emit("dictation-cancelled", ()) {
-                        tracing::error!("[Dictation Mode] Failed to emit dictation-cancelled event: {}", e);
-                    }
-
-                    info!("[Dictation Mode] Cancellation cleanup completed");
-                });
-            });
-
-            // Listen for Dictation Mode stop events (normal completion)
-            let app_handle_for_dictation_stop = app.handle().clone();
-            app.listen("dictation-stop", move |_event| {
-                info!("[Event] Received dictation-stop event - completing dictation normally");
-
-                // Stop dictation using the voice transcription plugin command
-                let app_handle_clone = app_handle_for_dictation_stop.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Use the plugin command to stop dictation only if controller exists
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(_) => {
-                                    info!("[Dictation Mode] Completed dictation successfully");
-                                }
-                                Err(e) => {
-                                    tracing::error!("[Dictation Mode] Failed to stop dictation: {}", e);
-                                }
-                            }
-                        }
-                        None => {
-                            tracing::warn!("[Dictation Mode] Voice controller not available - cannot stop dictation");
-                        }
-                    }
-
-                    // Always clean up state regardless of stop_dictation result
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Update floating bar manager
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                    });
-
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                        tracing::error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                    }
-                });
-            });
-
-            // Listen for force stop events (timeout/stuck transcription)
-            let app_handle_for_force_stop = app.handle().clone();
-            app.listen("dictation-transcription-force-stop", move |_event| {
-                warn!("[Event] Received dictation-transcription-force-stop event - emergency cleanup");
-
-                let app_handle_clone = app_handle_for_force_stop.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Force stop the voice controller with timeout only if it exists
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            let stop_with_timeout = tokio::time::timeout(
-                                std::time::Duration::from_secs(2),
-                                tauri_plugin_voice_transcription::commands::stop_dictation(
-                                    app_handle_clone.clone(),
-                                    controller_state
-                                )
-                            );
-
-                            match stop_with_timeout.await {
-                                Ok(Ok(_)) => {
-                                    info!("[Dictation Mode] Force stop completed successfully");
-                                }
-                                Ok(Err(e)) => {
-                                    error!("[Dictation Mode] Force stop failed: {}", e);
-                                }
-                                Err(_) => {
-                                    error!("[Dictation Mode] Force stop timed out - controller may be deadlocked");
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("[Dictation Mode] Voice controller not available - cannot force stop");
-                        }
-                    }
-
-                    // Force clean up state
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Update floating bar manager
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                    });
-
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                    }
-                });
-            });
-
-            // Listen for force cleanup events (stuck state recovery)
-            let app_handle_for_force_cleanup = app.handle().clone();
-            app.listen("dictation-transcription-force-cleanup", move |_event| {
-                warn!("[Event] Received dictation-transcription-force-cleanup event - recovering stuck state");
-
-                let app_handle_clone = app_handle_for_force_cleanup.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Reset dictation input monitor state
-                    crate::dictation_monitor::force_reset_dictation_input_state().await;
-
-                    // Force clean up app state
-                    let app_state = app_handle_clone.state::<state::AppState>();
-                    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                        *dictation_active = false;
-                    }
-
-                    // Update floating bar manager
-                    let app_handle_for_bar = app_handle_clone.clone();
-                    tauri::async_runtime::spawn(async move {
-                        commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
-                    });
-
-                    // Emit cleanup complete event
-                    if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                        error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
-                    }
-
-                    info!("[Dictation Mode] Force cleanup completed");
-                });
-            });
-
-            // Listen for voice transcription final results specifically for Dictation Mode
-            let app_handle_for_dictation_result = app.handle().clone();
-            app.listen("voice-transcription:final-result", move |event| {
-                // Check if we're in Dictation Mode and handle immediate typing
-                let app_handle_clone = app_handle_for_dictation_result.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app_state = app_handle_clone.state::<state::AppState>();
-
-                    // Check if Dictation Mode is active
-                    let is_dictation_active = app_state.dictation_active.lock()
-                        .map(|active| *active)
-                        .unwrap_or(false);
-
-                    if is_dictation_active {
-                        info!("[Dictation Mode] Processing final result for immediate typing");
-
-                        // Parse the transcription result
-                        let payload_str = event.payload();
-                        match serde_json::from_str::<serde_json::Value>(payload_str) {
-                            Ok(payload_json) => {
-                                if let Some(text_value) = payload_json.get("text") {
-                                    if let Some(text) = text_value.as_str() {
-                                        // Only type if the text is not empty and not just whitespace
-                                        let trimmed_text = text.trim();
-                                        if !trimmed_text.is_empty() {
-                                            // Check if clipboard saving is enabled
-                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                                .map(|enabled| *enabled)
-                                                .unwrap_or(true); // Default to true if lock fails
-
-                                            // Store to clipboard if enabled
-                                            if clipboard_enabled {
-                                                match crate::commands::core::dev_set_clipboard(
-                                                    trimmed_text.to_string(),
-                                                    app_state.clone()
-                                                ).await {
-                                                    Ok(()) => {
-                                                        info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
-                                                    }
-                                                }
-                                            } else {
-                                                info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
-                                            }
-
-                                            // Then type the transcribed text immediately using the computer use tools
-                                            match crate::commands::keyboard::global_type_text(
-                                                trimmed_text.to_string(),
-                                                app_handle_clone.clone(),
-                                                app_state.clone()
-                                            ).await {
-                                                Ok(()) => {
-                                                    info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
-                                                }
-                                            }
-                                        } else {
-                                            info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("[Dictation Mode] Failed to parse final-result payload: {}", e);
-                            }
-                        }
-
-                        // Reset Dictation Mode state after processing
-                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                            *dictation_active = false;
-                        }
-
-                        // Emit state change event for UI
-                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
-                        }
-                    }
-                });
-            });
-
-            // Listen for always listening wake word activation
-            let app_handle_for_wake_word = app.handle().clone();
-            app.listen("always-listening:activated", move |_event| {
-                info!("[AlwaysListening] Wake word detected - preparing for agent activation");
-
-                let app_handle_clone = app_handle_for_wake_word.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Update floating bar to indicate agent mode is starting
-                    commands::floating_bar::handle_always_listening_change(&app_handle_clone, true).await;
-
-                    // Emit event to UI to show wake word was detected
-                    if let Err(e) = app_handle_clone.emit("always-listening:wake-word-detected", ()) {
-                        error!("[AlwaysListening] Failed to emit wake-word-detected event: {}", e);
-                    }
-
-                    info!("[AlwaysListening] Wake word activation handled - waiting for follow-up transcription");
-                });
-            });
-
-            // Listen for always listening transcription results (after wake word)
-            let app_handle_for_always_listening = app.handle().clone();
-            app.listen("always-listening:transcription", move |event| {
-                info!("[AlwaysListening] Received transcription after wake word: {:?}", event.payload());
-
-                let app_handle_clone = app_handle_for_always_listening.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app_state = app_handle_clone.state::<state::AppState>();
-
-                    // Check if Dictation Mode is active - skip if so
-                    let is_dictation_active = app_state.dictation_active.lock()
-                        .map(|active| *active)
-                        .unwrap_or(false);
-
-                    if is_dictation_active {
-                        info!("[AlwaysListening] Dictation Mode is active - skipping agent activation");
-                        return;
-                    }
-
-                    // Parse the transcription result
-                    let payload_str = event.payload();
-                    match serde_json::from_str::<serde_json::Value>(payload_str) {
-                        Ok(payload_json) => {
-                            if let Some(text_value) = payload_json.get("text") {
-                                if let Some(text) = text_value.as_str() {
-                                    let trimmed_text = text.trim();
-                                    if !trimmed_text.is_empty() {
-                                        info!("[AlwaysListening] Activating agent with query: '{}'", trimmed_text);
-
-                                        // Update floating bar for agent query
-                                        commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(trimmed_text.to_string())).await;
-
-                                        // Submit query to agent system using the submit_query function
-                                        let state = app_state.clone();
-                                        let query = trimmed_text.to_string();
-
-                                        match crate::anthropic::submit_query(query, state, app_handle_clone.clone()).await {
-                                            Ok(()) => {
-                                                info!("[AlwaysListening] Agent query submitted successfully");
-                                            }
-                                            Err(e) => {
-                                                error!("[AlwaysListening] Failed to submit agent query: {}", e);
-
-                                                // Update floating bar to show error
-                                                commands::floating_bar::handle_dictation_finished(&app_handle_clone, Some(format!("Agent error: {}", e))).await;
-                                            }
-                                        }
-                                    } else {
-                                        info!("[AlwaysListening] Transcribed text was empty or whitespace only - ignoring");
-                                    }
-                                } else {
-                                    warn!("[AlwaysListening] Text field in transcription payload is not a string");
-                                }
-                            } else {
-                                warn!("[AlwaysListening] No 'text' field found in transcription payload");
-                            }
-                        }
-                        Err(e) => {
-                            error!("[AlwaysListening] Failed to parse transcription payload: {}", e);
-                        }
-                    }
-                });
-            });
-
-            // --- Initialize Autostart Configuration ---
-            let app_handle_for_autostart = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                commands::autostart::init_autostart(&app_handle_for_autostart);
-                tracing::info!("[Setup] Autostart configuration initialized successfully");
-            });
-
-            // Always listening mode is handled by the plugin and commands
-            // No additional monitoring task needed here
-
-            // Agent monitor task will be started after app is fully running
-
-            // === AGENT HOLD MODE EVENT LISTENERS ===
-
-            // Listen for agent transcription start events (hold mode)
-            let app_handle_for_agent_start = app.handle().clone();
-            app.listen("agent-transcription-start", move |_event| {
-                info!("[Event] Received agent-transcription-start event - starting agent mode via hold");
-
-                let app_handle_clone = app_handle_for_agent_start.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Start agent mode using voice transcription
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::start_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(()) => {
-                                    info!("[Agent Mode] Started agent transcription successfully");
-
-                                    if let Err(e) = app_handle_clone.emit("agent-active", true) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("[Agent Mode] Failed to start agent transcription: {}", e);
-
-                                    // Reset agent input monitor state on failure
-                                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event after failure: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("[Agent Mode] Voice controller not available - cannot start agent transcription");
-
-                            // Reset agent input monitor state
-                            crate::agent_monitor::force_reset_agent_input_state().await;
-
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                            }
-                        }
-                    }
-                });
-            });
-
-            // Listen for voice transcription final results specifically for Dictation Mode
-            let app_handle_for_dictation_result = app.handle().clone();
-            app.listen("voice-transcription:final-result", move |event| {
-                // Check if we're in Dictation Mode and handle immediate typing
-                let app_handle_clone = app_handle_for_dictation_result.clone();
-                tauri::async_runtime::spawn(async move {
-                    let app_state = app_handle_clone.state::<state::AppState>();
-
-                    // Check if Dictation Mode is active
-                    let is_dictation_active = app_state.dictation_active.lock()
-                        .map(|active| *active)
-                        .unwrap_or(false);
-
-                    if is_dictation_active {
-                        info!("[Dictation Mode] Processing final result for immediate typing");
-
-                        // Parse the transcription result
-                        let payload_str = event.payload();
-                        match serde_json::from_str::<serde_json::Value>(payload_str) {
-                            Ok(payload_json) => {
-                                if let Some(text_value) = payload_json.get("text") {
-                                    if let Some(text) = text_value.as_str() {
-                                        // Only type if the text is not empty and not just whitespace
-                                        let trimmed_text = text.trim();
-                                        if !trimmed_text.is_empty() {
-                                            // Check if clipboard saving is enabled
-                                            let clipboard_enabled = app_state.dictation_clipboard_enabled.lock()
-                                                .map(|enabled| *enabled)
-                                                .unwrap_or(true); // Default to true if lock fails
-
-                                            // Store to clipboard if enabled
-                                            if clipboard_enabled {
-                                                match crate::commands::core::dev_set_clipboard(
-                                                    trimmed_text.to_string(),
-                                                    app_state.clone()
-                                                ).await {
-                                                    Ok(()) => {
-                                                        info!("[Dictation Mode] Successfully stored text to clipboard: '{}'", trimmed_text);
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!("[Dictation Mode] Failed to store text to clipboard: {}", e);
-                                                    }
-                                                }
-                                            } else {
-                                                info!("[Dictation Mode] Clipboard saving is disabled, skipping clipboard storage");
-                                            }
-
-                                            // Then type the transcribed text immediately using the computer use tools
-                                            match crate::commands::keyboard::global_type_text(
-                                                trimmed_text.to_string(),
-                                                app_handle_clone.clone(),
-                                                app_state.clone()
-                                            ).await {
-                                                Ok(()) => {
-                                                    info!("[Dictation Mode] Successfully typed text: '{}'", trimmed_text);
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!("[Dictation Mode] Failed to type transcribed text: {}", e);
-                                                }
-                                            }
-                                        } else {
-                                            info!("[Dictation Mode] Transcribed text was empty or whitespace only, skipping typing");
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("[Dictation Mode] Failed to parse final-result payload: {}", e);
-                            }
-                        }
-
-                        // Reset Dictation Mode state after processing
-                        if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
-                            *dictation_active = false;
-                        }
-
-                        // Emit state change event for UI
-                        if let Err(e) = app_handle_clone.emit("dictation-active", false) {
-                            error!("[Dictation Mode] Failed to emit dictation-active event after final result: {}", e);
-                        }
-                    }
-                });
-            });
-
-            // Listen for agent stop events (hold mode - normal completion)
-            let app_handle_for_agent_stop = app.handle().clone();
-            app.listen("agent-stop", move |_event| {
-                info!("[Event] Received agent-stop event - stopping agent mode via hold");
-
-                let app_handle_clone = app_handle_for_agent_stop.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Stop agent mode using voice transcription
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(_) => {
-                                    info!("[Agent Mode] Stopped agent transcription successfully");
-
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("[Agent Mode] Failed to stop agent transcription: {}", e);
-
-                                    // Force reset agent input monitor state on failure
-                                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("[Agent Mode] Voice controller not available - cannot stop agent transcription");
-
-                            // Reset agent input monitor state
-                            crate::agent_monitor::force_reset_agent_input_state().await;
-
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                            }
-                        }
-                    }
-                });
-            });
-
-            // Listen for agent cancel events (hold mode - cancelled before threshold)
-            let app_handle_for_agent_cancel = app.handle().clone();
-            app.listen("agent-cancel", move |_event| {
-                info!("[Event] Received agent-cancel event - cancelling agent mode via hold");
-
-                let app_handle_clone = app_handle_for_agent_cancel.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Cancel agent mode using voice transcription
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(_) => {
-                                    info!("[Agent Mode] Cancelled agent transcription successfully");
-
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("[Agent Mode] Failed to cancel agent transcription: {}", e);
-
-                                    // Force reset agent input monitor state on failure
-                                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("[Agent Mode] Voice controller not available - cannot cancel agent transcription");
-
-                            // Reset agent input monitor state
-                            crate::agent_monitor::force_reset_agent_input_state().await;
-
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                            }
-                        }
-                    }
-                });
-            });
-
-            // Listen for agent force-stop events (hold mode - timeout or stuck)
-            let app_handle_for_agent_force_stop = app.handle().clone();
-            app.listen("agent-force-stop", move |_event| {
-                info!("[Event] Received agent-force-stop event - force stopping agent mode");
-
-                let app_handle_clone = app_handle_for_agent_force_stop.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Force stop agent mode
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            // Force stop voice transcription
-                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await;
-                        }
-                        None => {
-                            warn!("[Agent Mode] Voice controller not available during force stop");
-                        }
-                    }
-
-                    // Reset agent input monitor state
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                    }
-
-                    info!("[Agent Mode] Force stopped agent mode successfully");
-                });
-            });
-
-            // Listen for agent force-cleanup events (hold mode - emergency cleanup)
-            let app_handle_for_agent_force_cleanup = app.handle().clone();
-            app.listen("agent-force-cleanup", move |_event| {
-                info!("[Event] Received agent-force-cleanup event - emergency cleanup");
-
-                let app_handle_clone = app_handle_for_agent_force_cleanup.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Emergency cleanup - stop everything
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            // Force stop voice transcription
-                            let _ = tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await;
-                        }
-                        None => {
-                            warn!("[Agent Mode] Voice controller not available during emergency cleanup");
-                        }
-                    }
-
-                    // Reset all state
-                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                    // Mark agent execution as finished
-                    let app_state = app_handle_clone.state::<crate::state::AppState>();
-                    app_state.mark_agent_execution_finished();
-
-                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                        tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                    }
-
-                    warn!("[Agent Mode] Emergency cleanup completed");
-                });
-            });
-
-            // Listen for agent transcription stop events (hold mode - threshold reached)
-            let app_handle_for_agent_transcription_stop = app.handle().clone();
-            app.listen("agent-transcription-stop", move |_event| {
-                info!("[Event] Received agent-transcription-stop event - stopping transcription to process result");
-
-                let app_handle_clone = app_handle_for_agent_transcription_stop.clone();
-                tauri::async_runtime::spawn(async move {
-                    // Stop transcription to trigger final result processing
-                    // This will cause the voice-transcription:final-result event to be emitted
-                    // which will then process the transcribed text with the agent
-                    match app_handle_clone.try_state::<Arc<Mutex<tauri_plugin_voice_transcription::controller::VoiceController>>>() {
-                        Some(controller_state) => {
-                            match tauri_plugin_voice_transcription::commands::stop_dictation(
-                                app_handle_clone.clone(),
-                                controller_state
-                            ).await {
-                                Ok(_) => {
-                                    info!("[Agent Mode] Stopped transcription successfully - final result will be processed");
-                                    // Note: We don't emit agent-active false here because the agent will continue
-                                    // processing the transcribed text. The agent-active false will be emitted
-                                    // after the agent completes processing the query.
-                                }
-                                Err(e) => {
-                                    error!("[Agent Mode] Failed to stop transcription: {}", e);
-
-                                    // Reset agent input monitor state on failure
-                                    crate::agent_monitor::force_reset_agent_input_state().await;
-
-                                    if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                        tracing::error!("[Agent Mode] Failed to emit agent-active event after transcription stop failure: {}", e);
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            warn!("[Agent Mode] Voice controller not available - cannot stop transcription");
-
-                            // Reset agent input monitor state
-                            crate::agent_monitor::force_reset_agent_input_state().await;
-
-                            if let Err(e) = app_handle_clone.emit("agent-active", false) {
-                                tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
-                            }
-                        }
-                    }
-                });
-            });
 
             Ok(())
         });
@@ -2795,19 +763,8 @@ pub fn run() {
             info!("Tauri application exited successfully");
         }
         Err(e) => {
-            error!("Error while running tauri application: {}", e);
-            // Log the error but don't panic - this allows for graceful handling of permission issues
-            eprintln!("Juno failed to start properly. This is often due to missing system permissions.");
-            eprintln!("Please ensure you have granted the following permissions:");
-            eprintln!("- Accessibility (System Settings > Privacy & Security > Accessibility)");
-            eprintln!("- Screen Recording (System Settings > Privacy & Security > Screen Recording)");
-            eprintln!("- Microphone (System Settings > Privacy & Security > Microphone)");
-            eprintln!("");
-            eprintln!("If permissions are already granted, try restarting the app.");
-            eprintln!("Error details: {}", e);
-
-            // Exit with error code but don't panic
-            std::process::exit(1);
+            // Use centralized error handling for application startup errors
+            error_handling::handle_application_startup_error(e);
         }
     }
 }
@@ -3081,227 +1038,6 @@ mod tests {
     }
 }
 
-// --- Define macOS specific constants and delegate ---
-#[cfg(target_os = "macos")]
-mod macos_tracking {
-    use super::*; // Import items from parent module (like AppHandle, cocoa types etc.)
-    use std::sync::Mutex; // Use std::sync::Mutex for interior mutability safely
+// macOS tracking functionality moved to platform::macos::mouse_tracking module
 
-    // Constants for NSTrackingAreaOptions
-    const NS_TRACKING_MOUSE_ENTERED_AND_EXITED: u64 = 0x01;
-    const NS_TRACKING_ACTIVE_ALWAYS: u64 = 0x80;
-    const TRACKING_OPTIONS: u64 = NS_TRACKING_MOUSE_ENTERED_AND_EXITED | NS_TRACKING_ACTIVE_ALWAYS;
-
-    // Static storage for the AppHandle, wrapped for thread safety
-    static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
-
-    // Store the current window label for tracking
-    static CURRENT_WINDOW_LABEL: Mutex<Option<String>> = Mutex::new(None);
-
-    // Delegate implementation
-    extern "C" fn mouse_entered(_this: &Object, _cmd: Sel, _event: cocoa_id) {
-        info!("[Tracking Delegate] Mouse Entered");
-        if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-            if let Some(window_label) = CURRENT_WINDOW_LABEL.lock().unwrap().as_ref() {
-                if let Some(window) = handle.get_webview_window(window_label) {
-                    let _ = window.emit("mouse-entered-window", ()); // Emit specific event
-                    info!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
-                } else {
-                    eprintln!("[Tracking Delegate Error] Window '{}' not found for mouse_entered emit.", window_label);
-                }
-            }
-        }
-    }
-
-    extern "C" fn mouse_exited(_this: &Object, _cmd: Sel, _event: cocoa_id) {
-         info!("[Tracking Delegate] Mouse Exited");
-         if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-            if let Some(window_label) = CURRENT_WINDOW_LABEL.lock().unwrap().as_ref() {
-                if let Some(window) = handle.get_webview_window(window_label) {
-                    let _ = window.emit("mouse-left-window", ()); // Emit specific event
-                    info!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
-                } else {
-                    eprintln!("[Tracking Delegate Error] Window '{}' not found for mouse_exited emit.", window_label);
-                }
-            }
-         }
-    }
-
-    pub fn setup_tracking_area(window: &tauri::WebviewWindow<tauri::Wry>, app_handle: AppHandle) {
-        let window_label = window.label().to_string();
-        info!("Setting up macOS tracking area for window: {}", window_label);
-
-        // Store the AppHandle and window label statically
-        *APP_HANDLE.lock().unwrap() = Some(app_handle.clone());
-        *CURRENT_WINDOW_LABEL.lock().unwrap() = Some(window_label.clone());
-
-        let ns_window = match window.ns_window() {
-            Ok(ptr) => ptr as cocoa_id,
-            Err(e) => {
-                eprintln!("Failed to get NSWindow for tracking area setup: {}", e);
-                return;
-            }
-        };
-
-        unsafe {
-            let view = ns_window.contentView();
-            if view == nil {
-                eprintln!("Failed to get contentView for tracking area setup.");
-                return;
-            }
-
-            let delegate_class_name = "MouseTrackingDelegate";
-            let mut delegate_class = Class::get(delegate_class_name);
-
-            // Declare class only if it doesn't exist yet
-            if delegate_class.is_none() {
-                 info!("Declaring MouseTrackingDelegate class...");
-                 #[allow(unexpected_cfgs)] // Allow cfg from class! macro
-                let superclass = class!(NSObject);
-                let mut decl = ClassDecl::new(delegate_class_name, superclass).unwrap();
-
-                // Add mouseEntered: method
-                #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
-                decl.add_method(
-                    sel!(mouseEntered:),
-                    mouse_entered as extern "C" fn(&Object, Sel, cocoa_id),
-                );
-
-                // Add mouseExited: method
-                #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
-                decl.add_method(
-                    sel!(mouseExited:),
-                    mouse_exited as extern "C" fn(&Object, Sel, cocoa_id),
-                );
-
-                delegate_class = Some(decl.register());
-                 info!("MouseTrackingDelegate class registered.");
-            }
-
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-            let delegate: cocoa_id = msg_send![delegate_class.unwrap(), new];
-             info!("MouseTrackingDelegate instance created: {:?}", delegate);
-
-            // Keep the delegate alive. Leaking it here is simpler than complex lifetime management.
-            let _ = Box::leak(Box::new(delegate)); // Box the delegate and leak it
-
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-            let bounds: NSRect = msg_send![view, bounds];
-             info!("Got view bounds for tracking area.");
-
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send and class! macros
-            let tracking_area: cocoa_id = msg_send![class!(NSTrackingArea), alloc];
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-            let tracking_area_ptr: cocoa_id = msg_send![
-                tracking_area,
-                initWithRect: bounds
-                options: TRACKING_OPTIONS
-                owner: delegate // Use the delegate instance as the owner
-                userInfo: nil
-            ];
-             info!("NSTrackingArea created: {:?}", tracking_area_ptr);
-
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-            let _: () = msg_send![view, addTrackingArea: tracking_area_ptr];
-            #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
-            let _: () = msg_send![tracking_area_ptr, release]; // Release after adding (view retains it)
-            // Note: Do not release the delegate here, it's leaked via Box::leak
-
-             info!("NSTrackingArea added to view.");
-        }
-    }
-}
-
-// --- Enhanced Tray Menu Management ---
-
-/// Get current window states for tray menu display
-async fn get_window_states(app_handle: &AppHandle) -> (bool, bool) {
-    let main_visible = app_handle
-        .get_webview_window(constants::window_labels::MAIN)
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-
-    let floating_bar_visible = app_handle
-        .get_webview_window(constants::window_labels::FLOATING_BAR)
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-
-    (main_visible, floating_bar_visible)
-}
-
-/// Create a state-aware tray menu with window status indicators
-async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tauri::Wry>> {
-    let (main_visible, floating_bar_visible) = get_window_states(app_handle).await;
-
-    // Create main window menu item with state-aware text
-    let main_window_text = if main_visible { "Hide Juno" } else { "Show Juno" };
-    let main_window_id = if main_visible {
-        constants::tray_menu_ids::HIDE_MAIN_WINDOW
-    } else {
-        constants::tray_menu_ids::SHOW_MAIN_WINDOW
-    };
-    let main_window_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, main_window_id, main_window_text, true, None::<&str>).ok()?
-    );
-
-    // Create floating bar menu items with state-aware text
-    let floating_bar_text = if floating_bar_visible { "Hide Floating Bar" } else { "Show Floating Bar" };
-    let floating_bar_id = if floating_bar_visible {
-        constants::tray_menu_ids::HIDE_FLOATING_BAR
-    } else {
-        constants::tray_menu_ids::SHOW_FLOATING_BAR
-    };
-    let floating_bar_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, floating_bar_id, floating_bar_text, true, None::<&str>).ok()?
-    );
-
-    // Create other menu items
-    let new_chat_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::NEW_CHAT, "New Chat", true, None::<&str>).ok()?
-    );
-    let devtools_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::SHOW_DEVTOOLS, "Developer Tools", true, None::<&str>).ok()?
-    );
-    let settings_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::SETTINGS, "Settings...", true, None::<&str>).ok()?
-    );
-    let quit_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).ok()?
-    );
-
-    // Create separators
-    let separator1 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
-    let separator2 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
-    let separator3 = MenuItemKind::Predefined(tauri::menu::PredefinedMenuItem::separator(app_handle).ok()?);
-
-    // Build the menu with state-aware items
-    Menu::with_items(app_handle, &[
-        &main_window_item,
-        &new_chat_item,
-        &separator1,
-        &floating_bar_item,
-        &devtools_item,
-        &separator2,
-        &settings_item,
-        &separator3,
-        &quit_item,
-    ]).map_err(|e| eprintln!("[Tray Menu] Failed to create state-aware menu: {}", e)).ok()
-}
-
-/// Update the tray menu to reflect current window states
-async fn update_tray_menu(app_handle: &AppHandle) {
-    if let Some(new_menu) = create_state_aware_tray_menu(app_handle).await {
-        // Access the tray by the ID we set in the builder
-        if let Some(tray) = app_handle.tray_by_id("main_tray") {
-            if let Err(e) = tray.set_menu(Some(new_menu)) {
-                tracing::warn!("[Tray Menu] Failed to update tray menu: {}", e);
-            } else {
-                tracing::debug!("[Tray Menu] Tray menu updated successfully");
-            }
-        } else {
-            tracing::warn!("[Tray Menu] Tray with ID 'main_tray' not found");
-        }
-    } else {
-        tracing::warn!("[Tray Menu] Failed to create updated tray menu");
-    }
-}
+// --- Enhanced Tray Menu Management now handled by menu::tray_menu module ---

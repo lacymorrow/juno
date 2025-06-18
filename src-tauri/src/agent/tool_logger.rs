@@ -340,6 +340,7 @@ struct AgentEvent {
     payload: AgentEventPayload,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)] // Allows payload to be one of the variants without a type field in payload itself
 enum AgentEventPayload {
@@ -392,17 +393,20 @@ struct GenericContentPayload {
 }
 
 // NEW: Streaming event payloads
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamingTextPayload {
     chunk: String,
     message_id: Option<String>, // Optional message ID to track which response this belongs to
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamStartPayload {
     message_id: String,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize)]
 struct StreamEndPayload {
     message_id: String,
@@ -1156,7 +1160,7 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
         "message_id": message_id
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_START, event_data) {
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_START, event_data) {
         warn!("Failed to emit agent-stream-start event: {}", e);
     }
 }
@@ -1167,7 +1171,7 @@ pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_i
         "message_id": message_id
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_TEXT_STREAM, event_data) {
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::TEXT_STREAM, event_data) {
         warn!("Failed to emit agent-text-stream event: {}", e);
     }
 }
@@ -1178,7 +1182,7 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
         "complete_text": complete_text
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event_data) {
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_END, event_data) {
         warn!("Failed to emit agent-stream-end event: {}", e);
     }
 }

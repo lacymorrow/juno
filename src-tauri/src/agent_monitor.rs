@@ -2,13 +2,14 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{info, error, debug, warn};
 use crate::state::{AppState, AgentTriggerMode};
+use crate::constants::{monitor_sessions, events};
 
 // Configuration constants
-const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
-const IMMEDIATE_START_MS: u64 = 0; // Start agent immediately (0ms delay)
-const MAX_AGENT_DURATION_MS: u64 = 120_000; // 2 minutes max agent session time
-const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
-const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms cooldown for better responsiveness
+// const HOLD_DURATION_MS: u64 = 500; // Hold agent key for 500ms to commit to agent mode
+// const IMMEDIATE_START_MS: u64 = 0; // Start agent immediately (0ms delay)
+// const MAX_AGENT_DURATION_MS: u64 = 120_000; // 2 minutes max agent session time
+// const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds to force cleanup if stuck
+// const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms cooldown for better responsiveness
 
 // State for agent input monitoring
 #[derive(Debug)]
@@ -43,7 +44,7 @@ impl AgentInputMonitorState {
         // Check if we're in cooldown period after a recent cancellation
         if let Some(last_cancel) = self.last_cancellation_time {
             let time_since_cancel = last_cancel.elapsed().as_millis();
-            if time_since_cancel < COOLDOWN_AFTER_CANCEL_MS as u128 {
+            if time_since_cancel < monitor_sessions::COOLDOWN_AFTER_CANCEL_MS as u128 {
                 debug!("[AgentMonitor] Ignoring agent input press - still in cooldown period ({}ms since last cancellation)", time_since_cancel);
                 return false; // Don't start tracking during cooldown
             }
@@ -92,7 +93,7 @@ impl AgentInputMonitorState {
 
         if let Some(start_time) = self.hold_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= IMMEDIATE_START_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::IMMEDIATE_START_MS as u128 {
                 self.agent_started = true;
                 self.agent_start_time = Some(Instant::now());
                 info!("[AgentMonitor] Agent input held for {}ms - starting immediate agent mode", duration.as_millis());
@@ -109,7 +110,7 @@ impl AgentInputMonitorState {
 
         if let Some(start_time) = self.hold_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= HOLD_DURATION_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::HOLD_DURATION_MS as u128 {
                 self.hold_threshold_reached = true;
                 info!("[AgentMonitor] Agent input held for {}ms - threshold reached, committing to Agent Mode", duration.as_millis());
                 return true;
@@ -122,7 +123,7 @@ impl AgentInputMonitorState {
     pub fn check_agent_timeout(&mut self) -> bool {
         if let Some(start_time) = self.agent_start_time {
             let duration = start_time.elapsed();
-            if duration.as_millis() >= MAX_AGENT_DURATION_MS as u128 {
+            if duration.as_millis() >= monitor_sessions::MAX_AGENT_DURATION_MS as u128 {
                 warn!("[AgentMonitor] Agent has been running for {}ms - forcing cleanup", duration.as_millis());
                 return true;
             }
@@ -136,7 +137,7 @@ impl AgentInputMonitorState {
         if self.agent_started && self.hold_start_time.is_none() && !self.force_cleanup_scheduled {
             if let Some(start_time) = self.agent_start_time {
                 let duration = start_time.elapsed();
-                if duration.as_millis() >= FORCE_CLEANUP_TIMEOUT_MS as u128 {
+                if duration.as_millis() >= monitor_sessions::FORCE_CLEANUP_TIMEOUT_MS as u128 {
                     self.force_cleanup_scheduled = true;
                     warn!("[AgentMonitor] Scheduling force cleanup - agent stuck for {}ms", duration.as_millis());
                     return true;
@@ -192,7 +193,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         // When threshold is reached, we want to stop the transcription so the final result
         // gets processed by the voice-transcription:final-result handler, which will
         // send the transcribed text to the agent for processing
-        if let Err(e) = app_handle.emit("agent-transcription-stop", ()) {
+        if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_STOP, ()) {
             error!("[AgentMonitor] Failed to emit agent-transcription-stop: {}", e);
         }
     } else if agent_started {
@@ -202,7 +203,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         );
 
         // If released before threshold, cancel the agent
-        if let Err(e) = app_handle.emit("agent-cancel", ()) {
+        if let Err(e) = app_handle.emit(events::agent::CANCEL, ()) {
             error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
         }
     } else {
@@ -213,7 +214,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
     }
 }
 
-// Public function to force reset the agent input state (for emergency cleanup)
+// Public function to force reset the agent input state
 pub async fn force_reset_agent_input_state() {
     let mut state = AGENT_INPUT_STATE.lock().await;
     state.force_reset();
@@ -234,7 +235,7 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
             if state.check_and_start_agent() {
                 info!("[AgentMonitor] Background task detected agent should start - emitting agent-transcription-start");
                 // Emit event to start agent
-                if let Err(e) = app_handle.emit("agent-transcription-start", ()) {
+                if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
                     error!("[AgentMonitor] Failed to emit agent-transcription-start: {}", e);
                 } else {
                     info!("[AgentMonitor] Successfully emitted agent-transcription-start event");
@@ -244,21 +245,21 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
             // Check if we should reach threshold
             if state.check_and_reach_threshold() {
                 // Emit event for threshold reached
-                if let Err(e) = app_handle.emit("agent-committed", ()) {
+                if let Err(e) = app_handle.emit(events::agent::COMMITTED, ()) {
                     error!("[AgentMonitor] Failed to emit agent-committed: {}", e);
                 }
             }
 
             // Check for timeouts
             if state.check_agent_timeout() {
-                if let Err(e) = app_handle.emit("agent-force-stop", ()) {
+                if let Err(e) = app_handle.emit(events::agent::FORCE_STOP, ()) {
                     error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
                 }
             }
 
             // Check for stuck state cleanup
             if state.should_force_cleanup() {
-                if let Err(e) = app_handle.emit("agent-force-cleanup", ()) {
+                if let Err(e) = app_handle.emit(events::agent::FORCE_CLEANUP, ()) {
                     error!("[AgentMonitor] Failed to emit agent-force-cleanup: {}", e);
                 }
             }

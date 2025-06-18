@@ -3,7 +3,7 @@
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::state::AppState;
 use tauri::{State, Emitter, AppHandle, WebviewUrl, WebviewWindowBuilder, Manager};
-use tracing::warn;
+use tracing::{warn, info};
 
 // Declare the submodules
 pub mod registry;
@@ -13,6 +13,7 @@ pub mod core;
 pub mod dev;
 pub mod dictation;
 pub mod dictation_reset;
+pub mod dictation_state_manager;
 pub mod element;
 pub mod filesystem;
 pub mod floating_bar;
@@ -34,14 +35,29 @@ pub mod memory;
 pub mod always_listening;
 pub mod notifications;
 pub mod stop_operations;
+pub mod onboarding;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
 pub use self::core::*;
-pub use self::dev::*;
+// Removed unused dev import: pub use self::dev::*;
 pub use self::dictation::*;
 pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
-pub use self::floating_bar::*;
+pub use self::dictation_state_manager::{
+    force_reset_dictation_state,
+    get_dictation_comprehensive_status,
+    update_dictation_component_state,
+    transition_dictation_state
+};
+pub use self::floating_bar::{
+    floating_bar_click, floating_bar_focus_change, floating_bar_input_blur,
+    floating_bar_input_change, floating_bar_submit, get_floating_bar_config,
+    set_floating_bar_config, handle_backend_response, handle_dictation_started,
+    handle_dictation_partial, handle_dictation_finished, handle_tts_started,
+    handle_tts_finished, handle_dictation_mode_change, handle_always_listening_change,
+    handle_agent_started, handle_agent_stopped, handle_agent_cancelled,
+    initialize_bar_manager
+};
 pub use self::floating_panel::*;
 pub use self::filesystem::{dev_list_files, dev_get_file_content, dev_set_file_content, save_agent_response};
 pub use self::mouse::*;
@@ -56,6 +72,7 @@ pub use self::mcp::*;
 pub use self::memory::*;
 pub use self::always_listening::*;
 pub use self::stop_operations::*;
+pub use self::onboarding::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{
@@ -96,110 +113,4 @@ pub async fn test_system_context(state: State<'_, AppState>) -> Result<String, S
     }
 }
 
-/// Open the native settings window
-#[tauri::command]
-pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
-    // Check if settings window already exists
-    if let Some(settings_window) = app.get_webview_window("settings") {
-        // If it exists, just show and focus it
-        settings_window.show().map_err(|e| e.to_string())?;
-        settings_window.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
 
-    // Create new settings window if it doesn't exist
-    let settings_window = WebviewWindowBuilder::new(
-        &app,
-        "settings",
-        WebviewUrl::App("/settings".into()),
-    )
-    .title("Juno Settings")
-    .inner_size(800.0, 600.0)
-    .min_inner_size(700.0, 500.0)
-    .resizable(true)
-    .center()
-    .visible(false) // Start hidden, show after setup
-    .build()
-    .map_err(|e| e.to_string())?;
-
-    // Apply macOS-specific styling
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::TitleBarStyle;
-
-        // Set transparent title bar for native look
-        if let Err(e) = settings_window.set_title_bar_style(TitleBarStyle::Transparent) {
-            warn!("Failed to set title bar style: {}", e);
-        }
-    }
-
-    // Show the window
-    settings_window.show().map_err(|e| e.to_string())?;
-    settings_window.set_focus().map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Close the native settings window
-#[tauri::command]
-pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
-    if let Some(settings_window) = app.get_webview_window("settings") {
-        settings_window.hide().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-/// Open the native onboarding window
-#[tauri::command]
-pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
-    use tauri::{WebviewUrl, WebviewWindowBuilder};
-
-    // Check if onboarding window already exists
-    if let Some(onboarding_window) = app.get_webview_window("onboarding") {
-        // If it exists, just show and focus it
-        onboarding_window.show().map_err(|e| e.to_string())?;
-        onboarding_window.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    // Create new onboarding window if it doesn't exist
-    let onboarding_window = WebviewWindowBuilder::new(
-        &app,
-        "onboarding",
-        WebviewUrl::App("/onboarding".into()),
-    )
-    .title("Welcome to Juno")
-    .inner_size(900.0, 700.0)
-    .min_inner_size(800.0, 600.0)
-    .resizable(true)
-    .center()
-    .visible(false) // Start hidden, show after setup
-    .build()
-    .map_err(|e| e.to_string())?;
-
-    // Apply macOS-specific styling
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::TitleBarStyle;
-
-        // Set transparent title bar for native look
-        if let Err(e) = onboarding_window.set_title_bar_style(TitleBarStyle::Transparent) {
-            warn!("Failed to set title bar style for onboarding window: {}", e);
-        }
-    }
-
-    // Show the window
-    onboarding_window.show().map_err(|e| e.to_string())?;
-    onboarding_window.set_focus().map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Close the native onboarding window
-#[tauri::command]
-pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
-    if let Some(onboarding_window) = app.get_webview_window("onboarding") {
-        onboarding_window.hide().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}

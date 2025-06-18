@@ -5,27 +5,53 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Bell, BellOff, Volume2, VolumeX, TestTube, Shield, Info } from "lucide-react";
-import { NotificationSettings as NotificationSettingsType, NotificationType, SystemNotificationPermission } from "@/types/notifications";
+import {
+  Bell,
+  BellOff,
+  Volume2,
+  VolumeX,
+  TestTube,
+  Shield,
+  Info,
+} from "lucide-react";
+import {
+  NotificationSettings as NotificationSettingsType,
+  NotificationType,
+  SystemNotificationPermission,
+} from "@/types/notifications";
 
 export default function NotificationSettings() {
-  const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsType>({
-    type: "system",
-    sound_enabled: true,
-    duration: 5000,
-    position: "bottom-right",
-    show_icons: true,
-    persist_important: true,
-  });
+  const [notificationSettings, setNotificationSettings] =
+    useState<NotificationSettingsType>({
+      type: "system",
+      sound_enabled: true,
+      duration: 5000,
+      position: "bottom-right",
+      show_icons: true,
+      persist_important: true,
+    });
 
-  const [systemPermission, setSystemPermission] = useState<SystemNotificationPermission>({
-    granted: false,
-    denied: false,
-    default: true,
-  });
+  const [systemPermission, setSystemPermission] =
+    useState<SystemNotificationPermission>({
+      granted: false,
+      denied: false,
+      default: true,
+    });
 
   const [loading, setLoading] = useState(false);
   const [permissionLoading, setPermissionLoading] = useState(false);
@@ -63,7 +89,9 @@ export default function NotificationSettings() {
 
   const checkSystemPermission = async () => {
     try {
-      const permission = await invoke<SystemNotificationPermission>("check_notification_permission");
+      const permission = await invoke<SystemNotificationPermission>(
+        "check_notification_permission"
+      );
       setSystemPermission(permission);
     } catch (error) {
       console.error("Failed to check notification permission:", error);
@@ -73,13 +101,17 @@ export default function NotificationSettings() {
   const requestSystemPermission = async () => {
     setPermissionLoading(true);
     try {
-      const permission = await invoke<SystemNotificationPermission>("request_notification_permission");
+      const permission = await invoke<SystemNotificationPermission>(
+        "request_notification_permission"
+      );
       setSystemPermission(permission);
 
       if (permission.granted) {
         toast.success("Notification permission granted!");
       } else if (permission.denied) {
-        toast.error("Notification permission denied. You can enable it in system settings.");
+        toast.error(
+          "Notification permission denied. You can enable it in system settings."
+        );
       }
     } catch (error) {
       console.error("Failed to request notification permission:", error);
@@ -92,7 +124,7 @@ export default function NotificationSettings() {
   const updateNotificationType = async (type: NotificationType) => {
     try {
       await invoke("set_notification_type", { notificationType: type });
-      setNotificationSettings(prev => ({ ...prev, type }));
+      setNotificationSettings((prev) => ({ ...prev, type }));
       toast.success(`Notification type set to: ${type}`);
     } catch (error) {
       console.error("Failed to update notification type:", error);
@@ -103,7 +135,7 @@ export default function NotificationSettings() {
   const updateSoundEnabled = async (enabled: boolean) => {
     try {
       await invoke("set_notification_sound_enabled", { enabled });
-      setNotificationSettings(prev => ({ ...prev, sound_enabled: enabled }));
+      setNotificationSettings((prev) => ({ ...prev, sound_enabled: enabled }));
       toast.success(`Notification sound ${enabled ? "enabled" : "disabled"}`);
     } catch (error) {
       console.error("Failed to update notification sound:", error);
@@ -114,7 +146,7 @@ export default function NotificationSettings() {
   const updateDuration = async (duration: number) => {
     try {
       await invoke("set_notification_duration", { duration });
-      setNotificationSettings(prev => ({ ...prev, duration }));
+      setNotificationSettings((prev) => ({ ...prev, duration }));
     } catch (error) {
       console.error("Failed to update notification duration:", error);
       toast.error("Failed to update notification duration");
@@ -124,7 +156,10 @@ export default function NotificationSettings() {
   const updatePosition = async (position: string) => {
     try {
       await invoke("set_notification_position", { position });
-      setNotificationSettings(prev => ({ ...prev, position: position as any }));
+      setNotificationSettings((prev) => ({
+        ...prev,
+        position: position as any,
+      }));
       toast.success(`Notification position set to: ${position}`);
     } catch (error) {
       console.error("Failed to update notification position:", error);
@@ -135,7 +170,7 @@ export default function NotificationSettings() {
   const updateShowIcons = async (showIcons: boolean) => {
     try {
       await invoke("set_notification_show_icons", { showIcons });
-      setNotificationSettings(prev => ({ ...prev, show_icons: showIcons }));
+      setNotificationSettings((prev) => ({ ...prev, show_icons: showIcons }));
       toast.success(`Notification icons ${showIcons ? "enabled" : "disabled"}`);
     } catch (error) {
       console.error("Failed to update notification icons:", error);
@@ -146,8 +181,13 @@ export default function NotificationSettings() {
   const updatePersistImportant = async (persist: boolean) => {
     try {
       await invoke("set_notification_persist_important", { persist });
-      setNotificationSettings(prev => ({ ...prev, persist_important: persist }));
-      toast.success(`Important notification persistence ${persist ? "enabled" : "disabled"}`);
+      setNotificationSettings((prev) => ({
+        ...prev,
+        persist_important: persist,
+      }));
+      toast.success(
+        `Important notification persistence ${persist ? "enabled" : "disabled"}`
+      );
     } catch (error) {
       console.error("Failed to update notification persistence:", error);
       toast.error("Failed to update notification persistence");
@@ -158,9 +198,16 @@ export default function NotificationSettings() {
     setLoading(true);
     try {
       await invoke("test_notification");
-      toast.success("Test notification sent!");
+      // Only show toast confirmation if toast notifications are enabled
+      if (
+        notificationSettings.type === "toast" ||
+        notificationSettings.type === "both"
+      ) {
+        toast.success("Test notification sent!");
+      }
     } catch (error) {
       console.error("Failed to send test notification:", error);
+      // Always show error toasts regardless of settings for debugging purposes
       toast.error("Failed to send test notification");
     } finally {
       setLoading(false);
@@ -169,7 +216,11 @@ export default function NotificationSettings() {
 
   const getPermissionStatusBadge = () => {
     if (systemPermission.granted) {
-      return <Badge variant="default" className="bg-green-100 text-green-800">Granted</Badge>;
+      return (
+        <Badge variant="default" className="bg-green-100 text-green-800">
+          Granted
+        </Badge>
+      );
     } else if (systemPermission.denied) {
       return <Badge variant="destructive">Denied</Badge>;
     } else {
@@ -210,7 +261,9 @@ export default function NotificationSettings() {
             <Label htmlFor="notification-type">Notification Method</Label>
             <Select
               value={notificationSettings.type}
-              onValueChange={(value) => updateNotificationType(value as NotificationType)}
+              onValueChange={(value) =>
+                updateNotificationType(value as NotificationType)
+              }
             >
               <SelectTrigger id="notification-type">
                 <SelectValue placeholder="Select notification type" />
@@ -243,7 +296,8 @@ export default function NotificationSettings() {
       </Card>
 
       {/* System Notification Permission */}
-      {(notificationSettings.type === "system" || notificationSettings.type === "both") && (
+      {(notificationSettings.type === "system" ||
+        notificationSettings.type === "both") && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -263,8 +317,7 @@ export default function NotificationSettings() {
                     ? "Juno can show system notifications"
                     : systemPermission.denied
                     ? "Permission denied. Enable in System Settings > Notifications"
-                    : "Permission not yet requested"
-                  }
+                    : "Permission not yet requested"}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -318,7 +371,8 @@ export default function NotificationSettings() {
       </Card>
 
       {/* Toast Notification Settings */}
-      {(notificationSettings.type === "toast" || notificationSettings.type === "both") && (
+      {(notificationSettings.type === "toast" ||
+        notificationSettings.type === "both") && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -332,7 +386,9 @@ export default function NotificationSettings() {
           <CardContent className="space-y-6">
             {/* Duration */}
             <div className="space-y-3">
-              <Label htmlFor="duration">Duration: {notificationSettings.duration / 1000}s</Label>
+              <Label htmlFor="duration">
+                Duration: {notificationSettings.duration / 1000}s
+              </Label>
               <Slider
                 id="duration"
                 min={1000}
@@ -389,7 +445,9 @@ export default function NotificationSettings() {
             {/* Persist Important */}
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <Label htmlFor="persist-important">Persist Important Notifications</Label>
+                <Label htmlFor="persist-important">
+                  Persist Important Notifications
+                </Label>
                 <p className="text-sm text-gray-600">
                   Keep important notifications until manually dismissed
                 </p>
@@ -415,9 +473,9 @@ export default function NotificationSettings() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-gray-600">
-              All notifications are currently disabled. Juno will not show any notifications
-              for agent actions, completions, or errors. You can re-enable them by selecting
-              a different notification type above.
+              All notifications are currently disabled. Juno will not show any
+              notifications for agent actions, completions, or errors. You can
+              re-enable them by selecting a different notification type above.
             </p>
           </CardContent>
         </Card>

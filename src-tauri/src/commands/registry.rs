@@ -35,7 +35,9 @@ macro_rules! generate_invoke_handler {
             execute_mcp_task,
 
             // MCP Diagnostics Commands
-            get_mcp_diagnostics,
+            get_mcp_system_diagnostics,
+            force_restart_all_mcp_servers,
+            check_mcp_prerequisites,
             restart_mcp_server_with_diagnostics,
             troubleshoot_mcp_issues,
             apply_mcp_quick_fixes,
@@ -189,11 +191,13 @@ macro_rules! generate_invoke_handler {
             get_dictation_transcription_status,
 
             // Floating Bar Commands
-            floating_bar_click,
-            floating_bar_focus_change,
-            floating_bar_input_blur,
-            floating_bar_input_change,
-            floating_bar_submit,
+                    floating_bar_click,
+        floating_bar_focus_change,
+        floating_bar_input_blur,
+        floating_bar_input_change,
+        floating_bar_submit,
+        get_floating_bar_config,
+        set_floating_bar_config,
 
             // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
             list_ai_providers,
@@ -258,6 +262,8 @@ pub mod categories {
         "get_mcp_server_statuses",
         "update_mcp_server",
         "set_mcp_server_enabled",
+        "toggle_mcp_server",
+        "toggle_mcp_tool",
         "test_mcp_server_connection",
         "initialize_mcp_servers",
         "get_mcp_diagnostics",

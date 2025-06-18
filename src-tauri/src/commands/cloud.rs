@@ -30,7 +30,7 @@ pub struct CloudStatusResponse {
 /// Get current cloud configuration
 #[tauri::command]
 pub async fn get_cloud_config(
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     app_state: State<'_, AppState>,
 ) -> Result<CloudConfigResponse, String> {
     info!("Getting cloud configuration");
@@ -105,13 +105,13 @@ pub async fn get_cloud_status(
 ) -> Result<CloudStatusResponse, String> {
     let enabled = app_state.is_cloud_enabled();
     let mut connected = false;
-    let mut last_heartbeat: Option<std::time::SystemTime> = None;
+    let _last_heartbeat: Option<std::time::SystemTime> = None;
     let mut connection_state = serde_json::json!({
         "status": "disconnected",
         "message": "Not connected to cloud"
     });
     let mut device_id = None;
-    let last_error = None; // TODO: Track last error
+            let last_error = None; // Note: Error tracking not implemented yet
 
     // Get connection state if cloud client exists
     if enabled {
@@ -779,7 +779,7 @@ async fn run_basic_connection_test() -> serde_json::Value {
             "test": "basic_connection",
             "success": true,
             "response": response,
-            "duration_ms": 0 // TODO: Measure actual duration
+            "duration_ms": 0 // Note: Duration measurement not implemented yet
         }),
         Err(e) => serde_json::json!({
             "test": "basic_connection",
@@ -812,7 +812,7 @@ async fn run_authentication_test(app_state: &AppState) -> serde_json::Value {
     }
 }
 
-async fn run_command_processing_test(app_state: &AppState) -> serde_json::Value {
+async fn run_command_processing_test(_app_state: &AppState) -> serde_json::Value {
     info!("Running command processing test");
 
     // Test creating and validating a command
@@ -826,7 +826,10 @@ async fn run_command_processing_test(app_state: &AppState) -> serde_json::Value 
             config: None,
             mode: None,
         },
-        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
         signature: None,
         metadata: None,
     };

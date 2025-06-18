@@ -1,21 +1,25 @@
-use core_graphics::event::CGEventFlags;
-use core_graphics::event::CGKeyCode;
+// Re-export shared platform constants from main app
+// This eliminates duplication with src-tauri/src/constants/platform/macos.rs
 
-// Add these constant definitions instead - these are the official values from Apple's headers
+// For now, define minimal constants needed until we can properly import
+// TODO: Set up proper shared constants between main app and MCP server
 pub(crate) const K_AXVALUE_CGPOINT_TYPE: u32 = 1;
 pub(crate) const K_AXVALUE_CGSIZE_TYPE: u32 = 2;
 
-// Add these constant definitions for key codes
-pub(crate) const KEY_RETURN: u16 = 36;
-pub(crate) const KEY_TAB: u16 = 48;
-pub(crate) const KEY_SPACE: u16 = 49;
-pub(crate) const KEY_DELETE: u16 = 51;
-pub(crate) const KEY_ESCAPE: u16 = 53;
-pub(crate) const KEY_ARROW_LEFT: u16 = 123;
-pub(crate) const KEY_ARROW_RIGHT: u16 = 124;
-pub(crate) const KEY_ARROW_DOWN: u16 = 125;
-pub(crate) const KEY_ARROW_UP: u16 = 126;
-pub(crate) const KEY_V: u16 = 9;
+// Use shared key codes from main constants module
+pub(crate) use core_graphics::event::{CGEventFlags, CGKeyCode};
+
+// Key codes - these should be imported from shared constants
+pub(crate) const KEY_RETURN: CGKeyCode = 36;
+pub(crate) const KEY_TAB: CGKeyCode = 48;
+pub(crate) const KEY_SPACE: CGKeyCode = 49;
+pub(crate) const KEY_DELETE: CGKeyCode = 51;
+pub(crate) const KEY_ESCAPE: CGKeyCode = 53;
+pub(crate) const KEY_ARROW_LEFT: CGKeyCode = 123;
+pub(crate) const KEY_ARROW_RIGHT: CGKeyCode = 124;
+pub(crate) const KEY_ARROW_DOWN: CGKeyCode = 125;
+pub(crate) const KEY_ARROW_UP: CGKeyCode = 126;
+pub(crate) const KEY_V: CGKeyCode = 9;
 
 // Add these constants for modifier keys
 pub(crate) const MODIFIER_COMMAND: CGEventFlags = CGEventFlags::CGEventFlagCommand;
