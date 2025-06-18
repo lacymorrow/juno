@@ -114,7 +114,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                                         .unwrap_or_default()
                                         .as_millis() as u64
                                 });
-                                if let Err(e) = app_handle_clone.emit(crate::constants::events::USER_MESSAGE_SUBMITTED, user_message_data) {
+                                if let Err(e) = app_handle_clone.emit(crate::constants::events::messages::USER_MESSAGE_SUBMITTED, user_message_data) {
                                     error!("[Agent Mode] Failed to emit user-message-submitted event: {}", e);
                                 }
 
@@ -246,7 +246,7 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
         commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
     });
 
-    if let Err(e) = app_handle.emit(constants::events::DICTATION_ACTIVE, false) {
+    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
     }
 }
@@ -269,7 +269,7 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
     });
 
     // Emit cleanup complete event
-    if let Err(e) = app_handle.emit(constants::events::DICTATION_ACTIVE, false) {
+    if let Err(e) = app_handle.emit(constants::events::dictation::ACTIVE, false) {
         error!("[Dictation Mode] Failed to emit dictation-active event: {}", e);
     }
 
@@ -550,7 +550,7 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
                 Ok(()) => {
                     info!("[Agent Mode] Started agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, true) {
+                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, true) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
                 }
@@ -569,7 +569,7 @@ async fn handle_agent_transcription_start(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
             }
         }
@@ -599,7 +599,7 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
                     // Reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event after transcription stop failure: {}", e);
                     }
                 }
@@ -611,7 +611,7 @@ async fn handle_agent_transcription_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
             }
         }
@@ -630,7 +630,7 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Stopped agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
                 }
@@ -640,7 +640,7 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
                 }
@@ -652,7 +652,7 @@ async fn handle_agent_stop(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
             }
         }
@@ -671,7 +671,7 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                 Ok(_) => {
                     info!("[Agent Mode] Cancelled agent transcription successfully");
 
-                    if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
                 }
@@ -681,7 +681,7 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
                     // Force reset agent input monitor state on failure
                     crate::agent_monitor::force_reset_agent_input_state().await;
 
-                    if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+                    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
                     }
                 }
@@ -693,7 +693,7 @@ async fn handle_agent_cancel(app_handle: &AppHandle) {
             // Reset agent input monitor state
             crate::agent_monitor::force_reset_agent_input_state().await;
 
-            if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+            if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
                 tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
             }
         }
@@ -719,7 +719,7 @@ async fn handle_agent_force_stop(app_handle: &AppHandle) {
     // Reset agent input monitor state
     crate::agent_monitor::force_reset_agent_input_state().await;
 
-    if let Err(e) = app_handle.emit(constants::events::AGENT_ACTIVE, false) {
+    if let Err(e) = app_handle.emit(constants::events::agent::ACTIVE, false) {
         tracing::error!("[Agent Mode] Failed to emit agent-active event: {}", e);
     }
 

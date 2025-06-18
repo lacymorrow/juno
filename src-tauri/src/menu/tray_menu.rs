@@ -130,31 +130,31 @@ pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
         tray_menu_ids::SHOW_HIDE => {
             info!("[TrayMenu] Show/Hide menu item clicked");
             // For now, just trigger settings until we have the proper event
-            if let Err(e) = app_handle.emit(events::SETTINGS_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(events::menu::SETTINGS_REQUESTED, ()) {
                 error!("[TrayMenu] Failed to emit settings event: {}", e);
             }
         }
         tray_menu_ids::NEW_CHAT => {
             info!("[TrayMenu] New Chat menu item clicked");
-            if let Err(e) = app_handle.emit(events::NEW_CHAT_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(events::menu::NEW_CHAT_REQUESTED, ()) {
                 error!("[TrayMenu] Failed to emit new chat event: {}", e);
             }
         }
         tray_menu_ids::SHOW_HIDE_FLOATING_BAR => {
             info!("[TrayMenu] Show/Hide Floating Bar menu item clicked");
-            if let Err(e) = app_handle.emit(events::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
                 error!("[TrayMenu] Failed to emit toggle floating bar event: {}", e);
             }
         }
         tray_menu_ids::DEVELOPER_TOOLS => {
             info!("[TrayMenu] Developer Tools menu item clicked");
-            if let Err(e) = app_handle.emit(events::DEVTOOLS_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(events::menu::DEVTOOLS_REQUESTED, ()) {
                 error!("[TrayMenu] Failed to emit devtools event: {}", e);
             }
         }
         tray_menu_ids::SETTINGS => {
             info!("[TrayMenu] Settings menu item clicked");
-            if let Err(e) = app_handle.emit(events::SETTINGS_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(events::menu::SETTINGS_REQUESTED, ()) {
                 error!("[TrayMenu] Failed to emit settings event: {}", e);
             }
         }
