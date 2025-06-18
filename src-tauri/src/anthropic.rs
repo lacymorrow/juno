@@ -1,5 +1,6 @@
 use log::{info, error, warn};
 use uuid;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -164,17 +165,15 @@ pub async fn submit_query(
 
     // --- Get Persistent Memory Manager (Orchestrator maintains conversation memory) ---
     let memory_manager_arc = state.get_memory_manager().await;
-    let memory_manager_clone = {
+    
+    // Clean up any orphaned tool calls from previous cancelled executions
+    // This prevents LLM errors when tool calls don't have corresponding results
+    {
         let mut memory_manager = memory_manager_arc.lock().await;
-
-        // Clean up any orphaned tool calls from previous cancelled executions
-        // This prevents LLM errors when tool calls don't have corresponding results
         if let Err(e) = memory_manager.clean_orphaned_tool_calls().await {
             warn!("Failed to clean orphaned tool calls: {}", e);
         }
-
-        memory_manager.clone()
-    };
+    }
 
     // --- Setup Tool Provider for Specialized Agents ---
     let mut tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
@@ -261,7 +260,10 @@ pub async fn submit_query(
 
             // Create single agent runner with all tools
             let mut single_agent_runner = DefaultAgentRunner::with_boxed_brain(
-                memory_manager_clone,
+                {
+                    let memory_guard = memory_manager_arc.lock().await;
+                    memory_guard.clone()
+                },
                 agent_tool_provider,
                 brain,
                 agent_config::MAX_ITERATIONS,
@@ -309,7 +311,10 @@ pub async fn submit_query(
 
             // Create the orchestrator agent runner with personality-focused system prompt
             let mut orchestrator_runner = DefaultAgentRunner::with_boxed_brain(
-                memory_manager_clone,
+                {
+                    let memory_guard = memory_manager_arc.lock().await;
+                    memory_guard.clone()
+                },
                 orchestrator_tool_provider,
                 orchestrator_brain,
                 agent_config::MAX_ITERATIONS,
@@ -703,10 +708,10 @@ async fn execute_specialized_agent_task(
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
     };
 
-    // Create specialist agent runner with focused system prompt
+    // Create specialist agent runner with focused system prompt  
     let mut specialist_runner = DefaultAgentRunner::with_boxed_brain(
         specialist_memory,
-        (*tool_provider).clone(),
+        (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc
         specialist_brain,
         10, // Reduced iterations for focused tasks
         app_handle,
