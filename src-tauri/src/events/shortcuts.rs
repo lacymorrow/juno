@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Shortcut, Code, ShortcutState, ShortcutEvent};
 use tauri_plugin_voice_transcription::controller::VoiceController;
-use tracing::{info, error, warn};
+use tracing::{info, error};
 
 use crate::{constants, state};
 
@@ -83,45 +83,22 @@ fn handle_escape_key_shortcut(app: &AppHandle, event: &ShortcutEvent) {
             .map(|active| *active)
             .unwrap_or(false);
 
-        let has_active_operations = is_dictation_active || is_agent_active || is_always_listening_active;
+        // Always call comprehensive stop_all_operations for consistency
+        // This ensures all operations are stopped regardless of state detection
+        info!("[Escape Key] Cancelling all operations (detected states - dictation: {}, agent: {}, always_listening: {})",
+              is_dictation_active, is_agent_active, is_always_listening_active);
 
-        if has_active_operations {
-            info!("[Escape Key] Cancelling active operations (dictation: {}, agent: {}, always_listening: {})",
-                  is_dictation_active, is_agent_active, is_always_listening_active);
-
-            // Use the comprehensive stop_all_operations functionality
-            let app_handle_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                match crate::commands::stop_operations::stop_all_operations(app_handle_clone).await {
-                    Ok(message) => {
-                        info!("[Escape Key] Successfully stopped all operations: {}", message);
-                    }
-                    Err(e) => {
-                        error!("[Escape Key] Failed to stop all operations: {}", e);
-                    }
+        let app_handle_clone = app.clone();
+        tauri::async_runtime::spawn(async move {
+            match crate::commands::stop_operations::stop_all_operations(app_handle_clone).await {
+                Ok(message) => {
+                    info!("[Escape Key] Successfully stopped all operations: {}", message);
                 }
-            });
-        } else {
-            info!("[Escape Key] No active operations detected but key is registered - sending stop signals as cleanup");
-
-            // If the escape key is registered but no operations are detected as active,
-            // still send stop signals as cleanup (something registered it for a reason)
-            let app_handle_clone = app.clone();
-            tauri::async_runtime::spawn(async move {
-                // Just stop TTS and emit stop events as cleanup
-                crate::tts::stop_speech();
-
-                if let Err(e) = app_handle_clone.emit("tts-stop-requested", ()) {
-                    warn!("[Escape Key] Failed to emit TTS stop event: {}", e);
+                Err(e) => {
+                    error!("[Escape Key] Failed to stop all operations: {}", e);
                 }
-
-                if let Err(e) = app_handle_clone.emit("agent-stop-all", ()) {
-                    warn!("[Escape Key] Failed to emit agent-stop-all event: {}", e);
-                }
-
-                info!("[Escape Key] Sent cleanup stop signals");
-            });
-        }
+            }
+        });
     }
 }
 
@@ -152,7 +129,7 @@ fn handle_agent_mode_shortcut(app: &AppHandle, event: &ShortcutEvent) {
 
         if is_dictation_active {
             info!("[Agent Mode Shortcut] Pressed - stopping active dictation");
-            
+
             let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 // Stop dictation
