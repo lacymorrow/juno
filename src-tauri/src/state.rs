@@ -1071,35 +1071,13 @@ impl AppState {
             registry.len()
         );
 
-        // FIXED: Use blocking locks to ensure all providers are refreshed
-        // Previously try_lock could skip busy providers, causing inconsistent state
+        // Use proper async locks to ensure all providers are refreshed
         for provider_arc in registry.iter() {
-            match provider_arc.try_lock() {
-                Ok(mut provider) => {
-                    if let Err(e) = provider.refresh_mcp_tools().await {
-                        warn!("Failed to refresh MCP tools for tool provider: {}", e);
-                    } else {
-                        debug!("Successfully refreshed MCP tools for tool provider");
-                    }
-                }
-                Err(_) => {
-                    // Provider is busy, schedule retry instead of skipping
-                    warn!("Tool provider is busy, will retry MCP refresh in background");
-
-                    // Clone for background retry
-                    let provider_clone = provider_arc.clone();
-                    tokio::spawn(async move {
-                        // Wait a bit and retry
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        // FIXED: Use .lock().await instead of creating a Result pattern
-                        let mut provider = provider_clone.lock().await;
-                        if let Err(e) = provider.refresh_mcp_tools().await {
-                            error!("Background MCP refresh retry failed: {}", e);
-                        } else {
-                            debug!("Background MCP refresh retry succeeded");
-                        }
-                    });
-                }
+            let mut provider = provider_arc.lock().await;
+            if let Err(e) = provider.refresh_mcp_tools().await {
+                warn!("Failed to refresh MCP tools for tool provider: {}", e);
+            } else {
+                debug!("Successfully refreshed MCP tools for tool provider");
             }
         }
 
