@@ -663,6 +663,7 @@ pub fn run() {
             commands::complete_onboarding,
             commands::skip_onboarding,
             commands::reset_onboarding,
+            commands::restart_onboarding,
             commands::get_onboarding_info,
             commands::test_global_shortcuts_working,
 

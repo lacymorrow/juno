@@ -9,8 +9,8 @@ import { VoiceProvider } from "./contexts/VoiceContext";
 import FloatingPanel from "./FloatingPanel";
 import OnboardingWindow from "./OnboardingWindow";
 import "./styles/globals.css";
-import SettingsWindow from "./components/OLD-SettingsWindow";
-import Settings from "./components/OLD-Settings";
+// import SettingsWindow from "./components/OLD-SettingsWindow";
+// import Settings from "./components/OLD-Settings";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -26,11 +26,14 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       </BrowserRouter>
       {/* Toast notifications */}
       <Toaster
-        position="bottom-right"
+        position="top-center"
         expand={true}
         richColors={true}
         closeButton={true}
-        duration={5000}
+        duration={3000}
+        style={{
+          fontSize: "14px",
+        }}
       />
     </VoiceProvider>
   </React.StrictMode>
