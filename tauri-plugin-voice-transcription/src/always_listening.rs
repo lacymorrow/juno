@@ -279,14 +279,18 @@ impl AlwaysListeningController {
                     // Calculate volume level
                     let volume = Self::calculate_rms_volume(&audio_chunk);
 
-                    // Log audio chunk reception occasionally for debugging
-                    static mut LAST_CHUNK_LOG: Option<Instant> = None;
-                    unsafe {
-                        if LAST_CHUNK_LOG.map_or(true, |last| last.elapsed().as_secs() > 10) {
-                            info!("[AlwaysListening] Audio chunk: {} samples, RMS volume: {:.6}", audio_chunk.len(), volume);
-                            LAST_CHUNK_LOG = Some(Instant::now());
-                        }
+                                        // Log audio chunk reception occasionally for debugging
+                    thread_local! {
+                        static LAST_CHUNK_LOG: std::cell::RefCell<Option<Instant>> = std::cell::RefCell::new(None);
                     }
+
+                    LAST_CHUNK_LOG.with(|last_log| {
+                        let mut last_log = last_log.borrow_mut();
+                        if last_log.map_or(true, |last| last.elapsed().as_secs() > 10) {
+                            info!("[AlwaysListening] Audio chunk: {} samples, RMS volume: {:.6}", audio_chunk.len(), volume);
+                            *last_log = Some(Instant::now());
+                        }
+                    });
 
                     match current_state {
                         AlwaysListeningState::Monitoring => {
@@ -376,13 +380,17 @@ impl AlwaysListeningController {
                                 }
 
                                 // Log volume levels more frequently for debugging
-                                static mut LAST_VOLUME_LOG: Option<Instant> = None;
-                                unsafe {
-                                    if LAST_VOLUME_LOG.map_or(true, |last| last.elapsed().as_secs() > 5) { // Reduced frequency
-                                        debug!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (start threshold, sensitivity: {:.1})", volume, volume_threshold, sensitivity);
-                                        LAST_VOLUME_LOG = Some(Instant::now());
-                                    }
+                                thread_local! {
+                                    static LAST_VOLUME_LOG: std::cell::RefCell<Option<Instant>> = std::cell::RefCell::new(None);
                                 }
+
+                                LAST_VOLUME_LOG.with(|last_log| {
+                                    let mut last_log = last_log.borrow_mut();
+                                    if last_log.map_or(true, |last| last.elapsed().as_secs() > 5) { // Reduced frequency
+                                        debug!("[AlwaysListening] Volume monitoring: {:.6} < {:.6} (start threshold, sensitivity: {:.1})", volume, volume_threshold, sensitivity);
+                                        *last_log = Some(Instant::now());
+                                    }
+                                });
 
                                 // Maintain rolling buffer during monitoring
                                 if audio_buffer.len() > buffer_capacity {
@@ -851,20 +859,18 @@ impl AlwaysListeningController {
     }
 
     fn is_agent_call_allowed() -> bool {
-        // This is a simplified implementation - in a real system, you'd want to pass
-        // the Arc<Mutex<Vec<Instant>>> timestamps here for proper rate limiting
-        // For now, we'll implement basic time-based limiting
-        static mut LAST_CALL_TIMES: Option<Vec<std::time::SystemTime>> = None;
+        use std::sync::{Mutex, OnceLock};
 
-        unsafe {
-            let now = std::time::SystemTime::now();
-            let one_minute_ago = now - std::time::Duration::from_secs(60);
+        // Thread-safe replacement for static mut using OnceLock and Mutex
+        static CALL_TIMES: OnceLock<Mutex<Vec<std::time::SystemTime>>> = OnceLock::new();
 
-            if LAST_CALL_TIMES.is_none() {
-                LAST_CALL_TIMES = Some(Vec::new());
-            }
+        let call_times = CALL_TIMES.get_or_init(|| Mutex::new(Vec::new()));
 
-            if let Some(ref mut times) = LAST_CALL_TIMES {
+        match call_times.lock() {
+            Ok(mut times) => {
+                let now = std::time::SystemTime::now();
+                let one_minute_ago = now - std::time::Duration::from_secs(60);
+
                 // Remove calls older than 1 minute
                 times.retain(|&time| time > one_minute_ago);
 
@@ -875,8 +881,10 @@ impl AlwaysListeningController {
                 } else {
                     false
                 }
-            } else {
-                false
+            }
+            Err(e) => {
+                error!("Failed to acquire agent call rate limiting lock: {}", e);
+                false // Safe fallback - deny the call
             }
         }
     }

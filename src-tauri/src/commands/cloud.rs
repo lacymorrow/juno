@@ -826,7 +826,10 @@ async fn run_command_processing_test(_app_state: &AppState) -> serde_json::Value
             config: None,
             mode: None,
         },
-        timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
         signature: None,
         metadata: None,
     };

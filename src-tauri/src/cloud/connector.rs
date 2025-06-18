@@ -532,7 +532,10 @@ impl ProductionCloudConnector {
         let auth_message = WebSocketMessage {
             message_type: MessageType::Auth,
             data: auth_data,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         };
 
         self.send_websocket_message(auth_message).await?;
@@ -626,7 +629,10 @@ impl ProductionCloudConnector {
         let command_message = WebSocketMessage {
             message_type: MessageType::Command,
             data: serde_json::to_value(command)?,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         };
 
         let result = self.send_websocket_message(command_message).await;
@@ -662,7 +668,10 @@ impl ProductionCloudConnector {
         let status_message = WebSocketMessage {
             message_type: MessageType::Status,
             data: serde_json::to_value(status)?,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         };
 
         self.send_websocket_message(status_message).await
@@ -692,7 +701,10 @@ impl ProductionCloudConnector {
                 let heartbeat = WebSocketMessage {
                     message_type: MessageType::Heartbeat,
                     data: json!({
-                        "timestamp": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                        "timestamp": SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
                         "device_id": self.auth.get_credentials().map(|c| c.device_id.clone()).unwrap_or_default(),
                         "connection_stats": self.get_connection_stats().await,
                         "system_health": {
@@ -703,7 +715,10 @@ impl ProductionCloudConnector {
                             "performance": "optimal"
                         }
                     }),
-                    timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
                 };
 
                 if let Err(e) = self.send_websocket_message(heartbeat).await {
@@ -769,7 +784,9 @@ impl ProductionCloudConnector {
         // Check if any agent is currently active
         if app_state.is_agent_executing() {
             Some("Agent interaction in progress".to_string())
-        } else if *app_state.dictation_active.lock().unwrap() {
+        } else if app_state.dictation_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or(false) {
             Some("Voice dictation active".to_string())
         } else {
             None
@@ -786,10 +803,9 @@ impl ProductionCloudConnector {
             permissions.push(permission_types::SCREEN_RECORDING.to_string());
         }
 
-        let voice_enabled = {
-            let always_listening = app_state.always_listening_active.lock().unwrap();
-            *always_listening
-        };
+        let voice_enabled = app_state.always_listening_active.lock()
+            .map(|guard| *guard)
+            .unwrap_or(false);
 
         if voice_enabled {
             permissions.push(permission_types::MICROPHONE.to_string());
@@ -1011,8 +1027,9 @@ PhysMem: 8192M used (1234M wired), 567M unused.
         {
             let result = HardwareMonitor::parse_cpu_usage(sample_output);
             assert!(result.is_some());
-            let cpu_usage = result.unwrap();
-            assert_eq!(cpu_usage, 23.84); // 15.38 + 8.46
+            if let Some(cpu_usage) = result {
+                assert_eq!(cpu_usage, 23.84); // 15.38 + 8.46
+            }
         }
     }
 
@@ -1035,8 +1052,9 @@ PhysMem: 8192M used (1234M wired), 567M unused.
         {
             let result = HardwareMonitor::parse_cpu_usage(different_output);
             assert!(result.is_some());
-            let cpu_usage = result.unwrap();
-            assert_eq!(cpu_usage, 18.0); // 5.2 + 12.8
+            if let Some(cpu_usage) = result {
+                assert_eq!(cpu_usage, 18.0); // 5.2 + 12.8
+            }
         }
     }
 }
