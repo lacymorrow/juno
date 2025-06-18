@@ -1,6 +1,7 @@
 use accessibility::{AXAttribute, AXUIElement};
 use accessibility_sys::{AXUIElementSetAttributeValue, AXUIElementRef};
 use super::constants::*;
+use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
 use super::element::MacOSUIElement;
 use super::wrappers::ThreadSafeAXUIElement;
 use crate::element::UIElementImpl; // Needed for app_attributes in click_auto
@@ -22,6 +23,20 @@ use arboard::Clipboard;
 // Define key code constants for keyboard shortcuts
 const KEYCODE_CMD: CGKeyCode = 55; // Left Command key
 const KEYCODE_A: CGKeyCode = 0;    // 'A' key
+
+/// Helper function to create multi-monitor aware CGPoint
+/// Adjusts coordinates for the appropriate display and logs any changes
+fn create_adjusted_point(x: f64, y: f64) -> Result<CGPoint, AutomationError> {
+    let (adjusted_x, adjusted_y) = adjust_coordinates_for_display(x, y, None)?;
+
+    // Log coordinate adjustment for debugging multi-monitor issues
+    if x != adjusted_x || y != adjusted_y {
+        debug!("Multi-monitor coordinate adjustment: ({}, {}) → ({}, {})", x, y, adjusted_x, adjusted_y);
+        tracing::trace!("Display info: {}", get_displays_debug_info());
+    }
+
+    Ok(CGPoint::new(adjusted_x, adjusted_y))
+}
 
 // Native clipboard implementation using arboard (modern, cross-platform)
 struct NativeClipboard {
@@ -283,8 +298,8 @@ pub(crate) fn get_cursor_position() -> Result<(f64, f64), AutomationError> {
 /// Move the mouse cursor to the specified coordinates.
 #[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn mouse_move(x: f64, y: f64) -> Result<(), AutomationError> {
-    let point = CGPoint::new(x, y);
-    debug!("Moving mouse to ({}, {})", x, y);
+    let point = create_adjusted_point(x, y)?;
+    debug!("Moving mouse to ({}, {}) [adjusted]", point.x, point.y);
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse move".to_string()))?;
 
@@ -305,8 +320,8 @@ pub(crate) fn left_mouse_down(x: f64, y: f64, modifiers: Option<CGEventFlags>) -
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse down".to_string()))?;
 
-    // First, move the cursor to the target position
-    let point = CGPoint::new(x, y);
+    // First, move the cursor to the target position (with multi-monitor support)
+    let point = create_adjusted_point(x, y)?;
     let mouse_move = CGEvent::new_mouse_event(
         source.clone(),
         CGEventType::MouseMoved,
@@ -356,8 +371,8 @@ pub(crate) fn left_mouse_up(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> 
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source for mouse up".to_string()))?;
 
-    // Create the point for the current position
-    let point = CGPoint::new(x, y);
+    // Create the point for the current position (with multi-monitor support)
+    let point = create_adjusted_point(x, y)?;
 
     // Create the mouse up event
     let mouse_up = CGEvent::new_mouse_event(
@@ -402,8 +417,8 @@ pub(crate) fn left_click(x: f64, y: f64, modifiers: Option<CGEventFlags>) -> Res
 /// Simulate a right click (down + up) at specified coordinates.
 #[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
-    let point = CGPoint::new(x, y);
-    debug!("Performing right click at ({}, {})", x, y);
+    let point = create_adjusted_point(x, y)?;
+    debug!("Performing right click at ({}, {}) [adjusted]", point.x, point.y);
     mouse_move(x, y)?; // Ensure cursor is at the correct position
     std::thread::sleep(std::time::Duration::from_millis(20));
 
@@ -424,8 +439,8 @@ pub(crate) fn right_click(x: f64, y: f64) -> Result<(), AutomationError> {
 /// Simulate a middle click (down + up) at specified coordinates.
 #[allow(dead_code)] // Used through computer_use_ai_sdk interface
 pub(crate) fn middle_click(x: f64, y: f64) -> Result<(), AutomationError> {
-    let point = CGPoint::new(x, y);
-    debug!("Performing middle click at ({}, {})", x, y);
+    let point = create_adjusted_point(x, y)?;
+    debug!("Performing middle click at ({}, {}) [adjusted]", point.x, point.y);
     mouse_move(x, y)?; // Ensure cursor is at the correct position
     std::thread::sleep(std::time::Duration::from_millis(20));
 
@@ -445,8 +460,8 @@ pub(crate) fn middle_click(x: f64, y: f64) -> Result<(), AutomationError> {
 
 /// Simulate a double click at the specified coordinates.
 pub(crate) fn double_click(x: f64, y: f64) -> Result<(), AutomationError> {
-    let point = CGPoint::new(x, y);
-    debug!("Performing double click at ({}, {})", x, y);
+    let point = create_adjusted_point(x, y)?;
+    debug!("Performing double click at ({}, {}) [adjusted]", point.x, point.y);
     mouse_move(x, y)?;
     std::thread::sleep(std::time::Duration::from_millis(20));
 
@@ -489,7 +504,7 @@ pub(crate) fn triple_click(x: f64, y: f64) -> Result<(), AutomationError> {
 
     // Instead of calling double_click + left_click, we'll implement the full sequence
     // with proper click state tracking - similar to how double_click is implemented
-    let point = CGPoint::new(x, y);
+    let point = create_adjusted_point(x, y)?;
     mouse_move(x, y)?;
     std::thread::sleep(std::time::Duration::from_millis(20));
 
@@ -547,8 +562,8 @@ pub(crate) fn left_click_drag(
     end_x: f64,
     end_y: f64,
 ) -> Result<(), AutomationError> {
-    let start_point = CGPoint::new(start_x, start_y);
-    let end_point = CGPoint::new(end_x, end_y);
+    let start_point = create_adjusted_point(start_x, start_y)?;
+    let end_point = create_adjusted_point(end_x, end_y)?;
     debug!(
         "Performing left click drag from ({}, {}) to ({}, {})",
         start_x, start_y, end_x, end_y

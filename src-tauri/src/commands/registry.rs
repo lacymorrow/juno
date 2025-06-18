@@ -262,6 +262,8 @@ pub mod categories {
         "get_mcp_server_statuses",
         "update_mcp_server",
         "set_mcp_server_enabled",
+        "toggle_mcp_server",
+        "toggle_mcp_tool",
         "test_mcp_server_connection",
         "initialize_mcp_servers",
         "get_mcp_diagnostics",

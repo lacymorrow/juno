@@ -5,6 +5,7 @@ use super::utils::{
     get_running_application_pids, map_generic_role_to_macos_roles,
 };
 use super::wrappers::ThreadSafeAXUIElement;
+use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
 use crate::platforms::tree_search::{
     ElementFinderWithWindows, ElementsCollectorWithWindows, TreeWalkerWithWindows,
 };
@@ -365,12 +366,23 @@ fn post_mouse_event(
     click_count: Option<i64>, // For clicks/double/triple
     modifiers: Option<CGEventFlags>, // For modifier keys during click
 ) -> Result<(), AutomationError> {
+    // Multi-monitor support: adjust coordinates for the appropriate display
+    let (adjusted_x, adjusted_y) = adjust_coordinates_for_display(point.x, point.y, None)?;
+    let adjusted_point = CGPoint::new(adjusted_x, adjusted_y);
+
+    // Log display information for debugging multi-monitor issues
+    if point.x != adjusted_x || point.y != adjusted_y {
+        debug!("Multi-monitor coordinate adjustment: ({}, {}) → ({}, {})",
+            point.x, point.y, adjusted_x, adjusted_y);
+        trace!("Display info: {}", get_displays_debug_info());
+    }
+
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
 
-    // Remove `mut` as event is not modified after creation unless flags/count are set
-    let event = CGEvent::new_mouse_event(source, event_type, point, button)
-        .map_err(|e| AutomationError::PlatformError(format!("Failed to create mouse event: {:?}", e)))?; // Added error details
+    // Use adjusted point for multi-monitor support
+    let event = CGEvent::new_mouse_event(source, event_type, adjusted_point, button)
+        .map_err(|e| AutomationError::PlatformError(format!("Failed to create mouse event: {:?}", e)))?;
 
     if let Some(count) = click_count {
         // Use the correct constant kCGMouseEventClickState - try fully qualified path
