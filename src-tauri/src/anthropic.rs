@@ -116,6 +116,45 @@ pub async fn submit_query(
         return Ok(());
     }
 
+    // --- Offline Detection ---
+    info!("Checking network connectivity...");
+    let is_online = crate::utils::network::is_online().await;
+
+    if !is_online {
+        let offline_message = crate::utils::network::get_offline_message();
+        warn!("Device is offline, providing offline response");
+
+        // Emit offline message as agent response
+        let message_id = uuid::Uuid::new_v4().to_string();
+        crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
+        crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, offline_message.clone(), Some(message_id.clone()));
+        crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, offline_message.clone());
+
+        // Force system TTS for offline response
+        let current_provider = state.tts_provider.lock().map_err(|e| format!("Failed to access TTS provider: {}", e))?.clone();
+
+        // Temporarily switch to system TTS for offline message
+        {
+            let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock TTS provider: {}", e))?;
+            *tts_provider = "system".to_string();
+        }
+
+        // Play offline message using system TTS
+        if let Err(e) = crate::tts::invoke_tts(offline_message, state.clone(), app_handle.clone()).await {
+            warn!("Failed to play offline message via TTS: {}", e);
+        }
+
+        // Restore original TTS provider
+        {
+            let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to restore TTS provider: {}", e))?;
+            *tts_provider = current_provider;
+        }
+
+        return Ok(());
+    }
+
+    info!("Network connectivity confirmed, proceeding with agent execution");
+
     // --- Check if an agent is already running and cancel it ---
     if state.is_agent_executing() {
         let current_execution_id = state.get_current_agent_execution_id();
@@ -367,6 +406,11 @@ pub async fn submit_query(
         },
         Err(e) => {
             error!("Agent run failed: {}", e);
+
+            // Check if this is a network-related error
+            let error_message = e.to_string();
+            let is_network_error = crate::utils::network::is_network_error(&error_message);
+
             let (state_str, msg) = match e {
                 AgentError::Terminated => {
                     // Play agent attention sound for cancellation (less intrusive than error)
@@ -382,6 +426,17 @@ pub async fn submit_query(
                     }
                     ("Failed".to_string(), "Agent reached maximum steps.".to_string())
                 },
+                AgentError::LlmError(_) if is_network_error => {
+                    // Handle network errors gracefully - use friendly message instead of raw error
+                    warn!("LLM error appears to be network-related: {}", error_message);
+
+                    // Play different sound for network issues (less alarming)
+                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(app_handle.clone(), state.clone()).await {
+                        warn!("Failed to play network error sound: {}", e);
+                    }
+
+                    ("Offline".to_string(), crate::utils::network::get_offline_message())
+                },
                 _ => {
                     // Play agent error sound for other failures
                     if let Err(e) = crate::commands::sound::play_agent_error_sound(app_handle.clone(), state.clone()).await {
@@ -390,13 +445,44 @@ pub async fn submit_query(
                     ("Failed".to_string(), format!("Agent error: {}", e))
                 },
             };
-            SubmitQueryResult {
+
+            // For network errors, temporarily switch to system TTS to ensure the message is heard
+            let should_force_system_tts = is_network_error || state_str == "Offline";
+            let original_tts_provider = if should_force_system_tts {
+                let current_provider = state.tts_provider.lock().map(|p| p.clone()).unwrap_or_default();
+                // Switch to system TTS for network errors
+                if let Ok(mut tts_provider) = state.tts_provider.lock() {
+                    *tts_provider = "system".to_string();
+                    info!("Temporarily switched to system TTS for offline/network error message");
+                }
+                Some(current_provider)
+            } else {
+                None
+            };
+
+            let result = SubmitQueryResult {
                 text: msg.clone(),
                 spoken_text: None, // Error messages use same content for speech
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: state_str,
                 screenshot_base64: None,
+            };
+
+            // Store the original provider to restore later if needed
+            if let Some(original_provider) = original_tts_provider {
+                // We'll restore it after TTS processing below
+                let state_for_restore = state.inner().clone();
+                tokio::task::spawn(async move {
+                    // Give TTS time to process
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    if let Ok(mut tts_provider) = state_for_restore.tts_provider.lock() {
+                        *tts_provider = original_provider;
+                        info!("Restored original TTS provider after offline/network error message");
+                    }
+                });
             }
+
+            result
         }
     };
 

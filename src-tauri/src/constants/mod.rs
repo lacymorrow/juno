@@ -48,7 +48,7 @@ pub use ui::*;
 pub use menus::*;
 pub use agent::*;
 // Only re-export specific parts of errors to avoid conflict with events::messages
-pub use errors::{codes, recovery, cloud_networking};
+pub use errors::{codes, recovery};
 pub use files::*;
 pub use audio::*;
 pub use browser::*;

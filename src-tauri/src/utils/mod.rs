@@ -1,7 +1,11 @@
 // Add coordinates module
 pub mod coordinates;
 pub mod command_macros;
+<<<<<<< HEAD
 pub mod key_parsing;
+=======
+pub mod network;
+>>>>>>> rf5
 
 use computer_use_ai_sdk::Desktop;
 
