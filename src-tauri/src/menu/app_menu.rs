@@ -191,7 +191,7 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         }
         constants::app_menu_ids::CHECK_FOR_UPDATES => {
             info!("[Menu] Check for Updates menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::UPDATE_CHECK_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::UPDATE_CHECK_REQUESTED, ()) {
                 error!("[Menu] Failed to emit update check event: {}", e);
             }
         }
@@ -208,25 +208,25 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         // File Menu
         constants::app_menu_ids::NEW_CHAT => {
             info!("[Menu] New Chat menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::NEW_CHAT_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::NEW_CHAT_REQUESTED, ()) {
                 error!("[Menu] Failed to emit new chat event: {}", e);
             }
         }
         constants::app_menu_ids::CLEAR_HISTORY => {
             info!("[Menu] Clear History menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::CLEAR_HISTORY_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::CLEAR_HISTORY_REQUESTED, ()) {
                 error!("[Menu] Failed to emit clear history event: {}", e);
             }
         }
         constants::app_menu_ids::IMPORT_CHAT => {
             info!("[Menu] Import Chat menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::IMPORT_CHAT_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::IMPORT_CHAT_REQUESTED, ()) {
                 error!("[Menu] Failed to emit import chat event: {}", e);
             }
         }
         constants::app_menu_ids::EXPORT_CHAT => {
             info!("[Menu] Export Chat menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::EXPORT_CHAT_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::EXPORT_CHAT_REQUESTED, ()) {
                 error!("[Menu] Failed to emit export chat event: {}", e);
             }
         }
@@ -234,25 +234,25 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         // View Menu
         constants::app_menu_ids::TOGGLE_FLOATING_BAR => {
             info!("[Menu] Toggle Floating Bar menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
                 error!("[Menu] Failed to emit toggle floating bar event: {}", e);
             }
         }
         constants::app_menu_ids::TOGGLE_DEV_PANEL => {
             info!("[Menu] Toggle Dev Panel menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::TOGGLE_DEV_PANEL_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::TOGGLE_DEV_PANEL_REQUESTED, ()) {
                 error!("[Menu] Failed to emit toggle dev panel event: {}", e);
             }
         }
         constants::app_menu_ids::SHOW_DEVTOOLS => {
             info!("[Menu] Developer Tools menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::DEVTOOLS_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::DEVTOOLS_REQUESTED, ()) {
                 error!("[Menu] Failed to emit devtools event: {}", e);
             }
         }
         constants::app_menu_ids::SHOW_PERMISSIONS => {
             info!("[Menu] Permissions menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::PERMISSIONS_REQUESTED, ()) {
+            if let Err(e) = app_handle.emit(constants::events::menu::PERMISSIONS_REQUESTED, ()) {
                 error!("[Menu] Failed to emit permissions event: {}", e);
             }
         }
@@ -273,25 +273,25 @@ pub fn handle_app_menu_events(app_handle: AppHandle, event_id: &str) {
         // Help Menu
         constants::app_menu_ids::HELP => {
             info!("[Menu] Help menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::HELP_REQUESTED, "general") {
+            if let Err(e) = app_handle.emit(constants::events::menu::HELP_REQUESTED, "general") {
                 error!("[Menu] Failed to emit help event: {}", e);
             }
         }
         constants::app_menu_ids::KEYBOARD_SHORTCUTS => {
             info!("[Menu] Keyboard Shortcuts menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::HELP_REQUESTED, "shortcuts") {
+            if let Err(e) = app_handle.emit(constants::events::menu::HELP_REQUESTED, "shortcuts") {
                 error!("[Menu] Failed to emit keyboard shortcuts event: {}", e);
             }
         }
         constants::app_menu_ids::SEND_FEEDBACK => {
             info!("[Menu] Send Feedback menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::FEEDBACK_REQUESTED, "feedback") {
+            if let Err(e) = app_handle.emit(constants::events::menu::FEEDBACK_REQUESTED, "feedback") {
                 error!("[Menu] Failed to emit feedback event: {}", e);
             }
         }
         constants::app_menu_ids::REPORT_ISSUE => {
             info!("[Menu] Report Issue menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::FEEDBACK_REQUESTED, "issue") {
+            if let Err(e) = app_handle.emit(constants::events::menu::FEEDBACK_REQUESTED, "issue") {
                 error!("[Menu] Failed to emit report issue event: {}", e);
             }
         }

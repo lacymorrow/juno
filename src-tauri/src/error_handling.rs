@@ -132,7 +132,7 @@ pub mod utils {
             *dictation_active = false;
         }
 
-        if let Err(e) = app_handle.emit(crate::constants::events::DICTATION_ACTIVE, false) {
+        if let Err(e) = app_handle.emit(crate::constants::events::dictation::ACTIVE, false) {
             error!("Failed to emit dictation-active event after error recovery: {}", e);
         }
     }
@@ -150,7 +150,7 @@ pub mod utils {
         // Stop TTS if running
         crate::tts::stop_speech();
 
-        if let Err(e) = app_handle.emit(crate::constants::events::AGENT_ACTIVE, false) {
+        if let Err(e) = app_handle.emit(crate::constants::events::agent::ACTIVE, false) {
             error!("Failed to emit agent-active event after error recovery: {}", e);
         }
     }

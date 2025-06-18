@@ -14,7 +14,7 @@ use super::types::{
 };
 use super::security::CloudSecurity;
 use crate::state::AppState;
-use crate::constants::permission_types;
+use crate::constants::permissions;
 
 /// Remote command that can be executed on the device
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -587,9 +587,9 @@ impl CloudCommandProcessor {
         let app_state = self.app_handle.state::<AppState>();
 
         let required_permissions = vec![
-            permission_types::ACCESSIBILITY,
-            permission_types::SCREEN_RECORDING,
-            permission_types::MICROPHONE
+            permissions::types::ACCESSIBILITY,
+            permissions::types::SCREEN_RECORDING,
+            permissions::types::MICROPHONE
         ];
 
         let permissions = serde_json::json!({

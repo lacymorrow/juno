@@ -194,7 +194,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
         // Check if we should start transcription immediately
         if state.check_and_start_transcription() {
             // Emit event to start transcription immediately
-            if let Err(e) = app_handle.emit(events::DICTATION_TRANSCRIPTION_START, ()) {
+            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_START, ()) {
                 error!("[DictationMonitor] Failed to emit dictation-transcription-start: {}", e);
             }
         }
@@ -202,7 +202,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
         // Check if we've reached the hold threshold (commit to dictation)
         if state.check_and_reach_threshold() {
             // Emit event to confirm dictation commitment
-            if let Err(e) = app_handle.emit(events::DICTATION_COMMITTED, ()) {
+            if let Err(e) = app_handle.emit(events::dictation::COMMITTED, ()) {
                 error!("[DictationMonitor] Failed to emit dictation-committed: {}", e);
             }
         }
@@ -210,7 +210,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
         // Check for transcription timeout (safety mechanism)
         if state.check_transcription_timeout() {
             warn!("[DictationMonitor] Transcription timeout detected - forcing stop");
-            if let Err(e) = app_handle.emit(events::DICTATION_TRANSCRIPTION_FORCE_STOP, ()) {
+            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_FORCE_STOP, ()) {
                 error!("[DictationMonitor] Failed to emit dictation-transcription-force-stop: {}", e);
             }
 
@@ -226,7 +226,7 @@ async fn dictation_input_monitoring_task(app_handle: AppHandle) {
         // Check if we need to force cleanup due to stuck state
         if state.should_force_cleanup() {
             warn!("[DictationMonitor] Force cleanup triggered");
-            if let Err(e) = app_handle.emit(events::DICTATION_TRANSCRIPTION_FORCE_CLEANUP, ()) {
+            if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_FORCE_CLEANUP, ()) {
                 error!("[DictationMonitor] Failed to emit dictation-transcription-force-cleanup: {}", e);
             }
 
@@ -289,7 +289,7 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
         info!("[DictationMonitor] Dictation input released after threshold reached - completing Dictation Mode normally");
 
         // Emit event to stop dictation normally
-        if let Err(e) = app_handle.emit(events::DICTATION_STOP, ()) {
+        if let Err(e) = app_handle.emit(events::dictation::STOP, ()) {
             error!("[DictationMonitor] Failed to emit dictation-stop: {}", e);
         }
     } else if transcription_started {
@@ -299,7 +299,7 @@ pub async fn on_dictation_input_released(app_handle: &AppHandle) {
         );
 
         // Emit event to cancel transcription - no passthrough needed since we use Option+Space now
-        if let Err(e) = app_handle.emit(events::DICTATION_TRANSCRIPTION_CANCEL, ()) {
+        if let Err(e) = app_handle.emit(events::dictation::TRANSCRIPTION_CANCEL, ()) {
             error!("[DictationMonitor] Failed to emit dictation-transcription-cancel: {}", e);
         }
     } else {

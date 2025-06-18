@@ -17,7 +17,7 @@ use super::config::CloudConfig;
 use super::auth::DeviceAuth;
 use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
-use crate::constants::permission_types;
+use crate::constants::permissions;
 
 #[allow(dead_code)]
 type WsSender = futures_util::stream::SplitSink<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, Message>;
@@ -396,8 +396,8 @@ impl CloudClient {
         let mut permissions = Vec::new();
 
         if app_state.is_desktop_available() {
-            permissions.push(permission_types::ACCESSIBILITY.to_string());
-            permissions.push(permission_types::SCREEN_RECORDING.to_string());
+            permissions.push(permissions::types::ACCESSIBILITY.to_string());
+            permissions.push(permissions::types::SCREEN_RECORDING.to_string());
         }
 
         let voice_enabled = {
@@ -406,7 +406,7 @@ impl CloudClient {
         };
 
         if voice_enabled {
-            permissions.push(permission_types::MICROPHONE.to_string());
+            permissions.push(permissions::types::MICROPHONE.to_string());
         }
 
         permissions

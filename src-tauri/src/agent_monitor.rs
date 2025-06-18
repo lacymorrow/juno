@@ -193,7 +193,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         // When threshold is reached, we want to stop the transcription so the final result
         // gets processed by the voice-transcription:final-result handler, which will
         // send the transcribed text to the agent for processing
-        if let Err(e) = app_handle.emit(events::AGENT_TRANSCRIPTION_STOP, ()) {
+        if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_STOP, ()) {
             error!("[AgentMonitor] Failed to emit agent-transcription-stop: {}", e);
         }
     } else if agent_started {
@@ -203,7 +203,7 @@ pub async fn on_agent_input_released(app_handle: &AppHandle) {
         );
 
         // If released before threshold, cancel the agent
-        if let Err(e) = app_handle.emit(events::AGENT_CANCEL, ()) {
+        if let Err(e) = app_handle.emit(events::agent::CANCEL, ()) {
             error!("[AgentMonitor] Failed to emit agent-cancel: {}", e);
         }
     } else {
@@ -235,7 +235,7 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
             if state.check_and_start_agent() {
                 info!("[AgentMonitor] Background task detected agent should start - emitting agent-transcription-start");
                 // Emit event to start agent
-                if let Err(e) = app_handle.emit(events::AGENT_TRANSCRIPTION_START, ()) {
+                if let Err(e) = app_handle.emit(events::agent::TRANSCRIPTION_START, ()) {
                     error!("[AgentMonitor] Failed to emit agent-transcription-start: {}", e);
                 } else {
                     info!("[AgentMonitor] Successfully emitted agent-transcription-start event");
@@ -245,21 +245,21 @@ pub fn start_agent_monitor_task(app_handle: AppHandle) -> tokio::task::JoinHandl
             // Check if we should reach threshold
             if state.check_and_reach_threshold() {
                 // Emit event for threshold reached
-                if let Err(e) = app_handle.emit(events::AGENT_COMMITTED, ()) {
+                if let Err(e) = app_handle.emit(events::agent::COMMITTED, ()) {
                     error!("[AgentMonitor] Failed to emit agent-committed: {}", e);
                 }
             }
 
             // Check for timeouts
             if state.check_agent_timeout() {
-                if let Err(e) = app_handle.emit(events::AGENT_FORCE_STOP, ()) {
+                if let Err(e) = app_handle.emit(events::agent::FORCE_STOP, ()) {
                     error!("[AgentMonitor] Failed to emit agent-force-stop: {}", e);
                 }
             }
 
             // Check for stuck state cleanup
             if state.should_force_cleanup() {
-                if let Err(e) = app_handle.emit(events::AGENT_FORCE_CLEANUP, ()) {
+                if let Err(e) = app_handle.emit(events::agent::FORCE_CLEANUP, ()) {
                     error!("[AgentMonitor] Failed to emit agent-force-cleanup: {}", e);
                 }
             }

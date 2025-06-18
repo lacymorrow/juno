@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::time::Duration;
-use crate::constants::{timeouts, macos_system};
+use crate::constants::{timeouts, platform::macos};
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::permissions::{
     check_accessibility_permissions_with_auto_redirect
@@ -17,7 +17,7 @@ use lazy_static::lazy_static;
 use tokio_util::sync::CancellationToken;
 use std::sync::atomic::{AtomicBool, Ordering};
 // Removed unused import: use chrono::Utc;
-use crate::constants::permission_types;
+use crate::constants::permissions;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -514,7 +514,7 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
             .unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted,
             required: true,
             description: if granted {
@@ -533,7 +533,7 @@ async fn check_accessibility_permission() -> Result<PermissionStatus, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted: true,
             required: false,
             description: "Accessibility controls are not required on this platform.".to_string(),
@@ -551,7 +551,7 @@ async fn check_accessibility_permission_with_auto_redirect(auto_open_settings: b
             .unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted,
             required: true,
             description: if granted {
@@ -574,7 +574,7 @@ async fn check_accessibility_permission_with_auto_redirect(auto_open_settings: b
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted: true,
             required: false,
             description: "Accessibility controls are not required on this platform.".to_string(),
@@ -591,7 +591,7 @@ async fn check_screen_recording_permission() -> Result<PermissionStatus, String>
         let granted = test_screen_recording_access().await.unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::SCREEN_RECORDING.to_string(),
+            permission_type: permissions::types::SCREEN_RECORDING.to_string(),
             granted,
             required: true,
             description: if granted {
@@ -610,7 +610,7 @@ async fn check_screen_recording_permission() -> Result<PermissionStatus, String>
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::SCREEN_RECORDING.to_string(),
+            permission_type: permissions::types::SCREEN_RECORDING.to_string(),
             granted: true,
             required: false,
             description: "Screen recording controls are not required on this platform.".to_string(),
@@ -780,7 +780,7 @@ async fn open_microphone_system_settings() -> Result<(), String> {
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&[macos_system::MICROPHONE_PRIVACY_URL])
+            .args(&[permissions::urls::MICROPHONE_PRIVACY_URL])
             .status();
 
         match result {
@@ -868,7 +868,7 @@ async fn open_screen_recording_system_settings() -> Result<(), String> {
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&[macos_system::SCREEN_RECORDING_PRIVACY_URL])
+            .args(&[permissions::urls::SCREEN_RECORDING_PRIVACY_URL])
             .status();
 
         match result {
@@ -948,7 +948,7 @@ async fn open_input_monitoring_system_settings() -> Result<(), String> {
 
         // Try the modern macOS way first (macOS 13+)
         let result = Command::new("open")
-            .args(&[macos_system::INPUT_MONITORING_PRIVACY_URL])
+            .args(&[permissions::urls::INPUT_MONITORING_PRIVACY_URL])
             .status();
 
         match result {
@@ -997,7 +997,7 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
         let granted = test_microphone_access().await.unwrap_or(false);
 
         Ok(PermissionStatus {
-            permission_type: permission_types::MICROPHONE.to_string(),
+            permission_type: permissions::types::MICROPHONE.to_string(),
             granted,
             required: false, // Microphone is optional - voice features gracefully degrade without it
             description: if granted {
@@ -1016,7 +1016,7 @@ async fn check_microphone_permission() -> Result<PermissionStatus, String> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::MICROPHONE.to_string(),
+            permission_type: permissions::types::MICROPHONE.to_string(),
             granted: true,
             required: false,
             description: "Microphone access is handled by the system on this platform.".to_string(),
@@ -1199,7 +1199,7 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
         let granted = test_input_monitoring_access().await;
 
         Ok(PermissionStatus {
-            permission_type: permission_types::INPUT_MONITORING.to_string(),
+            permission_type: permissions::types::INPUT_MONITORING.to_string(),
             granted,
             required: false, // Input monitoring is optional - only needed for global shortcuts
             description: if granted {
@@ -1218,7 +1218,7 @@ async fn check_input_monitoring_permission() -> Result<PermissionStatus, String>
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PermissionStatus {
-            permission_type: permission_types::INPUT_MONITORING.to_string(),
+            permission_type: permissions::types::INPUT_MONITORING.to_string(),
             granted: true,
             required: false,
             description: "Input monitoring is not required on this platform.".to_string(),
@@ -1428,14 +1428,14 @@ mod tests {
     #[test]
     fn test_permission_status_creation() {
         let status = PermissionStatus {
-            permission_type: permission_types::ACCESSIBILITY.to_string(),
+            permission_type: permissions::types::ACCESSIBILITY.to_string(),
             granted: true,
             required: true,
             description: "Test description".to_string(),
             instructions: "Test instructions".to_string(),
         };
 
-        assert_eq!(status.permission_type, permission_types::ACCESSIBILITY);
+        assert_eq!(status.permission_type, permissions::types::ACCESSIBILITY);
         assert!(status.granted);
         assert!(status.required);
         assert!(!status.description.is_empty());
@@ -1446,28 +1446,28 @@ mod tests {
     fn test_permissions_state_all_granted_logic() {
         let permissions_state = PermissionsState {
             accessibility: PermissionStatus {
-                permission_type: permission_types::ACCESSIBILITY.to_string(),
+                permission_type: permissions::types::ACCESSIBILITY.to_string(),
                 granted: true,
                 required: true,
                 description: "Test".to_string(),
                 instructions: "Test".to_string(),
             },
             screen_recording: PermissionStatus {
-                permission_type: permission_types::SCREEN_RECORDING.to_string(),
+                permission_type: permissions::types::SCREEN_RECORDING.to_string(),
                 granted: true,
                 required: true,
                 description: "Test".to_string(),
                 instructions: "Test".to_string(),
             },
             microphone: PermissionStatus {
-                permission_type: permission_types::MICROPHONE.to_string(),
+                permission_type: permissions::types::MICROPHONE.to_string(),
                 granted: false,
                 required: false,
                 description: "Test".to_string(),
                 instructions: "Test".to_string(),
             },
             input_monitoring: PermissionStatus {
-                permission_type: permission_types::INPUT_MONITORING.to_string(),
+                permission_type: permissions::types::INPUT_MONITORING.to_string(),
                 granted: true,
                 required: true,
                 description: "Test".to_string(),
@@ -1478,18 +1478,18 @@ mod tests {
         };
 
         assert!(permissions_state.all_granted);
-        assert_eq!(permissions_state.accessibility.permission_type, permission_types::ACCESSIBILITY);
-        assert_eq!(permissions_state.input_monitoring.permission_type, permission_types::INPUT_MONITORING);
+        assert_eq!(permissions_state.accessibility.permission_type, permissions::types::ACCESSIBILITY);
+        assert_eq!(permissions_state.input_monitoring.permission_type, permissions::types::INPUT_MONITORING);
     }
 
     #[test]
     fn test_system_settings_url_safety() {
         // Test that we only accept valid permission type strings
         let valid_permissions = [
-            permission_types::ACCESSIBILITY,
-            permission_types::SCREEN_RECORDING,
-            permission_types::MICROPHONE,
-            permission_types::INPUT_MONITORING,
+            permissions::types::ACCESSIBILITY,
+            permissions::types::SCREEN_RECORDING,
+            permissions::types::MICROPHONE,
+            permissions::types::INPUT_MONITORING,
         ];
 
         for permission in &valid_permissions {

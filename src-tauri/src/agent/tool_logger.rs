@@ -1160,7 +1160,7 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
         "message_id": message_id
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_START, event_data) {
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_START, event_data) {
         warn!("Failed to emit agent-stream-start event: {}", e);
     }
 }
@@ -1171,7 +1171,7 @@ pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_i
         "message_id": message_id
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_TEXT_STREAM, event_data) {
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::TEXT_STREAM, event_data) {
         warn!("Failed to emit agent-text-stream event: {}", e);
     }
 }
@@ -1182,7 +1182,7 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
         "complete_text": complete_text
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::AGENT_STREAM_END, event_data) {
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_END, event_data) {
         warn!("Failed to emit agent-stream-end event: {}", e);
     }
 }
