@@ -227,7 +227,7 @@ pub async fn set_performance_monitoring(enabled: bool, state: State<'_, AppState
     info!("Setting performance monitoring to: {}", enabled);
 
     // Update the state
-    state.set_performance_monitoring_enabled(enabled);
+    let _ = state.set_performance_monitoring_enabled(enabled);
 
     // TODO: In the future, this could persist the setting to a config file
     // For now, it's stored in memory for the session
@@ -288,7 +288,7 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
 pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting debug mode to: {}", enabled);
 
-    state.set_debug_mode(enabled);
+    let _ = state.set_debug_mode(enabled);
 
     info!("Debug mode successfully set to: {}", enabled);
     Ok(())
@@ -324,10 +324,10 @@ pub async fn reset_all_settings(
     }
 
     // Reset performance monitoring
-    state.set_performance_monitoring_enabled(true);
+    let _ = state.set_performance_monitoring_enabled(true);
 
     // Reset debug mode
-    state.set_debug_mode(false);
+    let _ = state.set_debug_mode(false);
 
     // Reset dictation settings
     {
@@ -483,7 +483,7 @@ pub async fn set_agent_execution_progress(
 
     // Update current step if provided
     if let Some(step) = current_step {
-        state.update_agent_current_step(step);
+        let _ = state.update_agent_current_step(step);
     }
 
     // Note: AppState doesn't have a direct method to set max_steps independently,

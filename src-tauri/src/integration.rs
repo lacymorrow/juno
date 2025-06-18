@@ -30,8 +30,7 @@ pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std
     #[cfg(debug_assertions)]
     setup_development_integration(&app_handle);
 
-    // Initialize boot sound sequence
-    initialize_boot_sound_sequence(&app_handle);
+    // Boot sound is handled by app_setup module - removed duplicate call
 
     info!("✅ Application integration setup completed");
     Ok(())
@@ -707,25 +706,7 @@ fn setup_development_integration(app_handle: &AppHandle) {
     info!("🛠️ Development mode cleanup handlers installed");
 }
 
-/// Initialize boot sound sequence with proper timing
-fn initialize_boot_sound_sequence(app_handle: &AppHandle) {
-    info!("🔊 Initializing boot sound sequence...");
-
-    // --- Play Application Boot Sound ---
-    let app_handle_for_boot_sound = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        // Small delay to ensure UI is ready
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-
-        let state = app_handle_for_boot_sound.state::<crate::state::AppState>();
-        let app_handle_clone = app_handle_for_boot_sound.clone();
-        if let Err(e) = crate::commands::sound::play_boot_sound(app_handle_clone, state).await {
-            warn!("Failed to play boot sound: {}", e);
-        } else {
-            info!("Boot sound played successfully from backend");
-        }
-    });
-}
+// Boot sound function removed - handled by app_setup module
 
 /// Utility functions for component coordination and integration patterns
 pub mod utils {

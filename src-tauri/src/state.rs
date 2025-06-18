@@ -1,7 +1,7 @@
 use computer_use_ai_sdk::Desktop;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, error, warn, debug};
 use tauri::Emitter;
 
 pub mod desktop_wrapper;
@@ -306,18 +306,18 @@ impl AppState {
         // Send `false` to indicate cancellation is no longer requested.
         // Check if the current value is true before sending false to avoid unnecessary updates.
         let is_currently_cancelled = *self.cancel_rx.borrow();
-        log::info!(
+        info!(
             "[AppState] Attempting reset_cancel. Current state (is_cancelled): {}",
             is_currently_cancelled
         );
         if is_currently_cancelled {
             let send_result = self.cancel_tx.send(false);
-            log::info!(
+            info!(
                 "[AppState] reset_cancel: Sent 'false'. Result: {:?}",
                 send_result.is_ok()
             );
         } else {
-            log::info!("[AppState] reset_cancel: No reset needed (already false).");
+            info!("[AppState] reset_cancel: No reset needed (already false).");
         }
     }
 
@@ -333,7 +333,7 @@ impl AppState {
                 .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
             *id_guard = Some(execution_id.clone());
         }
-        log::info!(
+        info!(
             "[AppState] Agent execution started with ID: {}",
             execution_id
         );
@@ -362,7 +362,7 @@ impl AppState {
                 .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
             *current_step_guard = Some(0); // Start at step 0
         }
-        log::info!(
+        info!(
             "[AppState] Agent execution started with ID: {} (max steps: {})",
             execution_id,
             max_steps
@@ -382,7 +382,7 @@ impl AppState {
                 let mut id_guard = self.agent_execution_id.lock()
                     .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
                 let execution_id = id_guard.take();
-                log::info!(
+                info!(
                     "[AppState] Agent execution finished for ID: {:?}",
                     execution_id
                 );
@@ -401,7 +401,7 @@ impl AppState {
         })();
 
         if let Err(e) = result {
-            log::error!("Error marking agent execution as finished: {}", e);
+            error!("Error marking agent execution as finished: {}", e);
         }
     }
 
@@ -410,7 +410,7 @@ impl AppState {
         self.agent_execution_active.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check agent execution status: {}", e);
+                error!("Failed to check agent execution status: {}", e);
                 false // Safe fallback
             })
     }
@@ -420,7 +420,7 @@ impl AppState {
         self.agent_execution_id.lock()
             .map(|guard| guard.clone())
             .unwrap_or_else(|e| {
-                log::error!("Failed to get current agent execution ID: {}", e);
+                error!("Failed to get current agent execution ID: {}", e);
                 None // Safe fallback
             })
     }
@@ -430,7 +430,7 @@ impl AppState {
         let mut current_step_guard = self.agent_current_step.lock()
             .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
         *current_step_guard = Some(step);
-        log::debug!("[AppState] Agent current step updated to: {}", step);
+        debug!("[AppState] Agent current step updated to: {}", step);
         Ok(())
     }
 
@@ -439,7 +439,7 @@ impl AppState {
         self.agent_current_step.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to get current agent step: {}", e);
+                error!("Failed to get current agent step: {}", e);
                 None // Safe fallback
             })
     }
@@ -449,7 +449,7 @@ impl AppState {
         self.agent_max_steps.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to get agent max steps: {}", e);
+                error!("Failed to get agent max steps: {}", e);
                 None // Safe fallback
             })
     }
@@ -466,7 +466,7 @@ impl AppState {
         self.agent_execution_active.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check agent mode status: {}", e);
+                error!("Failed to check agent mode status: {}", e);
                 false // Safe fallback
             })
     }
@@ -476,7 +476,7 @@ impl AppState {
         self.dictation_active.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check dictation status: {}", e);
+                error!("Failed to check dictation status: {}", e);
                 false // Safe fallback
             })
     }
@@ -485,22 +485,22 @@ impl AppState {
     async fn get_or_init_playwright_driver(&self) -> Result<Arc<Playwright>, String> {
         let mut driver_guard = self.playwright_driver.lock().await;
         if driver_guard.is_none() {
-            log::info!("Initializing Playwright driver instance...");
+            info!("Initializing Playwright driver instance...");
             match Playwright::initialize().await {
                 Ok(pw_instance) => {
                     let arc_pw = Arc::new(pw_instance);
                     *driver_guard = Some(arc_pw.clone());
-                    log::info!("Playwright driver initialized and stored in AppState.");
+                    info!("Playwright driver initialized and stored in AppState.");
                     Ok(arc_pw)
                 }
                 Err(e) => {
                     let err_msg = format!("Failed to initialize Playwright driver: {}", e);
-                    log::error!("{}", err_msg);
+                    error!("{}", err_msg);
                     Err(err_msg)
                 }
             }
         } else {
-            log::debug!("Reusing existing Playwright driver instance from AppState.");
+            debug!("Reusing existing Playwright driver instance from AppState.");
             Ok(driver_guard.as_ref().unwrap().clone())
         }
     }
@@ -510,7 +510,7 @@ impl AppState {
         let mut controller_guard = self.browser_controller.lock().await;
 
         if controller_guard.is_none() {
-            log::info!("Initializing persistent browser controller (was None in AppState)");
+            info!("Initializing persistent browser controller (was None in AppState)");
             // Get or initialize the Playwright driver first
             let playwright_arc = self.get_or_init_playwright_driver().await.map_err(|e| {
                 format!(
@@ -522,17 +522,17 @@ impl AppState {
             match BrowserController::new(playwright_arc).await {
                 Ok(controller) => {
                     *controller_guard = Some(controller.clone());
-                    log::info!("BrowserController initialized and stored in AppState.");
+                    info!("BrowserController initialized and stored in AppState.");
                     Ok(controller)
                 }
                 Err(e) => {
                     let err_msg = format!("Failed to initialize browser controller: {}", e);
-                    log::error!("{}", err_msg);
+                    error!("{}", err_msg);
                     Err(err_msg)
                 }
             }
         } else {
-            log::debug!("Reusing existing browser controller from AppState.");
+            debug!("Reusing existing browser controller from AppState.");
             Ok(controller_guard.as_ref().unwrap().clone())
         }
     }
@@ -556,7 +556,7 @@ impl AppState {
         let type_id = TypeId::of::<T>();
         let components_lock = self.state_components.lock()
             .map_err(|e| {
-                log::error!("Failed to acquire state_components lock: {}", e);
+                error!("Failed to acquire state_components lock: {}", e);
             })
             .ok()?;
 
@@ -593,7 +593,7 @@ impl AppState {
         self.permissions_checked.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check permissions status: {}", e);
+                error!("Failed to check permissions status: {}", e);
                 false // Safe fallback
             })
     }
@@ -657,7 +657,7 @@ impl AppState {
                     *enabled = config.enabled;
                 }
                 Err(e) => {
-                    log::error!("Failed to update cloud enabled status: {}", e);
+                    error!("Failed to update cloud enabled status: {}", e);
                 }
             }
         }
@@ -699,7 +699,7 @@ impl AppState {
             .lock()
             .map(|enabled| *enabled)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check cloud enabled status: {}", e);
+                error!("Failed to check cloud enabled status: {}", e);
                 false // Safe fallback
             })
     }
@@ -734,7 +734,7 @@ impl AppState {
                     *enabled = config.enabled;
                 }
                 Err(e) => {
-                    log::error!("Failed to update cloud enabled status: {}", e);
+                    error!("Failed to update cloud enabled status: {}", e);
                 }
             }
         }
@@ -759,7 +759,7 @@ impl AppState {
             .lock()
             .map(|enabled| *enabled)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check performance monitoring status: {}", e);
+                error!("Failed to check performance monitoring status: {}", e);
                 false // Safe fallback
             })
     }
@@ -769,7 +769,7 @@ impl AppState {
         let mut monitoring_guard = self.performance_monitoring_enabled.lock()
             .map_err(|e| format!("Failed to acquire performance_monitoring_enabled lock: {}", e))?;
         *monitoring_guard = enabled;
-        log::info!(
+        info!(
             "Performance monitoring {}",
             if enabled { "enabled" } else { "disabled" }
         );
@@ -793,7 +793,7 @@ impl AppState {
             Err(_) => {
                 // Lock is busy - log this for debugging but don't error
                 // This is expected behavior when another operation is in progress
-                log::debug!("Production cloud connector is busy, returning None (non-blocking call)");
+                debug!("Production cloud connector is busy, returning None (non-blocking call)");
                 None
             }
         }
@@ -831,7 +831,7 @@ impl AppState {
         drop(config_guard);
 
         if mcp_configs.is_empty() {
-            log::debug!("No MCP servers configured, skipping initialization");
+            debug!("No MCP servers configured, skipping initialization");
             return Ok(());
         }
 
@@ -844,10 +844,10 @@ impl AppState {
             match manager_guard.add_server(config.clone()).await {
                 Ok(_) => {
                     added_servers.push(config.clone());
-                    log::debug!("Added MCP server configuration: {}", config.name);
+                    debug!("Added MCP server configuration: {}", config.name);
                 }
                 Err(e) => {
-                    log::warn!("Failed to add MCP server '{}': {}", config.name, e);
+                    warn!("Failed to add MCP server '{}': {}", config.name, e);
                 }
             }
         }
@@ -855,7 +855,7 @@ impl AppState {
         drop(manager_guard); // Release lock before starting servers
 
         if added_servers.is_empty() {
-            log::warn!("No MCP servers were successfully added");
+            warn!("No MCP servers were successfully added");
             return Ok(());
         }
 
@@ -865,7 +865,7 @@ impl AppState {
             .collect();
 
         if !enabled_servers.is_empty() {
-            log::info!("Starting {} MCP servers with staggered startup to prevent race conditions", enabled_servers.len());
+            info!("Starting {} MCP servers with staggered startup to prevent race conditions", enabled_servers.len());
 
             let manager = self.get_mcp_manager().await;
             let mut successful_servers = Vec::new();
@@ -878,7 +878,7 @@ impl AppState {
                     tokio::time::sleep(Duration::from_millis(2000)).await;
                 }
 
-                log::info!("Starting MCP server {} of {}: '{}'", index + 1, enabled_servers.len(), config.name);
+                info!("Starting MCP server {} of {}: '{}'", index + 1, enabled_servers.len(), config.name);
 
                 let manager_guard = manager.lock().await;
                 let start_result = tokio::time::timeout(
@@ -889,35 +889,35 @@ impl AppState {
 
                 match start_result {
                     Ok(Ok(_)) => {
-                        log::info!("✅ MCP server '{}' started successfully", config.name);
+                        info!("✅ MCP server '{}' started successfully", config.name);
                         successful_servers.push(config.name.clone());
 
                         // Give server additional time to fully initialize before starting next
                         tokio::time::sleep(Duration::from_millis(1000)).await;
                     }
                     Ok(Err(e)) => {
-                        log::warn!("❌ MCP server '{}' failed to start: {}", config.name, e);
+                        warn!("❌ MCP server '{}' failed to start: {}", config.name, e);
                         failed_servers.push(format!("{}: {}", config.name, e));
                     }
                     Err(_) => {
-                        log::warn!("⏰ MCP server '{}' startup timed out after 45s", config.name);
+                        warn!("⏰ MCP server '{}' startup timed out after 45s", config.name);
                         failed_servers.push(format!("{}: timeout", config.name));
                     }
                 }
             }
 
-            log::info!("MCP initialization complete: {} succeeded, {} failed", successful_servers.len(), failed_servers.len());
+            info!("MCP initialization complete: {} succeeded, {} failed", successful_servers.len(), failed_servers.len());
 
             if !failed_servers.is_empty() {
-                log::warn!("Failed MCP servers: {}", failed_servers.join(", "));
+                warn!("Failed MCP servers: {}", failed_servers.join(", "));
             }
         } else {
-            log::info!("No enabled MCP servers found to start");
+            info!("No enabled MCP servers found to start");
         }
 
         // Sync tools once at the end
         if let Err(e) = self.sync_mcp_tools().await {
-            log::warn!("Failed to sync MCP tools after initialization: {}", e);
+            warn!("Failed to sync MCP tools after initialization: {}", e);
         }
 
         Ok(())
@@ -939,28 +939,28 @@ impl AppState {
             .collect();
 
         if failed_servers.is_empty() {
-            log::debug!("No failed MCP servers to retry");
+            debug!("No failed MCP servers to retry");
             return Ok(());
         }
 
-        log::info!("Attempting to retry {} failed MCP servers", failed_servers.len());
+        info!("Attempting to retry {} failed MCP servers", failed_servers.len());
 
         let mut retry_count = 0;
         for server_id in failed_servers {
             // Each server manages its own backoff timing
             match manager_guard.start_server(&server_id).await {
                 Ok(_) => {
-                    log::info!("✅ Successfully retried MCP server: {}", server_id);
+                    info!("✅ Successfully retried MCP server: {}", server_id);
                     retry_count += 1;
                 }
                 Err(e) => {
-                    log::debug!("⏭️ MCP server {} not ready for retry: {}", server_id, e);
+                    debug!("⏭️ MCP server {} not ready for retry: {}", server_id, e);
                 }
             }
         }
 
         if retry_count > 0 {
-            log::info!("Retried {} MCP servers, syncing tools", retry_count);
+            info!("Retried {} MCP servers, syncing tools", retry_count);
             drop(manager_guard);
             self.sync_mcp_tools().await?;
         } else {
@@ -1010,7 +1010,7 @@ impl AppState {
         if let Ok(controller_guard) = self.browser_controller.try_lock() {
             if let Some(ref _controller) = *controller_guard {
                 // Just emit without trying to get app handle from controller
-                log::debug!("MCP tools updated, notifying frontend");
+                debug!("MCP tools updated, notifying frontend");
             }
         }
     }
@@ -1033,11 +1033,11 @@ impl AppState {
         });
 
         if let Err(e) = app_handle.emit("mcp_state_updated", payload) {
-            log::warn!("Failed to emit MCP state update: {}", e);
+            warn!("Failed to emit MCP state update: {}", e);
             return Err(format!("Failed to emit MCP state update: {}", e));
         }
 
-        log::debug!("Emitted MCP state update to frontend");
+        debug!("Emitted MCP state update to frontend");
         Ok(())
     }
 
@@ -1046,7 +1046,7 @@ impl AppState {
         let mut registry = self.tool_provider_registry.lock()
             .map_err(|e| format!("Failed to acquire tool_provider_registry lock: {}", e))?;
         registry.push(provider);
-        log::debug!("Registered tool provider for MCP refresh notifications");
+        debug!("Registered tool provider for MCP refresh notifications");
         Ok(())
     }
 
@@ -1056,13 +1056,13 @@ impl AppState {
             match self.tool_provider_registry.lock() {
                 Ok(registry_guard) => registry_guard.clone(),
                 Err(e) => {
-                    log::error!("Failed to access tool provider registry: {}", e);
+                    error!("Failed to access tool provider registry: {}", e);
                     return Err(format!("Failed to access tool provider registry: {}", e));
                 }
             }
         };
 
-        log::info!(
+        info!(
             "Refreshing {} registered tool providers with updated MCP tools",
             registry.len()
         );
@@ -1073,14 +1073,14 @@ impl AppState {
             match provider_arc.try_lock() {
                 Ok(mut provider) => {
                     if let Err(e) = provider.refresh_mcp_tools().await {
-                        log::warn!("Failed to refresh MCP tools for tool provider: {}", e);
+                        warn!("Failed to refresh MCP tools for tool provider: {}", e);
                     } else {
-                        log::debug!("Successfully refreshed MCP tools for tool provider");
+                        debug!("Successfully refreshed MCP tools for tool provider");
                     }
                 }
                 Err(_) => {
                     // Provider is busy, schedule retry instead of skipping
-                    log::warn!("Tool provider is busy, will retry MCP refresh in background");
+                    warn!("Tool provider is busy, will retry MCP refresh in background");
 
                     // Clone for background retry
                     let provider_clone = provider_arc.clone();
@@ -1090,9 +1090,9 @@ impl AppState {
                         // FIXED: Use .lock().await instead of creating a Result pattern
                         let mut provider = provider_clone.lock().await;
                         if let Err(e) = provider.refresh_mcp_tools().await {
-                            log::error!("Background MCP refresh retry failed: {}", e);
+                            error!("Background MCP refresh retry failed: {}", e);
                         } else {
-                            log::debug!("Background MCP refresh retry succeeded");
+                            debug!("Background MCP refresh retry succeeded");
                         }
                     });
                 }
@@ -1104,7 +1104,7 @@ impl AppState {
 
     /// Cleanup all MCP servers and resources
     pub async fn cleanup_mcp_resources(&self) -> Result<(), String> {
-        log::info!("🧹 Cleaning up MCP resources...");
+        info!("🧹 Cleaning up MCP resources...");
 
         let mcp_manager = self.get_mcp_manager().await;
         let manager_guard = mcp_manager.lock().await;
@@ -1113,12 +1113,12 @@ impl AppState {
         let configs = manager_guard.get_server_configs().await;
         for config in configs {
             if let Err(e) = manager_guard.stop_server(&config.id).await {
-                log::warn!("Failed to stop MCP server '{}': {}", config.name, e);
+                warn!("Failed to stop MCP server '{}': {}", config.name, e);
             }
         }
 
         drop(manager_guard);
-        log::info!("✅ MCP resources cleaned up");
+        info!("✅ MCP resources cleaned up");
         Ok(())
     }
 
@@ -1140,7 +1140,7 @@ impl AppState {
         // Try to claim initialization responsibility
         if INIT_FLAG.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
             // We're responsible for initialization
-            log::info!("Starting MCP servers initialization (first time)");
+            info!("Starting MCP servers initialization (first time)");
             let init_result = self.initialize_mcp_servers().await;
 
             // Store the result
@@ -1151,7 +1151,7 @@ impl AppState {
             init_result
         } else {
             // Someone else is/was initializing, wait for their result
-            log::debug!("MCP servers initialization already in progress, waiting for result");
+            debug!("MCP servers initialization already in progress, waiting for result");
             let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
 
             // Wait for initialization to complete
@@ -1183,7 +1183,7 @@ impl AppState {
         self.last_spoken_content.lock()
             .map(|guard| guard.clone())
             .unwrap_or_else(|e| {
-                log::error!("Failed to get last spoken content: {}", e);
+                error!("Failed to get last spoken content: {}", e);
                 None // Safe fallback
             })
     }
@@ -1208,7 +1208,7 @@ impl AppState {
         self.debug_mode.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check debug mode status: {}", e);
+                error!("Failed to check debug mode status: {}", e);
                 false // Safe fallback
             })
     }
@@ -1225,7 +1225,7 @@ impl AppState {
         self.tool_approval_required.lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
-                log::error!("Failed to check tool approval requirement: {}", e);
+                error!("Failed to check tool approval requirement: {}", e);
                 false // Safe fallback
             })
     }
