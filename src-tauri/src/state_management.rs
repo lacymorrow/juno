@@ -9,6 +9,9 @@ use tracing::{info, warn, error};
 use crate::state::AppState;
 use std::time::Duration;
 
+// Import sound commands for boot sound functionality
+use crate::commands::sound::{play_boot_sound, play_system_ready_sound};
+
 /// Initialize all application state components and background tasks
 pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), String> {
     info!("🚀 Initializing comprehensive application state management...");
@@ -335,6 +338,16 @@ pub async fn handle_emergency_state_cleanup(app_handle: &AppHandle) -> Result<()
         *dictation_active = false;
     }
 
+    // Stop always listening if active
+    if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
+        app_handle.clone(),
+        app_state.clone()
+    ).await {
+        warn!("[State] Failed to stop always listening during emergency cleanup: {}", e);
+    } else {
+        info!("[State] Always listening stopped during emergency cleanup");
+    }
+
     // Force reset monitoring states
     crate::agent_monitor::force_reset_agent_input_state().await;
     crate::dictation_monitor::force_reset_dictation_input_state().await;
@@ -342,6 +355,7 @@ pub async fn handle_emergency_state_cleanup(app_handle: &AppHandle) -> Result<()
     // Emit state updates
     let _ = app_handle.emit("agent-active", false);
     let _ = app_handle.emit("dictation-active", false);
+    let _ = app_handle.emit("always-listening-mode-changed", false);
     let _ = app_handle.emit("tts-stop-requested", ());
 
     // Update floating bar
