@@ -225,8 +225,7 @@ async fn start_background_state_tasks(app_handle: AppHandle) {
     // Start MCP error recovery background task
     start_mcp_retry_task(app_handle.clone()).await;
 
-    // Start boot sound task (with delay)
-    start_boot_sound_task(app_handle.clone()).await;
+    // Boot sound is handled by app_setup module - removed duplicate call
 
     info!("[State] Background state management tasks started");
 }
@@ -250,23 +249,7 @@ async fn start_mcp_retry_task(app_handle: AppHandle) {
     info!("[State] MCP retry background task started");
 }
 
-/// Start boot sound task with appropriate delay
-async fn start_boot_sound_task(app_handle: AppHandle) {
-    let app_handle_for_boot_sound = app_handle.clone();
-    tokio::spawn(async move {
-        // Small delay to ensure UI is ready
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-
-        let state = app_handle_for_boot_sound.state::<AppState>();
-        if let Err(e) = crate::commands::sound::play_boot_sound(app_handle_for_boot_sound.clone(), state).await {
-            warn!("Failed to play boot sound: {}", e);
-        } else {
-            info!("Boot sound played successfully from backend");
-        }
-    });
-
-    info!("[State] Boot sound task scheduled");
-}
+// Boot sound function removed - handled by app_setup module
 
 /// Handle state transitions for dictation mode
 pub async fn handle_dictation_state_transition(app_handle: &AppHandle, active: bool) -> Result<(), String> {

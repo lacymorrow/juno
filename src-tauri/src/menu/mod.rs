@@ -23,7 +23,7 @@ pub fn setup_all_menus(app_handle: &AppHandle) -> Result<(), Box<dyn std::error:
     app_handle.set_menu(app_menu)?;
 
     // Setup tray menu
-    tray_menu::setup_tray_icon(app_handle);
+    let _ = tray_menu::setup_tray_icon(app_handle);
 
     // Setup menu event listeners
     setup_menu_event_listeners(app_handle);

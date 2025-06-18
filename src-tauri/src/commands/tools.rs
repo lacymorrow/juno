@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use tracing::info;
 
 use crate::state::AppState;
-use crate::agent::tools::{ToolCategory, ToolConfig};
+use crate::agent::tools::ToolCategory;
 
 /// Get all tool configurations organized by category
 #[tauri::command]
@@ -233,7 +233,7 @@ pub async fn set_tool_approval_required(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     info!("Setting tool approval required: {}", required);
-    state.set_tool_approval_required(required);
+    let _ = state.set_tool_approval_required(required);
     Ok(())
 }
 

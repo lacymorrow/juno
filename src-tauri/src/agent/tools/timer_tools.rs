@@ -501,7 +501,7 @@ mod timer_tools_impl {
         let timer_manager = state.get::<TimerManager>()
             .unwrap_or_else(|| {
                 let manager = Arc::new(TimerManager::new());
-                state.insert(manager.clone());
+                let _ = state.insert(manager.clone());
                 manager
             });
 

@@ -1,4 +1,4 @@
-use log::{info, error, warn};
+use tracing::{info, error, warn};
 use uuid;
 use std::sync::Arc;
 
@@ -141,7 +141,7 @@ pub async fn submit_query(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-    state.mark_agent_execution_started_with_steps(execution_id.clone(), agent_config::MAX_ITERATIONS);
+    let _ = state.mark_agent_execution_started_with_steps(execution_id.clone(), agent_config::MAX_ITERATIONS);
     info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, agent_config::MAX_ITERATIONS);
 
     // Register escape key for cancellation during agent execution
@@ -405,7 +405,7 @@ pub async fn submit_query(
     let tts_content = final_response.spoken_text.as_ref().unwrap_or(&final_response.text).clone();
 
     // Clear spoken content from app state now that we've used it
-    state.clear_last_spoken_content();
+    let _ = state.clear_last_spoken_content();
 
     let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone(), app_handle.clone()).await {
         Ok(audio_result) => {
@@ -564,7 +564,7 @@ async fn register_orchestrator_delegation_tools(
                 Err(error_msg) => {
                     // Convert any specialist agent error into a proper error response
                     // This ensures that delegation tool failures are handled gracefully
-                    log::warn!("Browser agent delegation failed: {}", error_msg);
+                    warn!("Browser agent delegation failed: {}", error_msg);
                     Ok(serde_json::json!({
                         "success": false,
                         "agent_type": "browser",
@@ -613,7 +613,7 @@ async fn register_orchestrator_delegation_tools(
                 Err(error_msg) => {
                     // Convert any specialist agent error into a proper error response
                     // This ensures that delegation tool failures are handled gracefully
-                    log::warn!("Desktop agent delegation failed: {}", error_msg);
+                    warn!("Desktop agent delegation failed: {}", error_msg);
                     Ok(serde_json::json!({
                         "success": false,
                         "agent_type": "desktop",
@@ -698,7 +698,7 @@ async fn execute_specialized_agent_task(
     // Clean up any orphaned tool calls that might exist from previous failed executions
     // This provides additional safety against conversation state issues
     if let Err(e) = specialist_memory.clean_orphaned_tool_calls().await {
-        log::warn!("Failed to clean orphaned tool calls for {} agent: {}", agent_type, e);
+        warn!("Failed to clean orphaned tool calls for {} agent: {}", agent_type, e);
     }
 
     // Create appropriate brain for the specialist agent with focused system prompt
@@ -793,7 +793,7 @@ fn get_specialist_system_prompt(agent_type: &str) -> String {
 
 #[tauri::command]
 pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String> {
-    log::info!("Cleaning up browser resources...");
+    info!("Cleaning up browser resources...");
 
     // Get the app state to access the browser controller
     let state = app_handle.state::<AppState>();
@@ -804,15 +804,15 @@ pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String>
     // If we have a browser controller, clean it up
     if let Some(controller) = controller_guard.take() {
         if let Err(e) = controller.cleanup().await {
-            log::error!("Failed to clean up browser controller: {}", e);
+            error!("Failed to clean up browser controller: {}", e);
             return Err(format!("Failed to clean up browser: {}", e));
         }
-        log::info!("Browser controller cleaned up successfully");
+        info!("Browser controller cleaned up successfully");
     } else {
-        log::info!("No browser controller to clean up");
+        info!("No browser controller to clean up");
     }
 
-    log::info!("Browser cleanup completed successfully");
+    info!("Browser cleanup completed successfully");
     Ok(())
 }
 
