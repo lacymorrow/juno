@@ -5,294 +5,207 @@
 //! and comprehensive event handling for all tray menu interactions.
 
 use tauri::{
-    AppHandle,
-    Manager,
-    Emitter,
-    menu::{MenuItemKind, Menu, PredefinedMenuItem},
-    tray::{TrayIconEvent, MouseButton, MouseButtonState, TrayIconBuilder},
-    image::Image as TauriImage,
+    AppHandle, Manager, Emitter,
+    tray::{TrayIconBuilder, MouseButton, MouseButtonState},
+    menu::{MenuBuilder, MenuItemBuilder}
 };
-use tracing::{info, error, warn, debug};
-use crate::constants;
-use crate::commands;
+use tracing::{info, error};
+use crate::constants::{tray_menu_ids, events};
+use crate::state::AppState;
 
-// Embed tray icon data directly in the binary - no file system dependencies
-const TRAY_ICON_DATA: &[u8] = include_bytes!("../../icons/tray/32x32.png");
-
-/// Get current window states for tray menu display
-async fn get_window_states(app_handle: &AppHandle) -> (bool, bool) {
-    crate::window_management::get_window_states(app_handle).await
+/// Get keyboard shortcuts from app state
+fn get_keyboard_shortcuts(app: &AppHandle) -> Result<crate::state::KeyboardShortcuts, Box<dyn std::error::Error>> {
+    let app_state = app.state::<AppState>();
+    let shortcuts = app_state.keyboard_shortcuts.lock().map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
+    Ok(shortcuts.clone())
 }
 
-/// Create a state-aware tray menu with window status indicators
-async fn create_state_aware_tray_menu(app_handle: &AppHandle) -> Option<Menu<tauri::Wry>> {
-    let (main_visible, floating_bar_visible) = get_window_states(app_handle).await;
+/// Create a state-aware tray menu with keyboard shortcuts
+pub fn create_state_aware_tray_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+    info!("🍽️ Creating state-aware tray menu...");
 
-    // Create main window menu item with state-aware text
-    let main_window_text = if main_visible { "Hide Juno" } else { "Show Juno" };
-    let main_window_id = if main_visible {
-        constants::tray_menu_ids::HIDE_MAIN_WINDOW
-    } else {
-        constants::tray_menu_ids::SHOW_MAIN_WINDOW
-    };
-    let main_window_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, main_window_id, main_window_text, true, None::<&str>).ok()?
-    );
-
-    // Create floating bar menu items with state-aware text
-    let floating_bar_text = if floating_bar_visible { "Hide Floating Bar" } else { "Show Floating Bar" };
-    let floating_bar_id = if floating_bar_visible {
-        constants::tray_menu_ids::HIDE_FLOATING_BAR
-    } else {
-        constants::tray_menu_ids::SHOW_FLOATING_BAR
-    };
-    let floating_bar_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, floating_bar_id, floating_bar_text, true, None::<&str>).ok()?
-    );
-
-    // Create other menu items
-    let new_chat_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::NEW_CHAT, "New Chat", true, None::<&str>).ok()?
-    );
-    let devtools_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::SHOW_DEVTOOLS, "Developer Tools", true, None::<&str>).ok()?
-    );
-    let settings_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::SETTINGS, "Settings...", true, None::<&str>).ok()?
-    );
-    let quit_item = MenuItemKind::MenuItem(
-        tauri::menu::MenuItem::with_id(app_handle, constants::tray_menu_ids::QUIT, "Quit Juno", true, None::<&str>).ok()?
-    );
-
-    // Create separators
-    let separator1 = MenuItemKind::Predefined(PredefinedMenuItem::separator(app_handle).ok()?);
-    let separator2 = MenuItemKind::Predefined(PredefinedMenuItem::separator(app_handle).ok()?);
-    let separator3 = MenuItemKind::Predefined(PredefinedMenuItem::separator(app_handle).ok()?);
-
-    // Build the menu with state-aware items
-    Menu::with_items(app_handle, &[
-        &main_window_item,
-        &new_chat_item,
-        &separator1,
-        &floating_bar_item,
-        &devtools_item,
-        &separator2,
-        &settings_item,
-        &separator3,
-        &quit_item,
-    ]).map_err(|e| error!("[Tray Menu] Failed to create state-aware menu: {}", e)).ok()
-}
-
-/// Update the tray menu to reflect current window states
-pub async fn update_tray_menu(app_handle: &AppHandle) {
-    if let Some(new_menu) = create_state_aware_tray_menu(app_handle).await {
-        // Access the tray by the ID we set in the builder
-        if let Some(tray) = app_handle.tray_by_id("main_tray") {
-            if let Err(e) = tray.set_menu(Some(new_menu)) {
-                warn!("[Tray Menu] Failed to update tray menu: {}", e);
-            } else {
-                debug!("[Tray Menu] Tray menu updated successfully");
+    // Get keyboard shortcuts from app state
+    let _shortcuts = match get_keyboard_shortcuts(app) {
+        Ok(shortcuts) => shortcuts,
+        Err(e) => {
+            error!("[TrayMenu] Failed to get keyboard shortcuts: {}", e);
+            // Use defaults if we can't get from state
+            crate::state::KeyboardShortcuts {
+                agent_mode_toggle: "Option+D".to_string(),
+                dictation_input: "Option+Space".to_string(),
+                stop_current_task: "Escape".to_string(),
+                open_settings: "Cmd+,".to_string(),
             }
-        } else {
-            warn!("[Tray Menu] Tray with ID 'main_tray' not found");
         }
-    } else {
-        warn!("[Tray Menu] Failed to create updated tray menu");
-    }
+    };
+
+    // Build menu items with proper accelerators
+    let show_hide_item = MenuItemBuilder::new("Show/Hide Juno")
+        .id(tray_menu_ids::SHOW_HIDE)
+        .build(app)?;
+
+    let new_chat_item = MenuItemBuilder::new("New Chat")
+        .id(tray_menu_ids::NEW_CHAT)
+        .accelerator("CmdOrCtrl+N")
+        .build(app)?;
+
+    let show_hide_floating_item = MenuItemBuilder::new("Show/Hide Floating Bar")
+        .id(tray_menu_ids::SHOW_HIDE_FLOATING_BAR)
+        .accelerator("CmdOrCtrl+B")
+        .build(app)?;
+
+    let dev_tools_item = MenuItemBuilder::new("Developer Tools")
+        .id(tray_menu_ids::DEVELOPER_TOOLS)
+        .accelerator("CmdOrCtrl+Alt+I")
+        .build(app)?;
+
+    // Voice control information items (non-clickable)
+    let agent_mode_info = MenuItemBuilder::new("Agent Mode")
+        .id("agent_mode_info")
+        .accelerator("Alt+D")
+        .enabled(false)
+        .build(app)?;
+
+    let dictation_mode_info = MenuItemBuilder::new("Dictation Mode")
+        .id("dictation_mode_info")
+        .enabled(false)
+        .build(app)?;
+
+    let stop_task_info = MenuItemBuilder::new("Stop Current Task")
+        .id("stop_task_info")
+        .accelerator("Escape")
+        .enabled(false)
+        .build(app)?;
+
+    let settings_item = MenuItemBuilder::new("Settings...")
+        .id(tray_menu_ids::SETTINGS)
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
+
+    let quit_item = MenuItemBuilder::new("Quit Juno")
+        .id(tray_menu_ids::QUIT)
+        .accelerator("CmdOrCtrl+Q")
+        .build(app)?;
+
+    // Build the complete tray menu
+    let tray_menu = MenuBuilder::new(app)
+        .item(&show_hide_item)
+        .item(&new_chat_item)
+        .separator()
+        .item(&show_hide_floating_item)
+        .item(&dev_tools_item)
+        .separator()
+        .item(&agent_mode_info)
+        .item(&dictation_mode_info)
+        .item(&stop_task_info)
+        .separator()
+        .item(&settings_item)
+        .separator()
+        .item(&quit_item)
+        .build()?;
+
+    info!("✅ State-aware tray menu created successfully");
+    Ok(tray_menu)
+}
+
+/// Create and setup the system tray icon
+pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    info!("🔧 Setting up system tray icon...");
+
+    let tray_menu = create_state_aware_tray_menu(app)?;
+
+    let _tray = TrayIconBuilder::new()
+        .menu(&tray_menu)
+        .show_menu_on_left_click(false)
+        .icon(app.default_window_icon().unwrap().clone())
+        .build(app)?;
+
+    info!("✅ System tray icon setup completed");
+    Ok(())
 }
 
 /// Handle tray menu events
-fn handle_tray_menu_event(app_handle: &AppHandle, event_id: &str) {
+pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
     match event_id {
-        constants::tray_menu_ids::QUIT => {
-            info!("[Tray Menu] Quit requested.");
+        tray_menu_ids::SHOW_HIDE => {
+            info!("[TrayMenu] Show/Hide menu item clicked");
+            // For now, just trigger settings until we have the proper event
+            if let Err(e) = app_handle.emit(events::SETTINGS_REQUESTED, ()) {
+                error!("[TrayMenu] Failed to emit settings event: {}", e);
+            }
+        }
+        tray_menu_ids::NEW_CHAT => {
+            info!("[TrayMenu] New Chat menu item clicked");
+            if let Err(e) = app_handle.emit(events::NEW_CHAT_REQUESTED, ()) {
+                error!("[TrayMenu] Failed to emit new chat event: {}", e);
+            }
+        }
+        tray_menu_ids::SHOW_HIDE_FLOATING_BAR => {
+            info!("[TrayMenu] Show/Hide Floating Bar menu item clicked");
+            if let Err(e) = app_handle.emit(events::TOGGLE_FLOATING_BAR_REQUESTED, ()) {
+                error!("[TrayMenu] Failed to emit toggle floating bar event: {}", e);
+            }
+        }
+        tray_menu_ids::DEVELOPER_TOOLS => {
+            info!("[TrayMenu] Developer Tools menu item clicked");
+            if let Err(e) = app_handle.emit(events::DEVTOOLS_REQUESTED, ()) {
+                error!("[TrayMenu] Failed to emit devtools event: {}", e);
+            }
+        }
+        tray_menu_ids::SETTINGS => {
+            info!("[TrayMenu] Settings menu item clicked");
+            if let Err(e) = app_handle.emit(events::SETTINGS_REQUESTED, ()) {
+                error!("[TrayMenu] Failed to emit settings event: {}", e);
+            }
+        }
+        tray_menu_ids::QUIT => {
+            info!("[TrayMenu] Quit menu item clicked");
             app_handle.exit(0);
         }
-        constants::tray_menu_ids::SHOW_MAIN_WINDOW => {
-            info!("[Tray Menu] Show main window requested.");
-            let app_handle_clone = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::window_management::open_main_window(app_handle_clone.clone()).await {
-                    error!("[Tray Menu] Failed to open main window: {}", e);
-                } else {
-                    // Update tray menu after successful window creation/show
-                    update_tray_menu(&app_handle_clone).await;
-                }
-            });
+        _ => {
+            info!("[TrayMenu] Unknown menu item clicked: {}", event_id);
         }
-        constants::tray_menu_ids::HIDE_MAIN_WINDOW => {
-            info!("[Tray Menu] Hide main window requested.");
-            if let Some(window) = app_handle.get_webview_window(constants::window_labels::MAIN) {
-                let _ = window.hide();
-                // Update tray menu after state change
-                let app_handle_clone = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    update_tray_menu(&app_handle_clone).await;
-                });
-            } else {
-                error!("[Tray Menu Error] Main window not found.");
-            }
+    }
+}
+
+/// Handle TrayIconEvents like clicks on the icon itself
+pub fn handle_tray_icon_event(event: tauri::tray::TrayIconEvent) {
+    match event {
+        tauri::tray::TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        } => {
+            info!("[TrayIcon] Left click detected on tray icon");
+            // Implement left click behavior if needed
         }
-        constants::tray_menu_ids::SHOW_FLOATING_BAR => {
-            info!("[Tray Menu] Show floating bar requested.");
-            if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                if let Err(e) = window.set_ignore_cursor_events(false) {
-                    error!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                }
-                let _ = window.show();
-                let _ = window.set_focus();
-                // Update tray menu after state change
-                let app_handle_clone = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    update_tray_menu(&app_handle_clone).await;
-                });
-            } else {
-                error!("[Tray Menu Error] Floating bar window not found.");
-            }
-        }
-        constants::tray_menu_ids::HIDE_FLOATING_BAR => {
-            info!("[Tray Menu] Hide floating bar requested.");
-            if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                let _ = window.hide();
-                if let Err(e) = window.set_ignore_cursor_events(true) {
-                    error!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                }
-                // Update tray menu after state change
-                let app_handle_clone = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    update_tray_menu(&app_handle_clone).await;
-                });
-            } else {
-                error!("[Tray Menu Error] Floating bar window not found.");
-            }
-        }
-        constants::tray_menu_ids::NEW_CHAT => {
-            info!("[Tray Menu] New chat requested.");
-            if let Err(e) = app_handle.emit(constants::events::NEW_CHAT_REQUESTED, ()) {
-                error!("[Tray Menu] Failed to emit new chat event: {}", e);
-            }
-        }
-        constants::tray_menu_ids::TOGGLE_FLOATING_BAR => {
-            info!("[Tray Menu] Toggle floating bar requested.");
-            if let Some(window) = app_handle.get_webview_window(constants::window_labels::FLOATING_BAR) {
-                match window.is_visible() {
-                    Ok(true) => {
-                        let _ = window.hide();
-                        if let Err(e) = window.set_ignore_cursor_events(true) {
-                            error!("[Tray Error] Failed to set ignore cursor events to true: {}", e);
-                        }
-                    }
-                    Ok(false) => {
-                        if let Err(e) = window.set_ignore_cursor_events(false) {
-                            error!("[Tray Error] Failed to set ignore cursor events to false: {}", e);
-                        }
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                    Err(e) => error!("[Tray Menu Error] Checking floating bar visibility: {}", e),
-                }
-                // Update tray menu after state change
-                let app_handle_clone = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    update_tray_menu(&app_handle_clone).await;
-                });
-            } else {
-                error!("[Tray Menu Error] Floating bar window not found for toggle.");
-            }
-        }
-        constants::tray_menu_ids::SHOW_DEVTOOLS => {
-            info!("[Tray Menu] Developer Tools menu item clicked");
-            if let Err(e) = app_handle.emit(constants::events::DEVTOOLS_REQUESTED, ()) {
-                error!("[Tray Menu] Failed to emit devtools-requested event: {}", e);
-            }
-        }
-        constants::tray_menu_ids::SETTINGS => {
-            info!("[Tray Menu] Settings menu item clicked");
-            let app_handle_clone = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                    error!("[Tray Menu] Failed to open settings window: {}", e);
-                }
-            });
-        }
-        id if id == constants::app_menu_ids::SETTINGS => {
-            // Handle case where tray menu receives app menu settings ID
-            info!("[Tray Menu] Received app menu settings ID, redirecting to settings");
-            let app_handle_clone = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = crate::window_management::open_settings_window(app_handle_clone).await {
-                    error!("[Tray Menu] Failed to open settings window: {}", e);
-                }
-            });
+        tauri::tray::TrayIconEvent::Click {
+            button: MouseButton::Right,
+            button_state: MouseButtonState::Up,
+            ..
+        } => {
+            info!("[TrayIcon] Right click detected on tray icon");
+            // Right click behavior is handled by menu system
         }
         _ => {
-            info!("[Tray Menu] Unhandled tray menu event: {:?}", event_id);
+            // Handle other tray icon events if needed
         }
     }
 }
 
-/// Handle tray icon click events
-fn handle_tray_icon_event(event: TrayIconEvent) {
-    if let TrayIconEvent::Click {
-        button: MouseButton::Left,
-        button_state: MouseButtonState::Up,
-        ..
-    } = event
-    {
-        info!("[Tray Icon] Left click detected - showing menu only.");
-        // Note: The tray menu will automatically show on left click.
-        // We no longer toggle the floating bar on tray icon clicks.
-        // Users can use the menu items to control the floating bar instead.
+/// Enhanced tray menu refresh function
+pub fn refresh_tray_menu(app_handle: &AppHandle) {
+    info!("[TrayMenu] Refreshing tray menu...");
+
+    match create_state_aware_tray_menu(app_handle) {
+        Ok(_new_menu) => {
+            info!("[TrayMenu] Successfully refreshed tray menu");
+            // Note: Tauri v2 will handle menu updates automatically through the state
+        }
+        Err(e) => {
+            error!("[TrayMenu] Failed to refresh tray menu: {}", e);
+        }
     }
-}
-
-/// Setup the enhanced tray icon with state-aware menu
-pub fn setup_tray_icon(app_handle: &AppHandle) {
-    let tray_app_handle = app_handle.clone();
-
-    tauri::async_runtime::spawn(async move {
-        // Load the embedded icon data - no file system dependencies
-        let loaded_tauri_icon = match image::load_from_memory(TRAY_ICON_DATA) {
-            Ok(dynamic_image) => {
-                let width = dynamic_image.width();
-                let height = dynamic_image.height();
-                let rgba_image = dynamic_image.to_rgba8();
-                let bytes = rgba_image.into_raw();
-                let img = TauriImage::new_owned(bytes, width, height);
-                Some(img)
-            },
-            Err(e) => {
-                error!("[Tray Setup Error] Failed to load embedded tray icon: {}", e);
-                None
-            }
-        };
-
-        // Create enhanced tray menu with state-aware items
-        let tray_menu = create_state_aware_tray_menu(&tray_app_handle).await;
-
-        let mut tray_builder = TrayIconBuilder::with_id("main_tray")
-            .on_menu_event(move |app_handle, event| {
-                handle_tray_menu_event(app_handle, event.id().as_ref());
-            })
-            .on_tray_icon_event(|_tray, event| {
-                handle_tray_icon_event(event);
-            });
-
-        if let Some(icon_image) = loaded_tauri_icon {
-            tray_builder = tray_builder.icon(icon_image);
-        }
-
-        if let Some(menu) = tray_menu {
-            tray_builder = tray_builder.menu(&menu);
-        }
-
-        match tray_builder.build(&tray_app_handle) {
-            Ok(_) => {
-                info!("[Tray Setup] Enhanced tray icon configured successfully.");
-            },
-            Err(e) => error!("[Tray Setup Error] Failed to build enhanced tray icon: {}", e),
-        }
-    });
 }
 
 #[cfg(test)]

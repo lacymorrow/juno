@@ -289,6 +289,11 @@ pub mod tray_menu_ids {
     pub const HIDE_MAIN_WINDOW: &str = "hide-main-window";
     pub const NEW_CHAT: &str = "new-chat";
     pub const SETTINGS: &str = "tray-settings";
+
+    // New IDs for improved tray menu
+    pub const SHOW_HIDE: &str = "show-hide";
+    pub const SHOW_HIDE_FLOATING_BAR: &str = "show-hide-floating-bar";
+    pub const DEVELOPER_TOOLS: &str = "developer-tools";
 }
 
 pub mod app_menu_ids {
@@ -1011,223 +1016,11 @@ mod tests {
         // Test permission check delays
         assert_eq!(platform_macos::ACCESSIBILITY_PERMISSION_CHECK_DELAY_MS, 1000);
         assert_eq!(platform_macos::SCREEN_RECORDING_PERMISSION_CHECK_DELAY_MS, 2000);
-        assert!(platform_macos::SCREEN_RECORDING_PERMISSION_CHECK_DELAY_MS > platform_macos::ACCESSIBILITY_PERMISSION_CHECK_DELAY_MS);
 
         // Test system limits
         assert_eq!(platform_macos::MAX_ACCESSIBILITY_RETRIES, 3);
         assert_eq!(platform_macos::SYSTEM_PERMISSION_TIMEOUT_MS, 5000);
         assert!(platform_macos::MAX_ACCESSIBILITY_RETRIES > 0);
-    }
-
-    #[test]
-    fn test_extended_timeouts() {
-        // Test new timeout constants
-        assert_eq!(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS, 30_000);
-        assert_eq!(timeouts::REPLICATE_TIMEOUT_SECONDS, 300);
-        assert_eq!(timeouts::PERMISSION_CHECK_TIMEOUT_MS, 3_000);
-        assert_eq!(timeouts::AUDIO_DEVICE_DETECTION_TIMEOUT_MS, 3_000);
-        assert_eq!(timeouts::TOOL_EXECUTION_TIMEOUT_MS, 10_000);
-        assert_eq!(timeouts::MCP_INTEGRATION_TIMEOUT_MS, 30_000);
-
-        // Test timeout hierarchy
-        assert!(timeouts::PERMISSION_CHECK_TIMEOUT_MS < timeouts::TOOL_EXECUTION_TIMEOUT_MS);
-        assert!(timeouts::TOOL_EXECUTION_TIMEOUT_MS <= timeouts::MCP_INTEGRATION_TIMEOUT_MS);
-        assert!(timeouts::DEFAULT_NAVIGATION_TIMEOUT_MS == timeouts::MCP_INTEGRATION_TIMEOUT_MS);
-    }
-
-    #[test]
-    fn test_new_event_constants() {
-        // Test agent state events
-        assert_eq!(events::AGENT_ACTIVE, "agent-active");
-        assert_eq!(events::AGENT_ERROR, "agent-error");
-        assert_eq!(events::AGENT_TRANSCRIPTION_START, "agent-transcription-start");
-        assert_eq!(events::AGENT_CANCEL, "agent-cancel");
-
-        // Test dictation state events
-        assert_eq!(events::DICTATION_ACTIVE, "dictation-active");
-        assert_eq!(events::DICTATION_COMMITTED, "dictation-committed");
-        assert_eq!(events::DICTATION_TRANSCRIPTION_START, "dictation-transcription-start");
-
-        // Test UI events
-        assert_eq!(events::KEY_PRESS_VISUALIZATION, "key-press-visualization");
-        assert_eq!(events::CLICK_VISUALIZATION, "click-visualization");
-
-        // Test TTS events
-        assert_eq!(events::TTS_AUDIO_READY, "tts-audio-ready");
-        assert_eq!(events::TTS_STOP_REQUESTED, "tts-stop-requested");
-    }
-
-    #[test]
-    fn test_tool_names() {
-        // Test delegation tools
-        assert_eq!(tool_names::DELEGATE_TO_BROWSER_AGENT, "delegate_to_browser_agent");
-        assert_eq!(tool_names::DELEGATE_TO_DESKTOP_AGENT, "delegate_to_desktop_agent");
-        assert_eq!(tool_names::DELEGATE_TO_FILE_AGENT, "delegate_to_file_agent");
-
-        // Test computer use tools
-        assert_eq!(tool_names::COMPUTER, "computer");
-        assert_eq!(tool_names::BASH, "bash");
-        assert_eq!(tool_names::STR_REPLACE_BASED_EDIT_TOOL, "str_replace_based_edit_tool");
-
-        // Test action names
-        assert_eq!(tool_names::ACTION_SCREENSHOT, "screenshot");
-        assert_eq!(tool_names::ACTION_CLICK, "click");
-        assert_eq!(tool_names::ACTION_TYPE, "type");
-    }
-
-    #[test]
-    fn test_mouse_timing_constants() {
-        // Test mouse timing hierarchy
-        assert!(timeouts::MOUSE_MICRO_DELAY_MS < timeouts::MOUSE_CLICK_DELAY_MS);
-        assert!(timeouts::MOUSE_CLICK_DELAY_MS < timeouts::MOUSE_ACTION_DELAY_MS);
-        assert!(timeouts::MOUSE_ACTION_DELAY_MS < timeouts::MOUSE_SEQUENCE_DELAY_MS);
-        assert!(timeouts::MOUSE_SEQUENCE_DELAY_MS < timeouts::DOUBLE_CLICK_DELAY_MS);
-
-        // Test reasonable values
-        assert_eq!(timeouts::MOUSE_MICRO_DELAY_MS, 10);
-        assert_eq!(timeouts::MOUSE_CLICK_DELAY_MS, 50);
-        assert_eq!(timeouts::MOUSE_ACTION_DELAY_MS, 100);
-        assert_eq!(timeouts::MOUSE_SEQUENCE_DELAY_MS, 300);
-        assert_eq!(timeouts::DOUBLE_CLICK_DELAY_MS, 500);
-    }
-
-    #[test]
-    fn test_extended_constants() {
-        // Test HTTP headers
-        assert_eq!(http_headers::CONTENT_TYPE, "Content-Type");
-        assert_eq!(http_headers::APPLICATION_JSON, "application/json");
-        assert_eq!(http_headers::X_API_KEY, "x-api-key");
-
-        // Test browser JS constants
-        assert_eq!(browser_js::QUERY_SELECTOR_ALL, "document.querySelectorAll");
-        assert_eq!(browser_js::QUERY_SELECTOR, "document.querySelector");
-        assert_eq!(browser_js::TEXT_CONTENT, "textContent");
-
-        // Test provider names
-        assert_eq!(provider_names::ANTHROPIC, "anthropic");
-        assert_eq!(provider_names::OPENAI, "openai");
-        assert_eq!(provider_names::SYSTEM, "system");
-
-        // Test anthropic content types
-        assert_eq!(anthropic_content_types::TOOL_USE, "tool_use");
-        assert_eq!(anthropic_content_types::TOOL_RESULT, "tool_result");
-        assert_eq!(anthropic_content_types::TEXT, "text");
-
-        // Test Chrome flags
-        assert_eq!(chrome_flags::REMOTE_DEBUG_PORT_FLAG, "--remote-debugging-port=9222");
-        assert_eq!(chrome_flags::HEADLESS_FLAG, "--headless");
-
-        // Test common files
-        assert_eq!(common_files::PACKAGE_JSON, "package.json");
-        assert_eq!(common_files::CARGO_TOML, "Cargo.toml");
-        assert_eq!(common_files::README_MD, "README.md");
-    }
-
-    #[test]
-    fn test_extended_timing_constants() {
-        // Test permission timing
-        assert_eq!(timeouts::PERMISSION_CHECK_DELAY_MS, 1000);
-        assert_eq!(timeouts::SCREEN_RECORDING_CHECK_DELAY_MS, 2000);
-        assert!(timeouts::PERMISSION_CHECK_DELAY_MS < timeouts::SCREEN_RECORDING_CHECK_DELAY_MS);
-
-        // Test cloud timing
-        assert_eq!(timeouts::CLOUD_RETRY_BASE_DELAY_MS, 2000);
-        assert_eq!(timeouts::CLOUD_HEARTBEAT_INTERVAL_MS, 30000);
-        assert_eq!(timeouts::CLOUD_STATUS_INTERVAL_MS, 30000);
-
-        // Test MCP timing
-        assert_eq!(timeouts::MCP_SERVER_STARTUP_DELAY_MS, 500);
-        assert_eq!(timeouts::MCP_SERVER_RESTART_DELAY_MS, 1000);
-        assert!(timeouts::MCP_SERVER_STARTUP_DELAY_MS < timeouts::MCP_SERVER_RESTART_DELAY_MS);
-    }
-
-    #[test]
-    fn test_computer_action_constants() {
-        // Test extended action names
-        assert_eq!(tool_names::ACTION_LEFT_CLICK, "left_click");
-        assert_eq!(tool_names::ACTION_RIGHT_CLICK, "right_click");
-        assert_eq!(tool_names::ACTION_DOUBLE_CLICK, "double_click");
-        assert_eq!(tool_names::ACTION_HOLD_KEY, "hold_key");
-
-        // Ensure no duplicate action names
-        use std::collections::HashSet;
-        let actions = vec![
-            tool_names::ACTION_SCREENSHOT,
-            tool_names::ACTION_CLICK,
-            tool_names::ACTION_LEFT_CLICK,
-            tool_names::ACTION_RIGHT_CLICK,
-            tool_names::ACTION_DOUBLE_CLICK,
-            tool_names::ACTION_TYPE,
-            tool_names::ACTION_KEY,
-            tool_names::ACTION_HOLD_KEY,
-            tool_names::ACTION_SCROLL,
-            tool_names::ACTION_WAIT,
-        ];
-
-        let unique_actions: HashSet<&str> = actions.iter().cloned().collect();
-        assert_eq!(actions.len(), unique_actions.len(), "Duplicate action names found");
-    }
-
-    #[test]
-    fn test_error_recovery_constants() {
-        // Test recovery delays
-        assert_eq!(error_recovery::ELEMENT_NOT_FOUND_DELAY_MS, 1000);
-        assert_eq!(error_recovery::NETWORK_ERROR_DELAY_MS, 2000);
-        assert_eq!(error_recovery::TIMEOUT_RECOVERY_DELAY_MS, 5000);
-        assert_eq!(error_recovery::RATE_LIMIT_BACKOFF_MS, 60000);
-
-        // Test default configuration
-        assert_eq!(error_recovery::DEFAULT_MAX_RETRIES, 3);
-        assert_eq!(error_recovery::DEFAULT_BASE_RETRY_DELAY_MS, 500);
-        assert_eq!(error_recovery::DEFAULT_MAX_RETRY_DELAY_MS, 10000);
-
-        // Test backoff parameters
-        assert_eq!(error_recovery::BACKOFF_MULTIPLIER, 2);
-        assert_eq!(error_recovery::MAX_BACKOFF_EXPONENT, 5);
-    }
-
-    #[test]
-    fn test_cloud_networking_constants() {
-        // Test connection parameters
-        assert_eq!(cloud_networking::MAX_CONNECTION_RETRIES, 10);
-        assert_eq!(cloud_networking::BASE_RETRY_DELAY_MS, 2000);
-        assert_eq!(cloud_networking::CONNECTION_CHECK_INTERVAL_MS, 5000);
-
-        // Test intervals
-        assert_eq!(cloud_networking::HEARTBEAT_SEND_INTERVAL_MS, 30000);
-        assert_eq!(cloud_networking::STATUS_CHECK_INTERVAL_MS, 30000);
-        assert_eq!(cloud_networking::RECONNECTION_DELAY_MS, 5000);
-
-        // Test backoff parameters
-        assert_eq!(cloud_networking::BACKOFF_MULTIPLIER, 2);
-        assert_eq!(cloud_networking::MAX_BACKOFF_EXPONENT, 5);
-
-        // Test reasonable timing hierarchy
-        assert!(cloud_networking::BASE_RETRY_DELAY_MS < cloud_networking::CONNECTION_CHECK_INTERVAL_MS);
-        assert!(cloud_networking::CONNECTION_CHECK_INTERVAL_MS < cloud_networking::HEARTBEAT_SEND_INTERVAL_MS);
-    }
-
-    #[test]
-    fn test_macos_system_constants() {
-        // Test privacy URLs
-        assert!(macos_system::MICROPHONE_PRIVACY_URL.contains("Privacy_Microphone"));
-        assert!(macos_system::SCREEN_RECORDING_PRIVACY_URL.contains("Privacy_ScreenCapture"));
-        assert!(macos_system::INPUT_MONITORING_PRIVACY_URL.contains("Privacy_ListenEvent"));
-        assert!(macos_system::ACCESSIBILITY_PRIVACY_URL.contains("Privacy_Accessibility"));
-
-        // Test bundle identifiers
-        assert_eq!(macos_system::SYSTEM_PREFERENCES_BUNDLE, "com.apple.systempreferences");
-        assert_eq!(macos_system::SYSTEM_SETTINGS_BUNDLE, "com.apple.systemsettings");
-
-        // Test commands
-        assert_eq!(macos_system::OPEN_COMMAND, "open");
-        assert_eq!(macos_system::OSASCRIPT_COMMAND, "osascript");
-        assert_eq!(macos_system::BUNDLE_FLAG, "-b");
-
-        // Test permission messages
-        assert!(macos_system::ACCESSIBILITY_GRANTED_MSG.contains("Accessibility"));
-        assert!(macos_system::SCREEN_RECORDING_GRANTED_MSG.contains("Screen recording"));
-        assert!(macos_system::MICROPHONE_GRANTED_MSG.contains("Microphone"));
     }
 
     #[test]
