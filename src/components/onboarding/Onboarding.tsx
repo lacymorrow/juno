@@ -640,36 +640,11 @@ export default function OnboardingFlow({
                   {/* Cancel shortcut for cancel step */}
                   {step.id === "cancel" && (
                     <div className="relative">
-                      <div className="mb-4 p-3 rounded-lg bg-gray-50 border">
-                        <div className="flex items-center gap-2 text-sm">
-                          <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                          <span className="font-medium">
-                            ✋ Universal Cancel Key
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-600 mt-1">
-                          The Escape key works in any situation - dictation,
-                          agent tasks, or TTS playback
-                        </p>
-                      </div>
-
                       {/* Simple visual representation of Escape key */}
                       <div className="flex justify-center my-6">
                         <div className="flex items-center justify-center w-20 h-20 rounded-xl border-2 bg-white border-gray-300 text-gray-700 shadow-sm">
                           <span className="text-lg font-semibold">Esc</span>
                         </div>
-                      </div>
-
-                      <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
-                        <h4 className="font-medium text-blue-900 mb-2">
-                          Key Benefits:
-                        </h4>
-                        <ul className="text-sm text-blue-800 space-y-1">
-                          <li>• Stops dictation immediately</li>
-                          <li>• Cancels running agent tasks</li>
-                          <li>• Interrupts text-to-speech playback</li>
-                          <li>• Works in any application context</li>
-                        </ul>
                       </div>
 
                       <p className="text-sm text-gray-500 mt-4 text-center">
