@@ -195,7 +195,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
 
   const handleToggleServer = async (serverId: string, enabled: boolean) => {
     try {
-      await invoke("toggle_mcp_server", { serverId, enabled });
+      await invoke("toggle_mcp_server", { server_id: serverId, enabled });
       toast.success(`Server ${enabled ? "enabled" : "disabled"}`);
       // Backend will emit mcp_state_updated event automatically
     } catch (error) {
@@ -210,7 +210,11 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
     enabled: boolean
   ) => {
     try {
-      await invoke("toggle_mcp_tool", { serverId, toolName, enabled });
+      await invoke("toggle_mcp_tool", {
+        server_id: serverId,
+        tool_name: toolName,
+        enabled,
+      });
       toast.success(`Tool ${toolName} ${enabled ? "enabled" : "disabled"}`);
       // Backend will emit mcp_state_updated event automatically
     } catch (error) {

@@ -132,14 +132,24 @@ async fn initialize_mcp_state(app_handle: AppHandle) -> Result<(), String> {
 
     let app_state = app_handle.state::<AppState>();
 
-    // Initialize MCP servers from configuration
-    if let Err(e) = app_state.initialize_mcp_servers().await {
-        warn!("Failed to initialize MCP servers: {}", e);
-        info!("MCP servers can be configured and started via Settings");
-    } else {
-        info!("Successfully initialized MCP servers");
-    }
+    // Initialize MCP servers from configuration in background to prevent blocking app startup
+    let app_state_bg = app_state.inner().clone();
+    tokio::spawn(async move {
+        // Add a small delay to let the main app fully initialize first
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
 
+        match app_state_bg.initialize_mcp_servers().await {
+            Ok(_) => {
+                info!("Successfully initialized MCP servers in background");
+            }
+            Err(e) => {
+                warn!("Failed to initialize MCP servers in background: {}", e);
+                info!("MCP servers can be configured and started via Settings");
+            }
+        }
+    });
+
+    info!("MCP state initialization scheduled - will complete in background");
     Ok(())
 }
 

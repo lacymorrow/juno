@@ -30,7 +30,15 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
 
     // Initialize MCP manager
     let mcp_manager = Arc::new(MCPManager::new());
-    initialize_default_mcp_servers(&mcp_manager).await?;
+
+    // Initialize default MCP servers in the background to not block app startup
+    let mcp_manager_bg = mcp_manager.clone();
+    tokio::spawn(async move {
+        if let Err(e) = initialize_default_mcp_servers_safely(&mcp_manager_bg).await {
+            tracing::warn!("Background MCP server initialization had issues: {}", e);
+            tracing::info!("MCP servers can be configured and started manually via Settings");
+        }
+    });
 
     // Store globally
     ORCHESTRATOR.set(Arc::new(Mutex::new(orchestrator)))
@@ -38,15 +46,16 @@ pub async fn init_orchestrator_with_app_handle(app_handle: tauri::AppHandle) -> 
     MCP_MANAGER.set(mcp_manager)
         .map_err(|_| "Failed to initialize MCP manager - already initialized")?;
 
-    tracing::info!("Enhanced multi-agent orchestrator system with MCP integration initialized successfully");
+    tracing::info!("Enhanced multi-agent orchestrator system initialized successfully");
+    tracing::info!("MCP server initialization continues in background");
     Ok(())
 }
 
-/// Initialize default MCP servers for common tools
-async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
+/// Initialize default MCP servers safely without blocking app startup
+async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Result<(), String> {
     // Add essential MCP servers that provide intelligent capabilities with improved configurations
     let default_servers = vec![
-        // Core filesystem operations (this package exists)
+        // Core filesystem operations (this package exists) - DISABLED by default to prevent startup issues
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "filesystem".to_string(),
@@ -62,13 +71,13 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
                 env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
                 env
             },
-            enabled: true,
-            auto_start: true,
-            timeout_seconds: 60, // Increased timeout
-            max_retries: 2, // Reduced retries to prevent spam
+            enabled: false, // Disabled by default to prevent startup blocking
+            auto_start: false,
+            timeout_seconds: 60,
+            max_retries: 1, // Reduced retries to prevent spam
         },
 
-        // Everything server for comprehensive testing and development (confirmed to exist)
+        // Everything server for comprehensive testing and development - DISABLED by default
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "everything".to_string(),
@@ -85,13 +94,13 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
                 env.insert("NODE_MAX_LISTENERS".to_string(), "20".to_string());
                 env
             },
-            enabled: true,
-            auto_start: true,
-            timeout_seconds: 75, // Longer timeout for complex server
-            max_retries: 2,
+            enabled: false, // Disabled by default to prevent EPIPE errors
+            auto_start: false,
+            timeout_seconds: 75,
+            max_retries: 1,
         },
 
-        // Memory and sequential thinking (confirmed to exist)
+        // Memory and sequential thinking - DISABLED by default
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "memory".to_string(),
@@ -106,13 +115,13 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
                 env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
                 env
             },
-            enabled: true,
-            auto_start: true,
+            enabled: false, // Disabled by default
+            auto_start: false,
             timeout_seconds: 45,
-            max_retries: 2,
+            max_retries: 1,
         },
 
-        // Sequential thinking for problem solving (confirmed to exist)
+        // Sequential thinking for problem solving - DISABLED by default
         MCPServerConfig {
             id: uuid::Uuid::new_v4().to_string(),
             name: "sequential-thinking".to_string(),
@@ -127,64 +136,40 @@ async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), 
                 env.insert("MCP_LOG_LEVEL".to_string(), "error".to_string());
                 env
             },
-            enabled: true,
-            auto_start: true,
+            enabled: false, // Disabled by default
+            auto_start: false,
             timeout_seconds: 45,
-            max_retries: 2,
+            max_retries: 1,
         },
     ];
 
-    tracing::info!("Initializing {} default MCP servers...", default_servers.len());
+    tracing::info!("Adding {} default MCP server configurations (disabled by default)...", default_servers.len());
 
+    let mut successful_configs = 0;
     for config in default_servers {
-        if let Err(e) = mcp_manager.add_server(config.clone()).await {
-            tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
-
-            // Continue for optional servers that might not be available
-            if config.name == "everything" {
-                tracing::info!("Continuing without optional MCP server '{}' - it may not be available", config.name);
-                continue;
+        match mcp_manager.add_server(config.clone()).await {
+            Ok(_) => {
+                successful_configs += 1;
+                tracing::info!("Successfully added MCP server configuration '{}'", config.name);
             }
-        } else {
-            tracing::info!("Successfully added MCP server '{}'", config.name);
-        }
-    }
-
-    // Start all enabled servers with staggered startup to avoid overwhelming npm
-    let configs = mcp_manager.get_server_configs().await;
-    tracing::info!("Starting {} MCP servers...", configs.len());
-
-    for (i, config) in configs.iter().enumerate() {
-        if config.enabled && config.auto_start {
-            // Add a small delay between server starts to prevent npm conflicts
-            if i > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-            }
-
-            match mcp_manager.start_server(&config.id).await {
-                Ok(_) => {
-                    tracing::info!("Successfully started MCP server '{}'", config.name);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to start MCP server '{}': {}", config.name, e);
-
-                    // For critical servers, we might want to retry
-                    if config.name == "filesystem" || config.name == "memory" {
-                        tracing::info!("Retrying critical MCP server '{}'...", config.name);
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        if let Err(retry_err) = mcp_manager.start_server(&config.id).await {
-                            tracing::error!("Retry failed for critical MCP server '{}': {}", config.name, retry_err);
-                        } else {
-                            tracing::info!("Successfully started MCP server '{}' on retry", config.name);
-                        }
-                    }
-                }
+            Err(e) => {
+                tracing::warn!("Failed to add default MCP server '{}': {}", config.name, e);
+                // Continue with other servers - don't let one failure block everything
             }
         }
     }
 
-    tracing::info!("MCP server initialization complete");
+    tracing::info!("Successfully configured {}/{} default MCP servers", successful_configs, 4);
+    tracing::info!("MCP servers are disabled by default - enable them in Settings if needed");
+    tracing::info!("To prevent app startup delays, MCP servers must be manually enabled in Settings");
+
     Ok(())
+}
+
+/// Initialize default MCP servers for common tools (legacy function - now redirects to safe version)
+async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
+    tracing::info!("Redirecting to safe MCP server initialization...");
+    initialize_default_mcp_servers_safely(mcp_manager).await
 }
 
 /// Get the global orchestrator instance
