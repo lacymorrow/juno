@@ -409,34 +409,42 @@ pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), St
 pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
-    // Get current user count before decrementing
-    let current_count = ESCAPE_KEY_USERS.load(Ordering::SeqCst);
-    if current_count == 0 {
-        warn!("[EscapeKey] Attempted to unregister escape key with zero users");
-        return Ok(());
-    }
-
-    // Decrement the user count atomically
-    let user_count = ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst) - 1;
-    info!("[EscapeKey] Unregistering escape key handler, user count: {}", user_count);
-
-    // Only unregister if no more users and currently registered
-    if user_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
-        let escape_shortcut = Shortcut::new(None, Code::Escape);
-        match app_handle.global_shortcut().unregister(escape_shortcut) {
-            Ok(()) => {
-                ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
-                info!("[EscapeKey] Successfully unregistered escape key - no more active users");
-            },
-            Err(e) => {
-                // Rollback user count on failure
-                ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
-                warn!("[EscapeKey] Failed to unregister escape key shortcut: {} - rolling back user count", e);
-                // Don't return error for unregistration failures as it's not critical
-            }
+    // Atomically decrement the user count, preventing underflow
+    let user_count = ESCAPE_KEY_USERS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+        if current > 0 {
+            Some(current - 1)
+        } else {
+            None
         }
-    } else {
-        info!("[EscapeKey] Escape key still has {} users, keeping registered", user_count);
+    });
+
+    match user_count {
+        Ok(previous_count) => {
+            let new_count = previous_count - 1;
+            info!("[EscapeKey] Unregistering escape key handler, user count: {} -> {}", previous_count, new_count);
+
+            // Only unregister if no more users and currently registered
+            if new_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
+                let escape_shortcut = Shortcut::new(None, Code::Escape);
+                match app_handle.global_shortcut().unregister(escape_shortcut) {
+                    Ok(()) => {
+                        ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
+                        info!("[EscapeKey] Successfully unregistered escape key - no more active users");
+                    },
+                    Err(e) => {
+                        // Rollback user count on failure
+                        ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
+                        warn!("[EscapeKey] Failed to unregister escape key shortcut: {} - rolling back user count", e);
+                        // Don't return error for unregistration failures as it's not critical
+                    }
+                }
+            } else {
+                info!("[EscapeKey] Escape key still has {} users, keeping registered", new_count);
+            }
+        },
+        Err(_) => {
+            warn!("[EscapeKey] Attempted to unregister escape key with zero users");
+        }
     }
 
     Ok(())
