@@ -96,7 +96,8 @@ pub async fn get_tts_provider_command(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?.clone();
-    info!("Current TTS provider: {}", provider);
+    // Reduced logging frequency - only log at debug level
+    tracing::debug!("Current TTS provider: {}", provider);
     Ok(provider)
 }
 
@@ -122,13 +123,13 @@ pub async fn invoke_tts(
     register_tts_escape_key(&app_handle).await;
 
     info!("Using TTS provider from state: {}", provider_from_state);
-    
+
     // Use fallback mechanism to try alternative providers if the primary fails
     let result = invoke_tts_with_fallback(text, &provider_from_state).await;
-    
+
     // Unregister escape key after TTS completion (success or failure)
     unregister_tts_escape_key(&app_handle).await;
-    
+
     result
 }
 
