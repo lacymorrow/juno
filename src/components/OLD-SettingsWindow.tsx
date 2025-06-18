@@ -1400,7 +1400,7 @@ function NetworkSettings({
                         onCheckedChange={async (enabled) => {
                           try {
                             await invoke("toggle_mcp_server", {
-                              serverId: server.id,
+                              server_id: server.id,
                               enabled,
                             });
                             await settings.loadMcpServers();
@@ -1497,8 +1497,8 @@ function NetworkSettings({
                       onCheckedChange={async (enabled) => {
                         try {
                           await invoke("toggle_mcp_tool", {
-                            serverId: tool.server_id,
-                            toolName: tool.tool_definition.name,
+                            server_id: tool.server_id,
+                            tool_name: tool.tool_definition.name,
                             enabled,
                           });
                           await settings.loadMcpServers();

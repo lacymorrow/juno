@@ -213,6 +213,47 @@ pub async fn set_mcp_server_enabled(
     Ok(())
 }
 
+/// Toggle an MCP server on/off (alias for set_mcp_server_enabled for frontend compatibility)
+#[tauri::command]
+pub async fn toggle_mcp_server(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    server_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    set_mcp_server_enabled(app_handle, state, server_id, enabled).await
+}
+
+/// Toggle an MCP tool on/off
+#[tauri::command]
+pub async fn toggle_mcp_tool(
+    app_handle: AppHandle,
+    state: State<'_, AppState>,
+    server_id: String,
+    tool_name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    info!("Toggling MCP tool {} from server {} enabled: {}", tool_name, server_id, enabled);
+
+    // Update in tool configuration
+    {
+        let tool_config = state.get_tool_config_manager().await;
+        let mut config_guard = tool_config.lock().await;
+        config_guard.set_tool_enabled(&format!("{}:{}", server_id, tool_name), enabled);
+    }
+
+    // Save configuration
+    state.save_tool_config(&app_handle).await?;
+
+    // Sync tools to update the MCP tool information
+    state.sync_mcp_tools().await?;
+
+    // Emit state update to frontend
+    state.emit_mcp_state_update(&app_handle).await?;
+
+    Ok(())
+}
+
 /// Test MCP server connection (without adding it permanently)
 #[tauri::command]
 pub async fn test_mcp_server_connection(
