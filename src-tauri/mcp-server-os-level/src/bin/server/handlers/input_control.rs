@@ -4,16 +4,17 @@ use axum::{
     response::Json as JsonResponse,
 };
 use serde_json;
-use std::process::Command;
 use std::sync::Arc;
 use tracing::{error, info};
+use core_graphics::event::{CGEventSource, CGEventSourceStateID, CGEvent, CGEventType, CGEventTapLocation, CGKeyCode};
+use core_graphics::geometry::CGPoint;
 
 use crate::server::types::{
     AppState, ElementCache, InputAction, InputControlRequest, InputControlResponse,
     InputControlWithElementsResponse,
 };
-
 use crate::server::handlers::utils::refresh_elements_and_attributes_after_action;
+use crate::platforms::macos::interaction::{get_key_code, parse_key_combination};
 
 // Define the handler for input control
 pub async fn input_control_handler(
@@ -28,52 +29,132 @@ pub async fn input_control_handler(
     // Execute appropriate input action
     match payload.action {
         InputAction::KeyPress(key) => {
-            // Add key name to key code mapping
-            let key_code = match key.as_str() {
-                "Tab" => "48",    // Tab key code
-                "Return" => "36", // Enter/Return key code
-                "Space" => "49",  // Space key code
-                "Escape" => "53", // Escape key code
-                // Add more key mappings as needed
-                _ => key.as_str(), // Use as-is if it's already a number
+            info!("pressing key: {}", key);
+
+            // Try to parse as key combination first (e.g., "cmd+c", "shift+tab")
+            let result = if key.contains('+') {
+                // Use centralized key combination parsing
+                match parse_key_combination(&key) {
+                    Ok((key_code, flags)) => {
+                        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+                            .map_err(|_| "Failed to create event source")?;
+
+                        let key_down = CGEvent::new_keyboard_event(source.clone(), key_code as CGKeyCode, true)
+                            .map_err(|_| "Failed to create key down event")?;
+                        if !flags.is_empty() {
+                            key_down.set_flags(flags);
+                        }
+                        key_down.post(CGEventTapLocation::HID);
+
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+
+                        let key_up = CGEvent::new_keyboard_event(source, key_code as CGKeyCode, false)
+                            .map_err(|_| "Failed to create key up event")?;
+                        if !flags.is_empty() {
+                            key_up.set_flags(flags);
+                        }
+                        key_up.post(CGEventTapLocation::HID);
+
+                        Ok(())
+                    }
+                    Err(e) => Err(format!("Invalid key combination '{}': {}", key, e)),
+                }
+            } else {
+                // Use centralized single key parsing
+                match get_key_code(&key) {
+                    Ok(key_code) => {
+                        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+                            .map_err(|_| "Failed to create event source")?;
+
+                        let key_down = CGEvent::new_keyboard_event(source.clone(), key_code as CGKeyCode, true)
+                            .map_err(|_| "Failed to create key down event")?;
+                        key_down.post(CGEventTapLocation::HID);
+
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+
+                        let key_up = CGEvent::new_keyboard_event(source, key_code as CGKeyCode, false)
+                            .map_err(|_| "Failed to create key up event")?;
+                        key_up.post(CGEventTapLocation::HID);
+
+                        Ok(())
+                    }
+                    Err(e) => Err(format!("Invalid key '{}': {}", key, e)),
+                }
             };
 
-            let script = format!(
-                "tell application \"System Events\" to key code {}",
-                key_code
-            );
-            info!("executing key press script: {}", script);
-            if let Err(e) = Command::new("osascript").arg("-e").arg(script).output() {
-                error!("failed to press key: {}", e);
+            if let Err(error_msg) = result {
+                error!("failed to press key: {}", error_msg);
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     JsonResponse(
-                        serde_json::json!({"error": format!("failed to press key: {}", e)}),
+                        serde_json::json!({"error": error_msg}),
                     ),
                 ));
             }
         }
         InputAction::MouseMove { x, y } => {
-            // Implement mouse move
-            let script = format!(
-                "tell application \"System Events\" to set mouse position to {{{}, {}}}",
-                x, y
-            );
-            if let Err(e) = Command::new("osascript").arg("-e").arg(script).output() {
-                error!("failed to move mouse: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonResponse(
-                        serde_json::json!({"error": format!("failed to move mouse: {}", e)}),
-                    ),
-                ));
-            }
+            info!("moving mouse to ({}, {})", x, y);
+
+            let location = CGPoint::new(x as f64, y as f64);
+            let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+                Ok(source) => source,
+                Err(_) => {
+                    error!("failed to create event source for mouse move");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonResponse(
+                            serde_json::json!({"error": "Failed to create event source for mouse move"}),
+                        ),
+                    ));
+                }
+            };
+
+            let mouse_event = match CGEvent::new_mouse_event(
+                source,
+                CGEventType::MouseMoved,
+                location,
+                core_graphics::event::CGMouseButton::Left, // Ignored for mouse move
+            ) {
+                Ok(event) => event,
+                Err(_) => {
+                    error!("failed to create mouse move event");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonResponse(
+                            serde_json::json!({"error": "Failed to create mouse move event"}),
+                        ),
+                    ));
+                }
+            };
+
+            mouse_event.post(CGEventTapLocation::HID);
         }
         InputAction::MouseClick(button) => {
-            // Implement mouse click
-            let button_num = match button.as_str() {
-                "left" => 1,
-                "right" => 2,
+            info!("clicking mouse button: {}", button);
+
+            // Get current mouse position for click
+            let current_location = unsafe {
+                let event_source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).unwrap();
+                let mouse_event = CGEvent::new_mouse_event(
+                    event_source,
+                    CGEventType::MouseMoved,
+                    CGPoint::new(0.0, 0.0),
+                    core_graphics::event::CGMouseButton::Left,
+                ).unwrap();
+                mouse_event.location()
+            };
+
+            let (cg_button, down_event_type, up_event_type) = match button.as_str() {
+                "left" => (
+                    core_graphics::event::CGMouseButton::Left,
+                    CGEventType::LeftMouseDown,
+                    CGEventType::LeftMouseUp,
+                ),
+                "right" => (
+                    core_graphics::event::CGMouseButton::Right,
+                    CGEventType::RightMouseDown,
+                    CGEventType::RightMouseUp,
+                ),
                 _ => {
                     error!("unsupported mouse button: {}", button);
                     return Err((
@@ -85,34 +166,87 @@ pub async fn input_control_handler(
                 }
             };
 
-            let script = format!(
-                "tell application \"System Events\" to click button {}",
-                button_num
-            );
-            if let Err(e) = Command::new("osascript").arg("-e").arg(script).output() {
-                error!("failed to click mouse: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonResponse(
-                        serde_json::json!({"error": format!("failed to click mouse: {}", e)}),
-                    ),
-                ));
-            }
+            let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+                Ok(source) => source,
+                Err(_) => {
+                    error!("failed to create event source for mouse click");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonResponse(
+                            serde_json::json!({"error": "Failed to create event source for mouse click"}),
+                        ),
+                    ));
+                }
+            };
+
+            // Mouse down
+            let down_event = match CGEvent::new_mouse_event(source.clone(), down_event_type, current_location, cg_button) {
+                Ok(event) => event,
+                Err(_) => {
+                    error!("failed to create mouse down event");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonResponse(
+                            serde_json::json!({"error": "Failed to create mouse down event"}),
+                        ),
+                    ));
+                }
+            };
+            down_event.post(CGEventTapLocation::HID);
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Mouse up
+            let up_event = match CGEvent::new_mouse_event(source, up_event_type, current_location, cg_button) {
+                Ok(event) => event,
+                Err(_) => {
+                    error!("failed to create mouse up event");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonResponse(
+                            serde_json::json!({"error": "Failed to create mouse up event"}),
+                        ),
+                    ));
+                }
+            };
+            up_event.post(CGEventTapLocation::HID);
         }
         InputAction::WriteText(text) => {
-            // Implement text writing
-            let script = format!(
-                "tell application \"System Events\" to keystroke \"{}\"",
-                text
-            );
-            if let Err(e) = Command::new("osascript").arg("-e").arg(script).output() {
-                error!("failed to write text: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    JsonResponse(
-                        serde_json::json!({"error": format!("failed to write text: {}", e)}),
-                    ),
-                ));
+            info!("writing text: {}", text);
+
+            let source = match CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+                Ok(source) => source,
+                Err(_) => {
+                    error!("failed to create event source for text writing");
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        JsonResponse(
+                            serde_json::json!({"error": "Failed to create event source for text writing"}),
+                        ),
+                    ));
+                }
+            };
+
+            // Type each character in the text
+            for character in text.chars() {
+                // Create keyboard event for each character
+                let event = match CGEvent::new_unicode_keyboard_event(source.clone(), &[character as u16], false) {
+                    Ok(event) => event,
+                    Err(_) => {
+                        error!("failed to create keyboard event for character: {}", character);
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            JsonResponse(
+                                serde_json::json!({"error": format!("Failed to create keyboard event for character: {}", character)}),
+                            ),
+                        ));
+                    }
+                };
+
+                event.post(CGEventTapLocation::HID);
+
+                // Small delay between characters for better reliability
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
     }
