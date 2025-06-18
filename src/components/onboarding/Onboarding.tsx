@@ -36,13 +36,19 @@ const permissions = [
   },
 ];
 
-const getOnboardingSteps = (permissionsAlreadyGranted: boolean) => [
+const getOnboardingSteps = (
+  permissionsAlreadyGranted: boolean,
+  isDevelopmentMode: boolean = false
+) => [
   {
     id: "welcome",
     title: "Welcome to Juno",
-    subtitle: "Your intelligent Mac companion",
-    description:
-      "Juno helps you automate tasks, manage your workflow, and get more done with your Mac.",
+    subtitle: isDevelopmentMode
+      ? "Your intelligent Mac companion (Development Mode)"
+      : "Your intelligent Mac companion",
+    description: isDevelopmentMode
+      ? "Juno helps you automate tasks, manage your workflow, and get more done with your Mac. You're running in development mode, so onboarding will always show on startup."
+      : "Juno helps you automate tasks, manage your workflow, and get more done with your Mac.",
     icon: <Sparkles className="w-12 h-12 text-blue-500" />,
     action: "Get Started",
   },
@@ -364,12 +370,14 @@ interface OnboardingFlowProps {
   onComplete: () => void;
   onSkip?: () => void;
   permissionsAlreadyGranted?: boolean;
+  isDevelopmentMode?: boolean;
 }
 
 export default function OnboardingFlow({
   onComplete,
   onSkip,
   permissionsAlreadyGranted = false,
+  isDevelopmentMode = false,
 }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [shortcutPressed, setShortcutPressed] = useState(false);
@@ -416,7 +424,10 @@ export default function OnboardingFlow({
     loadInitialData();
   }, []);
 
-  const onboardingSteps = getOnboardingSteps(permissionsAlreadyGranted);
+  const onboardingSteps = getOnboardingSteps(
+    permissionsAlreadyGranted,
+    isDevelopmentMode
+  );
 
   const handleNext = () => {
     // Block navigation from shortcut step if shortcut hasn't been pressed
