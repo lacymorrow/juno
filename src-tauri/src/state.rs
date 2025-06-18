@@ -501,7 +501,9 @@ impl AppState {
             }
         } else {
             debug!("Reusing existing Playwright driver instance from AppState.");
-            Ok(driver_guard.as_ref().unwrap().clone())
+            driver_guard.as_ref()
+                .ok_or_else(|| "Playwright driver is None despite check".to_string())
+                .map(|driver| driver.clone())
         }
     }
 
@@ -533,7 +535,9 @@ impl AppState {
             }
         } else {
             debug!("Reusing existing browser controller from AppState.");
-            Ok(controller_guard.as_ref().unwrap().clone())
+            controller_guard.as_ref()
+                .ok_or_else(|| "Browser controller is None despite check".to_string())
+                .map(|controller| controller.clone())
         }
     }
 
@@ -1134,7 +1138,9 @@ impl AppState {
         if INIT_FLAG.load(Ordering::Acquire) {
             let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
             let guard = result_mutex.lock().await;
-            return guard.as_ref().unwrap().clone();
+            return guard.as_ref()
+                .ok_or_else(|| "MCP initialization result is None".to_string())?
+                .clone();
         }
 
         // Try to claim initialization responsibility
