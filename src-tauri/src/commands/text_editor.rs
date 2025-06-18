@@ -9,11 +9,14 @@ use tracing::{info, warn, error};
 use super::send_dev_tool_notification; // Use helper from parent module
 
 // Helper moved here as it's only used by text editor commands
-fn update_undo_state(state: &State<AppState>, path: String, previous_content: Option<String>) {
-    let mut last_edited = state.last_edited_file.lock().unwrap();
+fn update_undo_state(state: &State<AppState>, path: String, previous_content: Option<String>) -> Result<(), String> {
+    let mut last_edited = state.last_edited_file.lock()
+        .map_err(|e| format!("Failed to acquire last_edited_file lock: {}", e))?;
     *last_edited = Some(path.into()); // Convert String to PathBuf
-    let mut prev_content = state.previous_content.lock().unwrap();
+    let mut prev_content = state.previous_content.lock()
+        .map_err(|e| format!("Failed to acquire previous_content lock: {}", e))?;
     *prev_content = Some(previous_content); // Wrap Option<String> in Option
+    Ok(())
 }
 
 
@@ -43,7 +46,9 @@ pub(crate) async fn dev_text_editor_create(
     // Store previous state for undo
     let previous_content = fs::read_to_string(&path_buf).ok();
     // Use original String for state update, convert PathBuf back for notification
-    update_undo_state(&state, path_buf.to_string_lossy().to_string(), previous_content);
+    if let Err(e) = update_undo_state(&state, path_buf.to_string_lossy().to_string(), previous_content) {
+        warn!("Failed to update undo state: {}", e);
+    }
 
     match fs::write(&path_buf, content) {
         Ok(_) => {
@@ -80,7 +85,9 @@ pub(crate) async fn dev_text_editor_str_replace(
     };
 
     // Store previous state for undo
-    update_undo_state(&state, path_buf.to_string_lossy().to_string(), Some(original_content.clone()));
+    if let Err(e) = update_undo_state(&state, path_buf.to_string_lossy().to_string(), Some(original_content.clone())) {
+        warn!("Failed to update undo state: {}", e);
+    }
 
     let modified_content = original_content.replace(&find, &replace);
 
@@ -120,7 +127,9 @@ pub(crate) async fn dev_text_editor_insert(
      };
 
     // Store previous state for undo
-    update_undo_state(&state, path_buf.to_string_lossy().to_string(), Some(original_content.clone()));
+    if let Err(e) = update_undo_state(&state, path_buf.to_string_lossy().to_string(), Some(original_content.clone())) {
+        warn!("Failed to update undo state: {}", e);
+    }
 
     let mut lines: Vec<String> = original_content.lines().map(String::from).collect();
 
@@ -162,8 +171,10 @@ pub(crate) async fn dev_text_editor_undo_edit(
 ) -> Result<(), String> {
     info!("[DEV_TOOL] Undoing last text editor operation");
 
-    let mut last_file_lock = state.last_edited_file.lock().unwrap();
-    let mut prev_content_lock = state.previous_content.lock().unwrap();
+    let mut last_file_lock = state.last_edited_file.lock()
+        .map_err(|e| format!("Failed to acquire last_edited_file lock: {}", e))?;
+    let mut prev_content_lock = state.previous_content.lock()
+        .map_err(|e| format!("Failed to acquire previous_content lock: {}", e))?;
 
     if let Some(path) = last_file_lock.take() {
         let prev_content_option = prev_content_lock.take();

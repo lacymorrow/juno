@@ -296,7 +296,7 @@ fn validate_shortcut_format(shortcut: &str) -> Result<(), String> {
 
         if !allowed_standalone.contains(&single_key.as_str()) {
             // Provide more specific guidance based on key type
-            if single_key.len() == 1 && single_key.chars().next().unwrap().is_alphabetic() {
+            if single_key.len() == 1 && single_key.chars().next().map_or(false, |c| c.is_alphabetic()) {
                 return Err(format!("Letter keys like '{}' should include a modifier (Alt, Ctrl, Cmd, Shift) to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut.to_uppercase(), shortcut.to_uppercase()));
             } else if single_key.chars().all(|c| c.is_ascii_digit()) {
                 return Err(format!("Number keys like '{}' should include a modifier to avoid conflicts with typing. Try 'Alt+{}' or 'Ctrl+{}'.", shortcut, shortcut, shortcut));
