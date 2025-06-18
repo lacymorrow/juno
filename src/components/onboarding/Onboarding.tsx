@@ -1,16 +1,17 @@
-import React, { useState, useEffect } from "react";
-import {
-  ChevronRight,
-  Sparkles,
-  Shield,
-  CheckCircle,
-  Monitor,
-  Keyboard,
-  Eye,
-} from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  CheckCircle,
+  ChevronRight,
+  Keyboard,
+  Shield,
+  Sparkles,
+  XCircle,
+  Eye,
+  Monitor,
+} from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useState } from "react";
 
 const permissions = [
   {
@@ -53,6 +54,15 @@ const getOnboardingSteps = (permissionsAlreadyGranted: boolean) => [
     description:
       "Try the agent mode shortcut below! This will activate Juno's AI assistant from anywhere on your Mac.",
     icon: <Keyboard className="w-12 h-12 text-purple-500" />,
+    action: "Continue",
+  },
+  {
+    id: "cancel",
+    title: "Master the Cancel Key",
+    subtitle: "Learn how to stop any operation",
+    description:
+      "Sometimes you need to stop what Juno is doing. Try pressing the Escape key below to see how cancellation works!",
+    icon: <XCircle className="w-12 h-12 text-red-500" />,
     action: "Continue",
   },
   ...(permissionsAlreadyGranted
@@ -373,12 +383,11 @@ export default function OnboardingFlow({
 }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [shortcutPressed, setShortcutPressed] = useState(false);
+  const [backendShortcutsWorking, setBackendShortcutsWorking] = useState(false);
+  const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
   const [currentPermission, setCurrentPermission] = useState(0);
-  const [grantedPermissions, setGrantedPermissions] = useState<string[]>([]);
-  const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
   const [isComplete, setIsComplete] = useState(false);
-  const [backendShortcutsWorking, setBackendShortcutsWorking] = useState(false);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -439,9 +448,6 @@ export default function OnboardingFlow({
 
   const handleShortcutPressed = () => {
     setShortcutPressed(true);
-    setTimeout(() => {
-      setCurrentStep(currentStep + 1);
-    }, 500);
   };
 
   const handlePermissionAllow = async () => {
@@ -469,7 +475,7 @@ export default function OnboardingFlow({
       }
 
       if (success) {
-        setGrantedPermissions([...grantedPermissions, permission.id]);
+        // No need to update grantedPermissions as the permission is granted
       }
     } catch (error) {
       console.error("Error requesting permission:", error);
@@ -494,11 +500,32 @@ export default function OnboardingFlow({
   };
 
   const handleSkip = () => {
+    // Skip the current step by jumping to the end
     setIsComplete(true);
     if (onSkip) {
       onSkip();
     } else {
       onComplete();
+    }
+  };
+
+  const handleSkipStep = () => {
+    // Skip just the current step and move to the next one
+    if (currentStep < onboardingSteps.length - 1) {
+      // Reset step-specific states when skipping
+      if (step.id === "shortcut") {
+        setShortcutPressed(true); // Allow progression if they come back
+      }
+      // Remove the cancel step logic since it's no longer interactive
+      setCurrentStep(currentStep + 1);
+    } else {
+      // If this is the last step, complete onboarding
+      setIsComplete(true);
+      if (onSkip) {
+        onSkip();
+      } else {
+        onComplete();
+      }
     }
   };
 
@@ -599,6 +626,47 @@ export default function OnboardingFlow({
                     </div>
                   )}
 
+                  {/* Cancel shortcut for cancel step */}
+                  {step.id === "cancel" && (
+                    <div className="relative">
+                      <div className="mb-4 p-3 rounded-lg bg-gray-50 border">
+                        <div className="flex items-center gap-2 text-sm">
+                          <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                          <span className="font-medium">
+                            ✋ Universal Cancel Key
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-1">
+                          The Escape key works in any situation - dictation,
+                          agent tasks, or TTS playback
+                        </p>
+                      </div>
+
+                      {/* Simple visual representation of Escape key */}
+                      <div className="flex justify-center my-6">
+                        <div className="flex items-center justify-center w-20 h-20 rounded-xl border-2 bg-white border-gray-300 text-gray-700 shadow-sm">
+                          <span className="text-lg font-semibold">Esc</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                        <h4 className="font-medium text-blue-900 mb-2">
+                          Key Benefits:
+                        </h4>
+                        <ul className="text-sm text-blue-800 space-y-1">
+                          <li>• Stops dictation immediately</li>
+                          <li>• Cancels running agent tasks</li>
+                          <li>• Interrupts text-to-speech playback</li>
+                          <li>• Works in any application context</li>
+                        </ul>
+                      </div>
+
+                      <p className="text-sm text-gray-500 mt-4 text-center">
+                        The Escape key is your universal "stop" button in Juno
+                      </p>
+                    </div>
+                  )}
+
                   {/* Permissions list */}
                   {step.id === "permissions" && (
                     <div className="space-y-3 mt-8">
@@ -631,17 +699,26 @@ export default function OnboardingFlow({
 
                 {/* Actions */}
                 <div className="flex gap-4">
-                  {currentStep < onboardingSteps.length - 1 &&
-                    step.id !== "shortcut" &&
-                    step.id !== "permissions" && (
-                      <button
-                        onClick={handleSkip}
-                        className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
-                      >
-                        Skip
-                      </button>
-                    )}
-                  {/* Hide continue button for shortcut step until shortcut is pressed */}
+                  {/* Show skip button on all steps except the final complete step */}
+                  {currentStep < onboardingSteps.length - 1 && (
+                    <button
+                      onClick={handleSkipStep}
+                      className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                    >
+                      Skip
+                    </button>
+                  )}
+                  {/* Show complete skip button on final step */}
+                  {currentStep === onboardingSteps.length - 1 && (
+                    <button
+                      onClick={handleSkip}
+                      className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                    >
+                      Skip All
+                    </button>
+                  )}
+
+                  {/* Continue button - hide for shortcut step until completed, but cancel step is no longer interactive */}
                   {(step.id !== "shortcut" || shortcutPressed) && (
                     <button
                       onClick={handleNext}
