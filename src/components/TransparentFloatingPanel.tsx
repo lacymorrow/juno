@@ -33,6 +33,8 @@ interface TransparentFloatingPanelProps {
   maxWidth?: number;
   opacity?: number;
   isWindowHovered?: boolean;
+  disableWindowManagement?: boolean;
+  onModeChange?: (mode: "compact" | "expanded" | "chat" | "settings") => void;
 }
 
 export function TransparentFloatingPanel({
@@ -40,6 +42,8 @@ export function TransparentFloatingPanel({
   maxWidth = 400,
   opacity = 0.92,
   isWindowHovered = false,
+  disableWindowManagement = false,
+  onModeChange,
 }: TransparentFloatingPanelProps) {
   // Use context hooks instead of local state
   const { voiceState } = useVoice();
@@ -61,6 +65,11 @@ export function TransparentFloatingPanel({
 
   // Window and panel management with delayed resizing for smooth transitions
   useEffect(() => {
+    // Skip window management if disabled (handled by wrapper component)
+    if (disableWindowManagement) {
+      return;
+    }
+
     const setupWindow = async () => {
       try {
         const appWindow = await Window.getByLabel("floating-panel");
@@ -104,7 +113,7 @@ export function TransparentFloatingPanel({
     return () => {
       cleanup?.then((cleanupFn) => cleanupFn?.());
     };
-  }, [panelState.mode]);
+  }, [panelState.mode, disableWindowManagement]);
 
   // Sync local panel state with context agent state
   useEffect(() => {
@@ -175,6 +184,13 @@ export function TransparentFloatingPanel({
     isHovered,
   ]);
 
+  // Notify parent component when panel mode changes
+  useEffect(() => {
+    if (onModeChange) {
+      onModeChange(panelState.mode);
+    }
+  }, [panelState.mode, onModeChange]);
+
   // Note: Drag functionality now handled by Tauri's data-tauri-drag-region
   // This allows proper desktop window dragging instead of webview-only dragging
 
@@ -239,16 +255,16 @@ export function TransparentFloatingPanel({
 
   // Get background color based on state
   const getBackgroundColor = () => {
-    if (voiceState.mode === "dictation") {
-      return "bg-gradient-to-br from-orange-500/20 to-orange-600/30";
+    if (panelState.voiceMode === "dictation") {
+      return "bg-gradient-to-br from-orange-500/70 to-orange-600/80";
     }
-    if (voiceState.mode === "agent" || panelState.agentStatus !== "idle") {
-      return "bg-gradient-to-br from-blue-500/20 to-blue-600/30";
+    if (panelState.voiceMode === "agent" || panelState.agentStatus !== "idle") {
+      return "bg-gradient-to-br from-blue-500/70 to-blue-600/80";
     }
-    if (voiceState.isSpeaking) {
-      return "bg-gradient-to-br from-purple-500/20 to-purple-600/30";
+    if (panelState.isSpeaking) {
+      return "bg-gradient-to-br from-purple-500/70 to-purple-600/80";
     }
-    return "bg-gradient-to-br from-gray-800/20 to-gray-900/30";
+    return "bg-gradient-to-br from-gray-800/70 to-gray-900/80";
   };
 
   // Audio level visualization
@@ -264,7 +280,7 @@ export function TransparentFloatingPanel({
               "w-1 rounded-full transition-all duration-150 audio-bar",
               voiceState.audioLevel > (i + 1) * 20
                 ? "bg-white/80 h-3"
-                : "bg-white/20 h-1"
+                : "bg-white/70 h-1"
             )}
           />
         ))}
@@ -328,7 +344,7 @@ export function TransparentFloatingPanel({
     <div
       ref={panelRef}
       className={cn(
-        "w-screen h-screen bg-transparent overflow-hidden select-none",
+        "w-screen h-screen bg-transparent select-none",
         // PRODUCTION READY: Smart pointer events based on click-through state
         !isClickThroughEnabled ? "pointer-events-auto" : "pointer-events-none",
         className
@@ -451,8 +467,8 @@ export function TransparentFloatingPanel({
                 {/* Current Activity */}
                 {(voiceState.transcriptionText ||
                   panelState.currentResponse) && (
-                  <div className="bg-black/20 rounded-lg p-2 text-xs">
-                    {voiceState.transcriptionText && (
+                  <div className="bg-black/70 rounded-lg p-2 text-xs">
+                    {panelState.transcriptionText && (
                       <div className="text-orange-200">
                         "{voiceState.transcriptionText}"
                       </div>
@@ -482,13 +498,13 @@ export function TransparentFloatingPanel({
                     onMouseDown={(e) => e.stopPropagation()}
                     onFocus={(e) => e.stopPropagation()}
                     placeholder="Quick ask..."
-                    className="flex-1 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/30 cursor-text"
+                    className="flex-1 bg-black/70 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/80 cursor-text"
                   />
                   <button
                     type="submit"
                     disabled={!inputValue.trim()}
                     onClick={(e) => e.stopPropagation()}
-                    className="px-2 py-1 bg-blue-500/30 hover:bg-blue-500/50 rounded text-xs transition-colors disabled:opacity-50 cursor-pointer"
+                    className="px-2 py-1 bg-blue-500/80 hover:bg-blue-500/50 rounded text-xs transition-colors disabled:opacity-50 cursor-pointer"
                   >
                     Ask
                   </button>
@@ -540,8 +556,8 @@ export function TransparentFloatingPanel({
                       className={cn(
                         "text-xs p-2 rounded",
                         msg.role === "user"
-                          ? "bg-blue-500/20 text-blue-100"
-                          : "bg-gray-500/20 text-gray-100"
+                          ? "bg-blue-500/70 text-blue-100"
+                          : "bg-gray-500/70 text-gray-100"
                       )}
                     >
                       {msg.content}
@@ -560,13 +576,13 @@ export function TransparentFloatingPanel({
                     onMouseDown={(e) => e.stopPropagation()}
                     onFocus={(e) => e.stopPropagation()}
                     placeholder="Type a message..."
-                    className="flex-1 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/30 cursor-text"
+                    className="flex-1 bg-black/70 border border-white/10 rounded px-2 py-1 text-xs text-white placeholder-white/50 focus:outline-none focus:border-white/80 cursor-text"
                   />
                   <button
                     type="submit"
                     disabled={!inputValue.trim()}
                     onClick={(e) => e.stopPropagation()}
-                    className="px-2 py-1 bg-blue-500/30 hover:bg-blue-500/50 rounded text-xs transition-colors disabled:opacity-50 cursor-pointer"
+                    className="px-2 py-1 bg-blue-500/80 hover:bg-blue-500/50 rounded text-xs transition-colors disabled:opacity-50 cursor-pointer"
                   >
                     Send
                   </button>
@@ -623,7 +639,7 @@ export function TransparentFloatingPanel({
 
                 <div>
                   <label className="block text-white/70 mb-1">Voice Mode</label>
-                  <select className="w-full bg-black/20 border border-white/10 rounded px-2 py-1 text-white">
+                  <select className="w-full bg-black/70 border border-white/10 rounded px-2 py-1 text-white">
                     <option>Always available</option>
                     <option>Push-to-talk</option>
                     <option>Disabled</option>
