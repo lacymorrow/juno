@@ -2,6 +2,7 @@
 
 use crate::agent::providers::config::{ProviderConfig, ProviderSettings, AgentMode};
 use crate::agent::providers::factory::{ProviderInfo, BrainFactory};
+use tauri::AppHandle;
 use tracing::info;
 
 /// Get the list of available providers
@@ -19,11 +20,11 @@ pub(crate) async fn get_active_provider() -> Result<String, String> {
 
 /// Set the active provider
 #[tauri::command]
-pub(crate) async fn set_active_provider(provider_id: String) -> Result<(), String> {
-    let mut config = ProviderConfig::load()
+pub(crate) async fn set_active_provider(app_handle: AppHandle, provider_id: String) -> Result<(), String> {
+    let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
-    config.set_active_provider(provider_id.clone())
+    config.set_active_provider(provider_id.clone(), &app_handle)
         .map_err(|e| format!("Failed to set active provider: {}", e))?;
 
     info!("Set active provider to: {}", provider_id);
@@ -32,8 +33,8 @@ pub(crate) async fn set_active_provider(provider_id: String) -> Result<(), Strin
 
 /// Get settings for a specific provider
 #[tauri::command]
-pub(crate) async fn get_provider_settings(provider_id: String) -> Result<ProviderSettings, String> {
-    let config = ProviderConfig::load()
+pub(crate) async fn get_provider_settings(app_handle: AppHandle, provider_id: String) -> Result<ProviderSettings, String> {
+    let config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
     match config.get_provider_settings(&provider_id) {
@@ -44,11 +45,11 @@ pub(crate) async fn get_provider_settings(provider_id: String) -> Result<Provide
 
 /// Update API key for a provider
 #[tauri::command]
-pub(crate) async fn update_provider_api_key(provider_id: String, api_key: String) -> Result<(), String> {
-    let mut config = ProviderConfig::load()
+pub(crate) async fn update_provider_api_key(app_handle: AppHandle, provider_id: String, api_key: String) -> Result<(), String> {
+    let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
-    config.update_api_key(&provider_id, api_key)
+    config.update_api_key(&provider_id, api_key, &app_handle)
         .map_err(|e| format!("Failed to update API key: {}", e))?;
 
     info!("Updated API key for provider: {}", provider_id);
@@ -57,11 +58,11 @@ pub(crate) async fn update_provider_api_key(provider_id: String, api_key: String
 
 /// Update model for a provider
 #[tauri::command]
-pub(crate) async fn update_provider_model(provider_id: String, model: String) -> Result<(), String> {
-    let mut config = ProviderConfig::load()
+pub(crate) async fn update_provider_model(app_handle: AppHandle, provider_id: String, model: String) -> Result<(), String> {
+    let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
-    config.update_model(&provider_id, model)
+    config.update_model(&provider_id, model, &app_handle)
         .map_err(|e| format!("Failed to update model: {}", e))?;
 
     info!("Updated model for provider: {}", provider_id);
@@ -70,8 +71,8 @@ pub(crate) async fn update_provider_model(provider_id: String, model: String) ->
 
 /// Update max tokens for a provider
 #[tauri::command]
-pub(crate) async fn update_provider_max_tokens(provider_id: String, max_tokens: u32) -> Result<(), String> {
-    let mut config = ProviderConfig::load()
+pub(crate) async fn update_provider_max_tokens(app_handle: AppHandle, provider_id: String, max_tokens: u32) -> Result<(), String> {
+    let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
     // Find the provider and update its max_tokens
@@ -88,7 +89,7 @@ pub(crate) async fn update_provider_max_tokens(provider_id: String, max_tokens: 
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save()
+    config.save_to_store(&app_handle)
         .map_err(|e| format!("Failed to save config: {}", e))?;
 
     info!("Updated max_tokens for provider: {}", provider_id);
@@ -97,8 +98,8 @@ pub(crate) async fn update_provider_max_tokens(provider_id: String, max_tokens: 
 
 /// Update temperature for a provider
 #[tauri::command]
-pub(crate) async fn update_provider_temperature(provider_id: String, temperature: f32) -> Result<(), String> {
-    let mut config = ProviderConfig::load()
+pub(crate) async fn update_provider_temperature(app_handle: AppHandle, provider_id: String, temperature: f32) -> Result<(), String> {
+    let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
     // Find the provider and update its temperature
@@ -115,7 +116,7 @@ pub(crate) async fn update_provider_temperature(provider_id: String, temperature
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save()
+    config.save_to_store(&app_handle)
         .map_err(|e| format!("Failed to save config: {}", e))?;
 
     info!("Updated temperature for provider: {}", provider_id);
@@ -124,8 +125,8 @@ pub(crate) async fn update_provider_temperature(provider_id: String, temperature
 
 /// Update system prompt for a provider
 #[tauri::command]
-pub(crate) async fn update_provider_system_prompt(provider_id: String, system_prompt: String) -> Result<(), String> {
-    let mut config = ProviderConfig::load()
+pub(crate) async fn update_provider_system_prompt(app_handle: AppHandle, provider_id: String, system_prompt: String) -> Result<(), String> {
+    let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
     // Find the provider and update its system_prompt
@@ -142,7 +143,7 @@ pub(crate) async fn update_provider_system_prompt(provider_id: String, system_pr
         return Err(format!("Provider '{}' not found", provider_id));
     }
 
-    config.save()
+    config.save_to_store(&app_handle)
         .map_err(|e| format!("Failed to save config: {}", e))?;
 
     info!("Updated system prompt for provider: {}", provider_id);
@@ -158,14 +159,14 @@ pub(crate) async fn get_agent_mode() -> Result<String, String> {
 
 /// Set the agent mode (single or multi)
 #[tauri::command]
-pub(crate) async fn set_agent_mode(mode: String) -> Result<(), String> {
+pub(crate) async fn set_agent_mode(app_handle: AppHandle, mode: String) -> Result<(), String> {
     let agent_mode = AgentMode::from_str(&mode)
         .ok_or_else(|| format!("Invalid agent mode: '{}'. Must be 'single' or 'multi'", mode))?;
 
-    let mut config = ProviderConfig::load()
+    let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
-    config.set_agent_mode(agent_mode)
+    config.set_agent_mode(agent_mode, &app_handle)
         .map_err(|e| format!("Failed to set agent mode: {}", e))?;
 
     info!("Set agent mode to: {}", mode);

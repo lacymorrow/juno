@@ -3,10 +3,9 @@
 //! Used by: Agent initialization and settings management for tool control.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::fs;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+use tauri_plugin_store::StoreExt;
 use tracing::info;
 
 // Re-export MCP types for convenience
@@ -87,7 +86,7 @@ pub struct ToolConfig {
 impl ToolConfig {
     /// Creates a new tool configuration with basic settings.
     /// Used by: Default tool initialization and configuration builders.
-    /// 
+    ///
     /// # Arguments
     /// * `name` - Unique tool name
     /// * `category` - Tool category for organization
@@ -105,7 +104,7 @@ impl ToolConfig {
 
     /// Creates a new configuration specifically for MCP tools.
     /// Used by: MCP integration when adding tools from external servers.
-    /// 
+    ///
     /// # Arguments
     /// * `name` - Tool name (will be prefixed with server name)
     /// * `server_id` - ID of the MCP server providing this tool
@@ -181,72 +180,63 @@ impl ToolConfigManager {
         Self::default()
     }
 
-    /// Load configuration from file or create default.
+    /// Load configuration from Tauri store or create default.
     /// Attempts to load existing configuration, creates default if missing.
     /// Used by: Application startup for configuration initialization.
-    /// 
+    ///
     /// # Arguments
-    /// * `config_path` - Path to the configuration JSON file
-    pub fn load_from_file(config_path: &PathBuf) -> Result<Self, String> {
-        if config_path.exists() {
-            let content = fs::read_to_string(config_path)
-                .map_err(|e| format!("Failed to read tool config: {}", e))?;
+    /// * `app_handle` - Tauri app handle for store access
+    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, String> {
+        let store = app_handle.store("tool_config.json")
+            .map_err(|e| format!("Failed to access tool config store: {}", e))?;
 
-            let mut config: Self = serde_json::from_str(&content)
-                .map_err(|e| format!("Failed to parse tool config: {}", e))?;
-
-            // Ensure all default tools are present (for backwards compatibility)
-            Self::ensure_default_tools(&mut config.tools);
-
-            info!("Loaded tool configuration from {}", config_path.display());
-            Ok(config)
-        } else {
-            info!("No tool configuration found, creating default");
-            let default_config = Self::default();
-            default_config.save_to_file(config_path)?;
-            Ok(default_config)
+        // Try to load the full configuration from store
+        if let Some(config_value) = store.get("tool_config") {
+            match serde_json::from_value::<Self>(config_value) {
+                Ok(mut config) => {
+                    // Ensure all default tools are present (for backwards compatibility)
+                    Self::ensure_default_tools(&mut config.tools);
+                    info!("Loaded tool configuration from store");
+                    return Ok(config);
+                }
+                Err(e) => {
+                    info!("Failed to parse stored tool config ({}), creating default", e);
+                }
+            }
         }
+
+        // No valid configuration found, create and save default
+        info!("No tool configuration found in store, creating default");
+        let default_config = Self::default();
+        default_config.save_to_store(app_handle)?;
+        Ok(default_config)
     }
 
-    /// Save configuration to file.
-    /// Serializes current configuration to JSON and saves to specified file.
+    /// Save configuration to Tauri store.
+    /// Serializes current configuration to JSON and saves to store.
     /// Used by: Settings UI and application shutdown for persistence.
-    /// 
+    ///
     /// # Arguments
-    /// * `config_path` - Path where configuration should be saved
-    pub fn save_to_file(&self, config_path: &PathBuf) -> Result<(), String> {
-        // Ensure parent directory exists
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
-        }
+    /// * `app_handle` - Tauri app handle for store access
+    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let store = app_handle.store("tool_config.json")
+            .map_err(|e| format!("Failed to access tool config store: {}", e))?;
 
-        let content = serde_json::to_string_pretty(self)
+        let config_value = serde_json::to_value(self)
             .map_err(|e| format!("Failed to serialize tool config: {}", e))?;
 
-        fs::write(config_path, content)
-            .map_err(|e| format!("Failed to write tool config: {}", e))?;
+        store.set("tool_config", config_value);
+        store.save()
+            .map_err(|e| format!("Failed to save tool config store: {}", e))?;
 
-        info!("Saved tool configuration to {}", config_path.display());
+        info!("Saved tool configuration to store");
         Ok(())
-    }
-
-    /// Get configuration path for the app.
-    /// Determines appropriate path for storing tool configuration.
-    /// Used by: Application initialization for finding config file location.
-    /// 
-    /// # Arguments
-    /// * `app_handle` - Tauri app handle for path resolution
-    pub fn get_config_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
-        let app_dir = app_handle.path().app_config_dir()
-            .map_err(|e| format!("Failed to get app config directory: {}", e))?;
-        Ok(app_dir.join("tool_config.json"))
     }
 
     /// Check if a tool is enabled.
     /// Checks both individual tool setting and category enablement state.
     /// Used by: Agent tool execution system for availability decisions.
-    /// 
+    ///
     /// # Arguments
     /// * `tool_name` - Name of the tool to check
     pub fn is_tool_enabled(&self, tool_name: &str) -> bool {
@@ -266,7 +256,7 @@ impl ToolConfigManager {
     /// Enable or disable a specific tool.
     /// Changes enablement state with protection against disabling required tools.
     /// Used by: Settings UI for individual tool management.
-    /// 
+    ///
     /// # Arguments
     /// * `tool_name` - Name of the tool to modify
     /// * `enabled` - New enablement state
@@ -281,7 +271,7 @@ impl ToolConfigManager {
     /// Enable or disable an entire category of tools.
     /// Changes enablement state for all tools in a category.
     /// Used by: Settings UI for category-level management.
-    /// 
+    ///
     /// # Arguments
     /// * `category` - Category to modify
     /// * `enabled` - New enablement state
@@ -300,7 +290,7 @@ impl ToolConfigManager {
     /// Get all tools in a category.
     /// Returns all tool configurations belonging to the specified category.
     /// Used by: Settings UI for category-specific display.
-    /// 
+    ///
     /// # Arguments
     /// * `category` - Category to filter by
     pub fn get_tools_by_category(&self, category: &ToolCategory) -> Vec<&ToolConfig> {
@@ -321,7 +311,7 @@ impl ToolConfigManager {
 
     /// Get tool configuration by name.
     /// Used by: Settings UI and configuration queries.
-    /// 
+    ///
     /// # Arguments
     /// * `tool_name` - Name of the tool to retrieve
     pub fn get_tool_config(&self, tool_name: &str) -> Option<ToolConfig> {
@@ -330,7 +320,7 @@ impl ToolConfigManager {
 
     /// Add or update a tool configuration.
     /// Used by: MCP integration and dynamic tool registration.
-    /// 
+    ///
     /// # Arguments
     /// * `config` - Tool configuration to add or update
     pub fn add_tool_config(&mut self, config: ToolConfig) {
@@ -352,116 +342,13 @@ impl ToolConfigManager {
     /// Used by: Settings UI reset functionality.
     pub fn reset_to_defaults(&mut self) {
         let mut new_config = Self::default();
-        
+
         // Preserve MCP server configurations
         new_config.mcp_servers = self.mcp_servers.clone();
-        
+
         *self = new_config;
     }
 
-    // MCP Server Management Methods
-
-    /// Add an MCP server configuration.
-    /// Used by: MCP integration and settings UI for server management.
-    /// 
-    /// # Arguments
-    /// * `config` - MCP server configuration to add
-    pub fn add_mcp_server(&mut self, config: MCPServerConfig) {
-        self.mcp_servers.insert(config.id.clone(), config);
-    }
-
-    /// Remove an MCP server configuration.
-    /// Removes server configuration and all associated tools.
-    /// Used by: Settings UI for server removal.
-    /// 
-    /// # Arguments
-    /// * `server_id` - ID of the server to remove
-    pub fn remove_mcp_server(&mut self, server_id: &str) {
-        self.mcp_servers.remove(server_id);
-        
-        // Also remove all tools from this server
-        self.tools.retain(|_, tool_config| {
-            tool_config.server_id.as_ref() != Some(&server_id.to_string())
-        });
-    }
-
-    /// Get all MCP server configurations.
-    /// Used by: Settings UI for server list display.
-    pub fn get_mcp_servers(&self) -> Vec<MCPServerConfig> {
-        self.mcp_servers.values().cloned().collect()
-    }
-
-    /// Get MCP server configuration by ID.
-    /// Used by: MCP integration for server management.
-    /// 
-    /// # Arguments
-    /// * `server_id` - ID of the server to retrieve
-    pub fn get_mcp_server(&self, server_id: &str) -> Option<MCPServerConfig> {
-        self.mcp_servers.get(server_id).cloned()
-    }
-
-    /// Update MCP server configuration.
-    /// Used by: Settings UI for server configuration changes.
-    /// 
-    /// # Arguments
-    /// * `config` - Updated server configuration
-    pub fn update_mcp_server(&mut self, config: MCPServerConfig) {
-        self.mcp_servers.insert(config.id.clone(), config);
-    }
-
-    /// Add tools from an MCP server
-    /// 
-    /// Creates tool configurations for all tools discovered from an MCP server.
-    /// 
-    /// Used by: MCP integration when server tools are discovered
-    /// 
-    /// # Arguments
-    /// * `server_id` - ID of the server providing the tools
-    /// * `tools` - List of discovered tools from the server
-    pub fn add_mcp_tools(&mut self, server_id: &str, tools: Vec<MCPToolInfo>) {
-        for tool_info in tools {
-            let tool_config = ToolConfig::new_mcp_tool(
-                tool_info.tool_definition.name.clone(),
-                server_id.to_string(),
-                tool_info.enabled,
-            ).with_description(tool_info.tool_definition.description);
-
-            self.add_tool_config(tool_config);
-        }
-    }
-
-    /// Get all MCP tools for a specific server
-    /// 
-    /// Used by: Settings UI for server-specific tool display
-    /// 
-    /// # Arguments
-    /// * `server_id` - ID of the server to filter by
-    pub fn get_mcp_tools_for_server(&self, server_id: &str) -> Vec<&ToolConfig> {
-        self.tools.values()
-            .filter(|config| {
-                config.category == ToolCategory::MCP && 
-                config.server_id.as_ref() == Some(&server_id.to_string())
-            })
-            .collect()
-    }
-
-    /// Check if an MCP server is enabled
-    /// 
-    /// Used by: MCP integration for server management decisions
-    /// 
-    /// # Arguments
-    /// * `server_id` - ID of the server to check
-    pub fn is_mcp_server_enabled(&self, server_id: &str) -> bool {
-        self.mcp_servers.get(server_id)
-            .map(|config| config.enabled)
-            .unwrap_or(false)
-    }
-
-    /// Enable or disable an MCP server
-    /// 
-    /// Used by: Settings UI for server enablement control
-    /// 
-    /// # Arguments
     /// * `server_id` - ID of the server to modify
     /// * `enabled` - New enablement state
     pub fn set_mcp_server_enabled(&mut self, server_id: &str, enabled: bool) {
@@ -473,7 +360,7 @@ impl ToolConfigManager {
     // Default tool initialization methods
 
     /// Initializes default Anthropic Computer Use tools
-    /// 
+    ///
     /// Used by: Default configuration creation
     fn add_default_anthropic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let anthropic_tools = vec![
@@ -501,7 +388,7 @@ impl ToolConfigManager {
     }
 
     /// Initializes default desktop automation tools
-    /// 
+    ///
     /// Used by: Default configuration creation
     fn add_default_desktop_tools(tools: &mut HashMap<String, ToolConfig>) {
         let desktop_tools = vec![
@@ -525,7 +412,7 @@ impl ToolConfigManager {
     }
 
     /// Initializes default browser automation tools
-    /// 
+    ///
     /// Used by: Default configuration creation
     fn add_default_browser_tools(tools: &mut HashMap<String, ToolConfig>) {
         let browser_tools = vec![
@@ -549,7 +436,7 @@ impl ToolConfigManager {
     }
 
     /// Initializes default timer and scheduling tools
-    /// 
+    ///
     /// Used by: Default configuration creation
     fn add_default_timer_tools(tools: &mut HashMap<String, ToolConfig>) {
         let timer_tools = vec![
@@ -571,7 +458,7 @@ impl ToolConfigManager {
     }
 
     /// Initializes default basic file and text tools
-    /// 
+    ///
     /// Used by: Default configuration creation
     fn add_default_basic_tools(tools: &mut HashMap<String, ToolConfig>) {
         let basic_tools = vec![
@@ -596,10 +483,10 @@ impl ToolConfigManager {
     }
 
     /// Ensure all default tools are present (for backwards compatibility)
-    /// 
+    ///
     /// Adds any missing default tools to existing configurations to handle
     /// configuration file upgrades and new tool additions.
-    /// 
+    ///
     /// Used by: Configuration loading for backwards compatibility
     fn ensure_default_tools(tools: &mut HashMap<String, ToolConfig>) {
         let mut default_tools = HashMap::new();
@@ -616,4 +503,119 @@ impl ToolConfigManager {
             }
         }
     }
+
+    // MCP Server Management Methods
+
+    /// Add an MCP server configuration.
+    /// Used by: MCP integration and settings UI for server management.
+    ///
+    /// # Arguments
+    /// * `config` - MCP server configuration to add
+    pub fn add_mcp_server(&mut self, config: MCPServerConfig) {
+        self.mcp_servers.insert(config.id.clone(), config);
+    }
+
+    /// Remove an MCP server configuration.
+    /// Removes server configuration and all associated tools.
+    /// Used by: Settings UI for server removal.
+    ///
+    /// # Arguments
+    /// * `server_id` - ID of the server to remove
+    pub fn remove_mcp_server(&mut self, server_id: &str) {
+        self.mcp_servers.remove(server_id);
+
+        // Also remove all tools from this server
+        self.tools.retain(|_, tool_config| {
+            tool_config.server_id.as_ref() != Some(&server_id.to_string())
+        });
+    }
+
+    /// Get all MCP server configurations.
+    /// Used by: Settings UI for server list display.
+    pub fn get_mcp_servers(&self) -> Vec<MCPServerConfig> {
+        self.mcp_servers.values().cloned().collect()
+    }
+
+    /// Get MCP server configuration by ID.
+    /// Used by: MCP integration for server management.
+    ///
+    /// # Arguments
+    /// * `server_id` - ID of the server to retrieve
+    pub fn get_mcp_server(&self, server_id: &str) -> Option<MCPServerConfig> {
+        self.mcp_servers.get(server_id).cloned()
+    }
+
+    /// Update MCP server configuration.
+    /// Used by: Settings UI for server configuration changes.
+    ///
+    /// # Arguments
+    /// * `config` - Updated server configuration
+    pub fn update_mcp_server(&mut self, config: MCPServerConfig) {
+        self.mcp_servers.insert(config.id.clone(), config);
+    }
+
+    /// Add tools from an MCP server
+    ///
+    /// Creates tool configurations for all tools discovered from an MCP server.
+    ///
+    /// Used by: MCP integration when server tools are discovered
+    ///
+    /// # Arguments
+    /// * `server_id` - ID of the server providing the tools
+    /// * `tools` - List of discovered tools from the server
+    pub fn add_mcp_tools(&mut self, server_id: &str, tools: Vec<MCPToolInfo>) {
+        for tool_info in tools {
+            let tool_config = ToolConfig::new_mcp_tool(
+                tool_info.tool_definition.name.clone(),
+                server_id.to_string(),
+                tool_info.enabled,
+            ).with_description(tool_info.tool_definition.description);
+
+            self.add_tool_config(tool_config);
+        }
+    }
+
+    /// Get all MCP tools for a specific server
+    ///
+    /// Used by: Settings UI for server-specific tool display
+    ///
+    /// # Arguments
+    /// * `server_id` - ID of the server to filter by
+    pub fn get_mcp_tools_for_server(&self, server_id: &str) -> Vec<&ToolConfig> {
+        self.tools.values()
+            .filter(|config| {
+                config.category == ToolCategory::MCP &&
+                config.server_id.as_ref() == Some(&server_id.to_string())
+            })
+            .collect()
+    }
+
+    /// Check if an MCP server is enabled
+    ///
+    /// Used by: MCP integration for server management decisions
+    ///
+    /// # Arguments
+    /// * `server_id` - ID of the server to check
+    pub fn is_mcp_server_enabled(&self, server_id: &str) -> bool {
+        self.mcp_servers.get(server_id)
+            .map(|config| config.enabled)
+            .unwrap_or(false)
+    }
+}
+
+/// Load tool configuration from persistent storage
+///
+/// Used by: Application startup for configuration initialization
+///
+/// # Arguments
+/// * `app` - Tauri app handle for store access
+/// * `state` - Application state containing tool config manager
+pub async fn load_tool_config_from_store(app: &AppHandle, state: &crate::state::AppState) -> Result<(), String> {
+    let loaded_config = ToolConfigManager::load_from_store(app)?;
+
+    let mut config_guard = state.tool_config_manager.lock().await;
+    *config_guard = loaded_config;
+
+    info!("Loaded tool configuration from store on startup");
+    Ok(())
 }

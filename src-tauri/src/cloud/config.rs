@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::fs;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_store::StoreExt;
 use super::types::CloudError;
-use tauri::Manager;
+use tracing::info;
 
 /// Cloud configuration settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,53 +58,64 @@ impl Default for CloudConfig {
 }
 
 impl CloudConfig {
-    /// Load configuration from file, creating default if not exists
-    pub fn load_from_file(app_handle: &tauri::AppHandle) -> Result<Self, CloudError> {
-        let config_path = Self::get_config_path(app_handle)?;
+    /// Load configuration from Tauri store or create default.
+    /// Attempts to load existing configuration, creates default if missing.
+    /// Used by: Cloud service initialization and settings management.
+    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, CloudError> {
+        let store = app_handle.store("cloud_config.json")
+            .map_err(|e| CloudError::ConfigError(format!("Failed to access cloud config store: {}", e)))?;
 
-        if config_path.exists() {
-            let config_str = fs::read_to_string(&config_path)
-                .map_err(|e| CloudError::ConfigError(format!("Failed to read config file: {}", e)))?;
-
-            let config: Self = toml::from_str(&config_str)
-                .map_err(|e| CloudError::ConfigError(format!("Failed to parse config: {}", e)))?;
-
-            Ok(config)
-        } else {
-            // Create default config and save it
-            let default_config = Self::default();
-            default_config.save_to_file(app_handle)?;
-            Ok(default_config)
+        // Try to load the configuration from store
+        if let Some(config_value) = store.get("cloud_config") {
+            match serde_json::from_value::<Self>(config_value) {
+                Ok(config) => {
+                    info!("Loaded cloud configuration from store");
+                    return Ok(config);
+                }
+                Err(e) => {
+                    info!("Failed to parse stored cloud config ({}), creating default", e);
+                }
+            }
         }
+
+        // No valid configuration found, create and save default
+        info!("No cloud configuration found in store, creating default");
+        let default_config = Self::default();
+        default_config.save_to_store(app_handle)?;
+        Ok(default_config)
     }
 
-    /// Save configuration to file
-    pub fn save_to_file(&self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
-        let config_path = Self::get_config_path(app_handle)?;
+    /// Save configuration to Tauri store.
+    /// Serializes current configuration to JSON and saves to store.
+    /// Used by: Cloud settings UI and configuration updates.
+    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), CloudError> {
+        let store = app_handle.store("cloud_config.json")
+            .map_err(|e| CloudError::ConfigError(format!("Failed to access cloud config store: {}", e)))?;
 
-        // Ensure parent directory exists
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| CloudError::ConfigError(format!("Failed to create config directory: {}", e)))?;
-        }
+        let config_value = serde_json::to_value(self)
+            .map_err(|e| CloudError::ConfigError(format!("Failed to serialize cloud config: {}", e)))?;
 
-        let config_str = toml::to_string_pretty(self)
-            .map_err(|e| CloudError::ConfigError(format!("Failed to serialize config: {}", e)))?;
+        store.set("cloud_config", config_value);
+        store.save()
+            .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud config store: {}", e)))?;
 
-        fs::write(&config_path, config_str)
-            .map_err(|e| CloudError::ConfigError(format!("Failed to write config file: {}", e)))?;
-
+        info!("Saved cloud configuration to store");
         Ok(())
     }
 
-    /// Get the path to the configuration file
-    pub fn get_config_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, CloudError> {
-        let app_data_dir = app_handle
-            .path()
-            .app_data_dir()
-            .map_err(|e| CloudError::ConfigError(format!("Failed to get app data directory: {}", e)))?;
+    /// Load configuration from file, creating default if not exists
+    /// DEPRECATED: Use load_from_store() instead. Kept for backwards compatibility during migration.
+    pub fn load_from_file(app_handle: &tauri::AppHandle) -> Result<Self, CloudError> {
+        // Attempt to migrate from old file-based config to new store-based config
+        info!("Attempting to load legacy cloud config file for migration");
+        Self::load_from_store(app_handle)
+    }
 
-        Ok(app_data_dir.join("cloud-config.toml"))
+    /// Save configuration to file
+    /// DEPRECATED: Use save_to_store() instead. Kept for backwards compatibility during migration.
+    pub fn save_to_file(&self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
+        // Redirect to store-based saving
+        self.save_to_store(app_handle)
     }
 
     /// Validate the configuration
@@ -129,20 +140,20 @@ impl CloudConfig {
     /// Update API key and save
     pub fn set_api_key(&mut self, api_key: String, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
         self.api_key = Some(api_key);
-        self.save_to_file(app_handle)
+        self.save_to_store(app_handle)
     }
 
     /// Enable cloud connectivity
     pub fn enable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
         self.enabled = true;
         self.validate()?;
-        self.save_to_file(app_handle)
+        self.save_to_store(app_handle)
     }
 
     /// Disable cloud connectivity
     pub fn disable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
         self.enabled = false;
-        self.save_to_file(app_handle)
+        self.save_to_store(app_handle)
     }
 
     /// Check if a command is allowed

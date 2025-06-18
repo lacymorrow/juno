@@ -67,6 +67,7 @@ Project MUST compile with exit code 0. No exceptions.
 - All persistent state in `AppState`, access via getters
 - Follow async/await patterns consistently throughout
 - **NEW**: Safe mutex handling with lock poisoning protection
+- **CRITICAL**: Use `tauri::async_runtime::spawn()` in event listeners, NEVER `tokio::spawn()`
 
 ### 🚫 Error Handling Rules (MANDATORY) 🚫
 **CRITICAL**: No string-based error detection patterns allowed!
@@ -97,6 +98,142 @@ Project MUST compile with exit code 0. No exceptions.
 6. **Performance**: String operations are slower than type matching
 
 **Required Migration**: See `docs/rules/ERROR_HANDLING_BEST_PRACTICES.md` for complete structured error handling guide.
+
+### 🎯 Tauri Event Listener Async Patterns (CRITICAL) 🎯
+**NEVER** use `tokio::spawn()` in Tauri event listeners - it will panic with "no reactor running"!
+
+**Anti-Pattern (CAUSES RUNTIME PANIC)**:
+```rust
+❌ app_handle.listen("some-event", move |event| {
+    tokio::spawn(async move {  // PANIC: no reactor running
+        // async work
+    });
+});
+```
+
+**Required Pattern**:
+```rust
+✅ app_handle.listen("some-event", move |event| {
+    tauri::async_runtime::spawn(async move {  // WORKS: uses Tauri's runtime
+        // async work
+    });
+});
+```
+
+**Why This Happens**:
+- Tauri event listeners don't run within a Tokio runtime context
+- `tokio::spawn()` requires an active Tokio reactor
+- `tauri::async_runtime::spawn()` uses Tauri's own async runtime
+- This pattern is used consistently in `src-tauri/src/integration.rs`
+
+**Common Locations to Watch**:
+- Event listeners in `src-tauri/src/commands/floating_bar.rs`
+- Integration event handlers in `src-tauri/src/integration.rs`
+- Any `app_handle.listen()` callback with async operations
+
+**Recent Fix**: This exact issue caused dictation crashes in December 2024 - all `tokio::spawn()` calls in floating bar event listeners were replaced with `tauri::async_runtime::spawn()`.
+
+### 📂 Tauri Store Pattern - MANDATORY for All Persistence (NEW) 📂
+**CRITICAL**: ALL configuration files MUST use the established Tauri store pattern. NO direct file I/O!
+
+**Why Tauri Store Pattern is Required**:
+- **Platform Consistency**: Handles platform-specific storage locations automatically
+- **Atomic Operations**: Store operations are atomic, preventing corruption from partial writes
+- **Error Handling**: Better error handling through the Tauri plugin system
+- **Reliability**: Official Tauri plugin with comprehensive testing
+- **Thread Safety**: Built-in synchronization for concurrent access
+- **Cross-Platform**: Works consistently across macOS, Windows, Linux
+
+**Required Pattern for ALL Configuration**:
+```rust
+use tauri_plugin_store::StoreExt;
+
+// ✅ CORRECT - Use Tauri store pattern
+pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, String> {
+    let store = app_handle.store("config_name.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+
+    // Try to load configuration from store
+    if let Some(config_value) = store.get("config_key") {
+        match serde_json::from_value::<Self>(config_value) {
+            Ok(config) => return Ok(config),
+            Err(e) => {
+                info!("Failed to parse stored config ({}), creating default", e);
+            }
+        }
+    }
+
+    // No valid configuration found, create and save default
+    let default_config = Self::default();
+    default_config.save_to_store(app_handle)?;
+    Ok(default_config)
+}
+
+pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), String> {
+    let store = app_handle.store("config_name.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+
+    let config_value = serde_json::to_value(self)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+    store.set("config_key", config_value);
+    store.save()
+        .map_err(|e| format!("Failed to save store: {}", e))?;
+
+    info!("Saved configuration to store");
+    Ok(())
+}
+```
+
+**❌ FORBIDDEN - Direct file I/O patterns**:
+```rust
+❌ use std::fs;
+❌ fs::read_to_string(&config_path)
+❌ fs::write(&config_path, contents)
+❌ tokio::fs::write(&config_path, data)
+❌ File::create(&config_path)
+❌ OpenOptions::new().write(true).create(true)
+```
+
+**✅ REQUIRED - Tauri store integration in AppState**:
+```rust
+// Load configuration during app startup
+impl AppState {
+    pub async fn load_config(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let loaded_config = ConfigManager::load_from_store(app_handle)?;
+        let mut config_guard = self.config_manager.lock().await;
+        *config_guard = loaded_config;
+        Ok(())
+    }
+
+    pub async fn save_config(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let config_guard = self.config_manager.lock().await;
+        config_guard.save_to_store(app_handle)
+    }
+}
+```
+
+**Files Currently Using This Pattern** (Examples to Follow):
+- ✅ `src-tauri/src/agent/tools/tool_config.rs` - Tool configuration management
+- ✅ `src-tauri/src/commands/shortcuts.rs` - Keyboard shortcuts persistence
+- ✅ `src-tauri/src/commands/core.rs` - Agent trigger mode settings
+- ✅ `src-tauri/src/commands/onboarding.rs` - Onboarding state tracking
+
+**Files That Need Migration** (Identified Issues):
+- ❌ `src-tauri/src/commands/floating_bar.rs` - Still uses `tokio::fs`
+- ❌ `src-tauri/src/cloud/config.rs` - Still uses `std::fs`
+- ❌ `src-tauri/src/agent/providers/config.rs` - Still uses `std::fs`
+- ❌ `src-tauri/src/agent/prompts/manager.rs` - Still uses `std::fs`
+
+**Migration Benefits Demonstrated**:
+The recent tool configuration migration from direct file I/O to Tauri store resulted in:
+- **Consistency**: Now matches all other settings patterns
+- **Reliability**: Better error handling and atomic operations
+- **Maintainability**: Easier to test and debug
+- **Thread Safety**: Built-in synchronization
+- **Platform Support**: Cross-platform storage locations
+
+**MANDATORY**: All new configuration files MUST use this pattern. All existing files using direct file I/O must be migrated.
 
 ## Enhanced Security Framework 🔒 NEW
 

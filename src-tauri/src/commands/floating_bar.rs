@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Listener, State};
+use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn, info};
@@ -32,51 +33,49 @@ impl Default for FloatingBarConfig {
 }
 
 impl FloatingBarConfig {
-    /// Get configuration file path
-    fn get_config_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
-        let config_dir = app_handle
-            .path()
-            .app_config_dir()
-            .map_err(|e| format!("Failed to get app config directory: {}", e))?;
-
-        std::fs::create_dir_all(&config_dir)
-            .map_err(|e| format!("Failed to create config directory: {}", e))?;
-
-        Ok(config_dir.join("floating_bar_config.json"))
-    }
-
-    /// Save configuration to file
-    pub async fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
-        let config_path = Self::get_config_path(app_handle)?;
-        let config_json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize config: {}", e))?;
-
-        tokio::fs::write(&config_path, config_json)
-            .await
-            .map_err(|e| format!("Failed to write config file: {}", e))?;
-
-        debug!("Floating bar configuration saved to: {:?}", config_path);
-        Ok(())
-    }
-
-    /// Load configuration from file
+    /// Load configuration from Tauri store or create default.
+    /// Attempts to load existing configuration, creates default if missing.
+    /// Used by: Application startup and settings management.
     pub async fn load(app_handle: &AppHandle) -> Result<Self, String> {
-        let config_path = Self::get_config_path(app_handle)?;
+        let store = app_handle.store("floating_bar_config.json")
+            .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
 
-        if !config_path.exists() {
-            debug!("Config file not found, using defaults: {:?}", config_path);
-            return Ok(Self::default());
+        // Try to load the configuration from store
+        if let Some(config_value) = store.get("floating_bar_config") {
+            match serde_json::from_value::<Self>(config_value) {
+                Ok(config) => {
+                    debug!("Loaded floating bar configuration from store");
+                    return Ok(config);
+                }
+                Err(e) => {
+                    debug!("Failed to parse stored floating bar config ({}), creating default", e);
+                }
+            }
         }
 
-        let config_content = tokio::fs::read_to_string(&config_path)
-            .await
-            .map_err(|e| format!("Failed to read config file: {}", e))?;
+        // No valid configuration found, create and save default
+        debug!("No floating bar configuration found in store, creating default");
+        let default_config = Self::default();
+        default_config.save(app_handle).await?;
+        Ok(default_config)
+    }
 
-        let config: Self = serde_json::from_str(&config_content)
-            .map_err(|e| format!("Failed to parse config file: {}", e))?;
+    /// Save configuration to Tauri store.
+    /// Serializes current configuration to JSON and saves to store.
+    /// Used by: Settings UI and configuration updates.
+    pub async fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let store = app_handle.store("floating_bar_config.json")
+            .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
 
-        debug!("Floating bar configuration loaded from: {:?}", config_path);
-        Ok(config)
+        let config_value = serde_json::to_value(self)
+            .map_err(|e| format!("Failed to serialize floating bar config: {}", e))?;
+
+        store.set("floating_bar_config", config_value);
+        store.save()
+            .map_err(|e| format!("Failed to save floating bar config store: {}", e))?;
+
+        debug!("Saved floating bar configuration to store");
+        Ok(())
     }
 }
 
