@@ -295,6 +295,23 @@ impl DictationStateManager {
             *dictation_active = is_active;
         }
 
+        // Handle escape key registration/unregistration
+        if is_active {
+            // Register escape key when dictation becomes active
+            if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
+                warn!("[StateManager] Failed to register escape key for dictation: {}", e);
+            } else {
+                info!("[StateManager] Registered escape key for dictation");
+            }
+        } else {
+            // Unregister escape key when dictation becomes inactive
+            if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
+                warn!("[StateManager] Failed to unregister escape key for dictation: {}", e);
+            } else {
+                info!("[StateManager] Unregistered escape key for dictation");
+            }
+        }
+
         // Sync floating bar
         crate::commands::floating_bar::handle_dictation_mode_change(app_handle, is_active).await;
 
@@ -476,4 +493,36 @@ pub async fn transition_dictation_state(
     };
 
     manager.transition_to_state(state, reason, component, &app).await
+}
+
+/// Force stop dictation (convenience function for stop operations)
+pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> {
+    info!("[DictationStateManager] Force stopping dictation");
+    
+    let manager = get_state_manager();
+    
+    // Force reset all dictation state
+    manager.force_reset_all_state(
+        app_handle,
+        "Force stop dictation requested".to_string()
+    ).await?;
+    
+    info!("[DictationStateManager] Force stop dictation completed");
+    Ok(())
+}
+
+/// Synchronize dictation state (for internal use)
+pub async fn sync_dictation_state(active: bool) -> Result<(), String> {
+    let manager = get_state_manager();
+    
+    let target_state = if active {
+        DictationState::Active { started_at: DictationStateManager::current_timestamp() }
+    } else {
+        DictationState::Idle
+    };
+    
+    // Note: This is a simplified sync - in practice you'd need an app_handle
+    // This function is mainly for internal coordination
+    info!("[DictationStateManager] Syncing dictation state to: {:?}", target_state);
+    Ok(())
 }

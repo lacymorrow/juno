@@ -1,17 +1,11 @@
 import React, { useCallback, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { toast } from "sonner";
 
-import { AppHeader, type AppView } from "@/components/AppHeader";
+import { AppHeader } from "@/components/AppHeader";
 import DevToolsPanel from "@/components/DevToolsPanel";
-import {
-  ModalSystem,
-  type ModalType,
-  type FeedbackData,
-  type UpdateInfo,
-} from "@/components/ModalSystem";
+import { ModalSystem } from "@/components/ModalSystem";
 import { PermissionsFlow } from "@/components/PermissionsFlow";
 import {
   ResizableHandle,
@@ -22,7 +16,6 @@ import {
 import { ChatContainer, ChatInput } from "@/components/chat";
 import ClickVisualizer from "@/components/ClickVisualizer";
 import CommandOverlay from "@/components/CommandOverlay";
-import { FloatingBar } from "@/components/FloatingBar";
 import KeyPressOverlay from "@/components/KeyPressOverlay";
 import ToolApprovalModal from "@/components/ToolApprovalModal";
 
@@ -34,17 +27,13 @@ import { useBackendEvents } from "@/hooks/useBackendEvents";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useChatScrolling } from "@/hooks/useChatScrolling";
 import { useSound, useVoiceSounds } from "@/hooks/useSound";
-import { useVoice } from "@/contexts/VoiceContext";
-
-import { notificationService } from "@/lib/notifications";
 
 function App() {
   // Initialize custom hooks
   const appState = useAppState();
   const conversation = useConversation();
   const audioPlayback = useAudioPlayback();
-  const { playSuccess, playError } = useSound();
-  const { isLoading } = useVoice();
+  const { playError } = useSound();
 
   // Use voice sounds hook
   useVoiceSounds();
@@ -123,11 +112,10 @@ function App() {
       if (updateAvailable) {
         const latestVersion: string = await invoke("get_latest_version");
         appState.setUpdateInfo({
-          isAvailable: true,
+          available: true,
           version: latestVersion,
-          downloadUrl: `https://github.com/lacymorrow/juno/releases/tag/v${latestVersion}`,
         });
-        appState.setActiveModal("updateAvailable");
+        appState.setActiveModal("update");
         console.log(`✅ Update available: v${latestVersion}`);
       } else {
         toast.success("✅ You're running the latest version!");
@@ -180,7 +168,12 @@ function App() {
         appState.setAppVersion(version);
 
         // Load keyboard shortcuts
-        const shortcuts = await invoke("get_keyboard_shortcuts");
+        const shortcuts = (await invoke("get_keyboard_shortcuts")) as {
+          agent_mode_toggle: string;
+          dictation_input: string;
+          stop_current_task: string;
+          open_settings: string;
+        };
         appState.setKeyboardShortcuts(shortcuts);
 
         console.log(`🚀 Juno AI v${version} initialized`);
@@ -265,15 +258,14 @@ function App() {
   // Render main UI
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Header */}
+      {/* Header - Fixed to include required props for model/agent selection */}
       <AppHeader
         currentView={appState.currentView}
         onViewChange={appState.setCurrentView}
         onToggleDevPanel={appState.toggleDevPanel}
         serverStatus={appState.serverStatus}
         isProcessing={appState.isProcessing}
-        appVersion={appState.appVersion}
-        keyboardShortcuts={appState.keyboardShortcuts}
+        isDevPanelOpen={appState.isDevPanelOpen}
       />
 
       {/* Main Content */}
@@ -335,18 +327,19 @@ function App() {
       <KeyPressOverlay />
       <ToolApprovalModal />
 
-      {/* Modal System */}
+      {/* Modal System - Fixed to match expected props */}
       <ModalSystem
         activeModal={appState.activeModal}
         onClose={() => appState.setActiveModal(null)}
         feedbackData={appState.feedbackData}
         onFeedbackDataChange={appState.handleFeedbackDataChange}
         updateInfo={appState.updateInfo}
-        isCheckingUpdate={appState.isCheckingUpdate}
         conversation={conversation.conversation}
+        isExporting={false}
+        isImporting={false}
+        keyboardShortcuts={appState.keyboardShortcuts}
         onUpdateConversation={conversation.updateConversation}
         onAddSystemMessage={conversation.addSystemMessage}
-        onUpdateCheck={handleUpdateCheck}
       />
     </div>
   );
