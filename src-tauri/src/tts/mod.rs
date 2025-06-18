@@ -53,18 +53,18 @@ pub fn reset_tts_stop_flag() {
 }
 
 // Register escape key for TTS cancellation
-async fn register_tts_escape_key(app_handle: &AppHandle) {
+pub async fn register_tts_escape_key(app_handle: &AppHandle) {
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
-        warn!("Failed to register escape key for TTS: {} - TTS will still work but escape key may not stop it", e);
+        warn!("[TTS] Failed to register escape key for TTS: {} - TTS will still work but escape key may not stop it", e);
     } else {
         info!("[TTS] Registered escape key for TTS cancellation");
     }
 }
 
 // Unregister escape key after TTS completion
-async fn unregister_tts_escape_key(app_handle: &AppHandle) {
+pub async fn unregister_tts_escape_key(app_handle: &AppHandle) {
     if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
-        warn!("Failed to unregister escape key after TTS: {} - continuing anyway", e);
+        warn!("[TTS] Failed to unregister escape key after TTS: {} - continuing anyway", e);
     } else {
         info!("[TTS] Unregistered escape key after TTS completion");
     }
