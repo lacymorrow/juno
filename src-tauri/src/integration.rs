@@ -107,6 +107,18 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                             if !trimmed_query.is_empty() {
                                 info!("[Agent Mode] Submitting query to agent: '{}'", trimmed_query);
 
+                                // Emit user message event for frontend to add to conversation
+                                let user_message_data = serde_json::json!({
+                                    "content": trimmed_query,
+                                    "timestamp": std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as u64
+                                });
+                                if let Err(e) = app_handle_clone.emit(crate::constants::events::USER_MESSAGE_SUBMITTED, user_message_data) {
+                                    error!("[Agent Mode] Failed to emit user-message-submitted event: {}", e);
+                                }
+
                                 // Submit the query to the agent system
                                 let app_state = app_handle_clone.state::<crate::state::AppState>();
                                 match crate::anthropic::submit_query(
