@@ -83,13 +83,11 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
 
 export function useBackendEvents({
     addSystemMessage,
-    addAssistantMessage,
     setConversationWithPruning,
     playAudioFromBase64,
     stopCurrentAudio,
     setIsProcessing,
     setServerStatus,
-    setUserHasScrolledUp,
     throttledAutoScroll,
 }: UseBackendEventsProps) {
 
