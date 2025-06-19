@@ -126,15 +126,55 @@ impl NativePermissionChecker {
         {
             use computer_use_ai_sdk::platforms::macos::permissions::check_accessibility_permissions;
 
-            // Trigger permission dialog
+            // First, try to trigger permission dialog
             match check_accessibility_permissions(true) {
-                Ok(_) => {
-                    info!("Accessibility permission request triggered");
-                    Ok(())
+                Ok(granted) => {
+                    if granted {
+                        info!("Accessibility permissions already granted");
+                        Ok(())
+                    } else {
+                        info!("Accessibility permission dialog shown, opening System Settings for manual grant");
+                        // Open accessibility settings to let user grant permission manually
+                        match Command::new("open")
+                            .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
+                            .status()
+                        {
+                            Ok(status) => {
+                                if status.success() {
+                                    info!("Accessibility settings opened successfully");
+                                    Ok(())
+                                } else {
+                                    warn!("Failed to open accessibility settings");
+                                    Err("Failed to open accessibility settings".to_string())
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Error opening accessibility settings: {}", e);
+                                Err(format!("Error opening accessibility settings: {}", e))
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!("Error requesting accessibility permissions: {}", e);
-                    Err(format!("Failed to request accessibility permissions: {}", e))
+                    // Still try to open settings as fallback
+                    info!("Opening accessibility settings as fallback");
+                    match Command::new("open")
+                        .args(&["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
+                        .status()
+                    {
+                        Ok(status) => {
+                            if status.success() {
+                                info!("Accessibility settings opened successfully (fallback)");
+                                Ok(())
+                            } else {
+                                Err(format!("Failed to request accessibility permissions: {}", e))
+                            }
+                        }
+                        Err(_) => {
+                            Err(format!("Failed to request accessibility permissions: {}", e))
+                        }
+                    }
                 }
             }
         }
