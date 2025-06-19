@@ -12,13 +12,13 @@ export default function OnboardingWindow() {
   useEffect(() => {
     const checkInitialData = async () => {
       try {
-        // Check permissions
+        // Check permissions using native APIs - eliminates all password prompts
         const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
           screenRecording: { granted: boolean; required: boolean };
           microphone: { granted: boolean; required: boolean };
           allGranted: boolean;
-        }>("check_permissions_status");
+        }>("check_permissions_status_native");
 
         setPermissionsGranted(permissionsResult.allGranted);
 

@@ -276,7 +276,7 @@ export function useSettings() {
 		setPermissionsLoading(true);
 		try {
 			const permissions = await getCachedOrFetch('permissionsState', () =>
-				invokeCommand<PermissionsState>("check_permissions_status")
+				invokeCommand<PermissionsState>("check_permissions_status_native")
 			);
 			setPermissionsState(permissions);
 		} catch (error) {

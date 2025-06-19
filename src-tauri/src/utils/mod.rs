@@ -138,7 +138,7 @@ pub fn format_elapsed_time(start_ms: u64, end_ms: u64) -> String {
 pub mod permission_validator {
     use crate::agent::core::AgentError;
     use crate::state::AppState;
-    use crate::commands::permissions::check_permissions_status;
+    use crate::commands::permissions::check_permissions_status_native;
     use tauri::{AppHandle, Manager};
     use tracing::{warn, info, debug};
 
@@ -202,7 +202,7 @@ pub mod permission_validator {
             }
             RequiredPermission::ScreenRecording => {
                 // Check screen recording permissions using our permission system
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => {
                         if !permissions.screen_recording.granted {
                             warn!("Tool '{}' requires screen recording permissions but they are not granted", tool_name);
@@ -226,7 +226,7 @@ pub mod permission_validator {
                 }
             }
             RequiredPermission::Microphone => {
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => {
                         if !permissions.microphone.granted {
                             info!("Tool '{}' requires microphone permissions but they are not granted - this may be optional for some tools", tool_name);
@@ -248,7 +248,7 @@ pub mod permission_validator {
                 }
             }
             RequiredPermission::InputMonitoring => {
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => {
                         if !permissions.input_monitoring.granted {
                             info!("Tool '{}' requires input monitoring permissions but they are not granted - this is often optional", tool_name);
@@ -274,7 +274,7 @@ pub mod permission_validator {
                     )));
                 }
 
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => {
                         if !permissions.screen_recording.granted {
                             warn!("Tool '{}' requires screen recording permissions but they are not granted", tool_name);
@@ -314,19 +314,19 @@ pub mod permission_validator {
                 app_state.is_desktop_available()
             }
             RequiredPermission::ScreenRecording => {
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => permissions.screen_recording.granted,
                     Err(_) => false,
                 }
             }
             RequiredPermission::Microphone => {
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => permissions.microphone.granted,
                     Err(_) => false,
                 }
             }
             RequiredPermission::InputMonitoring => {
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => permissions.input_monitoring.granted,
                     Err(_) => false,
                 }
@@ -336,7 +336,7 @@ pub mod permission_validator {
                 if !app_state.is_desktop_available() {
                     return false;
                 }
-                match check_permissions_status(app_handle.clone()).await {
+                match check_permissions_status_native(app_handle.clone()).await {
                     Ok(permissions) => permissions.screen_recording.granted,
                     Err(_) => false,
                 }
