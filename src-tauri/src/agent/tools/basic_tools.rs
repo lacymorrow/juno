@@ -294,7 +294,7 @@ mod basic_tools_impl {
     /// Creates the tool definition for the `run_terminal_command` tool.
     ///
     /// Allows agents to execute shell commands with minimal restrictions.
-    /// Now uses blacklist approach - blocks only truly destructive commands.
+    /// Now uses shell execution for proper tilde expansion and shell features.
     ///
     /// Used by: Development tools, system administration, build processes
     ///
@@ -303,13 +303,13 @@ mod basic_tools_impl {
     pub fn run_terminal_command_definition() -> ToolDefinition {
         ToolDefinition {
             name: "run_terminal_command".to_string(),
-            description: "Runs a shell command and returns its standard output and standard error. Minimal restrictions - blocks only truly destructive commands using blacklist approach.".to_string(),
+            description: "Runs a shell command and returns its standard output and standard error. Supports shell features like tilde expansion (~), environment variables, and command chaining. Minimal restrictions - blocks only truly destructive commands.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "The shell command to execute. Almost all commands allowed except truly destructive ones."
+                        "description": "The shell command to execute. Supports tilde (~) expansion, environment variables, pipes, and other shell features. Almost all commands allowed except truly destructive ones."
                     }
                 },
                 "required": ["command"]
@@ -320,7 +320,7 @@ mod basic_tools_impl {
     /// Executes the `run_terminal_command` tool operation with minimal restrictions.
     ///
     /// Runs a shell command and captures stdout, stderr, and exit code.
-    /// Now uses blacklist approach for maximum flexibility.
+    /// Now uses shell execution for proper tilde expansion and other shell features.
     ///
     /// Used by: Build tools, git operations, system utilities, development workflows
     ///
@@ -335,6 +335,7 @@ mod basic_tools_impl {
     /// ✅ Dangerous pattern detection (only extreme patterns blocked)
     /// ✅ Execution timeout enforcement
     /// ✅ Audit logging
+    /// ✅ Shell expansion support (tilde, environment variables, etc.)
     pub fn run_terminal_command_exec(input: Value) -> Result<Value, String> {
         let command_str = input["command"]
             .as_str()
@@ -350,29 +351,35 @@ mod basic_tools_impl {
         log::info!("💻 Executing command: {}", command_str);
 
         // Validate command with minimal restrictions (blacklist approach)
-        let validated_command = validate_command(command_str, &config)?;
+        let _validated_command = validate_command(command_str, &config)?;
 
-        log::info!("✅ Command approved for execution: {:?}", validated_command);
+        log::info!("✅ Command approved for execution: {}", command_str);
 
         // Record execution start time for timeout and performance monitoring
         let start_time = Instant::now();
 
-        // Execute command with timeout
-        let mut cmd = std::process::Command::new(&validated_command[0]);
-        if validated_command.len() > 1 {
-            cmd.args(&validated_command[1..]);
-        }
+        // Use shell execution for proper tilde expansion and shell features
+        // This matches the behavior of execute_command and bash tools
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut cmd = std::process::Command::new("cmd");
+            cmd.args(["/C", command_str]);
+            cmd
+        } else {
+            let mut cmd = std::process::Command::new("sh");
+            cmd.args(["-c", command_str]);
+            cmd
+        };
 
         // Set working directory to current directory
         if let Ok(current_dir) = std::env::current_dir() {
             cmd.current_dir(current_dir);
         }
 
-        log::info!("⚡ Executing command with timeout of {:?}", config.command_timeout);
+        log::info!("⚡ Executing command via shell with timeout of {:?}", config.command_timeout);
 
         // Execute with timeout (simplified approach - in production, use tokio::time::timeout)
         let output = cmd.output()
-            .map_err(|e| format!("Failed to spawn command process for '{}': {}", command_str, e))?;
+            .map_err(|e| format!("Failed to spawn shell process for '{}': {}", command_str, e))?;
 
         let execution_time = start_time.elapsed();
 
