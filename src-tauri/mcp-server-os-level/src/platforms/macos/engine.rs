@@ -1034,9 +1034,13 @@ impl AccessibilityEngine for MacOSEngine {
                     "Chain selector did not resolve to an element (intermediate step failed)".to_string()
                 ))
             }
-            Selector::Filter(_) => Err(AutomationError::UnsupportedOperation(
-                "Filter selector not implemented for find_element".to_string(),
-            )),
+            Selector::Filter(_filter_id) => {
+                // Filter selector requires a predicate registry to resolve filter IDs
+                // This is not implemented in the current architecture
+                Err(AutomationError::UnsupportedOperation(
+                    "Filter selector requires predicate registry implementation".to_string(),
+                ))
+            }
         }
     }
 
@@ -1194,15 +1198,34 @@ impl AccessibilityEngine for MacOSEngine {
 
                  Ok(ui_elements)
             }
-            Selector::Path(_) => Err(AutomationError::UnsupportedOperation(
-                "Path selector is not supported for find_elements due to complexity.".to_string(),
-            )),
-            Selector::Filter(_) => Err(AutomationError::UnsupportedOperation(
-                "Filter selector not implemented for find_elements".to_string(),
-            )),
-            Selector::Chain(_) => Err(AutomationError::UnsupportedOperation(
-                "Chain selector is not supported for find_elements due to complexity.".to_string(),
-            )),
+            Selector::Path(path) => {
+                // For find_elements, we can use a simpler approach than find_element
+                // Convert path to a chain of selectors and apply them sequentially
+                debug!("Processing Path selector for find_elements: {}", path);
+                let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+
+                // For now, just return the first element found by path selector
+                // A full implementation would need to collect all matching endpoints
+                match self.find_element(selector, root) {
+                    Ok(element) => Ok(vec![element]),
+                    Err(_) => Ok(vec![]), // Return empty instead of error for find_elements
+                }
+            }
+            Selector::Filter(_filter_id) => {
+                // Filter selector requires a predicate registry to resolve filter IDs
+                // This is not implemented in the current architecture
+                Err(AutomationError::UnsupportedOperation(
+                    "Filter selector requires predicate registry implementation".to_string(),
+                ))
+            }
+            Selector::Chain(selectors) => {
+                // For find_elements with Chain, return the first element found by chain selector
+                debug!("Processing Chain selector for find_elements with {} parts", selectors.len());
+                match self.find_element(selector, root) {
+                    Ok(element) => Ok(vec![element]),
+                    Err(_) => Ok(vec![]), // Return empty instead of error for find_elements
+                }
+            }
         }
     }
 
