@@ -185,27 +185,55 @@ impl NativePermissionChecker {
         }
     }
 
-    /// Check screen recording permission using CGDisplayStream - NO admin privileges required
+    /// Check screen recording permission using Desktop API - NO admin privileges required
     pub fn check_screen_recording_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
-            // Try to capture a 1x1 pixel to test screen recording permissions
-            match Command::new("screencapture")
-                .args(&["-t", "png", "-x", "-R", "0,0,1,1", "/tmp/juno_screen_test.png"])
-                .status()
-            {
-                Ok(status) => {
-                    let granted = status.success();
+            use computer_use_ai_sdk::Desktop;
+            use std::time::Duration;
+
+            // Use the same approach as test_screen_recording_access() - proper native API
+            let rt = tokio::runtime::Runtime::new()
+                .map_err(|e| format!("Failed to create runtime: {}", e))?;
+
+            let result = rt.block_on(async {
+                // Set a reasonable timeout for permission testing
+                tokio::time::timeout(Duration::from_millis(3000), async {
+                    // Try creating a minimal Desktop instance just for screenshot test
+                    match Desktop::new(false, false) {
+                        Ok(desktop) => {
+                            // Try to take a screenshot using the native API
+                            match desktop.capture_screenshot_base64() {
+                                                                 Ok(_) => {
+                                     debug!("Screenshot test successful - screen recording permission granted");
+                                     Ok::<bool, String>(true)
+                                 },
+                                 Err(e) => {
+                                     debug!("Screenshot test failed: {} - screen recording permission not granted", e);
+                                     Ok::<bool, String>(false)
+                                 }
+                            }
+                                                 },
+                         Err(e) => {
+                             warn!("Could not create Desktop instance for screenshot test: {}", e);
+                             Ok::<bool, String>(false)
+                         }
+                    }
+                }).await
+            });
+
+            match result {
+                Ok(Ok(granted)) => {
                     debug!("Screen recording permission status: {}", granted);
-
-                    // Clean up test file
-                    let _ = std::fs::remove_file("/tmp/juno_screen_test.png");
-
                     Ok(granted)
-                }
-                Err(e) => {
-                    warn!("Error testing screen recording: {}", e);
-                    Ok(false) // Assume not granted on error
+                },
+                Ok(Err(e)) => {
+                    warn!("Error during screen recording permission test: {}", e);
+                    Ok(false)
+                },
+                Err(_) => {
+                    warn!("Screen recording permission test timed out");
+                    Ok(false)
                 }
             }
         }
