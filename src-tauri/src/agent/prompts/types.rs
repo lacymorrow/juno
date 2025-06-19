@@ -10,15 +10,12 @@ pub enum PromptType {
     SystemDefaultDevelopment,
     /// Orchestrator personality prompt for multi-agent mode
     OrchestratorPersonality,
-    /// Expert agent prompts
+    /// Expert agent prompts (unified system)
     BrowserExpert,
     CodingExpert,
     DesktopExpert,
     GeneralExpert,
-    /// Specialist agent prompts (for delegation system)
-    BrowserSpecialist,
-    DesktopSpecialist,
-    FileSpecialist,
+    FileExpert,
     /// Provider-specific prompts
     AnthropicDefault,
     OpenAIDefault,
@@ -36,9 +33,7 @@ impl PromptType {
             PromptType::CodingExpert => "coding_expert",
             PromptType::DesktopExpert => "desktop_expert",
             PromptType::GeneralExpert => "general_expert",
-            PromptType::BrowserSpecialist => "browser_specialist",
-            PromptType::DesktopSpecialist => "desktop_specialist",
-            PromptType::FileSpecialist => "file_specialist",
+            PromptType::FileExpert => "file_expert",
             PromptType::AnthropicDefault => "anthropic_default",
             PromptType::OpenAIDefault => "openai_default",
             PromptType::GeminiDefault => "gemini_default",
@@ -55,9 +50,7 @@ impl PromptType {
             "coding_expert" => Some(PromptType::CodingExpert),
             "desktop_expert" => Some(PromptType::DesktopExpert),
             "general_expert" => Some(PromptType::GeneralExpert),
-            "browser_specialist" => Some(PromptType::BrowserSpecialist),
-            "desktop_specialist" => Some(PromptType::DesktopSpecialist),
-            "file_specialist" => Some(PromptType::FileSpecialist),
+            "file_expert" => Some(PromptType::FileExpert),
             "anthropic_default" => Some(PromptType::AnthropicDefault),
             "openai_default" => Some(PromptType::OpenAIDefault),
             "gemini_default" => Some(PromptType::GeminiDefault),
