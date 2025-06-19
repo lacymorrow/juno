@@ -72,13 +72,10 @@ export function PermissionsFlow({
       setIsLoading(true);
       setError(null);
 
-      const result =
-        useAutoRedirect && autoRedirectEnabled
-          ? await invoke<PermissionsState>(
-              "check_permissions_status_with_auto_redirect",
-              { autoOpenSettings: true }
-            )
-          : await invoke<PermissionsState>("check_permissions_status");
+      // Use native permission checking - eliminates all password prompts
+      const result = await invoke<PermissionsState>(
+        "check_permissions_status_native"
+      );
 
       setPermissions(result);
 
@@ -94,49 +91,23 @@ export function PermissionsFlow({
     }
   };
 
-  // Enhanced accessibility permission request with auto-redirect
-  const requestAccessibilityPermissionEnhanced = async (
-    withAutoRedirect = true
-  ) => {
-    try {
-      setIsRequestingPermission("accessibility");
-
-      const granted =
-        withAutoRedirect && autoRedirectEnabled
-          ? await invoke<boolean>(
-              "request_accessibility_permission_with_auto_redirect",
-              { autoOpenSettings: true }
-            )
-          : await invoke<boolean>("request_accessibility_permission");
-
-      if (granted) {
-        // Refresh permissions status
-        await checkPermissions();
-      } else if (!withAutoRedirect) {
-        // If not using auto-redirect and not granted, offer manual opening
-        await openSystemPreferences("accessibility");
-      }
-      // If using auto-redirect, the system settings should already be open
-    } catch (err) {
-      setError(err as string);
-      console.error("Error requesting accessibility permission:", err);
-    } finally {
-      setIsRequestingPermission(null);
-    }
-  };
-
-  // Original accessibility permission request (for backward compatibility)
+  // Request accessibility permission using native APIs - no password prompts
   const requestAccessibilityPermission = async () => {
     try {
       setIsRequestingPermission("accessibility");
-      const granted = await invoke<boolean>("request_accessibility_permission");
+      const granted = await invoke<boolean>(
+        "request_accessibility_permission_native"
+      );
 
       if (granted) {
-        // Refresh permissions status
+        // Permission was already granted
         await checkPermissions();
       } else {
-        // If not granted, open System Preferences
-        await openSystemPreferences("accessibility");
+        // System Settings should be open for user to grant permission
+        // Wait a moment and then refresh to check if user granted it
+        setTimeout(async () => {
+          await checkPermissions();
+        }, 2000);
       }
     } catch (err) {
       setError(err as string);
@@ -146,20 +117,20 @@ export function PermissionsFlow({
     }
   };
 
-  // Request screen recording permission with enhanced system settings navigation
+  // Request screen recording permission using native APIs - no password prompts
   const requestScreenRecordingPermission = async () => {
     try {
       setIsRequestingPermission("screen_recording");
       const granted = await invoke<boolean>(
-        "request_screen_recording_permission"
+        "request_screen_recording_permission_native"
       );
 
       if (granted) {
-        // Refresh permissions status
+        // Permission was already granted
         await checkPermissions();
       } else {
-        // Permission not granted - System Settings should be open automatically
-        // Wait a moment and then refresh to see if user granted it
+        // System Settings should be open for user to grant permission
+        // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
           await checkPermissions();
         }, 2000);
@@ -172,17 +143,19 @@ export function PermissionsFlow({
     }
   };
 
-  // Request microphone permission with system dialog trigger and settings navigation
+  // Request microphone permission using native APIs - no password prompts
   const requestMicrophonePermission = async () => {
     try {
       setIsRequestingPermission("microphone");
-      const granted = await invoke<boolean>("request_microphone_permission");
+      const granted = await invoke<boolean>(
+        "request_microphone_permission_native"
+      );
 
       if (granted) {
-        // Permission was granted immediately
+        // Permission was already granted
         await checkPermissions();
       } else {
-        // Permission dialog was shown or System Settings opened
+        // System Settings should be open for user to grant permission
         // Wait a moment and then refresh to check if user granted it
         setTimeout(async () => {
           await checkPermissions();
@@ -196,7 +169,7 @@ export function PermissionsFlow({
     }
   };
 
-  // Request input monitoring permission with enhanced system settings navigation
+  // Request input monitoring permission (uses existing legacy method as no native equivalent yet)
   const requestInputMonitoringPermission = async () => {
     try {
       setIsRequestingPermission("input_monitoring");
@@ -668,10 +641,7 @@ export function PermissionsFlow({
           {permissions.accessibility.required &&
             renderPermissionCard(
               permissions.accessibility,
-              requestAccessibilityPermission,
-              autoRedirectEnabled
-                ? () => requestAccessibilityPermissionEnhanced(true)
-                : undefined
+              requestAccessibilityPermission
             )}
 
           {/* Screen Recording Permission */}
