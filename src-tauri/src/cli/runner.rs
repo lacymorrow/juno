@@ -1,6 +1,7 @@
 use crate::cli::Cli;
 use crate::state::AppState;
 use crate::tts;
+use crate::error_handling::JunoError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use computer_use_ai_sdk::Desktop; // Import Desktop
 use std::fs;
@@ -14,9 +15,10 @@ use tracing::{error, info, warn}; // Import tracing macros // Add the TTS import
 const CONFIG_FILE: &str = "config.json";
 
 /// Handles the execution of commands specified via CLI arguments.
-/// Returns `true` if a CLI command was handled (and the app should exit),
-/// `false` otherwise (and the Tauri app should launch).
-pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> bool {
+/// Returns `Ok(true)` if a CLI command was handled (and the app should exit),
+/// `Ok(false)` if no CLI command was handled (and the Tauri app should launch),
+/// `Err` if there was an error executing the CLI command.
+pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> Result<bool, JunoError> {
     // Prefix unused desktop_instance with _
     let _command_handled = false;
 
@@ -34,7 +36,7 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("Failed to create Tokio runtime for TTS test");
+            .map_err(|e| JunoError::SystemError(format!("Failed to create Tokio runtime for TTS test: {}", e)))?;
 
         match rt.block_on(tts::invoke_tts_for_provider(text, None, provider)) {
             Ok(base64_audio) => {
@@ -53,7 +55,7 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
 
                                 if let Err(e) = temp_file.write_all(&audio_bytes) {
                                     error!("[CLI Playback Error] Failed to write audio bytes to temp file: {}", e);
-                                    std::process::exit(1); // Exit on critical error
+                                    return Err(JunoError::FileSystemError(format!("Failed to write audio bytes to temp file: {}", e)));
                                 }
                                 temp_file.flush().ok();
 
@@ -96,7 +98,7 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
             }
             Err(e) => error!("[CLI TTS Error] {}", e),
         }
-        return true; // TTS test was run, so exit
+        return Ok(true); // TTS test was run, so exit
     }
 
     // --- Other Test Handlers ---
@@ -137,18 +139,17 @@ pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> boo
         match test_result {
             Ok(_) => {
                 println!("[CLI Test] Test completed successfully.");
-                std::process::exit(0);
+                return Ok(true); // Indicate that we handled a CLI command and should exit
             }
             Err(e) => {
                 error!("[CLI Test Error] {}", e);
-                std::process::exit(1);
+                return Err(JunoError::ApplicationError(format!("CLI test failed: {}", e)));
             }
         }
-        // return true; // Exit handled by process::exit above
     }
 
     // No CLI-specific commands were handled that require exiting
-    false
+    Ok(false)
 }
 
 /// Handles CLI commands that don't require desktop access when permissions are missing.

@@ -769,7 +769,24 @@ pub fn run() {
         }
         Err(e) => {
             // Use centralized error handling for application startup errors
-            error_handling::handle_application_startup_error(e);
+            let startup_error = error_handling::handle_application_startup_error(e);
+            error!("Application startup failed: {}", startup_error);
+
+            // Log the error but don't exit immediately - let the OS handle cleanup
+            // In development, we might want to panic to catch issues, but in production
+            // we should gracefully degrade
+            #[cfg(debug_assertions)]
+            {
+                // In debug builds, we can be more aggressive about stopping on errors
+                panic!("Application startup failed in debug mode: {}", startup_error);
+            }
+
+            #[cfg(not(debug_assertions))]
+            {
+                // In release builds, log the error and let the process exit naturally
+                error!("Application startup failed in production mode: {}", startup_error);
+                // Process will exit naturally when this function returns
+            }
         }
     }
 }
