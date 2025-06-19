@@ -1,3 +1,4 @@
+/// TODO: ELIMINATE STRING MATCHING
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
@@ -242,7 +243,7 @@ impl ErrorRecoveryManager {
             return ErrorPattern::FileSystemError;
         }
 
-        if error_message.contains("permission denied") || 
+        if error_message.contains("permission denied") ||
            error_message.contains("access denied") ||
            error_message.contains("accessibility permissions") ||
            error_message.contains("screen recording permission") ||

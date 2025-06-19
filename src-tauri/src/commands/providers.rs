@@ -18,17 +18,79 @@ pub(crate) async fn get_active_provider() -> Result<String, String> {
     Ok(provider.id().to_string())
 }
 
-/// Set the active provider
+/// Set the active provider and validate/reset model if needed
 #[tauri::command]
 pub(crate) async fn set_active_provider(app_handle: AppHandle, provider_id: String) -> Result<(), String> {
     let mut config = ProviderConfig::load_from_store(&app_handle)
         .map_err(|e| format!("Failed to load config: {}", e))?;
+
+    // Get the new provider info to validate models
+    let providers = BrainFactory::list_providers();
+    let new_provider = providers.iter().find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
+
+    // Check if current model is valid for new provider
+    if let Some(provider_settings) = config.get_provider_settings(&provider_id) {
+        if let Some(current_model) = &provider_settings.model {
+            let model_valid = new_provider.model_info.iter().any(|m| m.id == *current_model) ||
+                              new_provider.models.contains(current_model);
+
+            if !model_valid {
+                // Reset to default model for this provider
+                config.update_model(&provider_id, new_provider.default_model.clone(), &app_handle)
+                    .map_err(|e| format!("Failed to reset model to default: {}", e))?;
+                info!("Reset model to default '{}' for provider '{}'", new_provider.default_model, provider_id);
+            }
+        }
+    }
 
     config.set_active_provider(provider_id.clone(), &app_handle)
         .map_err(|e| format!("Failed to set active provider: {}", e))?;
 
     info!("Set active provider to: {}", provider_id);
     Ok(())
+}
+
+/// Validate if a model is available for the current provider
+#[tauri::command]
+pub(crate) async fn validate_provider_model(provider_id: String, model_id: String) -> Result<bool, String> {
+    let providers = BrainFactory::list_providers();
+    let provider = providers.iter().find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
+
+    let is_valid = provider.model_info.iter().any(|m| m.id == model_id) ||
+                   provider.models.contains(&model_id);
+
+    Ok(is_valid)
+}
+
+/// Get available models for a specific provider
+#[tauri::command]
+pub(crate) async fn get_provider_models(provider_id: String) -> Result<Vec<serde_json::Value>, String> {
+    let providers = BrainFactory::list_providers();
+    let provider = providers.iter().find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("Provider '{}' not found", provider_id))?;
+
+    // Return enhanced model info if available, otherwise fall back to simple model list
+    if !provider.model_info.is_empty() {
+        Ok(provider.model_info.iter().map(|m| {
+            serde_json::json!({
+                "id": m.id,
+                "name": m.name,
+                "supports_computer_use": m.supports_computer_use,
+                "is_recommended": m.is_recommended
+            })
+        }).collect())
+    } else {
+        Ok(provider.models.iter().map(|m| {
+            serde_json::json!({
+                "id": m,
+                "name": m,
+                "supports_computer_use": false,
+                "is_recommended": false
+            })
+        }).collect())
+    }
 }
 
 /// Get settings for a specific provider

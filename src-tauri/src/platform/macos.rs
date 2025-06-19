@@ -22,7 +22,7 @@ use {
         sel, sel_impl,
         declare::ClassDecl
     },
-    std::sync::Mutex,
+    std::sync::{Mutex, LazyLock},
 };
 
 /// Apply comprehensive macOS-specific setup for all application windows
@@ -241,6 +241,8 @@ fn activate_main_window(main_window: tauri::WebviewWindow<tauri::Wry>) {
 #[cfg(target_os = "macos")]
 pub mod mouse_tracking {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::LazyLock;
 
     // Constants for NSTrackingAreaOptions
     const NS_TRACKING_MOUSE_ENTERED_AND_EXITED: u64 = 0x01;
@@ -250,35 +252,43 @@ pub mod mouse_tracking {
     // Static storage for the AppHandle, wrapped for thread safety
     static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
 
-    // Store the current window label for tracking
-    static CURRENT_WINDOW_LABEL: Mutex<Option<String>> = Mutex::new(None);
+    // Store multiple window labels for tracking - HashMap maps delegate pointer to window label
+    static TRACKED_WINDOWS: LazyLock<Mutex<HashMap<u64, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-    /// Mouse entered event handler
-    extern "C" fn mouse_entered(_this: &Object, _cmd: Sel, _event: cocoa_id) {
+    /// Mouse entered event handler - now receives delegate pointer to identify window
+    extern "C" fn mouse_entered(this: &Object, _cmd: Sel, _event: cocoa_id) {
         info!("[Tracking Delegate] Mouse Entered");
+        let delegate_ptr = this as *const Object as u64;
+
         if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-            if let Some(window_label) = CURRENT_WINDOW_LABEL.lock().unwrap().as_ref() {
+            if let Some(window_label) = TRACKED_WINDOWS.lock().unwrap().get(&delegate_ptr) {
                 if let Some(window) = handle.get_webview_window(window_label) {
                     let _ = window.emit("mouse-entered-window", ()); // Emit specific event
                     info!("[Tracking Delegate] Emitted mouse-entered-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_entered emit.", window_label);
                 }
+            } else {
+                error!("[Tracking Delegate Error] No window label found for delegate pointer: {}", delegate_ptr);
             }
         }
     }
 
-    /// Mouse exited event handler
-    extern "C" fn mouse_exited(_this: &Object, _cmd: Sel, _event: cocoa_id) {
+    /// Mouse exited event handler - now receives delegate pointer to identify window
+    extern "C" fn mouse_exited(this: &Object, _cmd: Sel, _event: cocoa_id) {
         info!("[Tracking Delegate] Mouse Exited");
+        let delegate_ptr = this as *const Object as u64;
+
         if let Some(handle) = APP_HANDLE.lock().unwrap().as_ref() {
-            if let Some(window_label) = CURRENT_WINDOW_LABEL.lock().unwrap().as_ref() {
+            if let Some(window_label) = TRACKED_WINDOWS.lock().unwrap().get(&delegate_ptr) {
                 if let Some(window) = handle.get_webview_window(window_label) {
                     let _ = window.emit("mouse-left-window", ()); // Emit specific event
                     info!("[Tracking Delegate] Emitted mouse-left-window for window: {}", window_label);
                 } else {
                     error!("[Tracking Delegate Error] Window '{}' not found for mouse_exited emit.", window_label);
                 }
+            } else {
+                error!("[Tracking Delegate Error] No window label found for delegate pointer: {}", delegate_ptr);
             }
         }
     }
@@ -288,9 +298,10 @@ pub mod mouse_tracking {
         let window_label = window.label().to_string();
         info!("Setting up macOS tracking area for window: {}", window_label);
 
-        // Store the AppHandle and window label statically
-        *APP_HANDLE.lock().unwrap() = Some(app_handle.clone());
-        *CURRENT_WINDOW_LABEL.lock().unwrap() = Some(window_label.clone());
+        // Store the AppHandle (only needs to be set once)
+        if APP_HANDLE.lock().unwrap().is_none() {
+            *APP_HANDLE.lock().unwrap() = Some(app_handle.clone());
+        }
 
         let ns_window = match window.ns_window() {
             Ok(ptr) => ptr as cocoa_id,
@@ -307,15 +318,16 @@ pub mod mouse_tracking {
                 return;
             }
 
-            let delegate_class_name = "MouseTrackingDelegate";
-            let mut delegate_class = Class::get(delegate_class_name);
+            // Create a unique delegate class name for this window
+            let delegate_class_name = format!("MouseTrackingDelegate_{}", window_label.replace("-", "_"));
+            let mut delegate_class = Class::get(&delegate_class_name);
 
             // Declare class only if it doesn't exist yet
             if delegate_class.is_none() {
-                info!("Declaring MouseTrackingDelegate class...");
+                info!("Declaring {} class...", delegate_class_name);
                 #[allow(unexpected_cfgs)] // Allow cfg from class! macro
                 let superclass = class!(NSObject);
-                let mut decl = ClassDecl::new(delegate_class_name, superclass).unwrap();
+                let mut decl = ClassDecl::new(&delegate_class_name, superclass).unwrap();
 
                 // Add mouseEntered: method
                 #[allow(unexpected_cfgs)] // Allow cfg from sel! macro
@@ -332,12 +344,17 @@ pub mod mouse_tracking {
                 );
 
                 delegate_class = Some(decl.register());
-                info!("MouseTrackingDelegate class registered.");
+                info!("{} class registered.", delegate_class_name);
             }
 
             #[allow(unexpected_cfgs)] // Allow cfg from msg_send macro
             let delegate: cocoa_id = msg_send![delegate_class.unwrap(), new];
-            info!("MouseTrackingDelegate instance created: {:?}", delegate);
+            info!("{} instance created: {:?}", delegate_class_name, delegate);
+
+            // Store the mapping between delegate pointer and window label
+            let delegate_ptr = delegate as u64;
+            TRACKED_WINDOWS.lock().unwrap().insert(delegate_ptr, window_label.clone());
+            info!("Registered delegate pointer {} for window: {}", delegate_ptr, window_label);
 
             // Keep the delegate alive. Leaking it here is simpler than complex lifetime management.
             let _ = Box::leak(Box::new(delegate)); // Box the delegate and leak it
@@ -364,7 +381,7 @@ pub mod mouse_tracking {
             let _: () = msg_send![tracking_area_ptr, release]; // Release after adding (view retains it)
             // Note: Do not release the delegate here, it's leaked via Box::leak
 
-            info!("NSTrackingArea added to view.");
+            info!("NSTrackingArea added to view for window: {}", window_label);
         }
     }
 }
