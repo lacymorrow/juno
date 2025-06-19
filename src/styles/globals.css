@@ -511,20 +511,14 @@
   /* Panel is "stored" on the shelf - rotated away */
   transform: perspective(1200px) rotateX(-15deg) translateY(-12px) translateZ(-60px) scale(0.92);
   opacity: 0.8;
-  filter: blur(1px) brightness(0.9);
-  box-shadow:
-    0 25px 50px rgba(0, 0, 0, 0.4),
-    0 15px 35px rgba(0, 0, 0, 0.3);
+  filter: blur(1px) brightness(0.9) drop-shadow(0 25px 50px rgba(0, 0, 0, 0.4)) drop-shadow(0 15px 35px rgba(0, 0, 0, 0.3));
 }
 
 .floating-panel-shelf-effect.shelf-active {
   /* Panel is active - pulled forward from shelf */
   transform: perspective(1200px) rotateX(0deg) translateY(0px) translateZ(0px) scale(1);
   opacity: 1;
-  filter: blur(0px) brightness(1);
-  box-shadow:
-    0 15px 40px rgba(0, 0, 0, 0.5),
-    0 8px 25px rgba(0, 0, 0, 0.3);
+  filter: blur(0px) brightness(1) drop-shadow(0 15px 40px rgba(0, 0, 0, 0.5)) drop-shadow(0 8px 25px rgba(0, 0, 0, 0.3));
 }
 
 /* Depth layering for shelf effect */
