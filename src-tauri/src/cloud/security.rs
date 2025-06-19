@@ -82,8 +82,11 @@ impl CloudSecurity {
             }
         }
 
-        // Minimal command type validation
+        // Command type validation
         self.validate_command_type(&command.command_type)?;
+
+        // Validate actual command content against security threats
+        self.validate_command_content(command)?;
 
         // Basic payload validation with generous limits
         self.validate_command_payload(command)?;
@@ -92,7 +95,7 @@ impl CloudSecurity {
         Ok(())
     }
 
-    /// Validate command timestamp with generous time skew allowance
+    /// Validate command timestamp with proper security enforcement
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -105,28 +108,68 @@ impl CloudSecurity {
             timestamp - now
         };
 
-        // Allow 30 minutes of clock skew (much more generous than before)
+        // Enforce 30 minutes maximum time skew to prevent replay attacks
         if time_diff > 1800 {
-            log::warn!("⚠️ Command timestamp has large time skew ({} seconds), but allowing", time_diff);
-            // Don't block - just log warning
+            log::error!("🚫 Command timestamp has excessive time skew ({} seconds), rejecting for security", time_diff);
+            return Err(CloudError::SecurityError(format!(
+                "Command timestamp is outside acceptable window ({}s difference, max 1800s allowed). Possible replay attack detected.",
+                time_diff
+            )));
         }
 
+        log::debug!("✅ Command timestamp validated (time diff: {}s)", time_diff);
         Ok(())
     }
 
-    /// Validate command type with minimal restrictions
+    /// Validate command type with proper content validation
     fn validate_command_type(&self, command_type: &CloudCommandType) -> Result<(), CloudError> {
         let command_str = self.command_type_to_string(command_type);
 
-        // Only block truly destructive commands
-        for blocked_cmd in &self.blocked_commands {
-            if command_str.contains(blocked_cmd) {
-                return Err(CloudError::SecurityError(format!("Command contains blocked destructive pattern: '{}'", blocked_cmd)));
+        // Log command type validation
+        log::debug!("🔍 Validating command type: {}", command_str);
+
+        // Note: Command type validation alone is insufficient for security.
+        // The actual destructive pattern checking should be done in validate_command_payload
+        // where we have access to the actual command content, not just the type.
+
+        log::debug!("✅ Command type '{}' validation passed", command_str);
+        Ok(())
+    }
+
+    /// Validate the actual command content for security threats
+    fn validate_command_content(&self, command: &CloudCommand) -> Result<(), CloudError> {
+        // Check command payload content against blacklist patterns
+        let mut content_to_check: Vec<&str> = Vec::new();
+
+        // Add query content if it exists
+        if let Some(query) = &command.payload.query {
+            content_to_check.push(query);
+        }
+
+        // Add parameter content if it exists
+        let combined_params = command.payload.parameters.as_ref().map(|params| {
+            params.values().cloned().collect::<Vec<_>>().join(" ")
+        });
+        if let Some(ref combined) = combined_params {
+            if !combined.is_empty() {
+                content_to_check.push(combined);
             }
         }
 
-        // All command types are now allowed - security level is ignored
-        log::info!("✅ Command type '{}' allowed", command_str);
+        for content in content_to_check {
+            // Check against blocked command patterns
+            for blocked_cmd in &self.blocked_commands {
+                if content.to_lowercase().contains(&blocked_cmd.to_lowercase()) {
+                    log::error!("🚫 Command contains blocked destructive pattern: '{}'", blocked_cmd);
+                    return Err(CloudError::SecurityError(format!(
+                        "Command content contains blocked destructive pattern: '{}'. Command rejected for security.",
+                        blocked_cmd
+                    )));
+                }
+            }
+        }
+
+        log::debug!("✅ Command content validation passed");
         Ok(())
     }
 
@@ -154,16 +197,8 @@ impl CloudSecurity {
                 }
             },
             CloudCommandType::SystemCommand => {
-                // System commands now allowed with minimal validation
-                if let Some(params) = &command.payload.parameters {
-                    // Only block if it contains truly destructive patterns
-                    for blocked_cmd in &self.blocked_commands {
-                        if params.values().any(|v| v.to_string().contains(blocked_cmd)) {
-                            return Err(CloudError::SecurityError(format!("System command contains blocked destructive pattern: '{}'", blocked_cmd)));
-                        }
-                    }
-                }
-                log::info!("✅ System command allowed with minimal validation");
+                // System command validation - security checks are now handled by validate_command_content
+                log::debug!("✅ System command payload validation passed");
             },
             CloudCommandType::ConfigUpdate => {
                 // Configuration updates allowed with basic validation
