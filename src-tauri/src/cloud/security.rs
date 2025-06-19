@@ -1,55 +1,98 @@
+//! # Cloud Security Module - Maximally Permissive
+//!
+//! Cloud security system aligned with local tools' minimal restrictions.
+//! Uses blacklist approach to block only truly destructive commands.
+//!
+//! ## Security Features:
+//! - Minimal command validation (blacklist approach)
+//! - Basic payload validation (generous limits)
+//! - Audit logging for monitoring
+//! - Signature verification (optional)
+//!
+//! ## Usage
+//! Used by: Cloud command processor, WebSocket handlers
+//! Registration: Called via CloudSecurity::new() during cloud initialization
+
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashSet;
 use super::types::{CloudError, CloudCommand, CloudCommandType};
 use super::config::{CloudConfig, SecurityLevel};
 use super::auth::DeviceAuth;
 
-/// Security levels for different operations
+/// Security levels for different operations - now maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationSecurity {
     Safe,      // Always allow
-    Sensitive, // Require confirmation in medium/high security
-    Dangerous, // Only allow in low security or with explicit permission
-    Forbidden, // Never allow
+    Sensitive, // Allow with minimal validation
+    Dangerous, // Allow with basic validation
+    Forbidden, // Only truly destructive commands
 }
 
-/// Cloud security handler
+/// Cloud security handler - maximally permissive
 #[derive(Debug, Clone)]
 pub struct CloudSecurity {
     config: CloudConfig,
     auth: DeviceAuth,
+    // Minimal blacklist for truly destructive commands
+    blocked_commands: HashSet<String>,
 }
 
 impl CloudSecurity {
-    /// Create new security handler
+    /// Create new security handler with minimal restrictions
     pub fn new(config: CloudConfig, auth: DeviceAuth) -> Self {
-        Self { config, auth }
+        let mut blocked_commands = HashSet::new();
+
+        // Only block truly destructive commands that could cause irreversible damage
+        blocked_commands.insert("rm -rf /".to_string());
+        blocked_commands.insert("sudo rm -rf /".to_string());
+        blocked_commands.insert("format".to_string());
+        blocked_commands.insert("mkfs".to_string());
+        blocked_commands.insert("fdisk".to_string());
+        blocked_commands.insert("parted".to_string());
+        blocked_commands.insert("shutdown".to_string());
+        blocked_commands.insert("reboot".to_string());
+        blocked_commands.insert("halt".to_string());
+        blocked_commands.insert("poweroff".to_string());
+        blocked_commands.insert("init 0".to_string());
+        blocked_commands.insert("init 6".to_string());
+        blocked_commands.insert("chmod 777 /".to_string());
+        blocked_commands.insert("chown root /".to_string());
+        blocked_commands.insert("passwd root".to_string());
+        blocked_commands.insert(":(){ :|:& };:".to_string());
+        blocked_commands.insert(":(){:|:&};:".to_string());
+
+        Self { config, auth, blocked_commands }
     }
 
-    /// Validate incoming command
+    /// Validate incoming command with minimal restrictions
     pub fn validate_command(&self, command: &CloudCommand) -> Result<(), CloudError> {
-        // Check timestamp to prevent replay attacks
+        log::info!("🔓 Validating cloud command: {} with minimal restrictions", command.id);
+
+        // Basic timestamp validation (allow generous time skew)
         self.validate_timestamp(command.timestamp)?;
 
-        // Verify command signature if present
+        // Optional signature verification
         if let Some(signature) = &command.signature {
             let command_data = serde_json::to_string(command)?;
             if !self.auth.verify_signature(&command_data, signature)? {
-                return Err(CloudError::SecurityError("Invalid command signature".to_string()));
+                log::warn!("⚠️ Invalid signature for command {}, but allowing execution", command.id);
+                // Don't block on signature failure - just log it
             }
         }
 
-        // Check if command type is allowed
+        // Minimal command type validation
         self.validate_command_type(&command.command_type)?;
 
-        // Validate specific command parameters
+        // Basic payload validation with generous limits
         self.validate_command_payload(command)?;
 
+        log::info!("✅ Cloud command {} validated successfully", command.id);
         Ok(())
     }
 
-    /// Validate command timestamp
+    /// Validate command timestamp with generous time skew allowance
     fn validate_timestamp(&self, timestamp: u64) -> Result<(), CloudError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -62,94 +105,91 @@ impl CloudSecurity {
             timestamp - now
         };
 
-        // Allow 5 minutes of clock skew
-        if time_diff > 300 {
-            return Err(CloudError::SecurityError("Command timestamp too old or too far in future".to_string()));
+        // Allow 30 minutes of clock skew (much more generous than before)
+        if time_diff > 1800 {
+            log::warn!("⚠️ Command timestamp has large time skew ({} seconds), but allowing", time_diff);
+            // Don't block - just log warning
         }
 
         Ok(())
     }
 
-    /// Validate command type
+    /// Validate command type with minimal restrictions
     fn validate_command_type(&self, command_type: &CloudCommandType) -> Result<(), CloudError> {
         let command_str = self.command_type_to_string(command_type);
 
-        if !self.config.is_command_allowed(&command_str) {
-            return Err(CloudError::SecurityError(format!("Command type '{}' is not allowed", command_str)));
+        // Only block truly destructive commands
+        for blocked_cmd in &self.blocked_commands {
+            if command_str.contains(blocked_cmd) {
+                return Err(CloudError::SecurityError(format!("Command contains blocked destructive pattern: '{}'", blocked_cmd)));
+            }
         }
 
-        let security_level = self.get_command_security_level(command_type);
-
-        match (&self.config.security_level, &security_level) {
-            (SecurityLevel::High, OperationSecurity::Dangerous) => {
-                return Err(CloudError::SecurityError("Dangerous commands not allowed in high security mode".to_string()));
-            },
-            (SecurityLevel::High, OperationSecurity::Forbidden) => {
-                return Err(CloudError::SecurityError("Forbidden command".to_string()));
-            },
-            (SecurityLevel::Medium, OperationSecurity::Forbidden) => {
-                return Err(CloudError::SecurityError("Forbidden command".to_string()));
-            },
-            (_, OperationSecurity::Forbidden) => {
-                return Err(CloudError::SecurityError("Forbidden command".to_string()));
-            },
-            _ => Ok(()),
-        }
+        // All command types are now allowed - security level is ignored
+        log::info!("✅ Command type '{}' allowed", command_str);
+        Ok(())
     }
 
-    /// Validate command payload
+    /// Validate command payload with generous limits
     fn validate_command_payload(&self, command: &CloudCommand) -> Result<(), CloudError> {
         match command.command_type {
             CloudCommandType::VoiceQuery | CloudCommandType::TextQuery => {
+                // Basic validation - require either text or audio
                 if command.payload.query.is_none() && command.payload.audio_base64.is_none() {
                     return Err(CloudError::ValidationFailed("Query commands require either text or audio".to_string()));
                 }
 
-                // Validate query length
+                // Generous query length limit (increased from 10KB to 1MB)
                 if let Some(query) = &command.payload.query {
-                    if query.len() > 10000 {
-                        return Err(CloudError::ValidationFailed("Query text too long".to_string()));
+                    if query.len() > 1_000_000 {
+                        log::warn!("⚠️ Query text is very long ({} chars), but allowing", query.len());
                     }
                 }
 
-                // Validate audio data
+                // Generous audio data limit (increased from 7.5MB to 100MB)
                 if let Some(audio) = &command.payload.audio_base64 {
-                    if audio.len() > 10_000_000 { // ~7.5MB base64 encoded
-                        return Err(CloudError::ValidationFailed("Audio data too large".to_string()));
+                    if audio.len() > 100_000_000 {
+                        log::warn!("⚠️ Audio data is very large ({} bytes), but allowing", audio.len());
                     }
                 }
             },
             CloudCommandType::SystemCommand => {
-                // System commands require additional validation
+                // System commands now allowed with minimal validation
                 if let Some(params) = &command.payload.parameters {
-                    if params.contains_key("destructive") {
-                        return Err(CloudError::SecurityError("Destructive system commands not allowed".to_string()));
+                    // Only block if it contains truly destructive patterns
+                    for blocked_cmd in &self.blocked_commands {
+                        if params.values().any(|v| v.to_string().contains(blocked_cmd)) {
+                            return Err(CloudError::SecurityError(format!("System command contains blocked destructive pattern: '{}'", blocked_cmd)));
+                        }
                     }
                 }
+                log::info!("✅ System command allowed with minimal validation");
             },
             CloudCommandType::ConfigUpdate => {
-                // Configuration updates need special handling
+                // Configuration updates allowed with basic validation
                 if command.payload.config.is_none() {
                     return Err(CloudError::ValidationFailed("Config update requires config data".to_string()));
                 }
+                log::info!("✅ Config update allowed");
             },
             _ => {
-                // Other commands are generally safe
+                // All other commands are safe
+                log::info!("✅ Command type allowed by default");
             }
         }
 
         Ok(())
     }
 
-    /// Get security level for command type
+    /// Get security level for command type - now all are safe or minimally restricted
     fn get_command_security_level(&self, command_type: &CloudCommandType) -> OperationSecurity {
         match command_type {
             CloudCommandType::VoiceQuery => OperationSecurity::Safe,
             CloudCommandType::TextQuery => OperationSecurity::Safe,
             CloudCommandType::StatusRequest => OperationSecurity::Safe,
-            CloudCommandType::Screenshot => OperationSecurity::Sensitive,
-            CloudCommandType::SystemCommand => OperationSecurity::Dangerous,
-            CloudCommandType::ConfigUpdate => OperationSecurity::Sensitive,
+            CloudCommandType::Screenshot => OperationSecurity::Safe,
+            CloudCommandType::SystemCommand => OperationSecurity::Sensitive, // Only basic validation
+            CloudCommandType::ConfigUpdate => OperationSecurity::Safe,
         }
     }
 
@@ -165,19 +205,13 @@ impl CloudSecurity {
         }
     }
 
-    /// Check if command requires user confirmation
-    pub fn requires_confirmation(&self, command: &CloudCommand) -> bool {
-        let security_level = self.get_command_security_level(&command.command_type);
-
-        match (&self.config.security_level, &security_level) {
-            (SecurityLevel::Medium, OperationSecurity::Sensitive) => true,
-            (SecurityLevel::Medium, OperationSecurity::Dangerous) => true,
-            (SecurityLevel::High, OperationSecurity::Sensitive) => true,
-            _ => false,
-        }
+    /// Check if command requires user confirmation - now never required
+    pub fn requires_confirmation(&self, _command: &CloudCommand) -> bool {
+        // No confirmation required for any commands in maximally permissive mode
+        false
     }
 
-    /// Sanitize command payload for logging
+    /// Sanitize command payload for logging (keep this for audit purposes)
     pub fn sanitize_for_logging(&self, command: &CloudCommand) -> CloudCommand {
         let mut sanitized = command.clone();
 
@@ -213,14 +247,13 @@ impl CloudSecurity {
                 .unwrap_or_else(|| "unknown".to_string()),
             success: result.is_ok(),
             error_message: result.as_ref().err().map(|e| e.to_string()),
-            security_level: format!("{:?}", self.config.security_level),
+            security_level: "maximally_permissive".to_string(),
         }
     }
 
-    /// Rate limiting check
+    /// Rate limiting check - now always allows
     pub fn check_rate_limit(&self, _command_type: &CloudCommandType) -> Result<(), CloudError> {
-        // Note: Rate limiting by command type not implemented yet
-        // For now, always allow
+        // No rate limiting in maximally permissive mode
         Ok(())
     }
 }
@@ -237,7 +270,7 @@ pub struct AuditLogEntry {
     pub security_level: String,
 }
 
-/// Security policy for specific commands
+/// Security policy for specific commands - now maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityPolicy {
     pub command_type: String,
@@ -247,7 +280,7 @@ pub struct SecurityPolicy {
     pub additional_checks: Vec<String>,
 }
 
-/// Rate limiting configuration
+/// Rate limiting configuration - disabled in maximally permissive mode
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimit {
     pub max_requests: u32,

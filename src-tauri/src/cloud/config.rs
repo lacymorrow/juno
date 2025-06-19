@@ -1,10 +1,25 @@
+//! # Cloud Configuration Module - Maximally Permissive
+//!
+//! Cloud configuration settings aligned with local tools' minimal restrictions.
+//! Uses Low security level by default and minimal command restrictions.
+//!
+//! ## Configuration Features:
+//! - Low security level by default (maximally permissive)
+//! - Minimal denied commands list (only truly destructive)
+//! - Generous timeouts and limits
+//! - Store-based configuration management
+//!
+//! ## Usage
+//! Used by: Cloud service initialization, settings UI
+//! Configuration: Stored in cloud_config.json store
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 use super::types::CloudError;
 use tracing::info;
 
-/// Cloud configuration settings
+/// Cloud configuration settings - maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudConfig {
     pub enabled: bool,
@@ -15,18 +30,18 @@ pub struct CloudConfig {
     pub auto_connect: bool,
     pub reconnect_interval: u64, // seconds
     pub heartbeat_interval: u64, // seconds
-    pub command_timeout: u64, // seconds
+    pub command_timeout: u64, // seconds - generous timeout
     pub security_level: SecurityLevel,
-    pub allowed_commands: Vec<String>,
-    pub denied_commands: Vec<String>,
+    pub allowed_commands: Vec<String>, // All commands allowed by default
+    pub denied_commands: Vec<String>, // Only truly destructive commands
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SecurityLevel {
-    Low,    // Allow most commands
-    Medium, // Require confirmation for sensitive commands
-    High,   // Only allow whitelisted commands
+    Low,    // Allow all commands except denied (MAXIMALLY PERMISSIVE - DEFAULT)
+    Medium, // Allow all commands except denied (same as Low now)
+    High,   // Allow all commands except denied (same as Low now)
 }
 
 impl Default for CloudConfig {
@@ -40,18 +55,55 @@ impl Default for CloudConfig {
             auto_connect: true,
             reconnect_interval: 30,
             heartbeat_interval: 60,
-            command_timeout: 300,
-            security_level: SecurityLevel::Medium,
+            command_timeout: 600, // Increased from 300 to 600 seconds (10 minutes)
+            security_level: SecurityLevel::Low, // Changed from Medium to Low (maximally permissive)
             allowed_commands: vec![
+                // Allow ALL command types by default - comprehensive list
                 "text_query".to_string(),
                 "voice_query".to_string(),
                 "status_request".to_string(),
                 "screenshot".to_string(),
+                "system_command".to_string(),
+                "config_update".to_string(),
+                "file_operations".to_string(),
+                "web_browsing".to_string(),
+                "system_automation".to_string(),
+                "voice_transcription".to_string(),
+                "text_processing".to_string(),
+                "get_system_info".to_string(),
+                "get_capabilities".to_string(),
+                "heartbeat".to_string(),
+                "run_terminal_command".to_string(),
+                "read_file".to_string(),
+                "write_file".to_string(),
+                "execute_script".to_string(),
+                "browser_automation".to_string(),
+                "desktop_automation".to_string(),
+                "anthropic_computer_use".to_string(),
+                // Allow all other commands - this is now permissive by default
             ],
             denied_commands: vec![
-                "system_shutdown".to_string(),
-                "system_restart".to_string(),
-                "file_delete_system".to_string(),
+                // Only truly destructive commands that could cause irreversible damage
+                "rm -rf /".to_string(),
+                "sudo rm -rf /".to_string(),
+                "format".to_string(),
+                "mkfs".to_string(),
+                "fdisk".to_string(),
+                "parted".to_string(),
+                "shutdown".to_string(),
+                "reboot".to_string(),
+                "halt".to_string(),
+                "poweroff".to_string(),
+                "init 0".to_string(),
+                "init 6".to_string(),
+                "chmod 777 /".to_string(),
+                "chown root /".to_string(),
+                "passwd root".to_string(),
+                ":(){ :|:& };:".to_string(),
+                ":(){:|:&};:".to_string(),
+                "dd if=/dev/zero of=/dev/sda".to_string(),
+                "> /etc/passwd".to_string(),
+                "> /etc/shadow".to_string(),
             ],
         }
     }
@@ -68,21 +120,58 @@ impl CloudConfig {
         // Try to load the configuration from store
         if let Some(config_value) = store.get("cloud_config") {
             match serde_json::from_value::<Self>(config_value) {
-                Ok(config) => {
-                    info!("Loaded cloud configuration from store");
+                Ok(mut config) => {
+                    // Ensure we're using maximally permissive defaults for existing configs
+                    config.migrate_to_permissive_defaults();
+                    info!("Loaded cloud configuration from store (migrated to permissive defaults)");
                     return Ok(config);
                 }
                 Err(e) => {
-                    info!("Failed to parse stored cloud config ({}), creating default", e);
+                    info!("Failed to parse stored cloud config ({}), creating maximally permissive default", e);
                 }
             }
         }
 
-        // No valid configuration found, create and save default
-        info!("No cloud configuration found in store, creating default");
+        // No valid configuration found, create and save maximally permissive default
+        info!("No cloud configuration found in store, creating maximally permissive default");
         let default_config = Self::default();
         default_config.save_to_store(app_handle)?;
         Ok(default_config)
+    }
+
+    /// Migrate existing config to maximally permissive defaults
+    fn migrate_to_permissive_defaults(&mut self) {
+        // Ensure we're using Low security (maximally permissive)
+        self.security_level = SecurityLevel::Low;
+
+        // Update denied commands to only truly destructive ones
+        self.denied_commands = vec![
+            "rm -rf /".to_string(),
+            "sudo rm -rf /".to_string(),
+            "format".to_string(),
+            "mkfs".to_string(),
+            "fdisk".to_string(),
+            "parted".to_string(),
+            "shutdown".to_string(),
+            "reboot".to_string(),
+            "halt".to_string(),
+            "poweroff".to_string(),
+            "init 0".to_string(),
+            "init 6".to_string(),
+            "chmod 777 /".to_string(),
+            "chown root /".to_string(),
+            "passwd root".to_string(),
+            ":(){ :|:& };:".to_string(),
+            ":(){:|:&};:".to_string(),
+            "dd if=/dev/zero of=/dev/sda".to_string(),
+            "> /etc/passwd".to_string(),
+            "> /etc/shadow".to_string(),
+        ];
+
+        // Ensure generous timeout
+        if self.command_timeout < 600 {
+            self.command_timeout = 600;
+        }
     }
 
     /// Save configuration to Tauri store.
@@ -99,7 +188,7 @@ impl CloudConfig {
         store.save()
             .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud config store: {}", e)))?;
 
-        info!("Saved cloud configuration to store");
+        info!("Saved maximally permissive cloud configuration to store");
         Ok(())
     }
 
@@ -156,32 +245,25 @@ impl CloudConfig {
         self.save_to_store(app_handle)
     }
 
-    /// Check if a command is allowed
+    /// Check if a command is allowed - now maximally permissive
     pub fn is_command_allowed(&self, command: &str) -> bool {
-        // If in denied list, always block
-        if self.denied_commands.contains(&command.to_string()) {
-            return false;
-        }
-
-        match self.security_level {
-            SecurityLevel::Low => true, // Allow all except denied
-            SecurityLevel::Medium => {
-                // Allow if in whitelist, or if it's a safe command
-                self.allowed_commands.contains(&command.to_string()) ||
-                self.is_safe_command(command)
-            },
-            SecurityLevel::High => {
-                // Only allow if explicitly in whitelist
-                self.allowed_commands.contains(&command.to_string())
+        // First check if it's in the denied list (only truly destructive commands)
+        for denied_cmd in &self.denied_commands {
+            if command.contains(denied_cmd) {
+                log::warn!("🚫 Command '{}' blocked due to destructive pattern: '{}'", command, denied_cmd);
+                return false;
             }
         }
+
+        // All security levels now behave the same - maximally permissive
+        // Allow all commands except those in the denied list
+        log::info!("✅ Command '{}' allowed (maximally permissive mode)", command);
+        true
     }
 
-    /// Check if a command is considered safe
+    /// Check if a command is considered safe - now almost everything is safe
     fn is_safe_command(&self, command: &str) -> bool {
-        matches!(command,
-            "text_query" | "voice_query" | "status_request" | "screenshot" |
-            "get_system_info" | "get_capabilities" | "heartbeat"
-        )
+        // Check against denied list - if not denied, it's safe
+        !self.denied_commands.iter().any(|denied| command.contains(denied))
     }
 }
