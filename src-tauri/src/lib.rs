@@ -740,7 +740,7 @@ pub fn run() {
 
             #[cfg(target_os = "linux")]
             platform::apply_linux_setup(&app_handle);
-
+          
             #[cfg(target_os = "windows")]
             platform::apply_windows_setup(&app_handle);
             // --- End Platform-Specific Setup ---
