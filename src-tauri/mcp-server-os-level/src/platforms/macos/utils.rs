@@ -361,7 +361,7 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
 
     // Get window bounds
     let (x, y, width, height) = window_element.bounds()?;
-    
+
     // Check for valid dimensions
     if width <= 0.0 || height <= 0.0 {
         let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
@@ -421,10 +421,10 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
             "Window bounds ({}, {}, {}, {}) exceed screen dimensions ({}, {}). Clamping crop.",
             crop_x, crop_y, crop_width, crop_height, display_buffer.width(), display_buffer.height()
         );
-        
+
         let clamped_width = crop_width.min(display_buffer.width().saturating_sub(crop_x));
         let clamped_height = crop_height.min(display_buffer.height().saturating_sub(crop_y));
-        
+
         if clamped_width == 0 || clamped_height == 0 {
             let label = attrs.label.unwrap_or_else(|| "N/A".to_string());
             let err_msg = format!(
@@ -434,7 +434,7 @@ pub fn capture_window_screenshot(window_element: &MacOSUIElement) -> Result<Stri
             warn!("{}", err_msg);
             return Err(AutomationError::PlatformError(err_msg));
         }
-        
+
         let cropped_buffer = imageops::crop_imm(
             &display_buffer,
             crop_x,
@@ -607,11 +607,11 @@ pub fn global_to_window_coordinates(
 
     // Get window bounds
     let (window_x, window_y, _width, _height) = window_element.bounds()?;
-    
+
     // Convert to window-relative coordinates
     let relative_x = global_x - window_x;
     let relative_y = global_y - window_y;
-    
+
     Ok((relative_x, relative_y))
 }
 
@@ -633,11 +633,11 @@ pub fn window_to_global_coordinates(
 
     // Get window bounds
     let (global_window_x, global_window_y, _width, _height) = window_element.bounds()?;
-    
+
     // Convert to global coordinates
     let global_x = global_window_x + window_x;
     let global_y = global_window_y + window_y;
-    
+
     Ok((global_x, global_y))
 }
 
