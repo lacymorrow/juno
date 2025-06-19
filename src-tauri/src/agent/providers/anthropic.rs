@@ -1,6 +1,3 @@
-#![macro_use]
-extern crate serde;
-
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -82,14 +79,12 @@ struct ApiTool {
 }
 
 // Streaming event structures for parsing SSE events
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct StreamEvent {
     #[serde(rename = "type")]
     event_type: String,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct MessageStartEvent {
     #[serde(rename = "type")]
@@ -97,7 +92,6 @@ struct MessageStartEvent {
     message: StreamMessage,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct StreamMessage {
     id: String,
@@ -110,7 +104,6 @@ struct StreamMessage {
     stop_sequence: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct ContentBlockStartEvent {
     #[serde(rename = "type")]
@@ -119,7 +112,6 @@ struct ContentBlockStartEvent {
     content_block: ApiContentBlock,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct ContentBlockDeltaEvent {
     #[serde(rename = "type")]
@@ -128,7 +120,6 @@ struct ContentBlockDeltaEvent {
     delta: ContentDelta,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct ContentDelta {
     #[serde(rename = "type")]
@@ -139,7 +130,6 @@ struct ContentDelta {
     partial_json: Option<String>, // For input_json_delta
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct ContentBlockStopEvent {
     #[serde(rename = "type")]
@@ -147,7 +137,6 @@ struct ContentBlockStopEvent {
     index: u32,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct MessageDeltaEvent {
     #[serde(rename = "type")]
@@ -156,14 +145,12 @@ struct MessageDeltaEvent {
     usage: Option<serde_json::Value>, // Usage info
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct MessageDelta {
     stop_reason: Option<String>,
     stop_sequence: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct MessageStopEvent {
     #[serde(rename = "type")]
