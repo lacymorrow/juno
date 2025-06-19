@@ -17,11 +17,51 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Save, CheckCircle } from "lucide-react";
+import { Save, CheckCircle, Brain, Cpu } from "lucide-react";
 import { SettingsSectionProps } from "../types";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
+interface ModelInfo {
+  id: string;
+  name: string;
+  supports_computer_use: boolean;
+  is_recommended: boolean;
+}
 
 export default function AIProviderSettings({ settings }: SettingsSectionProps) {
-  const currentProvider = settings.providers.find(p => p.id === settings.activeProvider);
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+
+  const currentProvider = settings.providers.find(
+    (p) => p.id === settings.activeProvider
+  );
+
+  // Load models when active provider changes
+  useEffect(() => {
+    if (settings.activeProvider && !settings.isLoading) {
+      loadModelsForProvider(settings.activeProvider);
+    }
+  }, [settings.activeProvider, settings.isLoading]);
+
+  const loadModelsForProvider = async (providerId: string) => {
+    setLoadingModels(true);
+    try {
+      const models = await invoke<ModelInfo[]>("get_provider_models", {
+        providerId,
+      });
+      setAvailableModels(models);
+    } catch (error) {
+      console.error("Failed to load models for provider:", error);
+      setAvailableModels([]);
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  const selectedModel = availableModels.find(
+    (m) => m.id === settings.formData.model
+  );
 
   return (
     <div className="space-y-6">
@@ -49,7 +89,10 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                       <div className="flex items-center gap-2">
                         <span>{provider.name}</span>
                         {provider.computer_use_supported && (
-                          <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                          <Badge
+                            variant="secondary"
+                            className="text-xs bg-blue-100 text-blue-800"
+                          >
                             Computer Use
                           </Badge>
                         )}
@@ -66,7 +109,9 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                   {currentProvider.computer_use_supported && (
                     <div className="flex items-center gap-2 text-sm">
                       <CheckCircle className="h-4 w-4 text-green-600" />
-                      <span className="text-green-700">Computer use capabilities available</span>
+                      <span className="text-green-700">
+                        Computer use capabilities available
+                      </span>
                     </div>
                   )}
                 </div>
@@ -109,99 +154,125 @@ export default function AIProviderSettings({ settings }: SettingsSectionProps) {
                     </span>
                   )}
                 </Label>
-                <Select
-                  value={settings.formData.model}
-                  onValueChange={(value) =>
-                    settings.setFormData((prev) => ({ ...prev, model: value }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(() => {
-                      if (currentProvider?.model_info) {
-                        return (
-                          <>
-                            {/* Computer Use Models */}
-                            {currentProvider.model_info.filter(model => model.supports_computer_use).length > 0 && (
-                              <>
-                                <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-blue-50 border-b">
-                                  Computer Use Models
-                                </div>
-                                {currentProvider.model_info
-                                  .filter(model => model.supports_computer_use)
-                                  .map((model) => (
-                                    <SelectItem key={model.id} value={model.id}>
-                                      <div className="flex items-center gap-2">
-                                        <span>🖥️</span>
-                                        <span>{model.name}</span>
-                                        {model.is_recommended && (
-                                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                            Recommended
-                                          </Badge>
-                                        )}
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                              </>
-                            )}
-
-                            {/* General Chat Models */}
-                            {currentProvider.model_info.filter(model => !model.supports_computer_use).length > 0 && (
-                              <>
-                                <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-gray-50 border-b">
-                                  General Chat Models
-                                </div>
-                                {currentProvider.model_info
-                                  .filter(model => !model.supports_computer_use)
-                                  .map((model) => (
-                                    <SelectItem key={model.id} value={model.id}>
-                                      <div className="flex items-center gap-2">
-                                        <span>💬</span>
-                                        <span>{model.name}</span>
-                                        {model.is_recommended && (
-                                          <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                            Recommended
-                                          </Badge>
-                                        )}
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                              </>
-                            )}
-                          </>
+                {loadingModels ? (
+                  <div className="flex items-center gap-2 p-2 border rounded">
+                    <div className="w-4 h-4 bg-muted animate-pulse rounded" />
+                    <span className="text-sm text-muted-foreground">
+                      Loading models...
+                    </span>
+                  </div>
+                ) : (
+                  <Select
+                    value={settings.formData.model}
+                    onValueChange={async (value) => {
+                      // Validate model before setting
+                      try {
+                        const isValid = await invoke<boolean>(
+                          "validate_provider_model",
+                          {
+                            providerId: settings.activeProvider,
+                            modelId: value,
+                          }
                         );
-                      } else {
-                        // Fallback to old model list format
-                        return currentProvider?.models?.map((model) => (
-                          <SelectItem key={model} value={model}>
-                            {model}
-                          </SelectItem>
-                        )) || null;
+
+                        if (isValid) {
+                          settings.setFormData((prev) => ({
+                            ...prev,
+                            model: value,
+                          }));
+                        } else {
+                          console.warn(
+                            `Model ${value} is not valid for provider ${settings.activeProvider}`
+                          );
+                        }
+                      } catch (error) {
+                        console.error("Failed to validate model:", error);
                       }
-                    })()}
-                  </SelectContent>
-                </Select>
-                {(() => {
-                  if (settings.formData.model && currentProvider?.model_info) {
-                    const selectedModel = currentProvider.model_info.find(m => m.id === settings.formData.model);
-                    if (selectedModel?.supports_computer_use) {
-                      return (
-                        <div className="text-xs text-muted-foreground">
-                          ✅ This model supports computer use automation
-                        </div>
-                      );
-                    } else if (selectedModel) {
-                      return (
-                        <div className="text-xs text-muted-foreground">
-                          ⚠️ This model is for general chat only
-                        </div>
-                      );
-                    }
-                  }
-                  return null;
-                })()}
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* Computer Use Models */}
+                      {availableModels.filter(
+                        (model) => model.supports_computer_use
+                      ).length > 0 && (
+                        <>
+                          <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-blue-50 border-b">
+                            <div className="flex items-center gap-1">
+                              <Cpu size={12} />
+                              Computer Use Models
+                            </div>
+                          </div>
+                          {availableModels
+                            .filter((model) => model.supports_computer_use)
+                            .map((model) => (
+                              <SelectItem key={model.id} value={model.id}>
+                                <div className="flex items-center gap-2">
+                                  <span>🖥️</span>
+                                  <span>{model.name}</span>
+                                  {model.is_recommended && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs bg-green-50 text-green-700 border-green-200"
+                                    >
+                                      Recommended
+                                    </Badge>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))}
+                        </>
+                      )}
+
+                      {/* General Chat Models */}
+                      {availableModels.filter(
+                        (model) => !model.supports_computer_use
+                      ).length > 0 && (
+                        <>
+                          <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-gray-50 border-b">
+                            <div className="flex items-center gap-1">
+                              <Brain size={12} />
+                              General Chat Models
+                            </div>
+                          </div>
+                          {availableModels
+                            .filter((model) => !model.supports_computer_use)
+                            .map((model) => (
+                              <SelectItem key={model.id} value={model.id}>
+                                <div className="flex items-center gap-2">
+                                  <span>💬</span>
+                                  <span>{model.name}</span>
+                                  {model.is_recommended && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-xs bg-green-50 text-green-700 border-green-200"
+                                    >
+                                      Recommended
+                                    </Badge>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+                {selectedModel && (
+                  <div className="text-xs text-muted-foreground">
+                    {selectedModel.supports_computer_use ? (
+                      <span className="text-green-700">
+                        ✅ This model supports computer use automation
+                      </span>
+                    ) : (
+                      <span className="text-amber-700">
+                        ⚠️ This model is for general chat only
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
