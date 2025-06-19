@@ -49,8 +49,10 @@ impl fmt::Display for JunoError {
 
 impl std::error::Error for JunoError {}
 
-/// Enhanced application startup error handling
-pub fn handle_application_startup_error(error: tauri::Error) -> ! {
+/// Handle application startup errors with graceful degradation
+/// This function logs the error and provides user guidance but does NOT exit the process
+/// Returns a JunoError that the caller can handle appropriately
+pub fn handle_application_startup_error(error: tauri::Error) -> JunoError {
     error!("Error while running tauri application: {}", error);
 
     // Enhanced user-friendly error messages
@@ -74,9 +76,22 @@ pub fn handle_application_startup_error(error: tauri::Error) -> ! {
     eprintln!("");
     eprintln!("💬 Need help? Visit: https://github.com/juno-ai/issues");
 
-    // CRITICAL: This is the only acceptable use of std::process::exit in the application
-    // It's only called when the application cannot start at all (e.g., missing critical permissions)
-    // All other error paths should use proper Result<T, E> error handling
+    // Return an error instead of exiting
+    JunoError::ApplicationError(format!("Application startup failed: {}", error))
+}
+
+/// EMERGENCY ONLY: Exit the process immediately with error code
+/// This should ONLY be used in truly unrecoverable situations where graceful shutdown is impossible
+/// Consider using handle_application_startup_error() and returning the error instead
+pub fn emergency_exit_with_error(error: tauri::Error) -> ! {
+    error!("EMERGENCY EXIT: Unrecoverable application error: {}", error);
+
+    eprintln!("🚨 CRITICAL ERROR: Juno encountered an unrecoverable error and must exit.");
+    eprintln!("Error: {}", error);
+    eprintln!("💬 Please report this at: https://github.com/juno-ai/issues");
+
+    // This is the ONLY remaining acceptable use of std::process::exit in the application
+    // It's only for truly unrecoverable errors where graceful shutdown is impossible
     std::process::exit(1);
 }
 

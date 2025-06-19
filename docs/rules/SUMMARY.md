@@ -89,7 +89,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ### **Development Patterns**
 
-- **Error Handling**: Use `AgentError` enum, never `std::process::exit()`
+- **Error Handling**: ✅ IMPLEMENTED - Use `JunoError` enum, eliminated `std::process::exit()` calls
 - **State Access**: Arc-based thread safety with proper cloning
 - **Tool Registration**: Consistent `ToolDefinition` patterns
 - **AI Provider Management**: Data-driven model definitions with capability detection

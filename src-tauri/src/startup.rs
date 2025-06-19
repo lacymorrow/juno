@@ -176,29 +176,45 @@ pub fn init_ai_providers() -> Result<(), String> {
 }
 
 /// Handle CLI command processing and determine if app should continue
-pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> bool {
+pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
     let cli = cli::Cli::parse();
 
-    // If handle_cli_commands returns true, it means a command was executed
+    // If handle_cli_commands returns Ok(true), it means a command was executed
     // and the application should exit.
     if let Some(desktop_ref) = desktop_arc.as_ref() {
-        if cli::runner::handle_cli_commands(&cli, desktop_ref) {
-            return false; // Exit early if a CLI command was handled
+        match cli::runner::handle_cli_commands(&cli, desktop_ref) {
+            Ok(should_exit) => {
+                if should_exit {
+                    return Ok(false); // Exit early if a CLI command was handled
+                }
+            }
+            Err(e) => {
+                error!("CLI command execution failed: {}", e);
+                return Err(e);
+            }
         }
     } else {
         // Handle CLI commands without desktop instance - create minimal instance for CLI only
         // Don't use auto-redirect for CLI to avoid opening settings during CLI operations
         match Desktop::new(false, false) {
             Ok(minimal_desktop) => {
-                if cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
-                    return false;
+                match cli::runner::handle_cli_commands(&cli, &minimal_desktop) {
+                    Ok(should_exit) => {
+                        if should_exit {
+                            return Ok(false);
+                        }
+                    }
+                    Err(e) => {
+                        error!("CLI command execution failed with minimal desktop: {}", e);
+                        return Err(e);
+                    }
                 }
             },
             Err(_) => {
                 // If CLI commands require desktop and can't create minimal instance,
                 // only handle non-desktop CLI commands
                 if cli::runner::handle_non_desktop_cli_commands(&cli) {
-                    return false;
+                    return Ok(false);
                 }
             }
         }
@@ -206,7 +222,7 @@ pub fn handle_cli_processing(desktop_arc: &Option<Arc<Desktop>>) -> bool {
 
     // Proceed with Tauri application launch if no CLI command was run
     println!("No CLI commands detected or tests requiring exit, launching Tauri application...");
-    true
+    Ok(true)
 }
 
 /// Initialize application state with desktop instance
@@ -238,8 +254,15 @@ impl StartupSequence {
         let _ = Self::init_providers(); // Non-fatal if this fails
 
         // Step 5: Handle CLI commands (may exit early)
-        if !Self::handle_cli(&desktop_arc) {
-            return Err("CLI command executed, application should exit".to_string());
+        match Self::handle_cli(&desktop_arc) {
+            Ok(should_continue) => {
+                if !should_continue {
+                    return Err("CLI command executed, application should exit".to_string());
+                }
+            }
+            Err(e) => {
+                return Err(format!("CLI command failed: {}", e));
+            }
         }
 
         // Step 6: Initialize application state
@@ -268,7 +291,7 @@ impl StartupSequence {
         init_ai_providers()
     }
 
-    fn handle_cli(desktop_arc: &Option<Arc<Desktop>>) -> bool {
+    fn handle_cli(desktop_arc: &Option<Arc<Desktop>>) -> Result<bool, crate::error_handling::JunoError> {
         info!("⚡ Processing CLI arguments...");
         handle_cli_processing(desktop_arc)
     }
