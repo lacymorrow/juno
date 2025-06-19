@@ -436,7 +436,7 @@ impl BrainFactory {
     pub fn get_agent_mode() -> AgentMode {
         let mode_str = env::var("AGENT_MODE").unwrap_or_else(|_| {
             match ProviderConfig::load() {
-                Ok(config) => config.get_agent_mode().to_string().to_string(),
+                Ok(config) => config.get_agent_mode().to_string().into(),
                 Err(_) => "multi".to_string(), // Default fallback
             }
         });

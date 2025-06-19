@@ -20,7 +20,7 @@ enum AudioThreadMessage {
 }
 
 pub struct VoiceController {
-    ctx: Option<WhisperContext>,
+    ctx: Option<Arc<WhisperContext>>,
     pub model_path: String,
     is_dictating: bool,
     audio_thread: Option<(thread::JoinHandle<()>, Sender<AudioThreadMessage>)>,
@@ -42,7 +42,7 @@ impl VoiceController {
             .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
 
         Ok(Self {
-            ctx: Some(ctx),
+            ctx: Some(Arc::new(ctx)),
             model_path: model_path_str.to_string(),
             is_dictating: false,
             audio_thread: None,
@@ -78,7 +78,7 @@ impl VoiceController {
     }
 
     /// Helper method to check initialization before performing operations
-    fn ensure_initialized(&self) -> Result<&WhisperContext> {
+    fn ensure_initialized(&self) -> Result<&Arc<WhisperContext>> {
         if !self.is_initialized {
             let _error_msg = self.initialization_error
                 .as_ref()
@@ -253,9 +253,11 @@ impl VoiceController {
         let actual_rate_for_thread = actual_rate;
         let app_handle_for_thread = app_handle.clone();
 
+        let shared_context = self.ctx.as_ref().unwrap().clone();
+
         let audio_thread_handle = thread::spawn(move || {
             Self::audio_thread_worker(
-                model_path_for_thread,
+                shared_context,
                 last_buffer_arc_for_thread,
                 actual_rate_for_thread,
                 app_handle_for_thread,
@@ -276,7 +278,7 @@ impl VoiceController {
     }
 
     fn audio_thread_worker<R: Runtime + 'static>(
-        model_path: String,
+        shared_whisper_context: Arc<WhisperContext>,
         last_buffer_arc: Arc<Mutex<Option<Vec<f32>>>>,
         actual_rate: u32,
         app_handle: AppHandle<R>,
@@ -287,20 +289,12 @@ impl VoiceController {
         config: cpal::StreamConfig,
         sample_format: SampleFormat,
     ) {
-        info!("[AudioThread] Thread started. Initializing Whisper context and state.");
+        info!("[AudioThread] Thread started. Using shared Whisper context (no model reload needed).");
 
-        let whisper_context = match WhisperContext::new_with_params(&model_path, WhisperContextParameters::default()) {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                tracing::error!("Failed to create WhisperContext in audio thread: {:?}", e);
-                return;
-            }
-        };
-
-        let mut whisper_state = match whisper_context.create_state() {
+        let mut whisper_state = match shared_whisper_context.create_state() {
             Ok(state) => state,
             Err(e) => {
-                tracing::error!("Failed to create WhisperState in audio thread: {:?}", e);
+                tracing::error!("Failed to create WhisperState from shared context: {:?}", e);
                 return;
             }
         };

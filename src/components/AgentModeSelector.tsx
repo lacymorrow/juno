@@ -39,9 +39,14 @@ export function AgentModeSelector({
     (mode) => mode.id === settings.agentMode
   );
 
-  const handleToggle = () => {
+  const handleToggle = async () => {
     const newMode = settings.agentMode === "single" ? "multi" : "single";
-    settings.handleAgentModeChange(newMode);
+    try {
+      await settings.handleAgentModeChange(newMode);
+    } catch (error) {
+      console.error("Failed to change agent mode:", error);
+      // The error handling is already done in the hook, but we can add additional UI feedback here if needed
+    }
   };
 
   if (settings.isLoading) {
@@ -71,6 +76,9 @@ export function AgentModeSelector({
             ? "h-7 text-xs border-none bg-transparent hover:bg-muted/50 px-2 gap-2"
             : "h-8 px-3 gap-2"
         }
+        title={`Switch to ${
+          settings.agentMode === "single" ? "Multi" : "Single"
+        } Agent Mode`}
       >
         <div
           className={`w-2 h-2 rounded-full ${
