@@ -1,4 +1,5 @@
 // macOS permissions management for accessibility, screen recording, and microphone
+// CIDRE-powered native permission system - eliminates osascript admin privilege prompts
 
 use serde::{Deserialize, Serialize};
 use std::process::Command;
@@ -18,6 +19,9 @@ use tokio_util::sync::CancellationToken;
 use std::sync::atomic::{AtomicBool, Ordering};
 // Removed unused import: use chrono::Utc;
 use crate::constants::permissions;
+
+// Import native permission checker
+use crate::commands::native_permissions::{NativePermissionChecker, NativePermissionStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,10 +54,67 @@ lazy_static! {
     static ref MONITORING_TASK: MonitoringTask = Arc::new(Mutex::new(None));
 }
 
-/// Check the status of all required macOS permissions
+/// Check the status of all required macOS permissions - NATIVE VERSION (no password prompts)
+#[tauri::command]
+pub async fn check_permissions_status_native(app: AppHandle) -> Result<PermissionsState, String> {
+    info!("Checking macOS permissions status using native APIs (no password prompts)");
+
+    let app_name = app.package_info().name.clone();
+
+    // Use native APIs instead of osascript - eliminates all password prompts
+    let native_accessibility = NativePermissionChecker::get_accessibility_status().await?;
+    let native_screen_recording = NativePermissionChecker::get_screen_recording_status().await?;
+    let native_microphone = NativePermissionChecker::get_microphone_status().await?;
+
+    // Convert to original format for compatibility
+    let accessibility = PermissionStatus {
+        permission_type: native_accessibility.permission_type,
+        granted: native_accessibility.granted,
+        required: native_accessibility.required,
+        description: native_accessibility.description,
+        instructions: native_accessibility.instructions,
+    };
+
+    let screen_recording = PermissionStatus {
+        permission_type: native_screen_recording.permission_type,
+        granted: native_screen_recording.granted,
+        required: native_screen_recording.required,
+        description: native_screen_recording.description,
+        instructions: native_screen_recording.instructions,
+    };
+
+    let microphone = PermissionStatus {
+        permission_type: native_microphone.permission_type,
+        granted: native_microphone.granted,
+        required: native_microphone.required,
+        description: native_microphone.description,
+        instructions: native_microphone.instructions,
+    };
+
+    // Check input monitoring using fallback method (no native API equivalent in CIDRE yet)
+    let input_monitoring = check_input_monitoring_permission().await?;
+
+    // Only consider REQUIRED permissions for all_granted status
+    let all_granted = accessibility.granted && screen_recording.granted;
+
+    let permissions_state = PermissionsState {
+        accessibility,
+        screen_recording,
+        microphone,
+        input_monitoring,
+        all_granted,
+        app_name,
+    };
+
+    info!("Native permissions checked - no password prompts required");
+    debug!("Permissions state: {:?}", permissions_state);
+    Ok(permissions_state)
+}
+
+/// Check the status of all required macOS permissions - LEGACY VERSION (may show password prompts)
 #[tauri::command]
 pub async fn check_permissions_status(app: AppHandle) -> Result<PermissionsState, String> {
-    info!("Checking macOS permissions status");
+    warn!("Using legacy permission checking - this may show password prompts. Consider using check_permissions_status_native instead.");
 
     let app_name = app.package_info().name.clone();
 
@@ -117,10 +178,174 @@ pub async fn check_permissions_status_with_auto_redirect(app: AppHandle, auto_op
     Ok(permissions_state)
 }
 
-/// Request accessibility permissions with system prompt
+/// Request accessibility permissions using native APIs - NO password prompts
+#[tauri::command]
+pub async fn request_accessibility_permission_native() -> Result<bool, String> {
+    info!("Requesting accessibility permissions using native APIs");
+
+    #[cfg(target_os = "macos")]
+    {
+        // First check current status
+        match NativePermissionChecker::check_accessibility_permission() {
+            Ok(true) => {
+                info!("Accessibility permissions already granted");
+                Ok(true)
+            }
+            Ok(false) => {
+                info!("Requesting accessibility permissions with native prompt");
+
+                // Trigger native permission request - no admin privileges needed
+                match NativePermissionChecker::request_accessibility_permission() {
+                    Ok(()) => {
+                        info!("Accessibility permission request triggered successfully");
+
+                        // Wait a moment and check again
+                        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+
+                        match NativePermissionChecker::check_accessibility_permission() {
+                            Ok(granted) => {
+                                if granted {
+                                    info!("Accessibility permissions now granted");
+                                } else {
+                                    info!("Accessibility permissions still not granted - user needs to manually enable in System Settings");
+                                }
+                                Ok(granted)
+                            }
+                            Err(e) => {
+                                error!("Error checking accessibility permissions after request: {}", e);
+                                Ok(false)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error requesting accessibility permissions: {}", e);
+                        Err(format!("Failed to request accessibility permissions: {}", e))
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error checking accessibility permissions: {}", e);
+                Err(format!("Failed to check accessibility permissions: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        warn!("Accessibility permissions are only available on macOS");
+        Ok(true) // Return true on non-macOS platforms
+    }
+}
+
+/// Request microphone permissions using native APIs - NO password prompts
+#[tauri::command]
+pub async fn request_microphone_permission_native() -> Result<bool, String> {
+    info!("Requesting microphone permissions using native APIs");
+
+    #[cfg(target_os = "macos")]
+    {
+        // First check current status
+        match NativePermissionChecker::check_microphone_permission() {
+            Ok(true) => {
+                info!("Microphone permissions already granted");
+                Ok(true)
+            }
+            Ok(false) => {
+                info!("Requesting microphone permissions with native dialog");
+
+                // Trigger native permission request - shows system dialog, no admin privileges needed
+                match NativePermissionChecker::request_microphone_permission().await {
+                    Ok(granted) => {
+                        if granted {
+                            info!("Microphone permissions granted by user");
+                        } else {
+                            info!("Microphone permissions denied by user");
+                        }
+                        Ok(granted)
+                    }
+                    Err(e) => {
+                        error!("Error requesting microphone permissions: {}", e);
+                        Err(format!("Failed to request microphone permissions: {}", e))
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error checking microphone permissions: {}", e);
+                Err(format!("Failed to check microphone permissions: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        warn!("Microphone permissions are only available on macOS");
+        Ok(true) // Return true on non-macOS platforms
+    }
+}
+
+/// Request screen recording permissions using native APIs - NO password prompts
+#[tauri::command]
+pub async fn request_screen_recording_permission_native() -> Result<bool, String> {
+    info!("Requesting screen recording permissions using native APIs");
+
+    #[cfg(target_os = "macos")]
+    {
+        // First check current status
+        match NativePermissionChecker::check_screen_recording_permission() {
+            Ok(true) => {
+                info!("Screen recording permissions already granted");
+                Ok(true)
+            }
+            Ok(false) => {
+                info!("Requesting screen recording permissions with native prompt");
+
+                // Trigger native permission request - no admin privileges needed
+                match NativePermissionChecker::request_screen_recording_permission() {
+                    Ok(()) => {
+                        info!("Screen recording permission request triggered successfully");
+
+                        // Wait a moment and check again
+                        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+
+                        match NativePermissionChecker::check_screen_recording_permission() {
+                            Ok(granted) => {
+                                if granted {
+                                    info!("Screen recording permissions now granted");
+                                } else {
+                                    info!("Screen recording permissions still not granted - user needs to manually enable in System Settings");
+                                }
+                                Ok(granted)
+                            }
+                            Err(e) => {
+                                error!("Error checking screen recording permissions after request: {}", e);
+                                Ok(false)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error requesting screen recording permissions: {}", e);
+                        Err(format!("Failed to request screen recording permissions: {}", e))
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error checking screen recording permissions: {}", e);
+                Err(format!("Failed to check screen recording permissions: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        warn!("Screen recording permissions are only available on macOS");
+        Ok(true) // Return true on non-macOS platforms
+    }
+}
+
+/// Request accessibility permissions with system prompt - LEGACY VERSION
 #[tauri::command]
 pub async fn request_accessibility_permission() -> Result<bool, String> {
-    info!("Requesting accessibility permissions");
+    warn!("Using legacy accessibility permission request - may show password prompts. Consider using request_accessibility_permission_native instead.");
 
     #[cfg(target_os = "macos")]
     {
