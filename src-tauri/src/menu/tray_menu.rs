@@ -13,6 +13,7 @@ use tracing::{info, error};
 use crate::constants::{tray_menu_ids, events};
 use crate::state::AppState;
 
+
 /// Get keyboard shortcuts from app state
 fn get_keyboard_shortcuts(app: &AppHandle) -> Result<crate::state::KeyboardShortcuts, Box<dyn std::error::Error>> {
     let app_state = app.state::<AppState>();
@@ -114,15 +115,84 @@ pub fn setup_tray_icon(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
 
     let tray_menu = create_state_aware_tray_menu(app)?;
 
+	// TODO: Swap Icon to use embedded data
+
+	// Embed tray icon data directly in the binary - no file system dependencies
+	// const TRAY_ICON_DATA: &[u8] = include_bytes!("../../icons/tray/32x32.png");
+	// let loaded_tauri_icon = match image::load_from_memory(TRAY_ICON_DATA) {
+	// 	Ok(dynamic_image) => {
+	// 		let width = dynamic_image.width();
+	// 		let height = dynamic_image.height();
+	// 		let rgba_image = dynamic_image.to_rgba8();
+	// 		let bytes = rgba_image.into_raw();
+	// 		let img = TauriImage::new_owned(bytes, width, height);
+	// 		Some(img)
+	// 	},
+	// 	Err(e) => {
+	// 		error!("[Tray Setup Error] Failed to load embedded tray icon: {}", e);
+	// 		None
+	// 	}
+	// };
+
     let _tray = TrayIconBuilder::new()
         .menu(&tray_menu)
         .show_menu_on_left_click(false)
         .icon(app.default_window_icon().unwrap().clone())
+        // .icon(loaded_tauri_icon)
         .build(app)?;
 
     info!("✅ System tray icon setup completed");
     Ok(())
 }
+
+/// Setup the enhanced tray icon with state-aware menuAdd commentMore actions
+// pub fn setup_tray_icon(app_handle: &AppHandle) {
+//     let tray_app_handle = app_handle.clone();
+
+//     tauri::async_runtime::spawn(async move {
+//         // Load the embedded icon data - no file system dependencies
+//         let loaded_tauri_icon = match image::load_from_memory(TRAY_ICON_DATA) {
+//             Ok(dynamic_image) => {
+//                 let width = dynamic_image.width();
+//                 let height = dynamic_image.height();
+//                 let rgba_image = dynamic_image.to_rgba8();
+//                 let bytes = rgba_image.into_raw();
+//                 let img = TauriImage::new_owned(bytes, width, height);
+//                 Some(img)
+//             },
+//             Err(e) => {
+//                 error!("[Tray Setup Error] Failed to load embedded tray icon: {}", e);
+//                 None
+//             }
+//         };
+
+//         // Create enhanced tray menu with state-aware items
+//         let tray_menu = create_state_aware_tray_menu(&tray_app_handle).await;
+
+//         let mut tray_builder = TrayIconBuilder::with_id("main_tray")
+//             .on_menu_event(move |app_handle, event| {
+//                 handle_tray_menu_event(app_handle, event.id().as_ref());
+//             })
+//             .on_tray_icon_event(|_tray, event| {
+//                 handle_tray_icon_event(event);
+//             });
+
+//         if let Some(icon_image) = loaded_tauri_icon {
+//             tray_builder = tray_builder.icon(icon_image);
+//         }
+
+//         if let Some(menu) = tray_menu {
+//             tray_builder = tray_builder.menu(&menu);
+//         }
+
+//         match tray_builder.build(&tray_app_handle) {
+//             Ok(_) => {
+//                 info!("[Tray Setup] Enhanced tray icon configured successfully.");
+//             },
+//             Err(e) => error!("[Tray Setup Error] Failed to build enhanced tray icon: {}", e),
+//         }
+//     });
+// }
 
 /// Handle tray menu events
 pub fn handle_tray_menu_events(app_handle: AppHandle, event_id: &str) {
