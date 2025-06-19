@@ -10,6 +10,7 @@ use tauri_plugin_voice_transcription::controller::VoiceController;
 use tracing::{info, error, warn};
 
 use crate::{constants, state, commands};
+use crate::utils::async_runtime::safe_spawn_async_task;
 
 /// Setup comprehensive application integration including plugins, event coordination, and component initialization
 pub fn setup_application_integration(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -47,7 +48,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
         // Register escape key for dictation cancellation
         let app_handle_for_escape = app_handle_for_listener.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle_for_escape).await {
                 warn!("Failed to register escape key for dictation: {} - continuing without escape key cancellation", e);
             }
@@ -55,7 +56,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
         // Play voice start sound automatically when dictation starts
         let app_handle_for_sound = app_handle_for_listener.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             let state = app_handle_for_sound.state::<crate::state::AppState>();
             if let Err(e) = crate::commands::sound::play_voice_start_sound(app_handle_for_sound.clone(), state).await {
                 warn!("Failed to play voice start sound: {}", e);
@@ -64,7 +65,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
 
         // Check if this is dictation mode and update floating bar manager accordingly
         let app_handle_clone = app_handle_for_listener.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             // Check if Dictation Mode is active
             let app_state = app_handle_clone.state::<state::AppState>();
             let is_dictation_mode = app_state.dictation_active.lock()
@@ -95,7 +96,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
         info!("[Event] Received app-dictation-finished event - triggering agent");
 
         let app_handle_clone = app_handle_for_agent_listener.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             // Parse the query from the event payload
             let payload_str = event.payload();
             match serde_json::from_str::<serde_json::Value>(payload_str) {
@@ -162,7 +163,7 @@ fn setup_specialized_voice_listeners(app_handle: &AppHandle) {
                 if let Some(text) = text_value.as_str() {
                     let app_handle_clone = app_handle_for_listener.clone();
                     let partial_text = text.to_string();
-                    tauri::async_runtime::spawn(async move {
+                    safe_spawn_async_task(move || async move {
                         commands::floating_bar::handle_dictation_partial(&app_handle_clone, partial_text).await;
                     });
                 }
@@ -187,7 +188,7 @@ fn setup_force_stop_listeners(app_handle: &AppHandle) {
         warn!("[Event] Received dictation-transcription-force-stop event - force stopping dictation");
 
         let app_handle_clone = app_handle_for_force_stop.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_voice_controller_force_stop(&app_handle_clone).await;
         });
     });
@@ -198,7 +199,7 @@ fn setup_force_stop_listeners(app_handle: &AppHandle) {
         warn!("[Event] Received dictation-transcription-force-cleanup event - recovering stuck state");
 
         let app_handle_clone = app_handle_for_force_cleanup.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_dictation_state_cleanup(&app_handle_clone).await;
         });
     });
@@ -242,7 +243,7 @@ async fn handle_voice_controller_force_stop(app_handle: &AppHandle) {
 
     // Update floating bar manager
     let app_handle_for_bar = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
+    safe_spawn_async_task(move || async move {
         commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
     });
 
@@ -264,7 +265,7 @@ async fn handle_dictation_state_cleanup(app_handle: &AppHandle) {
 
     // Update floating bar manager
     let app_handle_for_bar = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
+    safe_spawn_async_task(move || async move {
         commands::floating_bar::handle_dictation_mode_change(&app_handle_for_bar, false).await;
     });
 
@@ -286,7 +287,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
         info!("[AlwaysListening] Wake word detected - preparing for agent activation");
 
         let app_handle_clone = app_handle_for_wake_word.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             // Update floating bar to indicate agent mode is starting
             commands::floating_bar::handle_always_listening_change(&app_handle_clone, true).await;
 
@@ -305,7 +306,7 @@ fn setup_always_listening_integration(app_handle: &AppHandle) {
         info!("[AlwaysListening] Received transcription after wake word: {:?}", event.payload());
 
         let app_handle_clone = app_handle_for_always_listening.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_always_listening_transcription(&app_handle_clone, event.payload()).await;
         });
     });
@@ -378,7 +379,7 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
         info!("[AlwaysListening] Received stop request: {:?}", event.payload());
 
         let app_handle_clone = app_handle_for_stop_request.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_always_listening_stop_request(&app_handle_clone).await;
         });
     });
@@ -389,7 +390,7 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
         info!("[AlwaysListening] Command processed - considering auto-stop");
 
         let app_handle_clone = app_handle_for_command_processed.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_always_listening_command_processed(&app_handle_clone).await;
         });
     });
@@ -400,7 +401,7 @@ fn setup_always_listening_control_listeners(app_handle: &AppHandle) {
         info!("[AlwaysListening] Returning to wake word detection mode");
 
         let app_handle_clone = app_handle_for_wake_word_return.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_always_listening_return_to_wake_word(&app_handle_clone).await;
         });
     });
@@ -471,7 +472,7 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
         info!("[Event] Received agent-transcription-start event - starting agent mode via hold");
 
         let app_handle_clone = app_handle_for_agent_start.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_agent_transcription_start(&app_handle_clone).await;
         });
     });
@@ -482,7 +483,7 @@ fn setup_agent_transcription_listeners(app_handle: &AppHandle) {
         info!("[Event] Received agent-transcription-stop event - stopping transcription to process result");
 
         let app_handle_clone = app_handle_for_agent_transcription_stop.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_agent_transcription_stop(&app_handle_clone).await;
         });
     });
@@ -496,7 +497,7 @@ fn setup_agent_control_listeners(app_handle: &AppHandle) {
         info!("[Event] Received agent-stop event - stopping agent mode via hold");
 
         let app_handle_clone = app_handle_for_agent_stop.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_agent_stop(&app_handle_clone).await;
         });
     });
@@ -507,7 +508,7 @@ fn setup_agent_control_listeners(app_handle: &AppHandle) {
         info!("[Event] Received agent-cancel event - cancelling agent mode via hold");
 
         let app_handle_clone = app_handle_for_agent_cancel.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_agent_cancel(&app_handle_clone).await;
         });
     });
@@ -518,7 +519,7 @@ fn setup_agent_control_listeners(app_handle: &AppHandle) {
         info!("[Event] Received agent-force-stop event - force stopping agent mode");
 
         let app_handle_clone = app_handle_for_agent_force_stop.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_agent_force_stop(&app_handle_clone).await;
         });
     });
@@ -532,7 +533,7 @@ fn setup_agent_stop_all_listener(app_handle: &AppHandle) {
         info!("[Event] Received agent-stop-all event - performing comprehensive agent shutdown");
 
         let app_handle_clone = app_handle_for_agent_stop_all.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             handle_agent_stop_all(&app_handle_clone).await;
         });
     });
@@ -750,7 +751,7 @@ fn setup_development_integration(app_handle: &AppHandle) {
         info!("🔄 Frontend reload detected - cleaning up resources...");
 
         let app_handle_clone = app_handle_for_frontend_reload.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             // Cleanup MCP servers to prevent accumulation
             if let Some(state) = app_handle_clone.try_state::<crate::state::AppState>() {
                 if let Err(e) = state.cleanup_mcp_resources().await {

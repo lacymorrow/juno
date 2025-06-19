@@ -3,6 +3,7 @@ pub mod coordinates;
 pub mod command_macros;
 pub mod key_parsing;
 pub mod network;
+pub mod async_runtime;
 
 use computer_use_ai_sdk::Desktop;
 
