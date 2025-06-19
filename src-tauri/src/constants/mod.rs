@@ -37,28 +37,20 @@ pub mod browser;
 // Permissions constants
 pub mod permissions;
 
-// Re-export commonly used modules for compatibility (being specific to avoid conflicts)
-pub use app::*;
-pub use events::*;
-pub use timeouts::*;
-pub use api::*;
-pub use ports::*;
-pub use platform::*;
-pub use ui::*;
-pub use menus::*;
-pub use agent::*;
-// Only re-export specific parts of errors to avoid conflict with events::messages
-pub use errors::{codes, recovery};
-pub use files::*;
-pub use audio::*;
-pub use browser::*;
-pub use permissions::*;
+// Re-export all constants that actually exist
+pub use crate::constants::agent::*;
+pub use crate::constants::api::*;
+pub use crate::constants::app::*;
+pub use crate::constants::audio::*;
+pub use crate::constants::browser::*;
+pub use crate::constants::events::*;
+pub use crate::constants::files::*;
+pub use crate::constants::menus::*;
+pub use crate::constants::permissions::*;
+pub use crate::constants::ports::*;
+pub use crate::constants::timeouts::*;
+pub use crate::constants::ui::*;
+pub use crate::constants::errors::*;
 
-// Legacy compatibility - gradually remove these
-pub mod legacy {
-    // Deprecated modules - use specific modules instead
-    pub use crate::constants::events as events;
-    pub use crate::constants::timeouts as timeouts;
-    pub use crate::constants::api as api_endpoints;
-    pub use crate::constants::platform::macos as macos_system;
-}
+// Platform specific constants
+pub use crate::constants::platform::*;

@@ -281,7 +281,7 @@ pub async fn submit_query(
     let agent_result = match agent_mode {
         AgentMode::Single => {
             // Single agent mode - use traditional approach with all tools
-            let brain = match BrainFactory::create_brain() {
+            let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)) {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize single agent brain: {}", e);
@@ -325,7 +325,7 @@ pub async fn submit_query(
         },
         AgentMode::Multi => {
             // Multi-agent mode - use orchestrator with specialized agents
-            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(get_orchestrator_personality_prompt()) {
+            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(get_orchestrator_personality_prompt(&app_handle)) {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
@@ -597,9 +597,12 @@ pub async fn handle_tts_completion(
 }
 
 /// Get the personality-focused system prompt for the orchestrator
-fn get_orchestrator_personality_prompt() -> String {
-    // Use prompt manager for orchestrator personality, with fallback to default
-    let prompt_manager = PromptManager::load().unwrap_or_default();
+fn get_orchestrator_personality_prompt(app_handle: &tauri::AppHandle) -> String {
+    // FIXED: Use prompt manager with proper store loading instead of deprecated load()
+    let prompt_manager = PromptManager::load_from_store(app_handle).unwrap_or_else(|e| {
+        warn!("Failed to load prompt configuration from store: {}. Using defaults.", e);
+        PromptManager::new()
+    });
     prompt_manager.get_orchestrator_personality_prompt()
 }
 
@@ -788,7 +791,7 @@ async fn execute_specialized_agent_task(
     }
 
     // Create appropriate brain for the specialist agent with focused system prompt
-    let system_prompt = get_specialist_system_prompt(agent_type);
+    let system_prompt = get_specialist_system_prompt(agent_type, &app_handle);
     let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt) {
         Ok(brain) => brain,
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
@@ -869,9 +872,12 @@ async fn execute_specialized_agent_task(
 }
 
 /// Get system prompt for specialized agents
-fn get_specialist_system_prompt(agent_type: &str) -> String {
-    // Use prompt manager for specialist prompts, with fallback to defaults
-    let prompt_manager = PromptManager::load().unwrap_or_default();
+fn get_specialist_system_prompt(agent_type: &str, app_handle: &tauri::AppHandle) -> String {
+    // FIXED: Use prompt manager with proper store loading instead of deprecated load()
+    let prompt_manager = PromptManager::load_from_store(app_handle).unwrap_or_else(|e| {
+        warn!("Failed to load prompt configuration from store: {}. Using defaults.", e);
+        PromptManager::new()
+    });
     prompt_manager.get_specialist_prompt(agent_type)
 }
 

@@ -382,8 +382,9 @@ impl BrainFactory {
     pub async fn create_multi_agent_orchestrator(
         memory: std::sync::Arc<dyn MemoryManager + Send + Sync>,
         tool_provider: std::sync::Arc<dyn ToolProvider + Send + Sync>,
+        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<MultiAgentOrchestrator, AgentError> {
-        MultiAgentOrchestrator::new(memory, tool_provider).await
+        MultiAgentOrchestrator::new(memory, tool_provider, app_handle).await
     }
 
     /// Create an agent runtime based on configuration (single or multi-agent)
@@ -392,7 +393,7 @@ impl BrainFactory {
         tool_provider: std::sync::Arc<dyn ToolProvider + Send + Sync>,
         app_handle: Option<tauri::AppHandle>,
     ) -> Result<AgentRuntime, AgentError> {
-        let config = ProviderConfig::load()?;
+        let config = ProviderConfig::default(); // Use default config when no app_handle available
 
         match config.get_agent_mode() {
             AgentMode::Single => {
@@ -426,7 +427,7 @@ impl BrainFactory {
             },
             AgentMode::Multi => {
                 // Create multi-agent orchestrator
-                let orchestrator = Self::create_multi_agent_orchestrator(memory, tool_provider).await?;
+                let orchestrator = Self::create_multi_agent_orchestrator(memory, tool_provider, app_handle.as_ref()).await?;
                 Ok(AgentRuntime::Multi(orchestrator))
             }
         }
@@ -435,10 +436,7 @@ impl BrainFactory {
     /// Get current agent mode from configuration
     pub fn get_agent_mode() -> AgentMode {
         let mode_str = env::var("AGENT_MODE").unwrap_or_else(|_| {
-            match ProviderConfig::load() {
-                Ok(config) => config.get_agent_mode().to_string().into(),
-                Err(_) => "multi".to_string(), // Default fallback
-            }
+            "multi".to_string() // Default to multi-agent mode for new app
         });
         AgentMode::from_str(&mode_str).unwrap_or(AgentMode::Multi)
     }
@@ -446,10 +444,7 @@ impl BrainFactory {
     /// Get the current provider from configuration or environment
     pub fn get_current_provider() -> Provider {
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
-            match ProviderConfig::load() {
-                Ok(config) => config.active_provider,
-                Err(_) => "anthropic".to_string(), // Default fallback
-            }
+            "anthropic".to_string() // Default to Anthropic for new app
         });
         Provider::from_str(&provider_str).unwrap_or(Provider::Anthropic)
     }
@@ -458,7 +453,7 @@ impl BrainFactory {
     pub fn list_providers() -> Vec<ProviderInfo> {
         let current_provider = Self::get_current_provider();
         let providers = vec![Provider::Anthropic, Provider::OpenAI, Provider::Rig, Provider::Gemini];
-        let config = ProviderConfig::load().ok();
+        let config = Some(ProviderConfig::default()); // Use default config for new app
 
         providers.into_iter().map(|provider| {
             let provider_id = provider.id();
@@ -484,24 +479,44 @@ impl BrainFactory {
 
     /// Create an AgentBrain implementation based on provider configuration
     pub fn create_brain() -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
-        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_|
-            ProviderConfig::load()
-                .map(|config| config.active_provider)
-                .unwrap_or_else(|e|
-                    {
-                        warn!("AI_PROVIDER env not set and config failed to load ({}). Defaulting to anthropic.", e);
-                        "anthropic".to_string()
-                    }
-                )
-        );
+        Self::create_brain_with_app_handle(None)
+    }
+
+    /// Create an AgentBrain implementation with app handle for proper prompt loading
+    pub fn create_brain_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
+            "anthropic".to_string() // Default to Anthropic for new app
+        });
         info!("Attempting to use AI provider: {}", provider_str);
         env::set_var("AI_PROVIDER", &provider_str);
         apply_provider_settings_to_env()?;
 
+        // Load system prompt from prompt manager if app_handle is available
+        let system_prompt = if let Some(handle) = app_handle {
+            let prompt_manager = crate::agent::prompts::PromptManager::load_from_store(handle).unwrap_or_else(|e| {
+                warn!("Failed to load prompt configuration from store: {}. Using defaults.", e);
+                crate::agent::prompts::PromptManager::new()
+            });
+            Some(prompt_manager.get_default_system_prompt())
+        } else {
+            // Fallback to environment variable or default prompt
+            env::var("ANTHROPIC_SYSTEM_PROMPT").ok().or_else(|| {
+                // Use default prompt manager to get the template
+                let prompt_manager = crate::agent::prompts::PromptManager::new();
+                Some(prompt_manager.get_default_system_prompt())
+            })
+        };
+
         match Provider::from_str(&provider_str) {
             Some(Provider::Anthropic) => {
-                info!("Initializing Anthropic brain...");
-                AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                info!("Initializing Anthropic brain with system prompt...");
+                let api_key = env::var("ANTHROPIC_API_KEY")
+                    .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
+                let model = env::var("ANTHROPIC_MODEL").ok();
+                let max_tokens = env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
+
+                AnthropicBrain::new(api_key, model, max_tokens, system_prompt)
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::OpenAI) => {
                 info!("Attempting to initialize OpenAI brain...");
@@ -550,16 +565,9 @@ impl BrainFactory {
 
     /// Create an AgentBrain implementation with a custom system prompt
     pub fn create_brain_with_system_prompt(system_prompt: String) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
-        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_|
-            ProviderConfig::load()
-                .map(|config| config.active_provider)
-                .unwrap_or_else(|e|
-                    {
-                        warn!("AI_PROVIDER env not set and config failed to load ({}). Defaulting to anthropic.", e);
-                        "anthropic".to_string()
-                    }
-                )
-        );
+        let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
+            "anthropic".to_string() // Default to Anthropic for new app
+        });
         info!("Attempting to use AI provider: {} with custom system prompt", provider_str);
         apply_provider_settings_to_env()?;
 
