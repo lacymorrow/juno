@@ -94,6 +94,9 @@ export const EVENTS = {
 export const WINDOW_LABELS = {
   MAIN: 'main',
   FLOATING_BAR: 'floating-bar',
+  FLOATING_PANEL: 'floating-panel',
+  ONBOARDING: 'onboarding',
+  SETTINGS: 'settings',
 } as const;
 
 export const AUDIO = {

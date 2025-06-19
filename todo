@@ -8,6 +8,239 @@ src-tauri/src/anthropic.rs
 
 src-tauri/src/agent/tool_logger.rs
 
+
+
+
+2025-06-19T23:01:03.735994Z  INFO 🚀 Starting Juno application...
+2025-06-19T23:01:03.736276Z  INFO 🌍 Initializing environment...
+2025-06-19T23:01:03.736802Z  INFO Loaded environment variables from: "/Users/lmorrow/repo/dotdot/.env"
+2025-06-19T23:01:03.736931Z  INFO All critical environment variables are available
+2025-06-19T23:01:03.736961Z  INFO 🖥️ Initializing Desktop Automation Engine...
+2025-06-19T23:01:03.766728Z  INFO Desktop engine with auto-redirect initialized successfully.
+2025-06-19T23:01:03.766790Z  INFO Desktop Automation Engine initialized successfully with auto-redirect disabled
+2025-06-19T23:01:03.766865Z  INFO 🧠 Initializing AI providers...
+2025-06-19T23:01:03.767301Z  INFO AI_PROVIDER env var not set, using active_provider from config: anthropic
+2025-06-19T23:01:03.767320Z  INFO Applying environment settings for provider: anthropic
+2025-06-19T23:01:03.767635Z  INFO Provider settings initialized from configuration
+2025-06-19T23:01:03.767657Z  INFO ⚡ Processing CLI arguments...
+No CLI commands detected or tests requiring exit, launching Tauri application...
+2025-06-19T23:01:03.768848Z  INFO 🎯 Initializing application state...
+2025-06-19T23:01:03.769088Z  INFO Initializing TTS provider to 'system' (development mode)
+2025-06-19T23:01:03.959642Z  INFO === Voice Transcription Plugin Initialization Starting ===
+2025-06-19T23:01:03.959683Z  INFO Default config model path: models/ggml-tiny.en.bin
+2025-06-19T23:01:03.959689Z  INFO Starting model path resolution for: 'models/ggml-tiny.en.bin'
+2025-06-19T23:01:03.959751Z  INFO Strategy 1: Checking bundled resources...
+2025-06-19T23:01:03.959881Z  INFO   Resource path resolved to: /Users/lmorrow/repo/dotdot/src-tauri/target/debug/models/ggml-tiny.en.bin
+2025-06-19T23:01:03.959918Z  INFO   Resource path does not exist
+2025-06-19T23:01:03.959946Z  INFO   Resource directory: "/Users/lmorrow/repo/dotdot/src-tauri/target/debug"
+2025-06-19T23:01:03.959976Z  INFO   Checking bundled path: "/Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/models/ggml-tiny.en.bin"
+2025-06-19T23:01:03.959998Z  INFO   Bundled path does not exist
+2025-06-19T23:01:03.960001Z  INFO   Checking bundled path: "/Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin"
+2025-06-19T23:01:03.960127Z  INFO Found model in bundled resources: "/Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin"
+2025-06-19T23:01:03.960145Z  INFO Resolved model path: /Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin
+2025-06-19T23:01:03.960181Z  INFO Model path exists: true
+2025-06-19T23:01:03.960208Z  INFO Attempting to create VoiceController with path: /Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin
+whisper_init_from_file_with_params_no_state: loading model from '/Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin'
+whisper_model_load: loading model
+whisper_model_load: n_vocab       = 51864
+whisper_model_load: n_audio_ctx   = 1500
+whisper_model_load: n_audio_state = 384
+whisper_model_load: n_audio_head  = 6
+whisper_model_load: n_audio_layer = 4
+whisper_model_load: n_text_ctx    = 448
+whisper_model_load: n_text_state  = 384
+whisper_model_load: n_text_head   = 6
+whisper_model_load: n_text_layer  = 4
+whisper_model_load: n_mels        = 80
+whisper_model_load: ftype         = 1
+whisper_model_load: qntvr         = 0
+whisper_model_load: type          = 1 (tiny)
+whisper_model_load: adding 1607 extra tokens
+whisper_model_load: n_langs       = 99
+whisper_model_load:      CPU buffer size =    77.18 MB
+whisper_model_load: model size    =   77.11 MB
+2025-06-19T23:01:04.025220Z  INFO ✅ Voice transcription plugin initialized successfully with model: /Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin
+2025-06-19T23:01:04.025273Z  INFO Attempting to create AlwaysListeningController with path: /Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin
+whisper_init_from_file_with_params_no_state: loading model from '/Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin'
+whisper_model_load: loading model
+whisper_model_load: n_vocab       = 51864
+whisper_model_load: n_audio_ctx   = 1500
+whisper_model_load: n_audio_state = 384
+whisper_model_load: n_audio_head  = 6
+whisper_model_load: n_audio_layer = 4
+whisper_model_load: n_text_ctx    = 448
+whisper_model_load: n_text_state  = 384
+whisper_model_load: n_text_head   = 6
+whisper_model_load: n_text_layer  = 4
+whisper_model_load: n_mels        = 80
+whisper_model_load: ftype         = 1
+whisper_model_load: qntvr         = 0
+whisper_model_load: type          = 1 (tiny)
+whisper_model_load: adding 1607 extra tokens
+whisper_model_load: n_langs       = 99
+whisper_model_load:      CPU buffer size =    77.18 MB
+whisper_model_load: model size    =   77.11 MB
+2025-06-19T23:01:04.093108Z  INFO ✅ Always listening controller initialized successfully with model: /Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/tauri-plugin-voice-transcription/models/ggml-tiny.en.bin
+2025-06-19T23:01:04.093142Z  INFO === Voice Transcription Plugin Initialization Complete ===
+2025-06-19T23:01:04.875761Z  INFO 🍎 Setting up all application menus...
+2025-06-19T23:01:04.875810Z  INFO 🍎 Setting up application menu...
+2025-06-19T23:01:04.877238Z  INFO ✅ Application menu setup completed
+2025-06-19T23:01:04.883136Z  INFO 🔧 Setting up system tray icon...
+2025-06-19T23:01:04.883157Z  INFO 🍽️ Creating state-aware tray menu...
+2025-06-19T23:01:04.883434Z  INFO ✅ State-aware tray menu created successfully
+2025-06-19T23:01:04.910148Z  INFO 🚀 Initializing comprehensive application state management...
+2025-06-19T23:01:04.910247Z  INFO [State] Initializing environment state...
+2025-06-19T23:01:04.915907Z  INFO Successfully loaded environment variables from bundled .env file: "/Users/lmorrow/repo/dotdot/src-tauri/target/debug/_up_/.env"
+2025-06-19T23:01:04.916080Z  INFO All critical environment variables are available
+2025-06-19T23:01:04.916108Z  INFO Successfully loaded environment variables from bundled resources
+2025-06-19T23:01:04.916184Z  INFO [State] Initializing shortcuts state...
+2025-06-19T23:01:04.920370Z  INFO Loaded keyboard shortcuts from store
+2025-06-19T23:01:04.923158Z  INFO Loaded agent trigger mode from store: hold
+2025-06-19T23:01:04.929655Z  INFO ✅ System tray icon setup completed
+2025-06-19T23:01:04.929712Z  INFO ✅ All menus setup completed successfully
+2025-06-19T23:01:04.929743Z  INFO Applying macOS specific setup...
+2025-06-19T23:01:04.929786Z  INFO Found floating-bar for macOS setup.
+2025-06-19T23:01:04.930117Z  INFO macOS Setup: Floating bar mouse events configured.
+2025-06-19T23:01:04.930150Z  INFO macOS standard styling applied to floating-bar.
+2025-06-19T23:01:04.930208Z  INFO Setting up macOS tracking area for window: floating-bar
+2025-06-19T23:01:04.930252Z  INFO Declaring MouseTrackingDelegate_floating_bar class...
+2025-06-19T23:01:04.930282Z  INFO MouseTrackingDelegate_floating_bar class registered.
+2025-06-19T23:01:04.930292Z  INFO MouseTrackingDelegate_floating_bar instance created: 0x11fc3b1f0
+2025-06-19T23:01:04.930392Z  INFO Registered delegate pointer 4827886064 for window: floating-bar
+2025-06-19T23:01:04.930400Z  INFO Got view bounds for tracking area.
+2025-06-19T23:01:04.930422Z  INFO NSTrackingArea created: 0x11fc5bb70
+2025-06-19T23:01:04.930436Z  INFO NSTrackingArea added to view for window: floating-bar
+2025-06-19T23:01:04.930785Z  INFO Found floating-panel for macOS setup.
+2025-06-19T23:01:04.930896Z  INFO macOS Setup: Floating panel configured with production-ready settings.
+2025-06-19T23:01:04.930905Z  INFO Setting up macOS tracking area for window: floating-panel
+2025-06-19T23:01:04.930919Z  INFO Declaring MouseTrackingDelegate_floating_panel class...
+2025-06-19T23:01:04.930929Z  INFO MouseTrackingDelegate_floating_panel class registered.
+2025-06-19T23:01:04.930936Z  INFO MouseTrackingDelegate_floating_panel instance created: 0x1299e1f40
+2025-06-19T23:01:04.930942Z  INFO Registered delegate pointer 4993195840 for window: floating-panel
+2025-06-19T23:01:04.930945Z  INFO Got view bounds for tracking area.
+2025-06-19T23:01:04.930949Z  INFO NSTrackingArea created: 0x1299e2510
+2025-06-19T23:01:04.930955Z  INFO NSTrackingArea added to view for window: floating-panel
+2025-06-19T23:01:04.931303Z  INFO Setting up main window for proper focus handling.
+2025-06-19T23:01:04.931339Z  INFO macOS Setup: Main window mouse events enabled.
+2025-06-19T23:01:04.931085Z  INFO Loaded tool configuration from store
+2025-06-19T23:01:04.931571Z  INFO macOS specific setup completed
+2025-06-19T23:01:04.931627Z  INFO Loaded tool configuration from store on startup
+2025-06-19T23:01:04.931710Z  INFO Checking Input Monitoring permissions before registering shortcuts
+2025-06-19T23:01:04.931765Z  INFO 🔧 Setting up application integration...
+2025-06-19T23:01:04.931779Z  INFO 🎤 Setting up specialized voice transcription listeners...
+2025-06-19T23:01:04.931856Z  INFO 🔊 Setting up always listening integration...
+2025-06-19T23:01:04.931910Z  INFO 🤖 Setting up agent mode integration...
+2025-06-19T23:01:04.931953Z  INFO 🛠️ Setting up development mode integration...
+2025-06-19T23:01:04.931962Z  INFO 🛠️ Development mode cleanup handlers installed
+2025-06-19T23:01:04.931966Z  INFO ✅ Application integration setup completed
+2025-06-19T23:01:04.931976Z  INFO Application integration setup completed successfully
+2025-06-19T23:01:05.031961Z  INFO Floating bar window focus set successfully
+2025-06-19T23:01:05.032056Z  INFO Floating bar window shown successfully
+2025-06-19 19:01:05.140 juno[43318:5956464] +[IMKClient subclass]: chose IMKClient_Modern
+2025-06-19T23:01:05.173170Z  INFO Registered agent mode toggle shortcut: Option+D
+2025-06-19T23:01:05.179267Z  INFO Registered dictation input shortcut: Option+Space
+2025-06-19T23:01:05.179300Z  INFO Completed global shortcut registration (escape key will be registered dynamically when needed)
+2025-06-19T23:01:05.179632Z  INFO [DictationMonitor] Initializing dictation input monitoring system with immediate transcription start
+2025-06-19T23:01:05.187909Z  INFO [DictationMonitor] Dictation input monitoring system initialized successfully
+2025-06-19T23:01:05.187942Z  INFO [AgentMonitor] Starting background monitoring task
+2025-06-19T23:01:05.190270Z  INFO Agent monitor task started successfully
+2025-06-19T23:01:05.190342Z  INFO [State] Initializing MCP state...
+2025-06-19T23:01:05.191433Z  INFO MCP state initialization scheduled - will complete in background
+2025-06-19T23:01:05.191449Z  INFO [State] Initializing onboarding state...
+2025-06-19T23:01:05.193329Z  INFO Initializing onboarding system...
+2025-06-19T23:01:05.193622Z  INFO Development mode detected - onboarding will always be shown
+2025-06-19T23:01:05.193634Z  INFO Onboarding not completed in development mode, opening onboarding window
+2025-06-19T23:01:05.259376Z  INFO Main window focus set successfully - clicks should now work immediately
+2025-06-19T23:01:05.275024Z  INFO Showed existing onboarding window
+2025-06-19T23:01:05.275088Z  INFO Onboarding system initialized successfully
+2025-06-19T23:01:05.275098Z  INFO [State] Initializing orchestrator state...
+2025-06-19T23:01:05.317190Z  INFO Initialized all available specialized agents
+2025-06-19T23:01:05.318988Z  INFO Enhanced multi-agent orchestrator system initialized successfully
+2025-06-19T23:01:05.353446Z  INFO MCP server initialization continues in background
+2025-06-19T23:01:05.353509Z  INFO Multi-agent orchestrator system initialized successfully
+2025-06-19T23:01:05.353525Z  INFO [State] Initializing cloud state...
+2025-06-19T23:01:05.368682Z  INFO Loaded cloud configuration from store (migrated to permissive defaults)
+2025-06-19T23:01:05.404194Z  INFO Cloud client configuration initialized
+2025-06-19T23:01:05.404234Z  INFO Cloud connectivity is disabled in configuration
+2025-06-19T23:01:05.434389Z  INFO [State] Initializing floating bar state...
+2025-06-19T23:01:05.460348Z  INFO Floating bar manager initialized successfully
+2025-06-19T23:01:05.460395Z  INFO [State] Initializing monitoring state...
+2025-06-19T23:01:05.468396Z  INFO Autostart configuration initialized successfully
+2025-06-19T23:01:05.469709Z  INFO [State] Starting background state management tasks...
+2025-06-19T23:01:05.471124Z  INFO [State] MCP retry background task started
+2025-06-19T23:01:05.471173Z  INFO [State] Background state management tasks started
+2025-06-19T23:01:05.471188Z  INFO ✅ Application state management initialization completed
+2025-06-19T23:01:05.472236Z  INFO Application state management initialized successfully
+2025-06-19T23:01:05.474674Z  INFO Adding 4 default MCP server configurations (disabled by default)...
+2025-06-19T23:01:05.475450Z  INFO Added MCP server configuration: filesystem
+2025-06-19T23:01:05.475701Z  INFO Successfully added MCP server configuration 'filesystem'
+2025-06-19T23:01:05.475839Z  INFO Added MCP server configuration: everything
+2025-06-19T23:01:05.475912Z  INFO Successfully added MCP server configuration 'everything'
+2025-06-19T23:01:05.475963Z  INFO Added MCP server configuration: memory
+2025-06-19T23:01:05.475976Z  INFO Successfully added MCP server configuration 'memory'
+2025-06-19T23:01:05.476021Z  INFO Added MCP server configuration: sequential-thinking
+2025-06-19T23:01:05.476037Z  INFO Successfully added MCP server configuration 'sequential-thinking'
+2025-06-19T23:01:05.476055Z  INFO Successfully configured 4/4 default MCP servers
+2025-06-19T23:01:05.476063Z  INFO MCP servers are disabled by default - enable them in Settings if needed
+2025-06-19T23:01:05.476071Z  INFO To prevent app startup delays, MCP servers must be manually enabled in Settings
+2025-06-19T23:01:07.016202Z  INFO Checking macOS permissions status using native APIs (no password prompts)
+2025-06-19T23:01:07.033684Z  INFO Checking macOS permissions status using native APIs (no password prompts)
+2025-06-19T23:01:07.036853Z  INFO Getting floating bar configuration
+2025-06-19T23:01:07.041392Z  INFO Getting floating bar configuration
+2025-06-19 19:01:07.039 juno[43318:5956464] <CATransformLayer: 0x30b70de40> - changing property shadowOffset in transform-only layer, will have no effect
+2025-06-19 19:01:07.039 juno[43318:5956464] <CATransformLayer: 0x30b70de40> - changing property shadowColor in transform-only layer, will have no effect
+2025-06-19 19:01:07.039 juno[43318:5956464] <CATransformLayer: 0x30b70de40> - changing property shadowRadius in transform-only layer, will have no effect
+2025-06-19T23:01:07.056620Z  INFO Current sound enabled setting: true
+2025-06-19T23:01:07.060082Z  INFO Current sound enabled setting: true
+2025-06-19T23:01:07.087753Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.088594Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.089147Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.089404Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.089991Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.093420Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.093686Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.099872Z  INFO Loaded provider configuration from store
+2025-06-19T23:01:07.105618Z  INFO Checking macOS permissions status using native APIs (no password prompts)
+2025-06-19T23:01:07.153276Z  INFO Checking macOS permissions status using native APIs (no password prompts)
+screencapture: cannot write file to intended destination, /tmp/juno_screen_test.png
+screencapture: cannot write file to intended destination, /tmp/juno_screen_test.png
+screencapture: cannot write file to intended destination, /tmp/juno_screen_test.png
+2025-06-19T23:01:07.362515Z  INFO Successfully initialized MCP servers in background
+2025-06-19T23:01:08.106073Z  INFO Checking input monitoring permission status
+2025-06-19T23:01:08.106126Z  INFO Checking input monitoring permission status
+2025-06-19T23:01:08.106209Z  INFO Checking input monitoring permission status
+2025-06-19T23:01:08.106999Z  INFO Checking input monitoring permission status
+2025-06-19T23:01:08.176896Z  INFO Input monitoring test result: granted=false
+2025-06-19T23:01:08.176928Z  INFO Native permissions checked - no password prompts required
+2025-06-19T23:01:08.177171Z  INFO Input monitoring test result: granted=false
+2025-06-19T23:01:08.177210Z  INFO Native permissions checked - no password prompts required
+2025-06-19T23:01:08.181459Z  INFO Loaded tool configuration from store
+2025-06-19T23:01:08.211514Z  INFO Input monitoring test result: granted=false
+2025-06-19T23:01:08.211570Z  INFO Native permissions checked - no password prompts required
+2025-06-19T23:01:08.221483Z  INFO Input monitoring test result: granted=false
+2025-06-19T23:01:08.221589Z  INFO Native permissions checked - no password prompts required
+2025-06-19T23:01:08.231094Z  INFO Loaded tool configuration from store
+2025-06-19T23:01:13.146334Z  INFO [Tracking Delegate] Mouse Entered
+2025-06-19T23:01:13.146645Z  INFO [Tracking Delegate] Emitted mouse-entered-window for window: floating-bar
+2025-06-19T23:01:13.167066Z  INFO Setting floating panel click-through: false
+2025-06-19T23:01:13.167484Z  INFO macOS: Floating panel click-through set to: false
+2025-06-19T23:01:13.227869Z  INFO [Tracking Delegate] Mouse Exited
+2025-06-19T23:01:13.228070Z  INFO [Tracking Delegate] Emitted mouse-left-window for window: floating-bar
+2025-06-19T23:01:13.240811Z  INFO Setting floating panel click-through: true
+2025-06-19T23:01:13.241014Z  INFO macOS: Floating panel click-through set to: true
+2025-06-19T23:01:22.260280Z  INFO Requesting input monitoring permission
+2025-06-19T23:01:22.312199Z  INFO Input monitoring test result: granted=false
+2025-06-19T23:01:22.312231Z  INFO Input monitoring permission not granted, opening System Settings
+2025-06-19T23:01:22.312256Z  INFO Opening System Settings to Input Monitoring privacy section
+2025-06-19T23:01:22.577538Z  INFO Successfully opened System Settings to Input Monitoring section
+2025-06-19T23:01:25.721101Z  INFO Onboarding marked as completed at 2025-06-19T23:01:25.719946+00:00
+2025-06-19T23:01:25.728644Z  INFO Closed onboarding window
+
+
+
+
+
+
 # TODO
 
 ## ✅ COMPLETED: Tauri Store Pattern Migration (Successfully Fixed!)
