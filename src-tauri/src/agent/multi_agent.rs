@@ -85,9 +85,14 @@ impl MultiAgentOrchestrator {
     pub async fn new(
         _memory: Arc<dyn MemoryManager + Send + Sync>,
         tool_provider: Arc<dyn ToolProvider + Send + Sync>,
+        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<Self, AgentError> {
         // Load prompt manager
-        let prompt_manager = PromptManager::load().unwrap_or_default();
+        let prompt_manager = if let Some(handle) = app_handle {
+            PromptManager::load_from_store(handle).unwrap_or_else(|_| PromptManager::new())
+        } else {
+            PromptManager::new()
+        };
 
         // Create orchestrator (Gemini Flash for fast routing decisions)
         let orchestrator_brain = Arc::new(GeminiBrain::from_env()?);

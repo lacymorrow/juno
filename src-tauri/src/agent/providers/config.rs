@@ -157,15 +157,6 @@ impl ProviderConfig {
         Ok(default_config)
     }
 
-    /// Load configuration from the file system or create default
-    /// DEPRECATED: Use load_from_store() instead. Kept for backwards compatibility during migration.
-    pub fn load() -> Result<Self, AgentError> {
-        // For backwards compatibility, return a default config
-        // This method should no longer be used in production code
-        warn!("DEPRECATED: ProviderConfig::load() called. Use load_from_store() instead.");
-        Ok(Self::default())
-    }
-
     /// Save configuration to Tauri store.
     /// Serializes current configuration to JSON and saves to store.
     /// Used by: Settings UI and provider configuration updates.
@@ -184,15 +175,6 @@ impl ProviderConfig {
         })?;
 
         info!("Saved provider configuration to store");
-        Ok(())
-    }
-
-    /// Save configuration to file
-    /// DEPRECATED: Use save_to_store() instead. Kept for backwards compatibility during migration.
-    pub fn save(&self) -> Result<(), AgentError> {
-        // For backwards compatibility, do nothing
-        // This method should no longer be used in production code
-        warn!("DEPRECATED: ProviderConfig::save() called. Use save_to_store() instead.");
         Ok(())
     }
 
@@ -255,14 +237,27 @@ impl ProviderConfig {
     }
 }
 
-/// Apply provider settings to environment variables
-/// Uses the centralized prompt manager for default prompts
+/// Apply provider settings to environment variables (convenience method)
+/// Note: This creates a default configuration without app handle support
 pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
-    let config = ProviderConfig::load()?;
+    let config = ProviderConfig::default();
+    let prompt_manager = PromptManager::new();
+    apply_provider_settings_internal(&config, &prompt_manager)
+}
+
+/// Apply provider settings to environment variables from a given app handle
+/// Uses the centralized prompt manager for default prompts
+pub fn apply_provider_settings_to_env_with_handle(app_handle: &AppHandle) -> Result<(), AgentError> {
+    let config = ProviderConfig::load_from_store(app_handle)?;
 
     // Load prompt manager for default prompts
-    let prompt_manager = PromptManager::load().unwrap_or_default();
+    let prompt_manager = PromptManager::load_from_store(app_handle).unwrap_or_else(|_| PromptManager::new());
 
+    apply_provider_settings_internal(&config, &prompt_manager)
+}
+
+/// Internal function to apply provider settings to environment variables
+fn apply_provider_settings_internal(config: &ProviderConfig, prompt_manager: &PromptManager) -> Result<(), AgentError> {
     // Determine which provider's settings to apply.
     // Priority: AI_PROVIDER env var, then config.active_provider as fallback.
     let provider_id_to_apply = env::var("AI_PROVIDER")

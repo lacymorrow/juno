@@ -276,7 +276,7 @@ async fn inspect_prompt_system_exec(input: Value) -> Result<Value, String> {
     info!("Inspecting prompt system, show_content: {}", show_content);
 
     // Load the prompt manager
-    let prompt_manager = match crate::agent::prompts::PromptManager::load() {
+    let prompt_manager = match (|| Ok::<crate::agent::prompts::PromptManager, String>(crate::agent::prompts::PromptManager::new()))() {
         Ok(manager) => manager,
         Err(e) => {
             warn!("Failed to load prompt manager, using default: {}", e);

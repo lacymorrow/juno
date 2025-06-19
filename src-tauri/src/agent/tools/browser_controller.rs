@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::env;
 
 use crate::agent::structs::{AgentError, ToolResult};
-use crate::constants::{chrome_debug_urls, timeouts, shell_commands};
+use crate::constants::{chrome_debug_urls, timeouts, files::shell_commands};
 
 // Helper type alias for brevity
 type ControllerResult<T> = Result<T, AgentError>;
@@ -131,7 +131,7 @@ impl BrowserController {
         // Try to make a simple HTTP request to the primary Chrome debugging port
         let debug_url = chrome_debug_urls::PRIMARY;
         let version_url = format!("{}/json/version", debug_url);
-        
+
         match tokio::time::timeout(
             std::time::Duration::from_secs(2),
             reqwest::get(&version_url)
@@ -149,7 +149,7 @@ impl BrowserController {
                 log::debug!("Timeout connecting to remote debugging port");
             }
         }
-        
+
         // Try alternative ports
         for endpoint in [chrome_debug_urls::ALTERNATIVE_1, chrome_debug_urls::ALTERNATIVE_2] {
             let version_url = format!("{}/json/version", endpoint);
@@ -166,7 +166,7 @@ impl BrowserController {
                 _ => {} // Continue to next port
             }
         }
-        
+
         log::debug!("Remote debugging is not available on any standard ports");
         false
     }
@@ -275,13 +275,13 @@ impl BrowserController {
         // Create a temporary directory for the browser profile
         let temp_dir = std::env::temp_dir();
         let temp_profile = temp_dir.join(format!("juno-browser-{}", std::process::id()));
-        
+
         // Create the temporary profile directory
         if let Err(e) = std::fs::create_dir_all(&temp_profile) {
             log::warn!("Failed to create temporary profile directory: {}", e);
             return Err(AgentError::ToolError(format!("Failed to create temp profile: {}", e)));
         }
-        
+
         log::info!("Using temporary profile directory: {:?}", temp_profile);
 
         // Detect browser executable
@@ -360,14 +360,14 @@ impl BrowserController {
         {
             // Use multiple methods to detect Chrome processes
             log::info!("Checking if Chrome is already running...");
-            
+
             // Method 1: Use pgrep to check for Chrome processes
             let pgrep_output = tokio::process::Command::new("pgrep")
                 .arg("-f")
                 .arg("Google Chrome")
                 .output()
                 .await;
-            
+
             if let Ok(output) = pgrep_output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let pgrep_running = !stdout.trim().is_empty();
@@ -378,14 +378,14 @@ impl BrowserController {
             } else {
                 log::debug!("pgrep command failed, trying alternative detection");
             }
-            
+
             // Method 2: Check for Chrome application running via osascript
             let osascript_output = tokio::process::Command::new("osascript")
                 .arg("-e")
                 .arg("tell application \"System Events\" to (name of processes) contains \"Google Chrome\"")
                 .output()
                 .await;
-                
+
             if let Ok(output) = osascript_output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if stdout.trim() == "true" {
@@ -395,7 +395,7 @@ impl BrowserController {
             } else {
                 log::debug!("osascript command failed, trying alternative detection");
             }
-            
+
             // Method 3: Check for Chrome processes via ps
             let ps_output = tokio::process::Command::new("ps")
                 .arg("-A")
@@ -403,7 +403,7 @@ impl BrowserController {
                 .arg("comm")
                 .output()
                 .await;
-                
+
             if let Ok(output) = ps_output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if stdout.contains("Google Chrome") || stdout.contains("chrome") {
@@ -411,21 +411,21 @@ impl BrowserController {
                     return true;
                 }
             }
-            
+
             log::info!("No Chrome processes detected");
             false
         }
-        
+
         #[cfg(target_os = "windows")]
         {
             log::info!("Checking if Chrome is already running...");
-            
+
             let output = tokio::process::Command::new("tasklist")
                 .arg("/FI")
                 .arg("IMAGENAME eq chrome.exe")
                 .output()
                 .await;
-                
+
             if let Ok(output) = output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let running = stdout.contains("chrome.exe");
@@ -436,20 +436,20 @@ impl BrowserController {
                 }
                 return running;
             }
-            
+
             false
         }
-        
+
         #[cfg(target_os = "linux")]
         {
             log::info!("Checking if Chrome is already running...");
-            
+
             let output = tokio::process::Command::new("pgrep")
                 .arg("-f")
                 .arg("chrome")
                 .output()
                 .await;
-                
+
             if let Ok(output) = output {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let running = !stdout.trim().is_empty();
@@ -460,7 +460,7 @@ impl BrowserController {
                 }
                 return running;
             }
-            
+
             false
         }
     }

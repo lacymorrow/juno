@@ -12,7 +12,7 @@ pub mod autostart;
 pub mod core;
 pub mod dev;
 pub mod dictation;
-pub mod dictation_reset;
+// Removed deprecated dictation_reset module
 pub mod dictation_state_manager;
 pub mod element;
 pub mod filesystem;
@@ -42,7 +42,7 @@ pub use self::autostart::*;
 pub use self::core::*;
 // Removed unused dev import: pub use self::dev::*;
 pub use self::dictation::*;
-pub use self::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
+// Removed deprecated dictation_reset exports
 pub use self::dictation_state_manager::{
     force_reset_dictation_state,
     get_dictation_comprehensive_status,

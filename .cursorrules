@@ -48,6 +48,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **NEW**: Comprehensive tool configuration with real implementations
 - **NEW**: All tool operations must use security validation and audit logging
 - **NEW**: Hardware monitoring data collection should be async and parallel
+- **CLEAN**: All deprecated methods eliminated - modern APIs only
+- **STORE-BASED**: All configuration uses Tauri store, no file-based legacy patterns
 
 ### Implementation Status (Enhanced)
 

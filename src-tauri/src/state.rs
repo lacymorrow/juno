@@ -644,7 +644,7 @@ impl AppState {
     /// Initialize cloud client
     pub async fn init_cloud_client(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         // Load cloud configuration
-        let config = CloudConfig::load_from_file(app_handle)
+        let config = CloudConfig::load_from_store(app_handle)
             .map_err(|e| format!("Failed to load cloud config: {}", e))?;
 
         // Update stored config
@@ -721,7 +721,7 @@ impl AppState {
     ) -> Result<(), String> {
         // Save to file
         config
-            .save_to_file(app_handle)
+            .save_to_store(app_handle)
             .map_err(|e| format!("Failed to save cloud config: {}", e))?;
 
         // Update stored config
