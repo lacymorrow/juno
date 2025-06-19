@@ -487,18 +487,15 @@ export default function OnboardingFlow({
     const permission = permissions[currentPermission];
 
     try {
-      // Open system settings for the specific permission
+      // Open system settings for the specific permission using native APIs
       let success = false;
 
       switch (permission.id) {
         case "accessibility":
-          success = await invoke(
-            "request_accessibility_permission_with_auto_redirect",
-            { autoOpenSettings: true }
-          );
+          success = await invoke("request_accessibility_permission_native");
           break;
         case "screen-recording":
-          success = await invoke("request_screen_recording_permission");
+          success = await invoke("request_screen_recording_permission_native");
           break;
         case "input-monitoring":
           success = await invoke("request_input_monitoring_permission");
