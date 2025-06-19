@@ -20,6 +20,7 @@ pub mod floating_bar;
 pub mod floating_panel;
 pub mod keyboard;
 pub mod mouse;
+pub mod native_permissions;
 pub mod permissions;
 pub mod providers;
 pub mod shell;
