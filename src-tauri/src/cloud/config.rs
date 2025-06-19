@@ -192,21 +192,6 @@ impl CloudConfig {
         Ok(())
     }
 
-    /// Load configuration from file, creating default if not exists
-    /// DEPRECATED: Use load_from_store() instead. Kept for backwards compatibility during migration.
-    pub fn load_from_file(app_handle: &tauri::AppHandle) -> Result<Self, CloudError> {
-        // Attempt to migrate from old file-based config to new store-based config
-        info!("Attempting to load legacy cloud config file for migration");
-        Self::load_from_store(app_handle)
-    }
-
-    /// Save configuration to file
-    /// DEPRECATED: Use save_to_store() instead. Kept for backwards compatibility during migration.
-    pub fn save_to_file(&self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
-        // Redirect to store-based saving
-        self.save_to_store(app_handle)
-    }
-
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), CloudError> {
         if self.enabled {

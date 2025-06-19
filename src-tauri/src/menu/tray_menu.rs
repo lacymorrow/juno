@@ -10,7 +10,7 @@ use tauri::{
     menu::{MenuBuilder, MenuItemBuilder}
 };
 use tracing::{info, error};
-use crate::constants::{tray_menu_ids, events};
+use crate::constants::{menus::tray_menu_ids, events};
 use crate::state::AppState;
 
 
