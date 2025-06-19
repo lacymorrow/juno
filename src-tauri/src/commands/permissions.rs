@@ -342,6 +342,65 @@ pub async fn request_screen_recording_permission_native() -> Result<bool, String
     }
 }
 
+/// Request input monitoring permissions using native APIs - NO password prompts
+#[tauri::command]
+pub async fn request_input_monitoring_permission_native() -> Result<bool, String> {
+    info!("Requesting input monitoring permissions using native APIs");
+
+    #[cfg(target_os = "macos")]
+    {
+        // First check current status
+        match NativePermissionChecker::check_input_monitoring_permission() {
+            Ok(true) => {
+                info!("Input monitoring permissions already granted");
+                Ok(true)
+            }
+            Ok(false) => {
+                info!("Requesting input monitoring permissions with native prompt");
+
+                // Trigger native permission request - no admin privileges needed
+                match NativePermissionChecker::request_input_monitoring_permission() {
+                    Ok(()) => {
+                        info!("Input monitoring permission request triggered successfully");
+
+                        // Wait a moment and check again
+                        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::PERMISSION_CHECK_DELAY_MS)).await;
+
+                        match NativePermissionChecker::check_input_monitoring_permission() {
+                            Ok(granted) => {
+                                if granted {
+                                    info!("Input monitoring permissions now granted");
+                                } else {
+                                    info!("Input monitoring permissions still not granted - user needs to manually enable in System Settings");
+                                }
+                                Ok(granted)
+                            }
+                            Err(e) => {
+                                error!("Error checking input monitoring permissions after request: {}", e);
+                                Ok(false)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error requesting input monitoring permissions: {}", e);
+                        Err(format!("Failed to request input monitoring permissions: {}", e))
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error checking input monitoring permissions: {}", e);
+                Err(format!("Failed to check input monitoring permissions: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        warn!("Input monitoring permissions are only available on macOS");
+        Ok(true) // Return true on non-macOS platforms
+    }
+}
+
 /// Request accessibility permissions with system prompt - LEGACY VERSION
 #[tauri::command]
 pub async fn request_accessibility_permission() -> Result<bool, String> {

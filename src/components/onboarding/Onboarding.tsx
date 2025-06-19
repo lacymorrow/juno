@@ -30,6 +30,13 @@ const permissions = [
     required: true,
   },
   {
+    id: "microphone",
+    title: "Microphone",
+    description: "Allow Juno to use voice features",
+    icon: <Sparkles className="w-5 h-5" />,
+    required: false,
+  },
+  {
     id: "input-monitoring",
     title: "Input Monitoring",
     description: "Allow Juno to monitor keyboard and mouse",
@@ -372,6 +379,8 @@ function PermissionDialog({
                   "This will allow Juno to automate tasks by controlling other applications and system functions."}
                 {permission.title === "Screen Recording" &&
                   "This will allow Juno to see what's on your screen to provide contextual assistance."}
+                {permission.title === "Microphone" &&
+                  "This will allow Juno to use voice features like dictation and voice commands."}
                 {permission.title === "Input Monitoring" &&
                   "This will allow Juno to monitor keyboard and mouse input for advanced automation features."}
               </p>
@@ -410,6 +419,11 @@ export default function OnboardingFlow({
   permissionsAlreadyGranted = false,
   isDevelopmentMode = false,
 }: OnboardingFlowProps) {
+  console.log("OnboardingFlow: Component rendering with props:", {
+    permissionsAlreadyGranted,
+    isDevelopmentMode,
+  });
+
   const [currentStep, setCurrentStep] = useState(0);
   const [shortcutPressed, setShortcutPressed] = useState(false);
   const [_backendShortcutsWorking, setBackendShortcutsWorking] =
@@ -418,6 +432,15 @@ export default function OnboardingFlow({
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
   const [currentPermission, setCurrentPermission] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+
+  console.log(
+    "OnboardingFlow: State - currentStep:",
+    currentStep,
+    "isComplete:",
+    isComplete,
+    "shortcutPressed:",
+    shortcutPressed
+  );
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -460,6 +483,11 @@ export default function OnboardingFlow({
     isDevelopmentMode
   );
 
+  console.log(
+    "OnboardingFlow: Generated onboarding steps:",
+    onboardingSteps.map((step) => ({ id: step.id, title: step.title }))
+  );
+
   const handleNext = () => {
     // Block navigation from shortcut step if shortcut hasn't been pressed
     const currentStepData = onboardingSteps[currentStep];
@@ -490,6 +518,8 @@ export default function OnboardingFlow({
       // Open system settings for the specific permission using native APIs
       let success = false;
 
+      console.log(`Requesting permission: ${permission.id}`);
+
       switch (permission.id) {
         case "accessibility":
           success = await invoke("request_accessibility_permission_native");
@@ -497,18 +527,32 @@ export default function OnboardingFlow({
         case "screen-recording":
           success = await invoke("request_screen_recording_permission_native");
           break;
+        case "microphone":
+          success = await invoke("request_microphone_permission_native");
+          break;
         case "input-monitoring":
-          success = await invoke("request_input_monitoring_permission");
+          success = await invoke("request_input_monitoring_permission_native");
           break;
         default:
           success = false;
       }
 
+      console.log(`Permission ${permission.id} request result:`, success);
+
+      // Add a delay to ensure System Settings has time to open
+      if (!success) {
+        console.log(
+          `System Settings should now be open for ${permission.title}`
+        );
+        // Give System Settings time to open and for user to interact
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
       if (success) {
-        // No need to update grantedPermissions as the permission is granted
+        console.log(`Permission ${permission.id} was already granted`);
       }
     } catch (error) {
-      console.error("Error requesting permission:", error);
+      console.error(`Error requesting permission ${permission.id}:`, error);
     }
 
     // Move to next permission or complete
@@ -543,7 +587,8 @@ export default function OnboardingFlow({
     // Skip just the current step and move to the next one
     if (currentStep < onboardingSteps.length - 1) {
       // Reset step-specific states when skipping
-      if (step.id === "shortcut") {
+      const currentStepData = onboardingSteps[currentStep];
+      if (currentStepData?.id === "shortcut") {
         setShortcutPressed(true); // Allow progression if they come back
       }
       // Remove the cancel step logic since it's no longer interactive
