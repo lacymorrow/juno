@@ -1005,36 +1005,31 @@ pub async fn request_microphone_permission() -> Result<bool, String> {
 async fn trigger_microphone_permission_dialog() -> bool {
     #[cfg(target_os = "macos")]
     {
+        // Use our existing voice transcription availability test instead of osascript
+        info!("Testing microphone access through voice transcription initialization");
+        
+        let voice_available = test_voice_transcription_availability().await;
+        if voice_available {
+            info!("Voice transcription available - microphone access confirmed");
+            return true;
+        }
 
-        // Try to trigger microphone permission using a simple audio recording test
-        // This should cause macOS to show the permission dialog if not already granted
+        // Fallback to simple system profiler check (no permission prompts)
         let result = tokio::time::timeout(Duration::from_millis(timeouts::SYSTEM_SETTINGS_OPERATION_TIMEOUT_MS), async {
-            // Use osascript to trigger microphone access which should show the permission dialog
-            let output = Command::new("osascript")
-                .args(&[
-                    "-e",
-                    r#"
-                    tell application "System Events"
-                        try
-                            set micStatus to microphone access allowed
-                            return micStatus
-                        on error
-                            -- This error might trigger the permission dialog
-                            return false
-                        end try
-                    end tell
-                    "#
-                ])
+            let output = Command::new("system_profiler")
+                .args(&["SPAudioDataType", "-json"])
                 .output();
 
             match output {
                 Ok(result) => {
                     let output_str = String::from_utf8_lossy(&result.stdout);
-                    info!("Microphone permission trigger result: {}", output_str.trim());
-                    true
+                    let has_audio_input = output_str.contains("Audio") && 
+                                         (output_str.contains("Input") || output_str.contains("Built-in"));
+                    info!("System audio device check result: {}", has_audio_input);
+                    has_audio_input
                 }
                 Err(e) => {
-                    warn!("Failed to trigger microphone permission dialog: {}", e);
+                    warn!("Failed to check audio devices via system_profiler: {}", e);
                     false
                 }
             }
@@ -1043,7 +1038,7 @@ async fn trigger_microphone_permission_dialog() -> bool {
         match result {
             Ok(success) => success,
             Err(_) => {
-                warn!("Microphone permission dialog trigger timed out");
+                warn!("Audio device check timed out");
                 false
             }
         }
@@ -1438,85 +1433,8 @@ async fn test_voice_transcription_availability() -> bool {
 fn test_applescript_microphone_access() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        // Try multiple AppleScript approaches for better reliability
-        let approaches = vec![
-            // Approach 1: Direct microphone access check
-            r#"
-                tell application "System Events"
-                    try
-                        set micPermission to (microphone access allowed)
-                        return micPermission as string
-                    on error errorMessage
-                        return "error: " & errorMessage
-                    end try
-                end tell
-            "#,
-            // Approach 2: Try to access microphone service directly
-            r#"
-                try
-                    set micPermission to (do shell script "system_profiler SPAudioDataType | grep -i 'Built-in Microphone\\|Input'" with administrator privileges)
-                    if micPermission contains "Built-in" then
-                        return "true"
-                    else
-                        return "false"
-                    end if
-                on error
-                    return "error: unable to check microphone access"
-                end try
-            "#,
-            // Approach 3: Check if we can query audio units
-            r#"
-                tell application "System Events"
-                    try
-                        -- Try to get audio input devices
-                        set audioDevices to (do shell script "system_profiler SPAudioDataType -json | grep -i 'input'")
-                        if audioDevices contains "Input" then
-                            return "true"
-                        else
-                            return "false"
-                        end if
-                    on error errorMessage
-                        return "error: " & errorMessage
-                    end try
-                end tell
-            "#,
-        ];
-
-        for (i, script) in approaches.iter().enumerate() {
-            debug!("Trying AppleScript approach {} for microphone detection", i + 1);
-
-            let output = Command::new("osascript")
-                .args(&["-e", script])
-                .output();
-
-            match output {
-                Ok(output) => {
-                    let result = String::from_utf8_lossy(&output.stdout);
-                    let result_clean = result.trim();
-
-                    if result_clean.starts_with("error:") {
-                        debug!("AppleScript approach {} returned error: {}", i + 1, result_clean);
-                        continue; // Try next approach
-                    }
-
-                    let granted = result_clean == "true" || result_clean == "authorized" || result_clean == "1";
-                    if granted {
-                        info!("AppleScript approach {} succeeded: microphone access confirmed", i + 1);
-                        return Ok(true);
-                    } else if result_clean == "false" {
-                        debug!("AppleScript approach {} returned false, trying next approach", i + 1);
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    warn!("AppleScript approach {} failed to execute: {}", i + 1, e);
-                    continue;
-                }
-            }
-        }
-
-        // If all approaches failed, try a system-level check
-        debug!("All AppleScript approaches failed, trying system-level microphone check");
+        // Prioritize system-level check (no permission prompts)
+        debug!("Using system-level microphone check to avoid permission prompts");
         match Command::new("system_profiler")
             .args(&["SPAudioDataType"])
             .output()
@@ -1529,13 +1447,53 @@ fn test_applescript_microphone_access() -> Result<bool, String> {
                 }
             }
             Err(e) => {
-                warn!("System profiler microphone check failed: {}", e);
+                debug!("System profiler microphone check failed: {}", e);
             }
         }
 
-        // If everything fails, return false but note it's likely a false negative
-        warn!("All microphone detection methods failed - this is likely a false negative");
-        Err("All microphone detection methods failed - this may be a false negative due to macOS security restrictions".to_string())
+        // Only use AppleScript as last resort and with single approach
+        debug!("System check inconclusive, trying single AppleScript approach");
+        
+        let script = r#"
+            tell application "System Events"
+                try
+                    set micPermission to (microphone access allowed)
+                    return micPermission as string
+                on error
+                    return "false"
+                end try
+            end tell
+        "#;
+
+        let output = Command::new("osascript")
+            .args(&["-e", script])
+            .output();
+
+        match output {
+            Ok(output) => {
+                let result = String::from_utf8_lossy(&output.stdout);
+                let result_clean = result.trim();
+
+                if result_clean.starts_with("error:") {
+                    debug!("AppleScript returned error: {}", result_clean);
+                    return Err("AppleScript permission check failed".to_string());
+                }
+
+                let granted = result_clean == "true" || result_clean == "authorized" || result_clean == "1";
+                if granted {
+                    info!("AppleScript confirmed microphone access");
+                    Ok(true)
+                } else {
+                    info!("AppleScript reports no microphone access - this may be a false negative");
+                    // Be optimistic since macOS security often gives false negatives
+                    Ok(false)
+                }
+            }
+            Err(e) => {
+                warn!("AppleScript execution failed: {}", e);
+                Err(format!("AppleScript microphone check failed: {}", e))
+            }
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
