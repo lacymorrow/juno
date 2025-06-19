@@ -124,24 +124,24 @@ impl PromptManager {
             .unwrap_or_else(|_| DefaultPrompts::orchestrator_personality().content)
     }
 
-    /// Get specialist prompt for delegation system
+    /// Get specialist prompt for delegation system (now uses expert prompts)
     pub fn get_specialist_prompt(&self, agent_type: &str) -> String {
         let prompt_type = match agent_type {
-            "browser" => PromptType::BrowserSpecialist,
-            "desktop" => PromptType::DesktopSpecialist,
-            "file" => PromptType::FileSpecialist,
+            "browser" => PromptType::BrowserExpert,
+            "desktop" => PromptType::DesktopExpert,
+            "file" => PromptType::FileExpert,
             _ => {
-                warn!("Unknown specialist agent type: {}. Using file specialist.", agent_type);
-                PromptType::FileSpecialist
+                warn!("Unknown specialist agent type: {}. Using file expert.", agent_type);
+                PromptType::FileExpert
             }
         };
 
         self.get_prompt(prompt_type, None)
             .unwrap_or_else(|_| {
                 match agent_type {
-                    "browser" => DefaultPrompts::browser_specialist().content,
-                    "desktop" => DefaultPrompts::desktop_specialist().content,
-                    _ => DefaultPrompts::file_specialist().content,
+                    "browser" => DefaultPrompts::browser_expert().content,
+                    "desktop" => DefaultPrompts::desktop_expert().content,
+                    _ => DefaultPrompts::file_expert().content,
                 }
             })
     }
@@ -154,6 +154,7 @@ impl PromptManager {
             "coding_expert" => PromptType::CodingExpert,
             "desktop_expert" => PromptType::DesktopExpert,
             "general_expert" => PromptType::GeneralExpert,
+            "file_expert" => PromptType::FileExpert,
             _ => {
                 warn!("Unknown expert agent type: {}. Using general expert.", agent_type);
                 PromptType::GeneralExpert
