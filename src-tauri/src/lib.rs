@@ -734,7 +734,14 @@ pub fn run() {
             // --- Old bar-state-changed listener removed - now handled by floating bar manager ---
 
             // --- Platform-Specific Setup ---
+            #[cfg(target_os = "macos")]
             platform::apply_macos_setup(&app_handle);
+            
+            #[cfg(target_os = "linux")]
+            platform::apply_linux_setup(&app_handle);
+            
+            #[cfg(target_os = "windows")]
+            platform::apply_windows_setup(&app_handle);
             // --- End Platform-Specific Setup ---
 
             // --- Setup All Event Listeners ---
