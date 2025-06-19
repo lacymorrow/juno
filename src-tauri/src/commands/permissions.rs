@@ -548,7 +548,7 @@ pub async fn start_permissions_monitoring(app: AppHandle) -> Result<(), String> 
                     }
 
                     debug!("Checking permissions status during monitoring");
-                    match check_permissions_status(app_clone.clone()).await {
+                    match check_permissions_status_native(app_clone.clone()).await {
                         Ok(current_state) => {
                             // Check if state has changed
                             let state_changed = match &last_state {

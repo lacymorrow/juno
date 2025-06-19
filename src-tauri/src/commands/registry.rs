@@ -155,6 +155,7 @@ macro_rules! generate_invoke_handler {
 
             // Permissions Commands - Legacy (May Show Password Prompts)
             check_permissions_status,
+        check_permissions_status_native,
             check_permissions_status_with_auto_redirect,
             request_accessibility_permission,
             request_screen_recording_permission,
