@@ -207,9 +207,9 @@ impl FloatingBarManager {
         // Start expansion
         self.set_state(BarState::Expanding).await;
 
-        // After animation, transition to input
+        // After animation, transition to input using safe spawning
         let app_handle = self.app_handle.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
@@ -246,7 +246,7 @@ impl FloatingBarManager {
 
                 // After animation, transition to input (if no other transitions happened)
                 let app_handle = self.app_handle.clone();
-                tauri::async_runtime::spawn(async move {
+                safe_spawn_async_task(move || async move {
                     sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
@@ -286,7 +286,7 @@ impl FloatingBarManager {
 
             // After animation, return to default (if no other transitions happened)
             let app_handle = self.app_handle.clone();
-            tauri::async_runtime::spawn(async move {
+            safe_spawn_async_task(move || async move {
                 sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                 if let Some(manager) = get_bar_manager(&app_handle).await {
                     let mut manager = manager.lock().await;
@@ -336,7 +336,7 @@ impl FloatingBarManager {
         // Transition directly to loading without shrinking
         let app_handle = self.app_handle.clone();
         let query_for_agent = query.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             sleep(Duration::from_millis(timeouts::UI_SLIDE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
@@ -347,9 +347,9 @@ impl FloatingBarManager {
                     manager.set_state(BarState::Loading).await;
                     manager.current_transition_id = None;
 
-                    // Trigger the AI agent
+                    // Trigger the AI agent using safe spawning
                     let app_handle_for_agent = app_handle.clone();
-                    tauri::async_runtime::spawn(async move {
+                    safe_spawn_async_task(move || async move {
                         let app_handle_clone = app_handle_for_agent.clone();
                         let state = app_handle_for_agent.state::<crate::state::AppState>();
                         if let Err(e) = crate::anthropic::submit_query(query_for_agent, state, app_handle_clone).await {
@@ -392,7 +392,7 @@ impl FloatingBarManager {
                 // Schedule completion state transition without recursive manager access
                 let app_handle = self.app_handle.clone();
                 let transition_id_clone = transition_id.clone();
-                tauri::async_runtime::spawn(async move {
+                safe_spawn_async_task(move || async move {
                     sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     // Emit event to complete transition instead of direct manager access
                     let _ = app_handle.emit("floating-bar-complete-transition", transition_id_clone);
@@ -411,7 +411,7 @@ impl FloatingBarManager {
                 // Schedule error state cleanup without recursive manager access
                 let app_handle = self.app_handle.clone();
                 let transition_id_clone = transition_id.clone();
-                tauri::async_runtime::spawn(async move {
+                safe_spawn_async_task(move || async move {
                     sleep(Duration::from_millis(timeouts::UI_NOTIFICATION_DISPLAY_MS)).await;
                     // Emit event to clear error state instead of direct manager access
                     let _ = app_handle.emit("floating-bar-clear-error", transition_id_clone);
@@ -594,77 +594,45 @@ pub async fn initialize_bar_manager(app_handle: AppHandle) {
     setup_agent_event_listeners(app_handle, manager).await;
 }
 
+// Import the safe async spawning utility
+use crate::utils::async_runtime::safe_spawn_async_task;
+
 // Set up event listeners for agent status changes
 async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex<FloatingBarManager>>) {
-    // Listen for agent-transcription-start
-    let manager_clone = manager.clone();
-    app_handle.listen("agent-transcription-start", move |_event| {
-        let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut manager = manager.lock().await;
-            if let Err(e) = manager.handle_agent_started().await {
-                error!("Failed to handle agent started: {}", e);
-            }
-        });
-    });
+    debug!("FloatingBarManager: Setting up agent event listeners");
 
-    // Listen for agent-stop
+    // Listen for delayed transitions with timeout protection
     let manager_clone = manager.clone();
-    app_handle.listen("agent-stop", move |_event| {
+    let app_handle_clone = app_handle.clone();
+    app_handle.listen("floating-bar-delayed-transition", move |event| {
         let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut manager = manager.lock().await;
-            if let Err(e) = manager.handle_agent_stopped().await {
-                error!("Failed to handle agent stopped: {}", e);
-            }
-        });
-    });
+        let app_handle = app_handle_clone.clone();
 
-    // Listen for agent-cancel
-    let manager_clone = manager.clone();
-    app_handle.listen("agent-cancel", move |_event| {
-        let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
+        safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
-            if let Err(e) = manager.handle_agent_cancelled().await {
-                error!("Failed to handle agent cancelled: {}", e);
-            }
-        });
-    });
 
-    // Listen for agent-processing-complete to reset state
-    let manager_clone = manager.clone();
-    app_handle.listen("agent-processing-complete", move |_event| {
-        let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut manager = manager.lock().await;
-            if let Err(e) = manager.handle_agent_completion("Finished", None).await {
-                error!("Failed to handle agent completion: {}", e);
-            }
-        });
-    });
+            // Parse timeout and transition ID from event payload
+            let (timeout_ms, transition_id) = match serde_json::from_str::<serde_json::Value>(event.payload()) {
+                Ok(payload) => {
+                    let timeout = payload.get("timeout_ms")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(750) as u64;
+                    let id = payload.get("transition_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    (timeout, id)
+                }
+                Err(_) => (750, None), // Default values
+            };
 
-    // Listen for agent-processing-error to reset state
-    let manager_clone = manager.clone();
-    app_handle.listen("agent-processing-error", move |event| {
-        let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut manager = manager.lock().await;
-            let error_message = event.payload().to_string();
-            if let Err(e) = manager.handle_agent_completion("Failed", Some(error_message)).await {
-                error!("Failed to handle agent error: {}", e);
-            }
-        });
-    });
+            // Only proceed if this is still the active transition
+            if manager.current_transition_id.as_ref() == transition_id.as_ref() {
+                sleep(Duration::from_millis(timeout_ms)).await;
 
-    // Listen for agent-stopping to reset state
-    let manager_clone = manager.clone();
-    app_handle.listen("agent-stopping", move |_event| {
-        let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut manager = manager.lock().await;
-            if let Err(e) = manager.handle_agent_stopped().await {
-                error!("Failed to handle agent stopping: {}", e);
+                // Double-check the transition ID after the delay
+                if manager.current_transition_id.as_ref() == transition_id.as_ref() {
+                    manager.set_state(BarState::Input).await;
+                }
             }
         });
     });
@@ -673,7 +641,8 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("voice-transcription:final-result", move |event| {
         let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
+
+        safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
 
             // Parse the final result to extract query text
@@ -693,11 +662,12 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
         });
     });
 
-        // Listen for error state cleanup
+    // Listen for error state cleanup
     let manager_clone = manager.clone();
     app_handle.listen("floating-bar-clear-error", move |event| {
         let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
+
+        safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
 
             // Parse transition ID from event payload
@@ -720,7 +690,8 @@ async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMu
     let manager_clone = manager.clone();
     app_handle.listen("floating-bar-complete-transition", move |event| {
         let manager = manager_clone.clone();
-        tauri::async_runtime::spawn(async move {
+
+        safe_spawn_async_task(move || async move {
             let mut manager = manager.lock().await;
 
             // Parse transition ID from event payload
