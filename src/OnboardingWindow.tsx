@@ -2,33 +2,56 @@ import OnboardingFlow from "@/components/onboarding/Onboarding";
 import { invoke } from "@tauri-apps/api/core";
 import { Window } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import { WINDOW_LABELS } from "@/lib/constants";
 
 export default function OnboardingWindow() {
+  console.log("OnboardingWindow: Component rendering/re-rendering");
+
   const [permissionsGranted, setPermissionsGranted] = useState(false);
   const [permissionsChecked, setPermissionsChecked] = useState(false);
   const [isDevelopmentMode, setIsDevelopmentMode] = useState(false);
+
+  console.log(
+    "OnboardingWindow: State - permissionsGranted:",
+    permissionsGranted,
+    "permissionsChecked:",
+    permissionsChecked,
+    "isDevelopmentMode:",
+    isDevelopmentMode
+  );
 
   // Check permissions and onboarding info on mount
   useEffect(() => {
     const checkInitialData = async () => {
       try {
+        console.log("OnboardingWindow: Starting permission check...");
+
         // Check permissions using native APIs - eliminates all password prompts
         const permissionsResult = await invoke<{
           accessibility: { granted: boolean; required: boolean };
-          screenRecording: { granted: boolean; required: boolean };
+          screen_recording: { granted: boolean; required: boolean };
           microphone: { granted: boolean; required: boolean };
-          allGranted: boolean;
+          input_monitoring: { granted: boolean; required: boolean };
+          all_granted: boolean;
+          app_name: string;
         }>("check_permissions_status_native");
 
-        setPermissionsGranted(permissionsResult.allGranted);
+        console.log("OnboardingWindow: Permissions result:", permissionsResult);
+        setPermissionsGranted(permissionsResult.all_granted);
 
         // Get onboarding info including development mode status
         const onboardingInfo = await invoke<any>("get_onboarding_info");
+        console.log("OnboardingWindow: Onboarding info:", onboardingInfo);
         setIsDevelopmentMode(onboardingInfo?.is_development_mode || false);
 
+        console.log("OnboardingWindow: Setting permissions checked to true");
         setPermissionsChecked(true);
       } catch (error) {
-        console.error("Error checking initial data:", error);
+        console.error("OnboardingWindow: Error checking initial data:", error);
+        console.error(
+          "OnboardingWindow: Error details:",
+          JSON.stringify(error, null, 2)
+        );
         setPermissionsChecked(true);
       }
     };
@@ -43,7 +66,7 @@ export default function OnboardingWindow() {
       console.log("Onboarding completed via backend");
 
       // Notify main window of completion
-      const mainWindow = await Window.getByLabel("main");
+      const mainWindow = await Window.getByLabel(WINDOW_LABELS.MAIN);
       if (mainWindow) {
         await mainWindow.emit("onboarding-complete", {});
       }
@@ -68,7 +91,7 @@ export default function OnboardingWindow() {
       console.log("Onboarding skipped via backend");
 
       // Notify main window that onboarding was skipped
-      const mainWindow = await Window.getByLabel("main");
+      const mainWindow = await Window.getByLabel(WINDOW_LABELS.MAIN);
       if (mainWindow) {
         await mainWindow.emit("onboarding-skipped", {});
       }
@@ -86,7 +109,13 @@ export default function OnboardingWindow() {
     }
   };
 
+  console.log(
+    "OnboardingWindow: About to render, permissionsChecked:",
+    permissionsChecked
+  );
+
   if (!permissionsChecked) {
+    console.log("OnboardingWindow: Rendering loading state");
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
@@ -97,6 +126,7 @@ export default function OnboardingWindow() {
     );
   }
 
+  console.log("OnboardingWindow: Rendering OnboardingFlow component");
   return (
     <OnboardingFlow
       onComplete={handleOnboardingComplete}

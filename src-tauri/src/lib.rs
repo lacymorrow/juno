@@ -512,9 +512,13 @@ pub fn run() {
             check_permissions_status,
             check_permissions_status_native,
             request_accessibility_permission,
+            request_accessibility_permission_native,
             request_microphone_permission,
+            request_microphone_permission_native,
             request_screen_recording_permission,
+            request_screen_recording_permission_native,
             request_input_monitoring_permission,
+            request_input_monitoring_permission_native,
             test_microphone_functionality,
             open_system_preferences,
             start_permissions_monitoring,
@@ -740,7 +744,7 @@ pub fn run() {
 
             #[cfg(target_os = "linux")]
             platform::apply_linux_setup(&app_handle);
-          
+
             #[cfg(target_os = "windows")]
             platform::apply_windows_setup(&app_handle);
             // --- End Platform-Specific Setup ---

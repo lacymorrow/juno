@@ -85,7 +85,50 @@ pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
     // Save the store
     store.save().map_err(|e| e.to_string())?;
 
-    info!("Onboarding reset");
+    // Reset permissions state so the permissions flow can be shown again during onboarding
+    let app_state = app.state::<crate::state::AppState>();
+
+    // Clear the permissions state in the app state
+    app_state.update_permissions_state(crate::commands::permissions::PermissionsState {
+        accessibility: crate::commands::permissions::PermissionStatus {
+            permission_type: "accessibility".to_string(),
+            granted: false,
+            required: true,
+            description: "Accessibility permission needs to be rechecked".to_string(),
+            instructions: "Grant accessibility permission during onboarding".to_string(),
+        },
+        screen_recording: crate::commands::permissions::PermissionStatus {
+            permission_type: "screen_recording".to_string(),
+            granted: false,
+            required: true,
+            description: "Screen recording permission needs to be rechecked".to_string(),
+            instructions: "Grant screen recording permission during onboarding".to_string(),
+        },
+        microphone: crate::commands::permissions::PermissionStatus {
+            permission_type: "microphone".to_string(),
+            granted: false,
+            required: false,
+            description: "Microphone permission needs to be rechecked".to_string(),
+            instructions: "Grant microphone permission if needed".to_string(),
+        },
+        input_monitoring: crate::commands::permissions::PermissionStatus {
+            permission_type: "input_monitoring".to_string(),
+            granted: false,
+            required: true,
+            description: "Input monitoring permission needs to be rechecked".to_string(),
+            instructions: "Grant input monitoring permission during onboarding".to_string(),
+        },
+        all_granted: false,
+        app_name: app.package_info().name.clone(),
+    }).await;
+
+    // Mark permissions as not checked so they will be re-evaluated
+    // Reset the permissions checked flag
+    if let Ok(mut checked_guard) = app_state.permissions_checked.lock() {
+        *checked_guard = false;
+    }
+
+    info!("Onboarding reset - permissions state also cleared for fresh onboarding experience");
     Ok(())
 }
 
