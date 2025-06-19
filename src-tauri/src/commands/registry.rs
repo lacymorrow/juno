@@ -152,6 +152,7 @@ macro_rules! generate_invoke_handler {
             request_accessibility_permission_native,
             request_microphone_permission_native,
             request_screen_recording_permission_native,
+            request_input_monitoring_permission_native,
 
             // Permissions Commands - Legacy (May Show Password Prompts)
             check_permissions_status,

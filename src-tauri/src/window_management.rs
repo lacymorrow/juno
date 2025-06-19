@@ -6,7 +6,7 @@
 
 use tauri::{AppHandle, Manager, Emitter, WebviewUrl, WebviewWindowBuilder};
 use tracing::{info, warn, error};
-use crate::constants;
+use crate::constants::{self, ui::window_labels};
 
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
@@ -27,46 +27,46 @@ pub struct WindowConfig {
 }
 
 impl WindowConfig {
-    /// Create configuration for settings window
+    /// Create configuration for settings window from Tauri config
     pub fn settings() -> Self {
         Self {
-            label: "settings".to_string(),
+            label: window_labels::SETTINGS.to_string(),
             title: "Juno Settings".to_string(),
             url: "/settings".to_string(),
-            width: 800.0,
+            width: 700.0,
             height: 600.0,
-            min_width: 700.0,
-            min_height: 500.0,
+            min_width: 420.0,
+            min_height: 300.0,
             resizable: true,
             center: true,
             transparent_title_bar: true,
         }
     }
 
-    /// Create configuration for onboarding window
+    /// Create configuration for onboarding window from Tauri config
     pub fn onboarding() -> Self {
         Self {
-            label: "onboarding".to_string(),
+            label: window_labels::ONBOARDING.to_string(),
             title: "Welcome to Juno".to_string(),
             url: "/onboarding".to_string(),
-            width: 900.0,
-            height: 700.0,
-            min_width: 800.0,
-            min_height: 600.0,
-            resizable: true,
+            width: 440.0,  // Match tauri.conf.json
+            height: 700.0,  // Match tauri.conf.json
+            min_width: 200.0,  // Match tauri.conf.json
+            min_height: 300.0,  // Match tauri.conf.json
+            resizable: false,  // Match tauri.conf.json
             center: true,
-            transparent_title_bar: true,
+            transparent_title_bar: false,  // Match tauri.conf.json
         }
     }
 
-    /// Create configuration for main window
+    /// Create configuration for main window from Tauri config
     pub fn main() -> Self {
         Self {
-            label: "main".to_string(),
+            label: window_labels::MAIN.to_string(),
             title: "Juno".to_string(),
             url: "/".to_string(),
-            width: 800.0,
-            height: 600.0,
+            width: 600.0,  // Match tauri.conf.json
+            height: 700.0,  // Match tauri.conf.json
             min_width: 400.0,
             min_height: 300.0,
             resizable: true,
@@ -82,16 +82,25 @@ pub struct WindowManager;
 impl WindowManager {
     /// Create or show a window with the given configuration
     pub async fn create_or_show_window(app: &AppHandle, config: WindowConfig) -> Result<(), String> {
-        // Check if window already exists
+        // Check if window already exists and is valid
         if let Some(existing_window) = app.get_webview_window(&config.label) {
-            // If it exists, just show and focus it
-            existing_window.show().map_err(|e| e.to_string())?;
-            existing_window.set_focus().map_err(|e| e.to_string())?;
-            if config.label == "main" {
-                existing_window.unminimize().map_err(|e| e.to_string())?;
+            // Check if window is actually valid (not destroyed)
+            match existing_window.is_visible() {
+                Ok(_) => {
+                    // Window is valid, show and focus it
+                    existing_window.show().map_err(|e| e.to_string())?;
+                    existing_window.set_focus().map_err(|e| e.to_string())?;
+                    if config.label == window_labels::MAIN {
+                        existing_window.unminimize().map_err(|e| e.to_string())?;
+                    }
+                    info!("Showed existing {} window", config.label);
+                    return Ok(());
+                }
+                Err(_) => {
+                    // Window exists in registry but is invalid/destroyed, continue to create new one
+                    info!("Existing {} window is invalid, creating new one", config.label);
+                }
             }
-            info!("Showed existing {} window", config.label);
-            return Ok(());
         }
 
         // Create new window if it doesn't exist
@@ -104,15 +113,20 @@ impl WindowManager {
         .inner_size(config.width, config.height)
         .min_inner_size(config.min_width, config.min_height)
         .resizable(config.resizable)
-        .visible(false); // Start hidden, show after setup
+        .visible(true); // Start visible to avoid display issues
 
         if config.center {
             builder = builder.center();
         }
 
-        let window = builder.build().map_err(|e| e.to_string())?;
+        let window = builder.build().map_err(|e| {
+            error!("Failed to build {} window: {}", config.label, e);
+            e.to_string()
+        })?;
 
-        // Apply macOS-specific styling
+        info!("Successfully built {} window", config.label);
+
+        // Apply macOS-specific styling after window is created
         #[cfg(target_os = "macos")]
         if config.transparent_title_bar {
             if let Err(e) = window.set_title_bar_style(TitleBarStyle::Transparent) {
@@ -120,9 +134,10 @@ impl WindowManager {
             }
         }
 
-        // Show the window
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
+        // Ensure window is visible and focused
+        if let Err(e) = window.set_focus() {
+            warn!("Failed to set focus for {} window: {}", config.label, e);
+        }
 
         info!("Successfully created and showed {} window", config.label);
         Ok(())
@@ -237,7 +252,7 @@ pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {
 /// Close the native settings window
 #[tauri::command]
 pub async fn close_settings_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::hide_window(&app, "settings").await
+    WindowManager::hide_window(&app, window_labels::SETTINGS).await
 }
 
 /// Open the native onboarding window
@@ -249,7 +264,7 @@ pub async fn open_onboarding_window(app: AppHandle) -> Result<(), String> {
 /// Close the native onboarding window
 #[tauri::command]
 pub async fn close_onboarding_window(app: AppHandle) -> Result<(), String> {
-    WindowManager::hide_window(&app, "onboarding").await
+    WindowManager::close_window(&app, window_labels::ONBOARDING).await
 }
 
 /// Open/recreate the main window
@@ -272,18 +287,19 @@ mod tests {
     #[test]
     fn test_window_config_creation() {
         let settings_config = WindowConfig::settings();
-        assert_eq!(settings_config.label, "settings");
+        assert_eq!(settings_config.label, window_labels::SETTINGS);
         assert_eq!(settings_config.title, "Juno Settings");
-        assert_eq!(settings_config.width, 800.0);
+        assert_eq!(settings_config.width, 700.0);
         assert!(settings_config.resizable);
 
         let onboarding_config = WindowConfig::onboarding();
-        assert_eq!(onboarding_config.label, "onboarding");
+        assert_eq!(onboarding_config.label, window_labels::ONBOARDING);
         assert_eq!(onboarding_config.title, "Welcome to Juno");
-        assert_eq!(onboarding_config.width, 900.0);
+        assert_eq!(onboarding_config.width, 440.0);  // Match tauri.conf.json
+        assert!(!onboarding_config.resizable);  // Match tauri.conf.json
 
         let main_config = WindowConfig::main();
-        assert_eq!(main_config.label, "main");
+        assert_eq!(main_config.label, window_labels::MAIN);
         assert_eq!(main_config.title, "Juno");
         assert!(!main_config.center); // Main window should not auto-center
     }
