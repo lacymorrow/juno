@@ -147,8 +147,15 @@ macro_rules! generate_invoke_handler {
             get_agent_mode,
             set_agent_mode,
 
-            // Permissions Commands
+            // Permissions Commands - Native (No Password Prompts)
+            check_permissions_status_native,
+            request_accessibility_permission_native,
+            request_microphone_permission_native,
+            request_screen_recording_permission_native,
+
+            // Permissions Commands - Legacy (May Show Password Prompts)
             check_permissions_status,
+        check_permissions_status_native,
             check_permissions_status_with_auto_redirect,
             request_accessibility_permission,
             request_screen_recording_permission,

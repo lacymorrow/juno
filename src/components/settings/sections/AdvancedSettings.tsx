@@ -63,7 +63,10 @@ export default function AdvancedSettings({
   const loadPermissionsStatus = async () => {
     setPermissionsLoading(true);
     try {
-      const result = await invoke<PermissionsState>("get_permissions_status");
+      // Use native permission checking - eliminates all password prompts
+      const result = await invoke<PermissionsState>(
+        "check_permissions_status_native"
+      );
       setPermissionsState(result);
     } catch (error) {
       console.error("Failed to load permissions:", error);

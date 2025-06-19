@@ -510,6 +510,7 @@ pub fn run() {
             transition_dictation_state,
             // Permissions Commands
             check_permissions_status,
+            check_permissions_status_native,
             request_accessibility_permission,
             request_microphone_permission,
             request_screen_recording_permission,
@@ -736,10 +737,10 @@ pub fn run() {
             // --- Platform-Specific Setup ---
             #[cfg(target_os = "macos")]
             platform::apply_macos_setup(&app_handle);
-            
+
             #[cfg(target_os = "linux")]
             platform::apply_linux_setup(&app_handle);
-            
+          
             #[cfg(target_os = "windows")]
             platform::apply_windows_setup(&app_handle);
             // --- End Platform-Specific Setup ---
@@ -818,7 +819,7 @@ mod tests {
     #[tokio::test]
     async fn test_permission_check_does_not_crash() {
         // Test that permission checking never causes segfaults
-        use crate::commands::permissions::check_permissions_status;
+        use crate::commands::permissions::{check_permissions_status, check_permissions_status_native};
 
         // Mock app handle - this should be safe even without real permissions
         // In a real test environment, this would use a test AppHandle
