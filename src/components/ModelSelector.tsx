@@ -33,6 +33,21 @@ export function ModelSelector({
     );
   }
 
+  // If no models are available, show an error state
+  if (!currentProvider.model_info || currentProvider.model_info.length === 0) {
+    return (
+      <div className={`flex items-center gap-2 ${className}`}>
+        {variant === "full" && (
+          <div className="flex items-center gap-1">
+            <Brain size={14} className="text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Model:</span>
+          </div>
+        )}
+        <span className="text-xs text-red-500">No models available</span>
+      </div>
+    );
+  }
+
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       {variant === "full" && (

@@ -69,6 +69,7 @@ pub enum AlwaysListeningState {
 }
 
 pub struct AlwaysListeningController {
+    shared_whisper_context: Option<Arc<WhisperContext>>,
     model_path: String,
     is_active: bool,
     state: AlwaysListeningState,
@@ -89,7 +90,12 @@ impl AlwaysListeningController {
             return Err(Error::ModelNotFound(model_path_str.to_string()));
         }
 
+        // Load the Whisper model once at initialization
+        let whisper_context = WhisperContext::new_with_params(model_path_str, WhisperContextParameters::default())
+            .map_err(|e| Error::Whisper(format!("Failed to create WhisperContext: {:?}", e)))?;
+
         Ok(Self {
+            shared_whisper_context: Some(Arc::new(whisper_context)),
             model_path: model_path_str.to_string(),
             is_active: false,
             state: AlwaysListeningState::Monitoring,
@@ -118,7 +124,7 @@ impl AlwaysListeningController {
         self.state = AlwaysListeningState::Monitoring;
 
         let (control_tx, control_rx) = channel::<AlwaysListeningMessage>();
-        let model_path_for_thread = self.model_path.clone();
+        let shared_context = self.shared_whisper_context.as_ref().unwrap().clone();
         let app_handle_for_thread = app_handle.clone();
         let sensitivity = self.sensitivity;
         let wake_words = self.wake_words.clone();
@@ -126,7 +132,7 @@ impl AlwaysListeningController {
 
         let audio_thread_handle = thread::spawn(move || {
             Self::always_listening_worker(
-                model_path_for_thread,
+                shared_context,
                 app_handle_for_thread,
                 control_rx,
                 sensitivity,
@@ -142,28 +148,19 @@ impl AlwaysListeningController {
     }
 
     fn always_listening_worker<R: Runtime + 'static>(
-        model_path: String,
+        shared_whisper_context: Arc<WhisperContext>,
         app_handle: AppHandle<R>,
         control_rx: std::sync::mpsc::Receiver<AlwaysListeningMessage>,
         mut sensitivity: f32,
         mut wake_words: Vec<String>,
         last_activity: Arc<Mutex<Option<Instant>>>,
     ) {
-        info!("[AlwaysListening] Worker thread started");
+        info!("[AlwaysListening] Worker thread started with shared Whisper context (no model reload needed)");
 
-        // Initialize Whisper context
-        let whisper_context = match WhisperContext::new_with_params(&model_path, WhisperContextParameters::default()) {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                error!("Failed to create WhisperContext in always listening thread: {:?}", e);
-                return;
-            }
-        };
-
-        let mut whisper_state = match whisper_context.create_state() {
+        let mut whisper_state = match shared_whisper_context.create_state() {
             Ok(state) => state,
             Err(e) => {
-                error!("Failed to create WhisperState in always listening thread: {:?}", e);
+                error!("Failed to create WhisperState from shared context: {:?}", e);
                 return;
             }
         };
@@ -1076,11 +1073,11 @@ impl AlwaysListeningController {
     }
 
     pub fn test_whisper_model(&self) -> Result<serde_json::Value> {
-        info!("[AlwaysListening] Testing Whisper model at path: {}", self.model_path);
+        info!("[AlwaysListening] Testing shared Whisper model at path: {}", self.model_path);
 
-        // Test model loading
-        let whisper_context = WhisperContext::new_with_params(&self.model_path, WhisperContextParameters::default())
-            .map_err(|e| Error::Whisper(format!("Failed to load Whisper model: {:?}", e)))?;
+        // Use the shared context instead of loading a new one
+        let whisper_context = self.shared_whisper_context.as_ref()
+            .ok_or_else(|| Error::Whisper("Shared Whisper context not available".to_string()))?;
 
         let mut whisper_state = whisper_context.create_state()
             .map_err(|e| Error::Whisper(format!("Failed to create Whisper state: {:?}", e)))?;

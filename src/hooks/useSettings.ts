@@ -355,22 +355,31 @@ export function useSettings() {
 	}, [invokeCommand]);
 
 	const handleActiveProviderChange = useCallback(async (providerId: string) => {
-		await invokeCommand("set_active_provider", { providerId });
-		setActiveProvider(providerId);
+		try {
+			await invokeCommand("set_active_provider", { providerId });
+			setActiveProvider(providerId);
 
-		const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
-			providerId,
-		});
-		setProviderSettings(settings);
-		setFormData({
-			apiKey: settings.api_key || "",
-			model: settings.model || "",
-			maxTokens: settings.max_tokens?.toString() || "",
-			temperature: settings.temperature?.toString() || "",
-			systemPrompt: settings.system_prompt || "",
-		});
+			// Invalidate cache for fresh data
+			invalidateCache('activeProvider');
+			invalidateCache('providers');
 
-		toast.success(`Active AI provider set to: ${providerId}`);
+			const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
+				providerId,
+			});
+			setProviderSettings(settings);
+			setFormData({
+				apiKey: settings.api_key || "",
+				model: settings.model || "",
+				maxTokens: settings.max_tokens?.toString() || "",
+				temperature: settings.temperature?.toString() || "",
+				systemPrompt: settings.system_prompt || "",
+			});
+
+			toast.success(`Active AI provider set to: ${providerId}`);
+		} catch (error) {
+			console.error("Failed to change active provider:", error);
+			toast.error(`Failed to change provider: ${error}`);
+		}
 	}, [invokeCommand]);
 
 	const handleSaveProviderSettings = async () => {
