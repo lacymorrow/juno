@@ -227,7 +227,7 @@ use crate::commands::sound::{
 pub use anthropic::submit_query; // Re-export the submit_query command
 
 // Import dictation reset commands
-use crate::commands::dictation_reset::{force_reset_dictation_transcription, get_dictation_transcription_status};
+// Removed deprecated dictation_reset imports
 use crate::commands::dictation_state_manager::{
     force_reset_dictation_state,
     get_dictation_comprehensive_status,
@@ -503,9 +503,7 @@ pub fn run() {
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
             // Dictation Reset Commands (LEGACY)
-            force_reset_dictation_transcription,
-            get_dictation_transcription_status,
-            // New Dictation State Management Commands
+            // Dictation State Management Commands
             force_reset_dictation_state,
             get_dictation_comprehensive_status,
             update_dictation_component_state,

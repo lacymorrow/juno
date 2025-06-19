@@ -348,20 +348,6 @@ impl LocalToolProvider {
                 .unwrap_or(false)
     }
 
-    /// Deprecated: Registers a synchronous tool. Use register_async_tool instead.
-    #[deprecated(note = "Use register_async_tool for all tools going forward")]
-    pub async fn register_tool<F>(&mut self, definition: ToolDefinition, executor: F)
-    where
-        F: Fn(Value) -> Result<Value, String> + Send + Sync + 'static,
-    {
-        let async_executor = move |input: Value| {
-            // Wrap the synchronous function in an async block
-            let result = executor(input);
-            async move { result } // This future resolves immediately
-        };
-        self.register_async_tool(definition, async_executor).await;
-    }
-
     /// Get comprehensive error recovery statistics
     pub async fn get_recovery_stats(&self) -> Value {
         let stats = self.error_recovery_stats.lock().await;

@@ -65,15 +65,6 @@ impl PromptManager {
         Ok(manager)
     }
 
-    /// Load configuration from file system
-    /// DEPRECATED: Use load_from_store() instead. Kept for backwards compatibility during migration.
-    pub fn load() -> Result<Self, AgentError> {
-        // For backwards compatibility, return a default configuration
-        // This method should no longer be used in production code
-        warn!("DEPRECATED: PromptManager::load() called. Use load_from_store() instead.");
-        Ok(Self::new())
-    }
-
     /// Save configuration to Tauri store.
     /// Serializes current configuration to JSON and saves to store.
     /// Used by: Settings UI and prompt configuration updates.
@@ -92,15 +83,6 @@ impl PromptManager {
         })?;
 
         info!("Saved prompt configuration to store");
-        Ok(())
-    }
-
-    /// Save configuration to file system
-    /// DEPRECATED: Use save_config_to_store() instead. Kept for backwards compatibility during migration.
-    pub fn save_config(&self) -> Result<(), AgentError> {
-        // For backwards compatibility, do nothing
-        // This method should no longer be used in production code
-        warn!("DEPRECATED: PromptManager::save_config() called. Use save_config_to_store() instead.");
         Ok(())
     }
 

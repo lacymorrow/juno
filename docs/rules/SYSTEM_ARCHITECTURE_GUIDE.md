@@ -497,6 +497,60 @@ pub struct DeploymentConfig {
 - ✅ **Monitoring Integrated**: Real-time health monitoring
 - ✅ **Documentation Complete**: Comprehensive architecture documentation
 
+## 🧠 Agent Framework Architecture
+
+### Hierarchical Multi-Agent System ✅ PRODUCTION COMPLETE
+
+**Location**: Primary agents in `src-tauri/src/agent/` and `src-tauri/src/anthropic.rs`
+
+#### Agent Hierarchy
+
+```
+Orchestrator Agent (anthropic.rs)
+├── Browser Expert Agent
+├── Coding Expert Agent  
+├── Desktop Expert Agent
+└── General Expert Agent
+```
+
+#### Orchestrator Agent (`src-tauri/src/anthropic.rs`)
+
+**Central Intelligence Hub**:
+
+- **Personality-driven conversations** with memory persistence
+- **Task routing and delegation** to specialist agents
+- **Workflow orchestration** for complex multi-step tasks
+- **Context retention** across conversation sessions
+- **Streaming response coordination** with UI integration
+
+#### Specialist Agents
+
+**Domain Experts with Isolated Memory**:
+
+1. **Browser Expert**: Web automation, content extraction, form interactions
+2. **Coding Expert**: File operations, code analysis, development workflows
+3. **Desktop Expert**: System automation, window management, UI interaction
+4. **General Expert**: Flexible task handling and general assistance
+
+### ✅ **MODERN ARCHITECTURE - NO DEPRECATED CODE**
+
+**Clean New Application**: Since Juno is a new application built from the ground up, all deprecated and legacy code has been completely eliminated. Key architectural decisions:
+
+- ✅ **All configuration uses Tauri store** - No legacy file-based config
+- ✅ **Modern async patterns throughout** - No deprecated sync methods
+- ✅ **Proper error handling with Result types** - No `std::process::exit()` calls
+- ✅ **Type-safe state management** - No unsafe global state patterns
+- ✅ **Current API usage only** - No compatibility layers or migration code
+- ✅ **Clean tool registration** - All tools use modern async registration
+- ✅ **Store-based persistence** - Unified configuration and data storage
+
+**Benefits**:
+
+- **Performance**: No overhead from legacy compatibility
+- **Maintainability**: Clean codebase without technical debt
+- **Security**: Modern patterns with proper validation
+- **Reliability**: Type-safe patterns prevent runtime errors
+
 ---
 
 **The Juno AI Computer Use Agent represents a complete, production-ready implementation of advanced AI agent architecture with enterprise-grade capabilities and comprehensive integration patterns.**

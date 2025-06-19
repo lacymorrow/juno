@@ -165,75 +165,42 @@ impl HardwareMonitor {
 - ✅ Data validation and format checking
 - ✅ Dark mode support with consistent theming
 
-## 🔧 System Architecture
+## 🏗️ System Architecture
 
-### Tool Framework
+### Hierarchical Agent Framework ✅ PRODUCTION COMPLETE
 
-**Location**: `src-tauri/src/agent/tools/`
+**Multi-Agent Orchestration System**:
 
-#### Tool Categories
+1. **Orchestrator Agent** (`src-tauri/src/anthropic.rs`)
+   - Personality-driven conversation management
+   - Task routing and delegation
+   - Memory persistence and context retention
+   - Advanced workflow orchestration
 
-1. **Anthropic Computer Use**: 17 core computer interaction tools
-2. **Basic Tools**: File operations with enterprise security
-3. **Browser Tools**: Web automation and content manipulation
-4. **Timer Tools**: Task scheduling with context resumption
-5. **MCP Tools**: External tool integration framework
-6. **Self-Awareness Tools**: Development mode capabilities (debug only)
+2. **Specialist Agents** (Domain experts with isolated memory)
+   - **Browser Expert**: Web automation and interaction
+   - **Coding Expert**: File operations and development tasks
+   - **Desktop Expert**: System-level automation
+   - **General Expert**: Flexible task handling
 
-#### Tool Configuration System
+3. **Tool Framework** (`src-tauri/src/agent/tools/`)
+   - 13 specialized tool categories
+   - Lazy initialization and configuration management
+   - Security validation and audit logging
+   - MCP (Model Context Protocol) integration
 
-```rust
-pub struct ToolConfigManager {
-    configs: HashMap<String, ToolConfig>,
-    categories: HashMap<String, CategoryConfig>,
-    mcp_servers: HashMap<String, McpServerConfig>,
-}
-```
+### ✅ **CLEAN CODEBASE - DEPRECATED CODE ELIMINATED**
 
-**Management Features**:
+**All Legacy/Deprecated Code Removed**: Since this is a new application, all deprecated methods and legacy compatibility layers have been completely removed from the codebase. This includes:
 
-- ✅ Individual tool enable/disable
-- ✅ Category-level configuration
-- ✅ MCP server integration
-- ✅ Persistent storage
-- ✅ Validation and error handling
+- ✅ **Eliminated deprecated `PromptManager::load()` and `save_config()` methods** - All code now uses proper `load_from_store()` and `save_to_store()` methods
+- ✅ **Removed deprecated `ProviderConfig::load()` and `save()` methods** - Replaced with store-based configuration
+- ✅ **Deleted deprecated `CloudConfig::load_from_file()` and `save_to_file()` methods** - Now uses Tauri store exclusively
+- ✅ **Eliminated deprecated `dictation_reset` commands** - All functionality migrated to modern `dictation_state_manager`
+- ✅ **Removed deprecated tool registration methods** - All tools use async registration patterns
+- ✅ **Cleaned up legacy constants module** - Removed compatibility layers and duplicate exports
 
-### Memory Management
-
-**Advanced System**: Token-aware memory with intelligent optimization
-
-```rust
-pub struct AdvancedMemoryManager {
-    messages: Vec<Message>,
-    summaries: Vec<ConversationSummary>,
-    token_counter: TokenCounter,
-    config: MemoryConfig,
-    pruning_strategy: PruningStrategy,
-}
-```
-
-**Capabilities**:
-
-- ✅ Token estimation and automatic pruning
-- ✅ Conversation summarization for context preservation
-- ✅ Memory metrics and usage tracking
-- ✅ Orphaned tool call cleanup
-- ✅ Real-time status monitoring
-
-### State Management
-
-**Centralized Architecture**: Arc-based sharing with safe access patterns
-
-```rust
-pub struct AppState {
-    agent_runner: Arc<Mutex<Option<AgentRunner>>>,
-    orchestrator: Arc<Mutex<Option<OrchestralAgent>>>,
-    specialist_agents: HashMap<String, Arc<Mutex<dyn SpecialistAgent>>>,
-    memory_managers: HashMap<String, Arc<Mutex<dyn MemoryManager>>>,
-    tool_providers: Arc<ToolProviders>,
-    config: Arc<Mutex<AppConfig>>,
-}
-```
+**Result**: Clean, modern codebase with no technical debt from deprecated APIs or migration patterns. All functionality uses current, supported APIs with proper error handling and type safety.
 
 ## 📈 Performance & Metrics
 

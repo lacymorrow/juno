@@ -48,7 +48,7 @@ pub struct CloudClient {
 impl CloudClient {
     /// Create new cloud client
     pub async fn new(app_handle: AppHandle) -> Result<Self, CloudError> {
-        let config = CloudConfig::load_from_file(&app_handle)?;
+        let config = CloudConfig::load_from_store(&app_handle)?;
         let auth = DeviceAuth::new(config.clone());
         let security = CloudSecurity::new(config.clone(), auth.clone());
         let command_processor = CloudCommandProcessor::new(app_handle.clone(), security.clone());

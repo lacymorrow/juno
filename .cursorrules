@@ -10,12 +10,13 @@ Documentation:
 We have this A.I. Anthropic Computer Use Bot.
 We want it to have a complete implementation. Make sure that you research anthropic computer use and look to see if we're missing anything completely.
 
-After every code modification made to Rust files, run `cargo check --manifest-path src-tauri/Cargo.toml`. Ensure the command completes successfully (exit code 0). If `cargo check` fails, address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
 @Web
 @<https://docs.anthropic.com/en/docs/agents-and-tools/computer-use>
 @main.rs
 
 ## Development Rules
+
+Since you're working on a new app when you create a feature, focus on the feature but don't be afraid to refactor things that are very unmaintainable or convoluted and clean up the repo while you work.
 
 ### Mandatory Compilation Check
 
@@ -23,7 +24,7 @@ After every code modification made to Rust files, run `cargo check --manifest-pa
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-**MUST** run after every Rust change. Project MUST compile with exit code 0. If `cargo check` fails, address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
+After every code modification made to Rust files, run `cargo check --manifest-path src-tauri/Cargo.toml`. Ensure the command completes successfully (exit code 0). If `cargo check` fails, address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
 
 ### Hierarchical Agent Architecture (Enhanced)
 
@@ -48,6 +49,8 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - **NEW**: Comprehensive tool configuration with real implementations
 - **NEW**: All tool operations must use security validation and audit logging
 - **NEW**: Hardware monitoring data collection should be async and parallel
+- **CLEAN**: All deprecated methods eliminated - modern APIs only
+- **STORE-BASED**: All configuration uses Tauri store, no file-based legacy patterns
 
 ### Implementation Status (Enhanced)
 
