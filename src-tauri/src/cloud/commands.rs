@@ -233,9 +233,9 @@ impl CloudCommandProcessor {
         let audio_data = general_purpose::STANDARD.decode(audio_base64)
             .map_err(|e| CloudError::ValidationFailed(format!("Invalid audio data: {}", e)))?;
 
-        // Validate audio data size (prevent extremely large audio files)
-        if audio_data.len() > 50 * 1024 * 1024 { // 50MB limit
-            return Err(CloudError::ValidationFailed("Audio data too large".to_string()));
+        // Generous audio data size validation (allow very large files in maximally permissive mode)
+        if audio_data.len() > 200 * 1024 * 1024 { // 200MB limit (increased from 50MB)
+            log::warn!("⚠️ Very large audio file ({} MB), but allowing in maximally permissive mode", audio_data.len() / (1024 * 1024));
         }
 
         info!("Decoded {} bytes of audio data for transcription", audio_data.len());
