@@ -209,7 +209,7 @@ impl FloatingBarManager {
 
         // After animation, transition to input
         let app_handle = self.app_handle.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
@@ -246,7 +246,7 @@ impl FloatingBarManager {
 
                 // After animation, transition to input (if no other transitions happened)
                 let app_handle = self.app_handle.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     if let Some(manager) = get_bar_manager(&app_handle).await {
                         let mut manager = manager.lock().await;
@@ -286,7 +286,7 @@ impl FloatingBarManager {
 
             // After animation, return to default (if no other transitions happened)
             let app_handle = self.app_handle.clone();
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                 if let Some(manager) = get_bar_manager(&app_handle).await {
                     let mut manager = manager.lock().await;
@@ -336,7 +336,7 @@ impl FloatingBarManager {
         // Transition directly to loading without shrinking
         let app_handle = self.app_handle.clone();
         let query_for_agent = query.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             sleep(Duration::from_millis(timeouts::UI_SLIDE_DELAY_MS)).await;
             if let Some(manager) = get_bar_manager(&app_handle).await {
                 let mut manager = manager.lock().await;
@@ -349,7 +349,7 @@ impl FloatingBarManager {
 
                     // Trigger the AI agent
                     let app_handle_for_agent = app_handle.clone();
-                    tokio::spawn(async move {
+                    tauri::async_runtime::spawn(async move {
                         let app_handle_clone = app_handle_for_agent.clone();
                         let state = app_handle_for_agent.state::<crate::state::AppState>();
                         if let Err(e) = crate::anthropic::submit_query(query_for_agent, state, app_handle_clone).await {
@@ -392,7 +392,7 @@ impl FloatingBarManager {
                 // Schedule completion state transition without recursive manager access
                 let app_handle = self.app_handle.clone();
                 let transition_id_clone = transition_id.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     sleep(Duration::from_millis(timeouts::UI_FADE_DELAY_MS)).await;
                     // Emit event to complete transition instead of direct manager access
                     let _ = app_handle.emit("floating-bar-complete-transition", transition_id_clone);
@@ -411,7 +411,7 @@ impl FloatingBarManager {
                 // Schedule error state cleanup without recursive manager access
                 let app_handle = self.app_handle.clone();
                 let transition_id_clone = transition_id.clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     sleep(Duration::from_millis(timeouts::UI_NOTIFICATION_DISPLAY_MS)).await;
                     // Emit event to clear error state instead of direct manager access
                     let _ = app_handle.emit("floating-bar-clear-error", transition_id_clone);
