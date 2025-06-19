@@ -37,6 +37,9 @@ pub mod state_management; // Application state management, initialization, and m
 pub mod error_handling; // Error handling, recovery mechanisms, and graceful degradation
 pub mod integration; // Application integration patterns, component coordination, and event listeners
 
+#[cfg(test)]
+pub mod test_fix_verification; // Test verification for recent fixes
+
 // Tray icon data is now handled by the menu::tray_menu module
 
 /// Parse a shortcut string into a Shortcut object
