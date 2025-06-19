@@ -3,18 +3,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, error, warn, debug};
 use tauri::Emitter;
+use std::sync::Mutex as StdMutex;
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use tokio::sync::{watch, Mutex as TokioMutex};
+use std::sync::Weak;
+use serde::{Serialize, Deserialize};
+use serde_json::Value;
 
 pub mod desktop_wrapper;
 use crate::commands::shell::ShellSessions;
 pub use desktop_wrapper::DesktopWrapper;
-use playwright::Playwright; // Import Playwright
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Mutex; // Added for tts_provider
-use tokio::sync::{watch, Mutex as TokioMutex}; // Added for keyboard shortcuts
+use playwright::api::playwright::Playwright;
 
 // Import the BrowserController for persistent storage
 use crate::agent::tools::browser_controller::BrowserController;
@@ -142,8 +143,8 @@ pub struct AppState {
     cancel_tx: Arc<CancelSender>,  // Store Sender to signal cancellation
     pub cancel_rx: CancelReceiver, // Store Receiver to check for cancellation
     // State for text_editor_undo_edit - Wrapped in Arc
-    pub last_edited_file: Arc<std::sync::Mutex<Option<PathBuf>>>,
-    pub previous_content: Arc<std::sync::Mutex<Option<Option<String>>>>,
+    pub last_edited_file: Arc<StdMutex<Option<PathBuf>>>,
+    pub previous_content: Arc<StdMutex<Option<Option<String>>>>,
     // Persistent Playwright driver instance, using TokioMutex
     playwright_driver: Arc<TokioMutex<Option<Arc<Playwright>>>>,
     // Persistent browser controller instance
@@ -151,58 +152,58 @@ pub struct AppState {
     // Persistent memory manager for conversation history
     pub memory_manager: Arc<TokioMutex<SimpleMemoryManager>>,
     // Dynamic storage for other state components - Wrapped in Arc
-    state_components: Arc<std::sync::Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
-    pub tts_provider: Arc<Mutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
-    pub bar_ui_state: Arc<Mutex<String>>, // Added to store the current UI state of the floating bar
-    pub dictation_active: Arc<Mutex<bool>>, // Track if Dictation Mode is active
-    pub dictation_clipboard_enabled: Arc<Mutex<bool>>, // Track if Dictation Mode should save to clipboard
-    pub sound_enabled: Arc<Mutex<bool>>,               // Track if sound effects are enabled
-    pub performance_monitoring_enabled: Arc<Mutex<bool>>, // Track if performance monitoring is enabled
-    pub timestamp_tracker: Arc<Mutex<TimestampTracker>>,  // Track timestamps for log grouping
+    state_components: Arc<StdMutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>>,
+    pub tts_provider: Arc<StdMutex<String>>, // Changed from tts_enabled: Arc<AtomicBool>
+    pub bar_ui_state: Arc<StdMutex<String>>, // Added to store the current UI state of the floating bar
+    pub dictation_active: Arc<StdMutex<bool>>, // Track if Dictation Mode is active
+    pub dictation_clipboard_enabled: Arc<StdMutex<bool>>, // Track if Dictation Mode should save to clipboard
+    pub sound_enabled: Arc<StdMutex<bool>>,               // Track if sound effects are enabled
+    pub performance_monitoring_enabled: Arc<StdMutex<bool>>, // Track if performance monitoring is enabled
+    pub timestamp_tracker: Arc<StdMutex<TimestampTracker>>,  // Track timestamps for log grouping
     // Permissions state tracking
     pub permissions_state: Arc<TokioMutex<Option<PermissionsState>>>, // Track permissions status
-    pub permissions_checked: Arc<Mutex<bool>>, // Track if permissions have been checked
+    pub permissions_checked: Arc<StdMutex<bool>>, // Track if permissions have been checked
     // Tool configuration manager
     pub tool_config_manager: Arc<TokioMutex<ToolConfigManager>>, // Manage tool enable/disable settings
     // Cloud connectivity
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
     pub cloud_config: Arc<TokioMutex<CloudConfig>>,         // Cloud configuration
-    pub cloud_enabled: Arc<Mutex<bool>>,                    // Track if cloud is enabled
+    pub cloud_enabled: Arc<StdMutex<bool>>,                    // Track if cloud is enabled
     // Production cloud connector
     pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
     // Keyboard shortcuts configuration
-    pub keyboard_shortcuts: Arc<Mutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
+    pub keyboard_shortcuts: Arc<StdMutex<KeyboardShortcuts>>, // Manage keyboard shortcuts
     // Agent trigger mode configuration
-    pub agent_trigger_mode: Arc<Mutex<AgentTriggerMode>>, // Track how agent is triggered (tap vs hold)
+    pub agent_trigger_mode: Arc<StdMutex<AgentTriggerMode>>, // Track how agent is triggered (tap vs hold)
     // MCP manager for external MCP server support
     pub mcp_manager: Arc<TokioMutex<MCPManager>>, // Manage external MCP servers and their tools
-    // Tool provider registry for refreshing MCP tools
-    pub tool_provider_registry: Arc<Mutex<Vec<Arc<tokio::sync::Mutex<LocalToolProvider>>>>>, // Track active tool providers
+    // Tool provider registry for refreshing MCP tools - using Weak references to prevent Arc cycles
+    pub tool_provider_registry: Arc<TokioMutex<Vec<Weak<TokioMutex<LocalToolProvider>>>>>, // Track active tool providers
     // Always listening mode state
-    pub always_listening_active: Arc<Mutex<bool>>, // Track if Always Listening Mode is active
-    pub always_listening_sensitivity: Arc<Mutex<f32>>, // Sensitivity threshold for activation
-    pub always_listening_wake_words: Arc<Mutex<Vec<String>>>, // Configurable wake words
+    pub always_listening_active: Arc<StdMutex<bool>>, // Track if Always Listening Mode is active
+    pub always_listening_sensitivity: Arc<StdMutex<f32>>, // Sensitivity threshold for activation
+    pub always_listening_wake_words: Arc<StdMutex<Vec<String>>>, // Configurable wake words
     // Notification settings
-    pub notification_type: Arc<Mutex<String>>, // "system", "toast", "both", or "disabled"
-    pub notification_sound_enabled: Arc<Mutex<bool>>, // Sound for notifications
-    pub notification_duration: Arc<Mutex<u32>>, // Duration in milliseconds for toast notifications
-    pub notification_position: Arc<Mutex<String>>, // Position for toast notifications
-    pub notification_show_icons: Arc<Mutex<bool>>, // Show icons in notifications
-    pub notification_persist_important: Arc<Mutex<bool>>, // Keep important notifications until dismissed
+    pub notification_type: Arc<StdMutex<String>>, // "system", "toast", "both", or "disabled"
+    pub notification_sound_enabled: Arc<StdMutex<bool>>, // Sound for notifications
+    pub notification_duration: Arc<StdMutex<u32>>, // Duration in milliseconds for toast notifications
+    pub notification_position: Arc<StdMutex<String>>, // Position for toast notifications
+    pub notification_show_icons: Arc<StdMutex<bool>>, // Show icons in notifications
+    pub notification_persist_important: Arc<StdMutex<bool>>, // Keep important notifications until dismissed
     // Agent execution status tracking
-    pub agent_execution_active: Arc<Mutex<bool>>, // Track if an agent is currently executing
-    pub agent_execution_id: Arc<Mutex<Option<String>>>, // Track the current agent execution ID
+    pub agent_execution_active: Arc<StdMutex<bool>>, // Track if an agent is currently executing
+    pub agent_execution_id: Arc<StdMutex<Option<String>>>, // Track the current agent execution ID
     // Agent iteration tracking
-    pub agent_current_step: Arc<Mutex<Option<u32>>>, // Track the current iteration/step number
-    pub agent_max_steps: Arc<Mutex<Option<u32>>>,    // Track the maximum iterations/steps allowed
+    pub agent_current_step: Arc<StdMutex<Option<u32>>>, // Track the current iteration/step number
+    pub agent_max_steps: Arc<StdMutex<Option<u32>>>,    // Track the maximum iterations/steps allowed
 
 
     // Dual content communication - store spoken content separately for TTS
-    pub last_spoken_content: Arc<Mutex<Option<String>>>, // Store spoken content separate from displayed text
+    pub last_spoken_content: Arc<StdMutex<Option<String>>>, // Store spoken content separate from displayed text
     // Debug mode tracking
-    pub debug_mode: Arc<Mutex<bool>>, // Track if debug mode is enabled
+    pub debug_mode: Arc<StdMutex<bool>>, // Track if debug mode is enabled
     // Tool approval setting
-    pub tool_approval_required: Arc<Mutex<bool>>, // Track if tool approval is required before execution
+    pub tool_approval_required: Arc<StdMutex<bool>>, // Track if tool approval is required before execution
     // Pending tool approvals
     pub pending_tool_approvals: Arc<TokioMutex<HashMap<String, ToolApprovalRequest>>>, // Track pending approval requests
 }
@@ -215,13 +216,13 @@ impl AppState {
             shell_sessions: ShellSessions::default(),
             cancel_tx: Arc::new(cancel_tx),
             cancel_rx,
-            last_edited_file: Arc::new(std::sync::Mutex::new(None)),
-            previous_content: Arc::new(std::sync::Mutex::new(None)),
+            last_edited_file: Arc::new(StdMutex::new(None)),
+            previous_content: Arc::new(StdMutex::new(None)),
             playwright_driver: Arc::new(TokioMutex::new(None)),
             browser_controller: Arc::new(TokioMutex::new(None)),
             memory_manager: Arc::new(TokioMutex::new(SimpleMemoryManager::new())), // Initialize persistent memory
-            state_components: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            tts_provider: Arc::new(Mutex::new({
+            state_components: Arc::new(StdMutex::new(HashMap::new())),
+            tts_provider: Arc::new(StdMutex::new({
                 #[cfg(debug_assertions)]
                 {
                     // In development, default to 'system' TTS
@@ -235,60 +236,60 @@ impl AppState {
                     "elevenlabs".to_string()
                 }
             })),
-            bar_ui_state: Arc::new(Mutex::new("default".to_string())), // Initialize bar UI state
-            dictation_active: Arc::new(Mutex::new(false)), // Initialize Dictation Mode as inactive
-            dictation_clipboard_enabled: Arc::new(Mutex::new(true)), // Initialize clipboard saving as enabled by default
-            sound_enabled: Arc::new(Mutex::new(true)), // Initialize sound effects as enabled by default
-            performance_monitoring_enabled: Arc::new(Mutex::new(true)), // Initialize performance monitoring as enabled by default
-            timestamp_tracker: Arc::new(Mutex::new(TimestampTracker::new())), // Initialize timestamp tracker
+            bar_ui_state: Arc::new(StdMutex::new("default".to_string())), // Initialize bar UI state
+            dictation_active: Arc::new(StdMutex::new(false)), // Initialize Dictation Mode as inactive
+            dictation_clipboard_enabled: Arc::new(StdMutex::new(true)), // Initialize clipboard saving as enabled by default
+            sound_enabled: Arc::new(StdMutex::new(true)), // Initialize sound effects as enabled by default
+            performance_monitoring_enabled: Arc::new(StdMutex::new(true)), // Initialize performance monitoring as enabled by default
+            timestamp_tracker: Arc::new(StdMutex::new(TimestampTracker::new())), // Initialize timestamp tracker
             // Initialize permissions state
             permissions_state: Arc::new(TokioMutex::new(None)),
-            permissions_checked: Arc::new(Mutex::new(false)),
+            permissions_checked: Arc::new(StdMutex::new(false)),
             // Initialize tool configuration manager
             tool_config_manager: Arc::new(TokioMutex::new(ToolConfigManager::new())),
             // Initialize cloud connectivity
             cloud_client: Arc::new(TokioMutex::new(None)),
             cloud_config: Arc::new(TokioMutex::new(CloudConfig::default())),
-            cloud_enabled: Arc::new(Mutex::new(false)),
+            cloud_enabled: Arc::new(StdMutex::new(false)),
             // Initialize production cloud connector
             production_cloud_connector: Arc::new(TokioMutex::new(None)),
             // Initialize keyboard shortcuts configuration
-            keyboard_shortcuts: Arc::new(Mutex::new(KeyboardShortcuts::default())),
+            keyboard_shortcuts: Arc::new(StdMutex::new(KeyboardShortcuts::default())),
             // Initialize agent trigger mode configuration
-            agent_trigger_mode: Arc::new(Mutex::new(AgentTriggerMode::Tap)),
+            agent_trigger_mode: Arc::new(StdMutex::new(AgentTriggerMode::Tap)),
             // Initialize MCP manager
             mcp_manager: Arc::new(TokioMutex::new(MCPManager::new())),
             // Initialize tool provider registry
-            tool_provider_registry: Arc::new(Mutex::new(Vec::new())),
+            tool_provider_registry: Arc::new(TokioMutex::new(Vec::new())),
             // Initialize Always Listening mode state
-            always_listening_active: Arc::new(Mutex::new(false)),
-            always_listening_sensitivity: Arc::new(Mutex::new(0.5)),
-            always_listening_wake_words: Arc::new(Mutex::new(
+            always_listening_active: Arc::new(StdMutex::new(false)),
+            always_listening_sensitivity: Arc::new(StdMutex::new(0.5)),
+            always_listening_wake_words: Arc::new(StdMutex::new(
                 app::DEFAULT_WAKE_WORDS
                     .iter()
                     .map(|s| s.to_string())
                     .collect(),
             )),
             // Initialize notification settings
-            notification_type: Arc::new(Mutex::new("system".to_string())),
-            notification_sound_enabled: Arc::new(Mutex::new(true)),
-            notification_duration: Arc::new(Mutex::new(5000)),
-            notification_position: Arc::new(Mutex::new("bottom-right".to_string())),
-            notification_show_icons: Arc::new(Mutex::new(true)),
-            notification_persist_important: Arc::new(Mutex::new(true)),
+            notification_type: Arc::new(StdMutex::new("system".to_string())),
+            notification_sound_enabled: Arc::new(StdMutex::new(true)),
+            notification_duration: Arc::new(StdMutex::new(5000)),
+            notification_position: Arc::new(StdMutex::new("bottom-right".to_string())),
+            notification_show_icons: Arc::new(StdMutex::new(true)),
+            notification_persist_important: Arc::new(StdMutex::new(true)),
             // Initialize agent execution status tracking
-            agent_execution_active: Arc::new(Mutex::new(false)),
-            agent_execution_id: Arc::new(Mutex::new(None)),
+            agent_execution_active: Arc::new(StdMutex::new(false)),
+            agent_execution_id: Arc::new(StdMutex::new(None)),
             // Initialize agent iteration tracking
-            agent_current_step: Arc::new(Mutex::new(None)),
-            agent_max_steps: Arc::new(Mutex::new(None)),
+            agent_current_step: Arc::new(StdMutex::new(None)),
+            agent_max_steps: Arc::new(StdMutex::new(None)),
 
             // Dual content communication - store spoken content separately for TTS
-            last_spoken_content: Arc::new(Mutex::new(None)),
+            last_spoken_content: Arc::new(StdMutex::new(None)),
             // Initialize debug mode tracking
-            debug_mode: Arc::new(Mutex::new(false)),
+            debug_mode: Arc::new(StdMutex::new(false)),
             // Initialize tool approval setting as disabled by default
-            tool_approval_required: Arc::new(Mutex::new(false)),
+            tool_approval_required: Arc::new(StdMutex::new(false)),
             // Initialize pending tool approvals
             pending_tool_approvals: Arc::new(TokioMutex::new(HashMap::new())),
         }
@@ -488,7 +489,7 @@ impl AppState {
             info!("Initializing Playwright driver instance...");
             match Playwright::initialize().await {
                 Ok(pw_instance) => {
-                    let arc_pw = Arc::new(pw_instance);
+                    let arc_pw: Arc<Playwright> = Arc::new(pw_instance);
                     *driver_guard = Some(arc_pw.clone());
                     info!("Playwright driver initialized and stored in AppState.");
                     Ok(arc_pw)
@@ -1044,33 +1045,39 @@ impl AppState {
     }
 
     /// Register a tool provider for MCP tool refresh notifications
-    pub fn register_tool_provider(&self, provider: Arc<tokio::sync::Mutex<LocalToolProvider>>) -> Result<(), String> {
-        let mut registry = self.tool_provider_registry.lock()
-            .map_err(|e| format!("Failed to acquire tool_provider_registry lock: {}", e))?;
-        registry.push(provider);
+    pub async fn register_tool_provider(&self, provider: Arc<TokioMutex<LocalToolProvider>>) -> Result<(), String> {
+        let mut registry = self.tool_provider_registry.lock().await;
+        registry.push(Arc::downgrade(&provider));
         debug!("Registered tool provider for MCP refresh notifications");
         Ok(())
     }
 
     /// Refresh all registered tool providers when MCP tools are updated
     pub async fn refresh_all_tool_providers(&self) -> Result<(), String> {
-        let registry = {
-            match self.tool_provider_registry.lock() {
-                Ok(registry_guard) => registry_guard.clone(),
-                Err(e) => {
-                    error!("Failed to access tool provider registry: {}", e);
-                    return Err(format!("Failed to access tool provider registry: {}", e));
-                }
+        let mut registry = self.tool_provider_registry.lock().await;
+
+        // Filter out dead weak references and collect live ones
+        let mut live_providers = Vec::new();
+        registry.retain(|weak_provider| {
+            if let Some(strong_provider) = weak_provider.upgrade() {
+                live_providers.push(strong_provider);
+                true // Keep this weak reference
+            } else {
+                debug!("Removing dead tool provider reference from registry");
+                false // Remove this dead weak reference
             }
-        };
+        });
 
         info!(
-            "Refreshing {} registered tool providers with updated MCP tools",
-            registry.len()
+            "Refreshing {} live tool providers with updated MCP tools",
+            live_providers.len()
         );
 
+        // Release registry lock before async operations
+        drop(registry);
+
         // Use proper async locks to ensure all providers are refreshed
-        for provider_arc in registry.iter() {
+        for provider_arc in live_providers {
             let mut provider = provider_arc.lock().await;
             if let Err(e) = provider.refresh_mcp_tools().await {
                 warn!("Failed to refresh MCP tools for tool provider: {}", e);

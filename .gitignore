@@ -90,7 +90,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Gatsby files
 .cache/
-public/
+# public/ - Commented out as this is a Tauri app that needs public assets tracked
 
 # Storybook build outputs
 .out/
