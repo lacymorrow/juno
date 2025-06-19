@@ -35,32 +35,17 @@ interface PermissionsState {
 }
 
 interface AdvancedSettingsProps extends SettingsSectionProps {
-  onNavigateToDevTools?: () => void;
-  onNavigateToChat?: () => void;
   onNavigateToPermissions?: () => void;
 }
 
 export default function AdvancedSettings({
   settings,
-  onNavigateToDevTools,
-  onNavigateToChat,
   onNavigateToPermissions,
 }: AdvancedSettingsProps) {
   const [permissionsState, setPermissionsState] =
     useState<PermissionsState | null>(null);
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
-
-  // Visualization settings state
-  const [showKeyPressOverlay, setShowKeyPressOverlay] = useState(
-    localStorage.getItem("juno-show-key-press-overlay") === "true"
-  );
-  const [showCommandOverlay, setShowCommandOverlay] = useState(
-    localStorage.getItem("juno-show-command-overlay") === "true"
-  );
-  const [showClickVisualization, setShowClickVisualization] = useState(
-    localStorage.getItem("juno-show-click-visualization") !== "false" // Default to true
-  );
 
   // Load debug mode status on mount
   useEffect(() => {
@@ -161,165 +146,6 @@ export default function AdvancedSettings({
                 onCheckedChange={settings.handlePerformanceMonitoringChange}
               />
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Visualization Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <MonitorSpeaker size={20} />
-              Visualization Settings
-            </CardTitle>
-            <CardDescription>
-              Configure visual feedback for key presses and command execution
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Show Key Press Overlay</div>
-                <div className="text-sm text-gray-500">
-                  Display key presses in real-time during agent operation
-                </div>
-              </div>
-              <Switch
-                checked={showKeyPressOverlay}
-                onCheckedChange={(enabled) => {
-                  localStorage.setItem(
-                    "juno-show-key-press-overlay",
-                    enabled.toString()
-                  );
-                  setShowKeyPressOverlay(enabled);
-                  toast.success(
-                    `Key press overlay ${enabled ? "enabled" : "disabled"}`
-                  );
-                }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Show Command Execution</div>
-                <div className="text-sm text-gray-500">
-                  Display active command status during tool execution
-                </div>
-              </div>
-              <Switch
-                checked={showCommandOverlay}
-                onCheckedChange={(enabled) => {
-                  localStorage.setItem(
-                    "juno-show-command-overlay",
-                    enabled.toString()
-                  );
-                  setShowCommandOverlay(enabled);
-                  toast.success(
-                    `Command overlay ${enabled ? "enabled" : "disabled"}`
-                  );
-                }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Show Click Visualization</div>
-                <div className="text-sm text-gray-500">
-                  Display visual feedback for mouse clicks and interactions
-                </div>
-              </div>
-              <Switch
-                checked={showClickVisualization}
-                onCheckedChange={(enabled) => {
-                  localStorage.setItem(
-                    "juno-show-click-visualization",
-                    enabled.toString()
-                  );
-                  setShowClickVisualization(enabled);
-                  toast.success(
-                    `Click visualization ${enabled ? "enabled" : "disabled"}`
-                  );
-                }}
-              />
-            </div>
-
-            <div className="text-sm text-muted-foreground">
-              <p>
-                <strong>Key Press Overlay:</strong> Shows keyboard input in the
-                top-right corner
-              </p>
-              <p>
-                <strong>Command Execution:</strong> Shows active tools and
-                commands in the top-left corner
-              </p>
-              <p>
-                <strong>Click Visualization:</strong> Shows animated circles
-                where mouse clicks occur
-              </p>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  toast.info(
-                    "Visualization features help you see what the AI agent is doing in real-time"
-                  );
-                }}
-              >
-                <AlertCircle className="h-4 w-4 mr-1" />
-                Help
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Developer Tools */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Terminal size={20} />
-              Developer Tools
-            </CardTitle>
-            <CardDescription>
-              Access developer tools and application windows
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Button
-                variant="outline"
-                className="h-20 flex flex-col items-center justify-center gap-2"
-                onClick={onNavigateToDevTools}
-              >
-                <Terminal size={24} />
-                <div className="text-center">
-                  <div className="font-medium">Developer Tools</div>
-                  <div className="text-xs text-muted-foreground">
-                    Debug and testing tools
-                  </div>
-                </div>
-              </Button>
-
-              <Button
-                variant="outline"
-                className="h-20 flex flex-col items-center justify-center gap-2"
-                onClick={onNavigateToChat}
-              >
-                <MonitorSpeaker size={24} />
-                <div className="text-center">
-                  <div className="font-medium">Main Chat</div>
-                  <div className="text-xs text-muted-foreground">
-                    Return to main interface
-                  </div>
-                </div>
-              </Button>
-            </div>
-
-            <p className="text-sm text-muted-foreground">
-              You can also access Developer Tools from the system tray menu or
-              use the toggle button in the main interface.
-            </p>
           </CardContent>
         </Card>
 

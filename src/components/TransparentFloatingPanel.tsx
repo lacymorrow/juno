@@ -26,6 +26,9 @@ interface PanelState {
   agentStatus: "idle" | "listening" | "thinking" | "responding" | "error";
   currentResponse?: string;
   error?: string;
+  voiceMode?: "dictation" | "agent";
+  isSpeaking?: boolean;
+  transcriptionText?: string;
 }
 
 interface TransparentFloatingPanelProps {

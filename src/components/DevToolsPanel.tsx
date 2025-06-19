@@ -12,6 +12,7 @@ import FileOperations from "./devtools/FileOperations";
 import KeyboardOperations from "./devtools/KeyboardOperations";
 import MouseOperations from "./devtools/MouseOperations";
 import ScreenshotOperations from "./devtools/ScreenshotOperations";
+import VisualizationSettings from "./devtools/VisualizationSettings";
 import WakeWordTesting from "./devtools/WakeWordTesting";
 import WindowOperations from "./devtools/WindowOperations";
 
@@ -20,7 +21,7 @@ const useOptimizedLoadingStates = () => {
   const [loadingSet, setLoadingSet] = useState<Set<string>>(new Set());
 
   const setLoading = useCallback((key: string, isLoading: boolean) => {
-    setLoadingSet(prev => {
+    setLoadingSet((prev) => {
       const newSet = new Set(prev);
       if (isLoading) {
         newSet.add(key);
@@ -31,86 +32,99 @@ const useOptimizedLoadingStates = () => {
     });
   }, []);
 
-  const isLoading = useCallback((key: string) => {
-    return loadingSet.has(key);
-  }, [loadingSet]);
+  const isLoading = useCallback(
+    (key: string) => {
+      return loadingSet.has(key);
+    },
+    [loadingSet]
+  );
 
   // Convert to LoadingStates format for compatibility with existing components
-  const loadingStates = useMemo<LoadingStates>(() => ({
-    screenshot: loadingSet.has('screenshot'),
-    focusInfo: loadingSet.has('focusInfo'),
-    focusDelay: loadingSet.has('focusDelay'),
-    elementScreenshot: loadingSet.has('elementScreenshot'),
-    clickFocus: loadingSet.has('clickFocus'),
-    typeText: loadingSet.has('typeText'),
-    pressKey: loadingSet.has('pressKey'),
-    openApp: loadingSet.has('openApp'),
-    openUrl: loadingSet.has('openUrl'),
-    scroll: loadingSet.has('scroll'),
-    globalTypeText: loadingSet.has('globalTypeText'),
-    getClipboard: loadingSet.has('getClipboard'),
-    setClipboard: loadingSet.has('setClipboard'),
-    holdKey: loadingSet.has('holdKey'),
-    releaseKey: loadingSet.has('releaseKey'),
-    wait: loadingSet.has('wait'),
-    findElement: loadingSet.has('findElement'),
-    clickElement: loadingSet.has('clickElement'),
-    getSelectedText: loadingSet.has('getSelectedText'),
-    getWindowList: loadingSet.has('getWindowList'),
-    getWindowInfo: loadingSet.has('getWindowInfo'),
-    focusWindow: loadingSet.has('focusWindow'),
-    resizeWindow: loadingSet.has('resizeWindow'),
-    moveWindow: loadingSet.has('moveWindow'),
-    closeWindow: loadingSet.has('closeWindow'),
-    listFiles: loadingSet.has('listFiles'),
-    getFileContent: loadingSet.has('getFileContent'),
-    setFileContent: loadingSet.has('setFileContent'),
-    mouseMove: loadingSet.has('mouseMove'),
-    mouseDown: loadingSet.has('mouseDown'),
-    mouseUp: loadingSet.has('mouseUp'),
-    mouseClick: loadingSet.has('mouseClick'),
-    mouseDoubleClick: loadingSet.has('mouseDoubleClick'),
-    mouseDrag: loadingSet.has('mouseDrag'),
-    testClickVisualization: loadingSet.has('testClickVisualization'),
-    setDeveloperPlayback: loadingSet.has('setDeveloperPlayback'),
-    playbackAudio: loadingSet.has('playbackAudio'),
-    setTtsProvider: loadingSet.has('setTtsProvider'),
-    testSystemContext: loadingSet.has('testSystemContext'),
-    debugAlwaysListening: loadingSet.has('debugAlwaysListening'),
-    startAlwaysListening: loadingSet.has('startAlwaysListening'),
-    stopAlwaysListening: loadingSet.has('stopAlwaysListening'),
-    toggleAlwaysListening: loadingSet.has('toggleAlwaysListening'),
-    setAlwaysListeningSensitivity: loadingSet.has('setAlwaysListeningSensitivity'),
-    setAlwaysListeningWakeWords: loadingSet.has('setAlwaysListeningWakeWords'),
-  }), [loadingSet]);
+  const loadingStates = useMemo<LoadingStates>(
+    () => ({
+      screenshot: loadingSet.has("screenshot"),
+      focusInfo: loadingSet.has("focusInfo"),
+      focusDelay: loadingSet.has("focusDelay"),
+      elementScreenshot: loadingSet.has("elementScreenshot"),
+      clickFocus: loadingSet.has("clickFocus"),
+      typeText: loadingSet.has("typeText"),
+      pressKey: loadingSet.has("pressKey"),
+      openApp: loadingSet.has("openApp"),
+      openUrl: loadingSet.has("openUrl"),
+      scroll: loadingSet.has("scroll"),
+      globalTypeText: loadingSet.has("globalTypeText"),
+      getClipboard: loadingSet.has("getClipboard"),
+      setClipboard: loadingSet.has("setClipboard"),
+      holdKey: loadingSet.has("holdKey"),
+      releaseKey: loadingSet.has("releaseKey"),
+      wait: loadingSet.has("wait"),
+      findElement: loadingSet.has("findElement"),
+      clickElement: loadingSet.has("clickElement"),
+      getSelectedText: loadingSet.has("getSelectedText"),
+      getWindowList: loadingSet.has("getWindowList"),
+      getWindowInfo: loadingSet.has("getWindowInfo"),
+      focusWindow: loadingSet.has("focusWindow"),
+      resizeWindow: loadingSet.has("resizeWindow"),
+      moveWindow: loadingSet.has("moveWindow"),
+      closeWindow: loadingSet.has("closeWindow"),
+      listFiles: loadingSet.has("listFiles"),
+      getFileContent: loadingSet.has("getFileContent"),
+      setFileContent: loadingSet.has("setFileContent"),
+      mouseMove: loadingSet.has("mouseMove"),
+      mouseDown: loadingSet.has("mouseDown"),
+      mouseUp: loadingSet.has("mouseUp"),
+      mouseClick: loadingSet.has("mouseClick"),
+      mouseDoubleClick: loadingSet.has("mouseDoubleClick"),
+      mouseDrag: loadingSet.has("mouseDrag"),
+      testClickVisualization: loadingSet.has("testClickVisualization"),
+      setDeveloperPlayback: loadingSet.has("setDeveloperPlayback"),
+      playbackAudio: loadingSet.has("playbackAudio"),
+      setTtsProvider: loadingSet.has("setTtsProvider"),
+      testSystemContext: loadingSet.has("testSystemContext"),
+      debugAlwaysListening: loadingSet.has("debugAlwaysListening"),
+      startAlwaysListening: loadingSet.has("startAlwaysListening"),
+      stopAlwaysListening: loadingSet.has("stopAlwaysListening"),
+      toggleAlwaysListening: loadingSet.has("toggleAlwaysListening"),
+      setAlwaysListeningSensitivity: loadingSet.has(
+        "setAlwaysListeningSensitivity"
+      ),
+      setAlwaysListeningWakeWords: loadingSet.has(
+        "setAlwaysListeningWakeWords"
+      ),
+    }),
+    [loadingSet]
+  );
 
   // Compatible setLoadingStates function for existing components
-  const setLoadingStates = useCallback((updateFn: React.SetStateAction<LoadingStates>) => {
-    if (typeof updateFn === 'function') {
-      const currentStates = loadingStates;
-      const newStates = updateFn(currentStates);
-      
-      // Update the set based on changes
-      setLoadingSet(() => {
+  const setLoadingStates = useCallback(
+    (updateFn: React.SetStateAction<LoadingStates>) => {
+      if (typeof updateFn === "function") {
+        const currentStates = loadingStates;
+        const newStates = updateFn(currentStates);
+
+        // Update the set based on changes
+        setLoadingSet(() => {
+          const newSet = new Set<string>();
+          Object.entries(newStates).forEach(([key, value]) => {
+            if (value) {
+              newSet.add(key);
+            }
+          });
+          return newSet;
+        });
+      } else {
+        // Direct state replacement
         const newSet = new Set<string>();
-        Object.entries(newStates).forEach(([key, value]) => {
+        Object.entries(updateFn).forEach(([key, value]) => {
           if (value) {
             newSet.add(key);
           }
         });
-        return newSet;
-      });
-    } else {
-      // Direct state replacement
-      const newSet = new Set<string>();
-      Object.entries(updateFn).forEach(([key, value]) => {
-        if (value) {
-          newSet.add(key);
-        }
-      });
-      setLoadingSet(newSet);
-    }
-  }, [loadingStates]);
+        setLoadingSet(newSet);
+      }
+    },
+    [loadingStates]
+  );
 
   return { loadingStates, setLoadingStates, setLoading, isLoading };
 };
@@ -169,7 +183,13 @@ const DevToolsPanel: React.FC = () => {
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold">Screenshot & Visualization</h2>
+          <h2 className="text-lg font-semibold">Visualization Controls</h2>
+          <Separator className="my-2" />
+          <VisualizationSettings />
+        </div>
+
+        <div>
+          <h2 className="text-lg font-semibold">Screenshot & Testing</h2>
           <Separator className="my-2" />
           <ScreenshotOperations />
         </div>
