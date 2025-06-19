@@ -6,6 +6,22 @@
 
 ## 🗑️ **ELIMINATED DEPRECATED CODE**
 
+### **Modern Rust Patterns (LATEST)**
+
+#### **Anthropic Provider (`src-tauri/src/agent/providers/anthropic.rs`)**
+
+- ❌ **REMOVED**: `#![macro_use]` - deprecated crate-level macro_use attribute
+- ❌ **REMOVED**: `extern crate serde;` - deprecated external crate declaration
+- ❌ **REMOVED**: All `#[allow(dead_code)]` attributes on streaming structs
+- ✅ **ACTIVE**: Modern `use` statements and proper struct definitions
+
+#### **Frontend Component Cleanup**
+
+- ❌ **REMOVED**: `src/components/OLD-Settings.tsx` (2408 lines) - deprecated legacy settings component
+- ❌ **REMOVED**: `src/components/OLD-SettingsWindow.tsx` (2291 lines) - deprecated settings window
+- ❌ **REMOVED**: Commented-out import statements in `src/main.tsx`
+- ✅ **ACTIVE**: `ModularSettingsWindow` - modern settings architecture
+
 ### **Configuration Management Systems**
 
 #### **Prompt Manager (`src-tauri/src/agent/prompts/manager.rs`)**
