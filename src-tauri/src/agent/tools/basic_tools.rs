@@ -129,10 +129,11 @@ mod basic_tools_impl {
             return Err("Empty path not allowed".to_string());
         }
 
+		// TODO: Add more path traversal patterns to the blacklist
         // Only prevent the most dangerous path traversal patterns
-        if path_str.contains("../../../") || path_str == "../../../" {
-            return Err("Excessive path traversal (../../../) not allowed".to_string());
-        }
+        // if path_str.contains("../../../") || path_str == "../../../" {
+        //     return Err("Excessive path traversal (../../../) not allowed".to_string());
+        // }
 
         let path = PathBuf::from(path_str);
 
