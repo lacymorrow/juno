@@ -98,13 +98,19 @@ export function FloatingBar() {
 
   // Update window size based on bar state
   useEffect(() => {
-    const isCompact = ["default", "finishing"].includes(barState);
+    const isCompact = ["default"].includes(barState);
 
     const targetSize = isCompact
       ? { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }
       : { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
 
-    resizeWindow(targetSize);
+    if (isCompact) {
+      setTimeout(() => {
+        resizeWindow(targetSize);
+      }, 1000);
+    } else {
+      resizeWindow(targetSize);
+    }
   }, [barState, resizeWindow]);
 
   // Handle animation state tracking

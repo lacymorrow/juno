@@ -3,14 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import "./styles/globals.css";
-import tauriConfig from "../src-tauri/tauri.conf.json";
-
-// Get default window dimensions from tauri.conf.json
-const floatingPanelConfig = tauriConfig.app.windows.find(
-  (window) => window.label === "floating-panel"
-);
-const DEFAULT_WIDTH = floatingPanelConfig?.width || 180;
-const DEFAULT_HEIGHT = floatingPanelConfig?.height || 100;
 
 // Constants for all panel sizes - these should match the TransparentFloatingPanel component
 // Adding 24px padding (12px on each side) for each dimension

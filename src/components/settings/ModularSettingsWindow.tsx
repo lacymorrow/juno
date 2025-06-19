@@ -5,10 +5,8 @@ import {
   Brain,
   Keyboard,
   Mic,
-  MonitorSpeaker,
   Network,
   Settings,
-  Bell,
   Shield,
   Terminal,
 } from "lucide-react";
@@ -21,8 +19,6 @@ import {
   AdvancedSettings,
   NetworkSettings,
   ShortcutsSettings,
-  ToolsSettings,
-  NotificationSettings,
 } from "./index";
 import { SettingsCategory } from "./types";
 
@@ -38,12 +34,6 @@ const settingsCategories: SettingsCategory[] = [
     name: "Voice & Audio",
     icon: <Mic className="w-8 h-8" />,
     description: "Voice transcription and audio settings",
-  },
-  {
-    id: "notifications",
-    name: "Notifications",
-    icon: <Bell className="w-8 h-8" />,
-    description: "System and toast notification preferences",
   },
   {
     id: "ai",
@@ -70,16 +60,10 @@ const settingsCategories: SettingsCategory[] = [
     description: "Customize keyboard shortcuts",
   },
   {
-    id: "tools",
-    name: "Tools",
-    icon: <MonitorSpeaker className="w-8 h-8" />,
-    description: "Configure available tools and features",
-  },
-  {
     id: "advanced",
     name: "Advanced",
     icon: <Terminal className="w-8 h-8" />,
-    description: "Advanced settings and developer options",
+    description: "System settings and reset options",
   },
 ];
 
@@ -118,8 +102,6 @@ export default function ModularSettingsWindow() {
         return <GeneralSettings settings={settings} />;
       case "voice":
         return <VoiceSettings settings={settings} />;
-      case "notifications":
-        return <NotificationSettings />;
       case "ai":
         return <AIProviderSettings settings={settings} />;
       case "network":
@@ -128,8 +110,6 @@ export default function ModularSettingsWindow() {
         return <SecuritySettings settings={settings} />;
       case "shortcuts":
         return <ShortcutsSettings settings={settings} />;
-      case "tools":
-        return <ToolsSettings settings={settings} />;
       case "advanced":
         return <AdvancedSettings settings={settings} />;
       default:
@@ -142,9 +122,7 @@ export default function ModularSettingsWindow() {
       {/* Sidebar with categories - macOS style */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
-          <h1 className="text-xl font-semibold text-gray-900">
-            MODULAR Settings
-          </h1>
+          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">

@@ -12,6 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import AudioVisualizer from "../bar/audio-visualizer";
 
 const permissions = [
   {
@@ -50,7 +51,9 @@ const getOnboardingSteps = (
     description: isDevelopmentMode
       ? "Juno helps you automate tasks, manage your workflow, and get more done with your Mac. You're running in development mode, so onboarding will always show on startup."
       : "Juno helps you automate tasks, manage your workflow, and get more done with your Mac.",
-    icon: <Sparkles className="w-12 h-12 text-blue-500" />,
+    icon: (
+      <img src="/juno.png" alt="Juno" className="w-50 h-50 object-contain" />
+    ),
     action: "Get Started",
   },
   {
@@ -59,16 +62,34 @@ const getOnboardingSteps = (
     subtitle: "Quick shortcuts to control Juno",
     description:
       "Try the agent mode shortcut below! This will activate Juno's AI assistant from anywhere on your Mac.",
-    icon: <Keyboard className="w-12 h-12 text-purple-500" />,
+    icon: (
+      <AudioVisualizer
+        appState="listening"
+        width={350}
+        height={60}
+        enableMicrophone={false}
+        intensity={1.2}
+        animationStyle="organic"
+      />
+    ),
     action: "Continue",
   },
   {
     id: "cancel",
-    title: "Master the Cancel Key",
-    subtitle: "Learn how to stop any operation",
+    title: "Escape to Cancel",
+    subtitle: "Stop any operation with a single key",
     description:
-      "Sometimes you need to stop what Juno is doing. Try pressing the Escape key below to see how cancellation works!",
-    icon: <XCircle className="w-12 h-12 text-red-500" />,
+      "Sometimes you need to stop what Juno is doing. Press Escape to stop Juno.",
+    icon: (
+      <AudioVisualizer
+        appState="error"
+        width={350}
+        height={60}
+        enableMicrophone={false}
+        intensity={1.8}
+        animationStyle="organic"
+      />
+    ),
     action: "Continue",
   },
   ...(permissionsAlreadyGranted
@@ -391,7 +412,8 @@ export default function OnboardingFlow({
 }: OnboardingFlowProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [shortcutPressed, setShortcutPressed] = useState(false);
-  const [backendShortcutsWorking, setBackendShortcutsWorking] = useState(false);
+  const [_backendShortcutsWorking, setBackendShortcutsWorking] =
+    useState(false);
   const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
   const [currentPermission, setCurrentPermission] = useState(0);
@@ -573,11 +595,7 @@ export default function OnboardingFlow({
                 className="text-center"
               >
                 {/* Icon */}
-                <div className="flex justify-center mb-8">
-                  <div className="w-20 h-20 rounded-full bg-gray-50/80 flex items-center justify-center">
-                    {step.icon}
-                  </div>
-                </div>
+                <div className="flex justify-center mb-8">{step.icon}</div>
 
                 {/* Content */}
                 <div className="space-y-4 mb-10">
