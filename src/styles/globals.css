@@ -321,9 +321,7 @@
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow:
-    0 8px 32px 0 rgba(0, 0, 0, 0.37),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  /* box-shadow removed - let macOS handle shadows */
 }
 
 .glass-panel-dark {
@@ -381,23 +379,20 @@
   animation: statusPulse 2s ease-in-out infinite;
 }
 
-/* Subtle glow effects */
+/* Subtle glow effects - let macOS handle shadows */
 .panel-glow-blue {
-  box-shadow:
-    0 0 20px rgba(59, 130, 246, 0.15),
-    0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  /* box-shadow removed - let macOS handle shadows */
+  border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
 .panel-glow-orange {
-  box-shadow:
-    0 0 20px rgba(249, 115, 22, 0.15),
-    0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  /* box-shadow removed - let macOS handle shadows */
+  border: 1px solid rgba(249, 115, 22, 0.2);
 }
 
 .panel-glow-purple {
-  box-shadow:
-    0 0 20px rgba(147, 51, 234, 0.15),
-    0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  /* box-shadow removed - let macOS handle shadows */
+  border: 1px solid rgba(147, 51, 234, 0.2);
 }
 
 /* Hover effects for compact mode */
@@ -494,8 +489,8 @@
 }
 
 .floating-panel-container.hover-active {
-  /* Enhanced shadow when hovered */
-  filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.3));
+  /* Enhanced glow when hovered - let macOS handle shadows */
+  opacity: 1;
 }
 
 /* 3D Shelf Effect for Floating Panel */
@@ -511,14 +506,14 @@
   /* Panel is "stored" on the shelf - rotated away */
   transform: perspective(1200px) rotateX(-15deg) translateY(-12px) translateZ(-60px) scale(0.92);
   opacity: 0.8;
-  filter: blur(1px) brightness(0.9) drop-shadow(0 25px 50px rgba(0, 0, 0, 0.4)) drop-shadow(0 15px 35px rgba(0, 0, 0, 0.3));
+  filter: blur(1px) brightness(0.9);
 }
 
 .floating-panel-shelf-effect.shelf-active {
   /* Panel is active - pulled forward from shelf */
   transform: perspective(1200px) rotateX(0deg) translateY(0px) translateZ(0px) scale(1);
   opacity: 1;
-  filter: blur(0px) brightness(1) drop-shadow(0 15px 40px rgba(0, 0, 0, 0.5)) drop-shadow(0 8px 25px rgba(0, 0, 0, 0.3));
+  filter: blur(0px) brightness(1);
 }
 
 /* Depth layering for shelf effect */
@@ -568,9 +563,7 @@
   backdrop-filter: blur(20px) saturate(180%);
   background-color: rgba(0, 0, 0, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  /* box-shadow removed - let macOS handle shadows */
 }
 
 /* Hover states for enhanced interaction */
