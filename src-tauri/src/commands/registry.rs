@@ -133,9 +133,11 @@ macro_rules! generate_invoke_handler {
             dev_wait,
 
             // Provider Commands
-            get_providers,
-            get_active_provider,
-            set_active_provider,
+                    get_providers,
+        get_active_provider,
+        set_active_provider,
+        validate_provider_model,
+        get_provider_models,
             get_provider_settings,
             update_provider_api_key,
             update_provider_model,

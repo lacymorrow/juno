@@ -400,6 +400,7 @@ impl LocalToolProvider {
         patterns
     }
 
+	/// TODO: ELIMINATE STRING MATCHING
     /// Classify error for recovery strategy selection
     fn classify_error(&self, error_msg: &str) -> ErrorClass {
         let error_lower = error_msg.to_lowercase();
