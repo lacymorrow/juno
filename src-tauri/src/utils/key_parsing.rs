@@ -58,7 +58,7 @@ pub fn validate_modifiers(modifiers: &[String]) -> Result<Vec<String>, String> {
     Ok(normalized)
 }
 
-/// Convert key combination to separate key and modifier for legacy APIs
+/// Convert key combination to separate key and modifier for APIs requiring separate values
 pub fn split_key_and_modifier(key_combo: &str) -> Result<(String, Option<String>), String> {
     let parsed = parse_key_combination(key_combo)?;
 

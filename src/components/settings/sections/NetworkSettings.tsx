@@ -127,11 +127,10 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
         setNewServerJson(correctedJson);
       }
 
-      // Support standard MCP format (Claude Desktop format) where server name is the key
+      // Standard MCP format (Claude Desktop format) where server name is the key
       // Example: { "mcp-server-firecrawl": { "command": "pnpm dlx", "args": ["firecrawl-mcp"], "env": { "FIRECRAWL_API_KEY": "..." } } }
       const serverEntries = Object.entries(parsedConfig);
 
-      // Check if this is the standard format (server name as key)
       if (
         serverEntries.length === 1 &&
         typeof serverEntries[0][1] === "object" &&
@@ -148,8 +147,7 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
           command: config.command || "",
           args: config.args || [],
           working_directory: config.working_directory || "",
-          environment_variables:
-            config.env || config.environment_variables || {},
+          environment_variables: config.env || {},
           enabled: true,
           auto_start: config.auto_start || false,
           timeout_seconds: config.timeout_seconds || 30,
@@ -163,26 +161,10 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
         return;
       }
 
-      // Support legacy format (single server object)
-      const newServer = {
-        id: `mcp-${Date.now()}`,
-        name: parsedConfig.name || "Unnamed Server",
-        description: parsedConfig.description || "",
-        command: parsedConfig.command || "",
-        args: parsedConfig.args || [],
-        working_directory: parsedConfig.working_directory || "",
-        environment_variables:
-          parsedConfig.env || parsedConfig.environment_variables || {},
-        enabled: true,
-        auto_start: parsedConfig.auto_start || false,
-        timeout_seconds: parsedConfig.timeout_seconds || 30,
-        max_retries: parsedConfig.max_retries || 3,
-      };
-
-      await invoke("add_mcp_server", { config: newServer });
-      toast.success("MCP server added successfully");
-      setNewServerJson("");
-      // Backend will emit mcp_state_updated event automatically
+      // If not in standard format, show error
+      toast.error(
+        "Invalid MCP server configuration format. Please use the standard format with server name as key."
+      );
     } catch (error) {
       console.error("Error adding MCP server:", error);
       if (error instanceof SyntaxError) {
@@ -276,10 +258,6 @@ export default function NetworkSettings({ settings }: SettingsSectionProps) {
                 <p>
                   • <strong>auto_start</strong>: Start automatically on app
                   launch
-                </p>
-                <p className="pt-2 font-medium">
-                  Legacy format also supported with "name" field and
-                  "environment_variables"
                 </p>
               </div>
             </div>

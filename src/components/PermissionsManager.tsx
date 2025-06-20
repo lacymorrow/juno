@@ -185,12 +185,12 @@ export function PermissionsManager({
     }
   };
 
-  // Request input monitoring permission (uses existing legacy method as no native equivalent yet)
+  // Request input monitoring permission using native APIs - no password prompts
   const requestInputMonitoringPermission = async () => {
     try {
       setIsRequestingPermission("input_monitoring");
       const granted = await invoke<boolean>(
-        "request_input_monitoring_permission"
+        "request_input_monitoring_permission_native"
       );
 
       if (granted) {

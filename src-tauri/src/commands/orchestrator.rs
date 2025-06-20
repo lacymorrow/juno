@@ -166,7 +166,7 @@ async fn initialize_default_mcp_servers_safely(mcp_manager: &MCPManager) -> Resu
     Ok(())
 }
 
-/// Initialize default MCP servers for common tools (legacy function - now redirects to safe version)
+/// Initialize default MCP servers for common tools
 async fn initialize_default_mcp_servers(mcp_manager: &MCPManager) -> Result<(), String> {
     tracing::info!("Redirecting to safe MCP server initialization...");
     initialize_default_mcp_servers_safely(mcp_manager).await
