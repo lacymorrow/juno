@@ -24,6 +24,7 @@ pub mod utils;
 pub mod agent;
 pub mod agents; // Multi-agent system with specialized agents
 pub mod constants;
+pub mod settings; // Centralized settings management with reactive updates
 pub mod dictation_monitor; // Module for intelligent dictation input handling
 pub mod agent_monitor; // Module for intelligent agent input handling (tap vs hold)
 pub mod cloud; // Cloud connectivity and remote control

@@ -178,23 +178,52 @@ pub async fn stop_tts() -> Result<(), String> {
 #[tauri::command]
 pub async fn set_tts_provider_command(
     provider: String,
+    app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    info!("Setting TTS provider to: {}", provider);
+
+    // Validate provider
+    let valid_providers = ["system", "elevenlabs", "replicate"];
+    if !valid_providers.contains(&provider.as_str()) {
+        return Err(format!("Invalid TTS provider: {}. Valid providers: {:?}", provider, valid_providers));
+    }
+
+    // Get current settings from centralized system
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Update centralized settings
+    audio_settings.tts_provider = provider.clone();
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update app state for backward compatibility
     let mut current_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?;
     *current_provider = provider.clone();
-    info!("TTS provider set to: {}", provider);
+
+    info!("TTS provider set to: {} (saved to centralized settings)", provider);
     Ok(())
 }
 
 // New command to get current TTS provider
 #[tauri::command]
 pub async fn get_tts_provider_command(
-    state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<String, String> {
-    let provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider: {}", e))?.clone();
+    // Get provider from centralized settings
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
     // Reduced logging frequency - only log at debug level
-    tracing::debug!("Current TTS provider: {}", provider);
-    Ok(provider)
+    tracing::debug!("Current TTS provider from centralized settings: {}", audio_settings.tts_provider);
+    Ok(audio_settings.tts_provider)
 }
 
 // Central TTS invocation function with escape key registration

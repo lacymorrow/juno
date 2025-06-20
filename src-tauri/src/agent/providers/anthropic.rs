@@ -12,6 +12,7 @@ use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::{AgentBrain, StreamingAgentBrain};
+use crate::agent::providers::factory::model_ids;
 
 // --- Anthropic API Structs --- //
 
@@ -160,7 +161,7 @@ struct MessageStopEvent {
 // --- AnthropicBrain Implementation --- //
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const DEFAULT_MODEL: &str = "claude-3-7-sonnet-20250219";
+const DEFAULT_MODEL: &str = model_ids::CLAUDE_3_7_SONNET;
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 #[derive(Clone)]

@@ -100,6 +100,85 @@ useEffect(() => {
 }, []);
 ```
 
+### Component State Synchronization Patterns ✅ CRITICAL
+
+#### ModelSelector Synchronization (RESOLVED)
+**Problem**: Multiple competing state sources causing race conditions and sync issues.
+
+**❌ Anti-Pattern - Multiple State Sources**:
+```typescript
+// WRONG - Multiple competing state sources
+const ModelSelector = () => {
+  const [currentModel, setCurrentModel] = useState(""); // Local state
+  const settings = useSettings(); // Global state
+  // Both trying to control the same UI element - RACE CONDITIONS!
+};
+```
+
+**✅ Correct Pattern - Single Source of Truth**:
+```typescript
+// CORRECT - Single authoritative state source
+const ModelSelector = ({ variant = "default" }: ModelSelectorProps) => {
+  const settings = useSettings();
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  // NO local currentModel state - eliminated competing sources
+
+  // Use settings.formData.model as single source of truth
+  const currentModelId = settings.formData.model || settings.providerSettings?.model || "";
+
+  // Proper event listener for provider changes
+  useEffect(() => {
+    const unlisten = listen<ProviderSettings>("provider_settings_changed", (event) => {
+      // Reload models when provider changes
+      loadModels();
+    });
+    return () => unlisten?.();
+  }, []);
+};
+```
+
+**Event Payload Structure Handling**:
+```typescript
+// ✅ CORRECT - Handle full ProviderSettings payload structure
+useEffect(() => {
+  const setupProviderListener = async () => {
+    unlisten = await listen<{
+      active_provider: string;
+      providers: Array<{
+        id: string;
+        api_key?: string;
+        model?: string;
+        max_tokens?: number;
+        temperature?: number;
+        system_prompt?: string;
+      }>;
+    }>("provider_settings_changed", (event) => {
+      const fullProviderSettings = event.payload;
+
+      // Extract current provider settings from providers array
+      const currentProviderSettings = fullProviderSettings.providers.find(
+        p => p.id === fullProviderSettings.active_provider
+      );
+
+      if (currentProviderSettings) {
+        setProviderSettings(currentProviderSettings);
+        setFormData({
+          model: currentProviderSettings.model || "",
+          // ... other fields
+        });
+      }
+    });
+  };
+}, [activeProvider]);
+```
+
+**Key Synchronization Rules**:
+1. **Single Source of Truth**: One authoritative state source per UI element
+2. **Event Payload Structure**: Understand backend event structure completely
+3. **Provider Change Detection**: Listen for `provider_settings_changed` events
+4. **Atomic State Updates**: Update all related state simultaneously
+5. **Error Prevention**: Handle missing provider settings gracefully
+
 ## Monitor Patterns
 
 ### State Monitoring Template

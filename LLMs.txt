@@ -7,6 +7,8 @@ Juno is a **production-ready Tauri v2 desktop app** implementing Anthropic's Com
 
 **Latest Enhancement**: Completed systematic improvement process (Steps 1-7) delivering advanced orchestration, tool configuration, memory management systems, plus security enhancements and hardware monitoring.
 
+**Recent Fix**: ✅ **ModelSelector Synchronization Issue Resolved** - Fixed critical frontend state synchronization problems where ModelSelector component was not properly syncing with provider changes, showing incorrect models, and experiencing race conditions between multiple state sources.
+
 ## Architecture Overview
 
 ### Core Components
@@ -434,6 +436,106 @@ await window.minimize();
 await window.maximize();
 await window.setFullscreen(!isFullscreen);
 ```
+
+### Frontend Component State Management Patterns 🔄 NEW
+
+#### ModelSelector Synchronization (RESOLVED)
+**Issue**: The ModelSelector component in the app header was experiencing critical state synchronization problems:
+- Not syncing with selected model when changing providers
+- Sometimes updated but was never consistently in sync
+- When changing providers (e.g., to OpenAI), still showed previous provider's models
+- Multiple competing state sources causing race conditions
+
+**Root Cause Analysis**:
+1. **Multiple competing state sources**: ModelSelector had its own `currentModel` state competing with `settings.formData.model` and `settings.providerSettings?.model`
+2. **Race conditions**: Multiple useEffect hooks conflicted with each other
+3. **Event listener mismatch**: useSettings hook was listening for `provider_settings_changed` events but incorrectly handling payload structure
+4. **Backend event structure**: Backend emits full `ProviderSettings` object but frontend was treating it as single provider settings
+
+**✅ Solution Implemented**:
+
+**ModelSelector.tsx Rewrite**:
+```typescript
+// ✅ CORRECT - Single source of truth pattern
+const ModelSelector = ({ variant = "default" }: ModelSelectorProps) => {
+  const settings = useSettings();
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  // NO local currentModel state - eliminated competing state sources
+
+  // Use settings.formData.model as single source of truth
+  const currentModelId = settings.formData.model || settings.providerSettings?.model || "";
+
+  // Proper event listener for provider changes
+  useEffect(() => {
+    const unlisten = listen<ProviderSettings>("provider_settings_changed", (event) => {
+      // Reload models when provider changes
+      loadModels();
+    });
+    return () => unlisten?.();
+  }, []);
+};
+```
+
+**useSettings.ts Event Listener Fix**:
+```typescript
+// ✅ CORRECT - Handle full ProviderSettings payload structure
+useEffect(() => {
+  const setupProviderListener = async () => {
+    unlisten = await listen<{
+      active_provider: string;
+      providers: Array<{
+        id: string;
+        api_key?: string;
+        model?: string;
+        max_tokens?: number;
+        temperature?: number;
+        system_prompt?: string;
+      }>;
+    }>("provider_settings_changed", (event) => {
+      const fullProviderSettings = event.payload;
+
+      // Extract current provider settings from providers array
+      const currentProviderSettings = fullProviderSettings.providers.find(
+        p => p.id === fullProviderSettings.active_provider
+      );
+
+      if (currentProviderSettings) {
+        setProviderSettings(currentProviderSettings);
+        setFormData({
+          model: currentProviderSettings.model || "",
+          // ... other fields
+        });
+      }
+    });
+  };
+}, [activeProvider]);
+```
+
+**Backend Event Structure**:
+```rust
+// Backend correctly emits full ProviderSettings structure
+let settings = ProviderSettings {
+    active_provider: "openai".to_string(),
+    providers: vec![
+        ProviderConfig { id: "openai", model: Some("gpt-4"), ... },
+        ProviderConfig { id: "anthropic", model: Some("claude-3-5-sonnet"), ... },
+    ]
+};
+app_handle.emit(events::PROVIDER_SETTINGS_CHANGED, settings);
+```
+
+**Key Patterns for Frontend Components**:
+1. **Single Source of Truth**: Always use one authoritative state source, avoid competing local state
+2. **Event Payload Structure**: Understand backend event structure - don't assume payload format
+3. **Provider Change Detection**: Listen for `provider_settings_changed` events and reload dependent data
+4. **State Synchronization**: Update all related state atomically when provider changes
+5. **Error Prevention**: Handle missing provider settings gracefully
+
+**Expected Behavior After Fix**:
+- ✅ ModelSelector properly syncs with provider changes
+- ✅ Shows provider-specific models immediately
+- ✅ Maintains consistent state across application
+- ✅ Eliminates race conditions and state conflicts
 
 ## Voice System - Three-Mode Architecture 🎙️
 

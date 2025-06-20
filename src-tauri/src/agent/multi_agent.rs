@@ -16,6 +16,7 @@ use crate::agent::providers::openai::OpenAIBrain;
 use crate::state::CancelReceiver;
 use crate::agent::prompts::PromptManager;
 use crate::agent::tools::ToolMappingService;
+use crate::settings::manager::SettingsManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum AgentType {
@@ -89,9 +90,15 @@ impl MultiAgentOrchestrator {
     ) -> Result<Self, AgentError> {
         // Load prompt manager
         let prompt_manager = if let Some(handle) = app_handle {
-            PromptManager::load_from_store(handle).unwrap_or_else(|_| PromptManager::new())
+            // Create settings manager from app handle
+            match SettingsManager::new(handle.clone()) {
+                Ok(settings_manager) => {
+                    crate::agent::prompts::PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|_| crate::agent::prompts::PromptManager::new())
+                }
+                Err(_) => crate::agent::prompts::PromptManager::new()
+            }
         } else {
-            PromptManager::new()
+            crate::agent::prompts::PromptManager::new()
         };
 
         // Create orchestrator (Gemini Flash for fast routing decisions)

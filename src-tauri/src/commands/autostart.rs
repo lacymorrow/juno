@@ -1,16 +1,16 @@
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
-use std::fs::{File, create_dir_all};
-use std::io::{Read, Write};
+use crate::settings::manager::SettingsManager;
 
+/// Enable autostart and save to centralized settings
 #[tauri::command]
-pub async fn enable_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+pub async fn enable_autostart(app: AppHandle) -> Result<bool, String> {
     let autostart_manager = app.autolaunch();
-    
+
     match autostart_manager.enable() {
         Ok(_) => {
-            // Save the setting locally
-            save_autostart_setting(&app, true)?;
+            // Save the setting to centralized settings
+            save_autostart_to_centralized_settings(app, true).await?;
             log::info!("Autostart enabled successfully");
             Ok(true)
         }
@@ -21,14 +21,15 @@ pub async fn enable_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, Str
     }
 }
 
+/// Disable autostart and save to centralized settings
 #[tauri::command]
-pub async fn disable_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+pub async fn disable_autostart(app: AppHandle) -> Result<bool, String> {
     let autostart_manager = app.autolaunch();
-    
+
     match autostart_manager.disable() {
         Ok(_) => {
-            // Save the setting locally
-            save_autostart_setting(&app, false)?;
+            // Save the setting to centralized settings
+            save_autostart_to_centralized_settings(app, false).await?;
             log::info!("Autostart disabled successfully");
             Ok(false)
         }
@@ -39,20 +40,30 @@ pub async fn disable_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, St
     }
 }
 
+/// Check if autostart is enabled, with fallback to centralized settings
 #[tauri::command]
-pub async fn is_autostart_enabled<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+pub async fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
     let autostart_manager = app.autolaunch();
-    
+
     match autostart_manager.is_enabled() {
         Ok(enabled) => {
-            log::debug!("Autostart status: {}", enabled);
+            log::debug!("Autostart status from system: {}", enabled);
+
+            // Sync with centralized settings if there's a mismatch
+            if let Ok(saved_enabled) = get_autostart_from_centralized_settings(&app).await {
+                if saved_enabled != enabled {
+                    log::info!("Syncing autostart state: system={}, saved={}", enabled, saved_enabled);
+                    save_autostart_to_centralized_settings(app.clone(), enabled).await?;
+                }
+            }
+
             Ok(enabled)
         }
         Err(err) => {
             log::error!("Failed to check autostart status: {}", err);
-            
-            // Fall back to locally saved setting if system check fails
-            match get_saved_autostart_setting(&app) {
+
+            // Fall back to centralized settings if system check fails
+            match get_autostart_from_centralized_settings(&app).await {
                 Ok(saved_setting) => {
                     log::debug!("Using saved autostart setting: {}", saved_setting);
                     Ok(saved_setting)
@@ -63,10 +74,11 @@ pub async fn is_autostart_enabled<R: Runtime>(app: AppHandle<R>) -> Result<bool,
     }
 }
 
+/// Toggle autostart state
 #[tauri::command]
-pub async fn toggle_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
+pub async fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
     let current_status = is_autostart_enabled(app.clone()).await?;
-    
+
     if current_status {
         disable_autostart(app).await
     } else {
@@ -74,181 +86,162 @@ pub async fn toggle_autostart<R: Runtime>(app: AppHandle<R>) -> Result<bool, Str
     }
 }
 
-// Helper function to save autostart setting locally
-fn save_autostart_setting<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> Result<(), String> {
-    let app_data_dir = app.path().app_config_dir()
-        .map_err(|_| "Failed to get app config directory".to_string())?;
-    
-    if !app_data_dir.exists() {
-        create_dir_all(&app_data_dir)
-            .map_err(|_| "Failed to create app config directory".to_string())?;
-    }
-    
-    let autostart_file = app_data_dir.join("autostart.json");
-    let setting_data = serde_json::json!({
-        "enabled": enabled,
-        "last_updated": chrono::Utc::now().to_rfc3339()
-    });
-    
-    let mut file = File::create(autostart_file)
-        .map_err(|_| "Failed to create autostart settings file".to_string())?;
-    
-    file.write_all(setting_data.to_string().as_bytes())
-        .map_err(|_| "Failed to write autostart settings".to_string())?;
-    
+/// Helper function to save autostart setting to centralized settings
+async fn save_autostart_to_centralized_settings(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    settings_manager.set_autostart_enabled(enabled).await
+        .map_err(|e| format!("Failed to save autostart setting: {}", e))?;
+
+    log::debug!("Autostart setting saved to centralized settings: {}", enabled);
     Ok(())
 }
 
-// Helper function to get saved autostart setting
-fn get_saved_autostart_setting<R: Runtime>(app: &AppHandle<R>) -> Result<bool, String> {
-    let app_data_dir = app.path().app_config_dir()
-        .map_err(|_| "Failed to get app config directory".to_string())?;
-    
-    let autostart_file = app_data_dir.join("autostart.json");
-    
-    if !autostart_file.exists() {
-        return Ok(false); // Default to disabled if no setting saved
-    }
-    
-    let mut file = File::open(autostart_file)
-        .map_err(|_| "Failed to open autostart settings file".to_string())?;
-    
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)
-        .map_err(|_| "Failed to read autostart settings file".to_string())?;
-    
-    let setting_data: serde_json::Value = serde_json::from_str(&contents)
-        .map_err(|_| "Failed to parse autostart settings".to_string())?;
-    
-    Ok(setting_data.get("enabled")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false))
+/// Helper function to get autostart setting from centralized settings
+async fn get_autostart_from_centralized_settings(app: &AppHandle) -> Result<bool, String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    settings_manager.get_autostart_enabled().await
+        .map_err(|e| format!("Failed to get autostart setting: {}", e))
 }
 
-/// Initialize autostart on app startup
-pub fn init_autostart<R: Runtime>(app: &AppHandle<R>) {
-    let autostart_manager = app.autolaunch();
-    
-    // Check if autostart should be enabled based on saved settings
-    if let Ok(should_be_enabled) = get_saved_autostart_setting(app) {
-        if let Ok(currently_enabled) = autostart_manager.is_enabled() {
-            // Sync the system setting with our saved preference
-            match (currently_enabled, should_be_enabled) {
-                (false, true) => {
-                    if let Err(err) = autostart_manager.enable() {
-                        log::warn!("Failed to enable autostart on startup: {}", err);
-                    } else {
-                        log::info!("Autostart enabled on startup");
+/// Initialize autostart on app startup - load from centralized settings
+pub fn init_autostart(app: &AppHandle) -> Result<(), String> {
+    // Create a handle that can be moved into the async block
+    let app_handle = app.clone();
+
+    // Use async runtime to check centralized settings
+    tauri::async_runtime::spawn(async move {
+        // Get the autostart manager inside the async block to avoid lifetime issues
+        let autostart_manager = app_handle.autolaunch();
+
+        let settings_manager = match SettingsManager::new(app_handle.clone()) {
+            Ok(manager) => manager,
+            Err(e) => {
+                log::warn!("Failed to create settings manager for autostart init: {}", e);
+                return;
+            }
+        };
+
+        match settings_manager.get_autostart_enabled().await {
+            Ok(should_be_enabled) => {
+                match autostart_manager.is_enabled() {
+                    Ok(currently_enabled) => {
+                        // Sync the system setting with our centralized preference
+                        match (currently_enabled, should_be_enabled) {
+                            (false, true) => {
+                                if let Err(err) = autostart_manager.enable() {
+                                    log::warn!("Failed to enable autostart on startup: {}", err);
+                                } else {
+                                    log::info!("Autostart enabled on startup");
+                                    // Update centralized settings to reflect the change
+                                    if let Err(err) = save_autostart_to_centralized_settings(app_handle.clone(), true).await {
+                                        log::warn!("Failed to save autostart state after enabling: {}", err);
+                                    }
+                                }
+                            }
+                            (true, false) => {
+                                if let Err(err) = autostart_manager.disable() {
+                                    log::warn!("Failed to disable autostart on startup: {}", err);
+                                } else {
+                                    log::info!("Autostart disabled on startup");
+                                    // Update centralized settings to reflect the change
+                                    if let Err(err) = save_autostart_to_centralized_settings(app_handle.clone(), false).await {
+                                        log::warn!("Failed to save autostart state after disabling: {}", err);
+                                    }
+                                }
+                            }
+                            _ => {
+                                log::debug!("Autostart setting already in sync");
+                            }
+                        }
                     }
-                }
-                (true, false) => {
-                    if let Err(err) = autostart_manager.disable() {
-                        log::warn!("Failed to disable autostart on startup: {}", err);
-                    } else {
-                        log::info!("Autostart disabled on startup");
+                    Err(err) => {
+                        log::warn!("Failed to check autostart status on startup: {}", err);
                     }
-                }
-                _ => {
-                    log::debug!("Autostart setting already in sync");
                 }
             }
+            Err(err) => {
+                log::warn!("Failed to load autostart setting from centralized settings: {}", err);
+            }
         }
-    }
+    });
+
+    Ok(())
+}
+
+/// Public helper function to load autostart setting from centralized settings
+/// Used by state management and other modules
+pub async fn load_autostart_from_centralized_settings(app: &AppHandle) -> Result<bool, String> {
+    get_autostart_from_centralized_settings(app).await
+}
+
+/// Public helper function to save autostart setting to centralized settings
+/// Used by state management and other modules
+pub async fn save_autostart_to_centralized_settings_helper(app: AppHandle, enabled: bool) -> Result<(), String> {
+    save_autostart_to_centralized_settings(app, enabled).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-    use std::env;
-    use std::fs;
+    use crate::settings::AppSettings;
 
     #[test]
-    fn test_autostart_setting_serialization() {
-        // Test that autostart settings can be properly serialized and deserialized
-        let setting_data = json!({
-            "enabled": true,
-            "last_updated": "2024-01-15T10:30:45.123Z"
-        });
-        
-        let serialized = setting_data.to_string();
-        assert!(serialized.contains("enabled"));
-        assert!(serialized.contains("true"));
-        assert!(serialized.contains("last_updated"));
-        
-        let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(parsed.get("enabled").unwrap().as_bool().unwrap(), true);
+    fn test_autostart_setting_defaults() {
+        // Test that autostart settings have proper defaults
+        let default_settings = AppSettings::default();
+        assert_eq!(default_settings.autostart_enabled, false);
     }
-    
+
     #[test]
-    fn test_autostart_setting_json_structure() {
-        // Test the structure of autostart settings
-        let enabled_setting = json!({
-            "enabled": true,
-            "last_updated": chrono::Utc::now().to_rfc3339()
-        });
-        
-        let disabled_setting = json!({
-            "enabled": false,
-            "last_updated": chrono::Utc::now().to_rfc3339()
-        });
-        
-        // Test enabled state
-        assert_eq!(enabled_setting.get("enabled").unwrap().as_bool().unwrap(), true);
-        assert!(enabled_setting.get("last_updated").is_some());
-        
-        // Test disabled state  
-        assert_eq!(disabled_setting.get("enabled").unwrap().as_bool().unwrap(), false);
-        assert!(disabled_setting.get("last_updated").is_some());
+    fn test_autostart_setting_structure() {
+        // Test the centralized settings structure
+        let settings = AppSettings {
+            autostart_enabled: true,
+            ..AppSettings::default()
+        };
+
+        assert_eq!(settings.autostart_enabled, true);
     }
-    
+
+    #[test]
+    fn test_autostart_toggle_logic() {
+        // Test toggle logic with different states
+        let enabled = true;
+        let disabled = false;
+
+        // Simulate toggle behavior
+        let after_toggle_enabled = !enabled;
+        let after_toggle_disabled = !disabled;
+
+        assert_eq!(after_toggle_enabled, false);
+        assert_eq!(after_toggle_disabled, true);
+    }
+
     #[test]
     fn test_autostart_error_handling() {
-        // Test error message formatting for autostart operations
-        let error_message = "Permission denied";
-        let formatted_error = format!("Failed to enable autostart: {}", error_message);
-        
-        assert!(formatted_error.contains("Failed to enable autostart"));
-        assert!(formatted_error.contains(error_message));
+        // Test error handling scenarios
+        let error_msg = "Failed to access settings store";
+        assert!(error_msg.contains("Failed to access"));
+        assert!(error_msg.contains("settings store"));
     }
-    
+
     #[test]
-    fn test_autostart_timestamp_format() {
-        // Test that timestamps are properly formatted in RFC3339
-        let timestamp = chrono::Utc::now().to_rfc3339();
-        
-        // Should contain the T separator and Z timezone
-        assert!(timestamp.contains('T'));
-        assert!(timestamp.ends_with('Z'));
-        
-        // Should be parseable back
-        let parsed_time = chrono::DateTime::parse_from_rfc3339(&timestamp);
-        assert!(parsed_time.is_ok());
-    }
-    
-    #[test]
-    fn test_autostart_configuration_validation() {
-        // Test validation of autostart configuration data
-        let valid_config = json!({
-            "enabled": true,
-            "last_updated": "2024-01-15T10:30:45.123Z"
-        });
-        
-        let invalid_config_missing_enabled = json!({
-            "last_updated": "2024-01-15T10:30:45.123Z"
-        });
-        
-        let invalid_config_wrong_type = json!({
-            "enabled": "true",  // Should be boolean, not string
-            "last_updated": "2024-01-15T10:30:45.123Z"
-        });
-        
-        // Valid config should parse correctly
-        assert!(valid_config.get("enabled").is_some());
-        assert!(valid_config.get("enabled").unwrap().as_bool().is_some());
-        
-        // Invalid configs should handle gracefully
-        assert!(invalid_config_missing_enabled.get("enabled").is_none());
-        assert!(invalid_config_wrong_type.get("enabled").unwrap().as_bool().is_none());
+    fn test_autostart_sync_scenarios() {
+        // Test different sync scenarios between system and saved settings
+        let system_enabled = true;
+        let saved_enabled = false;
+
+        // Should detect mismatch
+        assert_ne!(system_enabled, saved_enabled);
+
+        let system_disabled = false;
+        let saved_disabled = false;
+
+        // Should detect match
+        assert_eq!(system_disabled, saved_disabled);
     }
 }

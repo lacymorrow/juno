@@ -203,6 +203,12 @@ impl From<tokio_tungstenite::tungstenite::Error> for CloudError {
     }
 }
 
+impl From<String> for CloudError {
+    fn from(error: String) -> Self {
+        CloudError::ConfigError(error)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConnectionState {
     Disconnected,

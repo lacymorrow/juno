@@ -438,7 +438,7 @@ impl RGBConnectedGraphAnalyzer {
         let total_patches = patches.len();
 
         Ok(RGBAnalysisResult {
-            patches,
+            patches: patches.clone(),
             connected_components,
             importance_scores,
             processing_time_ms: processing_time.as_millis() as u64,
@@ -717,7 +717,11 @@ impl RGBConnectedGraphAnalyzer {
 
         for chunk_start in (0..patches.len()).step_by(chunk_size) {
             let chunk_end = (chunk_start + chunk_size).min(patches.len());
+<<<<<<< HEAD
             let chunk_patches = patches[chunk_start..chunk_end].to_vec(); // Clone the chunk
+=======
+            let chunk_patches = patches[chunk_start..chunk_end].to_vec();
+>>>>>>> 8659e398127f520fe7da438ba1626ad9f4b1ec80
             let all_patches = patches.to_vec();
             let display_info_clone = display_info.clone();
             let config = self.config.clone();

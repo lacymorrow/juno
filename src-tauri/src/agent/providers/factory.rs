@@ -16,7 +16,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
 
 // Model ID Constants - Single source of truth
-mod model_ids {
+pub mod model_ids {
     // Anthropic Claude Models
     pub const CLAUDE_4_OPUS: &str = "claude-opus-4-20250514";
     pub const CLAUDE_4_SONNET: &str = "claude-sonnet-4-20250514";
@@ -147,50 +147,87 @@ impl Provider {
     /// Get model definitions for the provider
     pub fn model_definitions(&self) -> &'static [ModelDefinition] {
         match self {
-            Provider::Anthropic => &[
-                ModelDefinition {
-                    id: model_ids::CLAUDE_4_SONNET,
-                    name: "Claude 4 Sonnet",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_4_OPUS,
-                    name: "Claude 4 Opus",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_7_SONNET,
-                    name: "Claude 3.7 Sonnet",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_5_SONNET,
-                    name: "Claude 3.5 Sonnet",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: false,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_5_HAIKU,
-                    name: "Claude 3.5 Haiku",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: false,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_OPUS,
-                    name: "Claude 3 Opus (Legacy)",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: false,
-                },
-            ],
+            Provider::Anthropic => {
+                // In development mode, show all models including Opus
+                if cfg!(debug_assertions) {
+                    &[
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_SONNET,
+                            name: "Claude 4 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: true,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_OPUS,
+                            name: "Claude 4 Opus (Dev Only)",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_7_SONNET,
+                            name: "Claude 3.7 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_SONNET,
+                            name: "Claude 3.5 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_HAIKU,
+                            name: "Claude 3.5 Haiku",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_OPUS,
+                            name: "Claude 3 Opus (Legacy - Dev Only)",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                    ]
+                } else {
+                    // In production mode, hide Opus models
+                    &[
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_SONNET,
+                            name: "Claude 4 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: true,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_7_SONNET,
+                            name: "Claude 3.7 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_SONNET,
+                            name: "Claude 3.5 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_HAIKU,
+                            name: "Claude 3.5 Haiku",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                    ]
+                }
+            },
             Provider::OpenAI => &[
                 ModelDefinition {
                     id: model_ids::OPENAI_CUA,
@@ -321,7 +358,7 @@ impl Provider {
             .unwrap_or_else(|| {
                 // Fallback constants if no definitions exist (shouldn't happen)
                 match self {
-                    Provider::Anthropic => model_ids::CLAUDE_3_7_SONNET,
+                    Provider::Anthropic => model_ids::CLAUDE_4_SONNET,
                     Provider::OpenAI => model_ids::OPENAI_CUA,
                     Provider::Rig => model_ids::GPT_4O,
                     Provider::Gemini => model_ids::GEMINI_1_5_PRO,
@@ -398,7 +435,7 @@ impl BrainFactory {
         match config.get_agent_mode() {
             AgentMode::Single => {
                 // Create a single agent runtime
-                let brain = Self::create_brain()?;
+                let brain = Self::create_brain().await?;
 
                                 // Convert Arc<dyn ToolProvider> to concrete type if needed
                 let local_tool_provider = if let Some(ref handle) = app_handle {
@@ -478,12 +515,12 @@ impl BrainFactory {
     }
 
     /// Create an AgentBrain implementation based on provider configuration
-    pub fn create_brain() -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
-        Self::create_brain_with_app_handle(None)
+    pub async fn create_brain() -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+        Self::create_brain_with_app_handle(None).await
     }
 
     /// Create an AgentBrain implementation with app handle for proper prompt loading
-    pub fn create_brain_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+    pub async fn create_brain_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
             "anthropic".to_string() // Default to Anthropic for new app
         });
@@ -493,8 +530,25 @@ impl BrainFactory {
 
         // Load system prompt from prompt manager if app_handle is available
         let system_prompt = if let Some(handle) = app_handle {
-            let prompt_manager = crate::agent::prompts::PromptManager::load_from_store(handle).unwrap_or_else(|e| {
-                warn!("Failed to load prompt configuration from store: {}. Using defaults.", e);
+            // Create settings manager from app handle
+            let settings_manager = match crate::settings::manager::SettingsManager::new(handle.clone()) {
+                Ok(manager) => manager,
+                Err(e) => {
+                    warn!("Failed to create settings manager: {}. Using defaults.", e);
+                    // Use default prompt instead of returning
+                    let prompt_manager = crate::agent::prompts::PromptManager::new();
+                    return Ok(Box::new(AnthropicBrain::new(
+                        env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
+                        None,
+                        None,
+                        Some(prompt_manager.get_default_system_prompt())
+                    )?) as Box<dyn AgentBrain + Send + Sync>);
+                }
+            };
+
+            // Load prompt manager with centralized settings
+            let prompt_manager = crate::agent::prompts::PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
+                warn!("Failed to load prompt configuration from centralized settings: {}. Using defaults.", e);
                 crate::agent::prompts::PromptManager::new()
             });
             Some(prompt_manager.get_default_system_prompt())
