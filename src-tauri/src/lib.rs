@@ -711,6 +711,17 @@ pub fn run() {
 
             set_debug_mode,
             get_debug_mode,
+
+            // Tray Icon Commands
+            commands::tray_commands::set_tray_icon_default,
+            commands::tray_commands::set_tray_icon_agent_active,
+            commands::tray_commands::set_tray_icon_dictation_active,
+            commands::tray_commands::set_tray_icon_always_listening,
+            commands::tray_commands::set_tray_icon_processing,
+            commands::tray_commands::set_tray_icon_error,
+            commands::tray_commands::update_tray_icon_from_state,
+            commands::tray_commands::test_all_tray_icon_states,
+            commands::tray_commands::get_current_tray_icon_state,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

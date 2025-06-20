@@ -37,6 +37,7 @@ pub mod always_listening;
 pub mod notifications;
 pub mod stop_operations;
 pub mod onboarding;
+pub mod tray_commands;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
