@@ -281,7 +281,7 @@ pub async fn submit_query(
     let agent_result = match agent_mode {
         AgentMode::Single => {
             // Single agent mode - use traditional approach with all tools
-            let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)) {
+            let brain = match BrainFactory::create_brain_with_app_handle(Some(&app_handle)).await {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize single agent brain: {}", e);
@@ -325,7 +325,7 @@ pub async fn submit_query(
         },
         AgentMode::Multi => {
             // Multi-agent mode - use orchestrator with specialized agents
-            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(get_orchestrator_personality_prompt(&app_handle)) {
+            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(get_orchestrator_personality_prompt(&app_handle).await) {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
@@ -597,10 +597,19 @@ pub async fn handle_tts_completion(
 }
 
 /// Get the personality-focused system prompt for the orchestrator
-fn get_orchestrator_personality_prompt(app_handle: &tauri::AppHandle) -> String {
-    // FIXED: Use prompt manager with proper store loading instead of deprecated load()
-    let prompt_manager = PromptManager::load_from_store(app_handle).unwrap_or_else(|e| {
-        warn!("Failed to load prompt configuration from store: {}. Using defaults.", e);
+async fn get_orchestrator_personality_prompt(app_handle: &tauri::AppHandle) -> String {
+    // Create settings manager from app handle
+    let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+        Ok(manager) => manager,
+        Err(e) => {
+            warn!("Failed to create settings manager: {}. Using defaults.", e);
+            return crate::agent::prompts::PromptManager::new().get_orchestrator_personality_prompt();
+        }
+    };
+
+    // FIXED: Use prompt manager with proper centralized settings loading
+    let prompt_manager = PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
+        warn!("Failed to load prompt configuration from centralized settings: {}. Using defaults.", e);
         PromptManager::new()
     });
     prompt_manager.get_orchestrator_personality_prompt()
@@ -791,7 +800,7 @@ async fn execute_specialized_agent_task(
     }
 
     // Create appropriate brain for the specialist agent with focused system prompt
-    let system_prompt = get_specialist_system_prompt(agent_type, &app_handle);
+    let system_prompt = get_specialist_system_prompt(agent_type, &app_handle).await;
     let specialist_brain = match BrainFactory::create_brain_with_system_prompt(system_prompt) {
         Ok(brain) => brain,
         Err(e) => return Err(format!("Failed to create specialist brain: {}", e)),
@@ -871,11 +880,20 @@ async fn execute_specialized_agent_task(
     }
 }
 
-/// Get system prompt for specialized agents
-fn get_specialist_system_prompt(agent_type: &str, app_handle: &tauri::AppHandle) -> String {
-    // FIXED: Use prompt manager with proper store loading instead of deprecated load()
-    let prompt_manager = PromptManager::load_from_store(app_handle).unwrap_or_else(|e| {
-        warn!("Failed to load prompt configuration from store: {}. Using defaults.", e);
+/// Get specialist system prompt for delegation task execution
+async fn get_specialist_system_prompt(agent_type: &str, app_handle: &tauri::AppHandle) -> String {
+    // Create settings manager from app handle
+    let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+        Ok(manager) => manager,
+        Err(e) => {
+            warn!("Failed to create settings manager: {}. Using defaults.", e);
+            return PromptManager::new().get_specialist_prompt(agent_type);
+        }
+    };
+
+    // FIXED: Use prompt manager with proper centralized settings loading
+    let prompt_manager = PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
+        warn!("Failed to load prompt configuration from centralized settings: {}. Using defaults.", e);
         PromptManager::new()
     });
     prompt_manager.get_specialist_prompt(agent_type)

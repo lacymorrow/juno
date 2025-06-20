@@ -6,17 +6,7 @@
 /// Central settings store file name
 pub const SETTINGS_STORE_FILE: &str = "app_settings.json";
 
-/// Legacy store file names (to be migrated)
-pub mod legacy_stores {
-    pub const ONBOARDING: &str = "onboarding.json";
-    pub const KEYBOARD_SHORTCUTS: &str = "keyboard_shortcuts.json";
-    pub const FLOATING_BAR_CONFIG: &str = "floating_bar_config.json";
-    pub const AGENT_SETTINGS: &str = "agent_settings.json";
-    pub const CLOUD_CONFIG: &str = "cloud_config.json";
-    pub const PROMPT_CONFIG: &str = "prompt_config.json";
-    pub const PROVIDER_CONFIG: &str = "provider_config.json";
-    pub const TOOL_CONFIG: &str = "tool_config.json";
-}
+
 
 /// Top-level settings keys in the unified store
 pub mod store_keys {
