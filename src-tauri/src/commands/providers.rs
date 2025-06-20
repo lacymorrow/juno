@@ -1,8 +1,9 @@
 // Commands for managing AI providers
 
-use crate::agent::providers::config::{ProviderConfig, ProviderSettings, AgentMode};
+use crate::agent::providers::config::{ProviderConfig, AgentMode};
 use crate::agent::providers::factory::{ProviderInfo, BrainFactory};
 use crate::settings::manager::SettingsManager;
+use crate::settings::ProviderConfig as CentralizedProviderConfig;
 use tauri::State;
 use tracing::info;
 
@@ -107,7 +108,7 @@ pub(crate) async fn get_provider_models(provider_id: String) -> Result<Vec<serde
 pub(crate) async fn get_provider_settings(
     settings_manager: State<'_, SettingsManager>,
     provider_id: String
-) -> Result<ProviderSettings, String> {
+) -> Result<CentralizedProviderConfig, String> {
     let config = ProviderConfig::load_from_centralized_settings(&settings_manager).await
         .map_err(|e| format!("Failed to load config: {}", e))?;
 
