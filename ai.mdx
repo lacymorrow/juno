@@ -37,9 +37,12 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [x] Test floating bar functionality
 - [x] **Result**: Successfully migrated with Send-safe error types, compilation successful
 
-#### ⭐ Step 2.4: Migrate `agent_settings.json` (**NEXT TARGET**)
-- [ ] Update `src-tauri/src/commands/core.rs`
-- [ ] Test agent trigger mode functionality
+#### ✅ Step 2.4: Migrate `agent_settings.json` (**COMPLETED**)
+- [x] Update `src-tauri/src/commands/core.rs`
+- [x] Remove legacy store fallback logic
+- [x] Clean up unused imports
+- [x] Test agent trigger mode functionality
+- [x] **Result**: Successfully migrated from `agent_settings.json` to centralized settings with complete legacy code removal
 
 #### 🌩️ Step 2.5: Migrate `cloud_config.json`
 - [ ] Update `src-tauri/src/cloud/config.rs`
@@ -72,9 +75,35 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [ ] **Step 4.2**: Clean up unused imports and code
 - [ ] **Step 4.3**: Update documentation
 
-## 📊 Migration Progress: **Step 2.4** | 3/12 JSON files migrated (25%)
+## 📊 Migration Progress: **Step 2.5** | 4/12 JSON files migrated (33%)
 
 ## ✅ Completed Achievements
+
+### 🎉 Step 2.4 - Agent Settings Migration COMPLETED Successfully!
+
+**What Was Accomplished:**
+1. **Complete Legacy Code Elimination**: Removed all fallback logic to legacy `agent_settings.json` store
+2. **Centralized Integration**: All agent settings now use only the centralized SettingsManager
+3. **Function Streamlining**:
+   - `get_agent_trigger_mode()` → Direct centralized settings access with state sync
+   - `set_agent_trigger_mode()` → Centralized save with validation and state update
+   - `load_agent_trigger_mode_from_store()` → Pure centralized loading with defaults
+4. **Import Cleanup**: Removed unused `tauri_plugin_store::StoreExt` and `legacy_stores` imports
+5. **Error Handling**: Clean error propagation without fallback complexity
+
+**Technical Implementation:**
+- ✅ **Perfect Compilation**: Exit code 0, no compilation errors
+- ✅ **Complete Migration**: All agent settings operations use centralized system exclusively
+- ✅ **State Synchronization**: Agent settings sync with AppState for backward compatibility
+- ✅ **Default Handling**: Proper fallback to AgentSettings::default() when settings not found
+- ✅ **Validation**: Comprehensive input validation for trigger modes (tap/hold)
+
+**Architecture Benefits:**
+- 🔄 **Reactive Updates**: Agent settings changes automatically propagate through centralized system
+- 📁 **Single Source**: All agent configuration centralized in unified store
+- 🛡️ **Type Safety**: Compile-time guarantees for all agent settings operations
+- 🔧 **Maintainability**: Eliminated complex fallback logic and legacy dependencies
+- 🎯 **Consistency**: Follows same patterns as previous successful migrations
 
 ### 🎉 Step 2.3 - Floating Bar Configuration Migration COMPLETED Successfully!
 
@@ -132,9 +161,9 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - Resolved function naming conflicts with `centralized_` prefixes
 - Full functionality preservation with reactive updates
 
-## 🎯 Next Target: Step 2.4 - agent_settings.json
+## 🎯 Next Target: Step 2.5 - cloud_config.json
 
-The next migration will focus on agent behavior settings, which handles trigger mode (tap/hold) and execution mode (single/multi) configurations.
+The next migration will focus on cloud connectivity settings, which handles server connections, authentication, and communication configurations.
 
 ## 🏗️ Architecture Overview
 

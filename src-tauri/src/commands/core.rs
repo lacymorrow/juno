@@ -8,7 +8,7 @@ use tracing::warn;
 use super::send_dev_tool_notification; // Use helper from parent module
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use serde::{Deserialize, Serialize};
-use tauri_plugin_store::StoreExt;
+use crate::settings::{manager::SettingsManager, AgentSettings};
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
@@ -396,16 +396,39 @@ pub async fn get_system_context() -> Result<serde_json::Value, String> {
 
 /// Get the current agent trigger mode (tap or hold)
 #[tauri::command]
-pub async fn get_agent_trigger_mode(state: State<'_, AppState>) -> Result<String, String> {
-    let trigger_mode = state.agent_trigger_mode.lock()
-        .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
+pub async fn get_agent_trigger_mode(
+    app: AppHandle,
+    state: State<'_, AppState>
+) -> Result<String, String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    let mode_str = match *trigger_mode {
-        crate::state::AgentTriggerMode::Tap => "tap",
-        crate::state::AgentTriggerMode::Hold => "hold",
-    };
+    match settings_manager.get_agent_settings().await {
+        Ok(agent_settings) => {
+            info!("Loaded agent trigger mode from centralized settings: {}", agent_settings.trigger_mode);
 
-    Ok(mode_str.to_string())
+            // Sync with state for backward compatibility
+            let trigger_mode = match agent_settings.trigger_mode.as_str() {
+                "tap" => crate::state::AgentTriggerMode::Tap,
+                "hold" => crate::state::AgentTriggerMode::Hold,
+                _ => {
+                    warn!("Invalid agent trigger mode: {}. Using default (tap)", agent_settings.trigger_mode);
+                    crate::state::AgentTriggerMode::Tap
+                }
+            };
+
+            {
+                let mut current_mode = state.agent_trigger_mode.lock()
+                    .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
+                *current_mode = trigger_mode;
+            }
+
+            Ok(agent_settings.trigger_mode)
+        }
+        Err(e) => {
+            Err(format!("Failed to load agent trigger mode from centralized settings: {}", e))
+        }
+    }
 }
 
 /// Set the agent trigger mode (tap or hold)
@@ -415,57 +438,67 @@ pub async fn set_agent_trigger_mode(
     state: State<'_, AppState>,
     mode: String,
 ) -> Result<(), String> {
+    // Validate the mode
     let trigger_mode = match mode.as_str() {
         "tap" => crate::state::AgentTriggerMode::Tap,
         "hold" => crate::state::AgentTriggerMode::Hold,
         _ => return Err(format!("Invalid agent trigger mode: {}. Must be 'tap' or 'hold'", mode)),
     };
 
-    // Update the state
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    // Get current settings or create default
+    let mut agent_settings = settings_manager.get_agent_settings().await
+        .unwrap_or_else(|_| AgentSettings {
+            trigger_mode: mode.clone(),
+            execution_mode: "multi".to_string(), // Default execution mode
+        });
+
+    // Update trigger mode
+    agent_settings.trigger_mode = mode.clone();
+
+    // Save to centralized settings
+    settings_manager.set_agent_settings(&agent_settings).await
+        .map_err(|e| format!("Failed to save agent settings: {}", e))?;
+
+    // Update the state for backward compatibility
     {
         let mut current_mode = state.agent_trigger_mode.lock()
             .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
         *current_mode = trigger_mode;
     }
 
-    // Save to persistent storage
-    let store = app.store("agent_settings.json")
-        .map_err(|e| format!("Failed to access agent settings store: {}", e))?;
-
-    store.set("trigger_mode", serde_json::Value::String(mode.clone()));
-    store.save()
-        .map_err(|e| format!("Failed to save agent settings: {}", e))?;
-
     info!("Updated agent trigger mode to: {}", mode);
     Ok(())
 }
 
-/// Load agent trigger mode from persistent storage
+/// Load agent trigger mode from centralized settings
 pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let store = app.store("agent_settings.json")
-        .map_err(|e| format!("Failed to access agent settings store: {}", e))?;
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    if let Some(mode_value) = store.get("trigger_mode") {
-        if let Some(mode_str) = mode_value.as_str() {
-            let trigger_mode = match mode_str {
-                "tap" => crate::state::AgentTriggerMode::Tap,
-                "hold" => crate::state::AgentTriggerMode::Hold,
-                _ => {
-                    warn!("Invalid agent trigger mode in store: {}. Using default (tap)", mode_str);
-                    crate::state::AgentTriggerMode::Tap
-                }
-            };
+    // Get agent settings or use defaults
+    let agent_settings = settings_manager.get_agent_settings().await
+        .unwrap_or_else(|_| AgentSettings::default());
 
-            let mut current_mode = state.agent_trigger_mode.lock()
-                .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
-            *current_mode = trigger_mode;
-
-            info!("Loaded agent trigger mode from store: {}", mode_str);
+    let trigger_mode = match agent_settings.trigger_mode.as_str() {
+        "tap" => crate::state::AgentTriggerMode::Tap,
+        "hold" => crate::state::AgentTriggerMode::Hold,
+        _ => {
+            warn!("Invalid agent trigger mode in centralized settings: {}. Using default (tap)", agent_settings.trigger_mode);
+            crate::state::AgentTriggerMode::Tap
         }
-    } else {
-        info!("No agent trigger mode found in store, using default (tap)");
+    };
+
+    // Update state
+    {
+        let mut current_mode = state.agent_trigger_mode.lock()
+            .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
+        *current_mode = trigger_mode;
     }
 
+    info!("Loaded agent trigger mode from centralized settings: {}", agent_settings.trigger_mode);
     Ok(())
 }
 
