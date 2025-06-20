@@ -147,30 +147,21 @@ macro_rules! generate_invoke_handler {
             get_agent_mode,
             set_agent_mode,
 
-            // Permissions Commands - Native (No Password Prompts)
+            // Permissions Commands - Native APIs Only (No Password Prompts)
             check_permissions_status_native,
             request_accessibility_permission_native,
             request_microphone_permission_native,
             request_screen_recording_permission_native,
             request_input_monitoring_permission_native,
-
-            // Permissions Commands - Legacy (May Show Password Prompts)
-            check_permissions_status,
-        check_permissions_status_native,
-            check_permissions_status_with_auto_redirect,
-            request_accessibility_permission,
-            request_screen_recording_permission,
-            request_microphone_permission,
-            request_input_monitoring_permission,
             test_microphone_functionality,
             open_system_preferences,
-            request_accessibility_permission_with_auto_redirect,
             open_system_settings_enhanced,
             start_permissions_monitoring,
             stop_permissions_monitoring,
             restart_app_after_permissions,
             prompt_app_restart_after_permissions,
             check_restart_needed_after_permissions,
+            handle_restart_after_permissions,
 
             // Sound Commands
             play_sound_by_type,
