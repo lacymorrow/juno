@@ -7,6 +7,7 @@ use crate::agent::{
     structs::{AgentAction, AgentError, Message, Role, ToolDefinition},
     traits::AgentBrain,
 };
+use crate::agent::providers::factory::model_ids;
 
 /// Implementation of AgentBrain using Rig library
 pub struct RigBrain {
@@ -21,7 +22,7 @@ impl RigBrain {
         let openai_api_key = env::var("OPENAI_API_KEY")
             .map_err(|_| AgentError::ConfigurationError("OPENAI_API_KEY not found in environment".to_string()))?;
 
-        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
+        let model = env::var("OPENAI_MODEL").unwrap_or_else(|_| model_ids::GPT_4O.to_string());
         let system_prompt = env::var("RIG_SYSTEM_PROMPT").ok();
 
         Ok(Self {

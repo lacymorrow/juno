@@ -11,13 +11,13 @@
 //!
 //! ## Usage
 //! Used by: Cloud service initialization, settings UI
-//! Configuration: Stored in cloud_config.json store
+//! Configuration: Managed by centralized settings system
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
-use tauri_plugin_store::StoreExt;
+
 use super::types::CloudError;
 use tracing::info;
+use crate::settings::CloudSettings;
 
 /// Cloud configuration settings - maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,33 +110,26 @@ impl Default for CloudConfig {
 }
 
 impl CloudConfig {
-    /// Load configuration from Tauri store or create default.
+    /// Load configuration from centralized settings or create default.
     /// Attempts to load existing configuration, creates default if missing.
     /// Used by: Cloud service initialization and settings management.
-    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, CloudError> {
-        let store = app_handle.store("cloud_config.json")
-            .map_err(|e| CloudError::ConfigError(format!("Failed to access cloud config store: {}", e)))?;
-
-        // Try to load the configuration from store
-        if let Some(config_value) = store.get("cloud_config") {
-            match serde_json::from_value::<Self>(config_value) {
-                Ok(mut config) => {
-                    // Ensure we're using maximally permissive defaults for existing configs
-                    config.migrate_to_permissive_defaults();
-                    info!("Loaded cloud configuration from store (migrated to permissive defaults)");
-                    return Ok(config);
-                }
-                Err(e) => {
-                    info!("Failed to parse stored cloud config ({}), creating maximally permissive default", e);
-                }
+    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, CloudError> {
+        match settings_manager.get_cloud_settings().await {
+            Ok(cloud_settings) => {
+                let mut config = Self::from_centralized_settings(&cloud_settings);
+                // Ensure we're using maximally permissive defaults for existing configs
+                config.migrate_to_permissive_defaults();
+                info!("Loaded cloud configuration from centralized settings (migrated to permissive defaults)");
+                Ok(config)
+            }
+            Err(e) => {
+                info!("Failed to load cloud settings from centralized system ({}), creating maximally permissive default", e);
+                // No valid configuration found, create and save maximally permissive default
+                let default_config = Self::default();
+                default_config.save_to_centralized_settings(settings_manager).await?;
+                Ok(default_config)
             }
         }
-
-        // No valid configuration found, create and save maximally permissive default
-        info!("No cloud configuration found in store, creating maximally permissive default");
-        let default_config = Self::default();
-        default_config.save_to_store(app_handle)?;
-        Ok(default_config)
     }
 
     /// Migrate existing config to maximally permissive defaults
@@ -174,21 +167,16 @@ impl CloudConfig {
         }
     }
 
-    /// Save configuration to Tauri store.
-    /// Serializes current configuration to JSON and saves to store.
+    /// Save configuration to centralized settings.
+    /// Converts current configuration to CloudSettings and saves via SettingsManager.
     /// Used by: Cloud settings UI and configuration updates.
-    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), CloudError> {
-        let store = app_handle.store("cloud_config.json")
-            .map_err(|e| CloudError::ConfigError(format!("Failed to access cloud config store: {}", e)))?;
+    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
+        let cloud_settings = self.to_centralized_settings();
 
-        let config_value = serde_json::to_value(self)
-            .map_err(|e| CloudError::ConfigError(format!("Failed to serialize cloud config: {}", e)))?;
+        settings_manager.set_cloud_settings(&cloud_settings).await
+            .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud settings: {}", e)))?;
 
-        store.set("cloud_config", config_value);
-        store.save()
-            .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud config store: {}", e)))?;
-
-        info!("Saved maximally permissive cloud configuration to store");
+        info!("Saved maximally permissive cloud configuration to centralized settings");
         Ok(())
     }
 
@@ -212,22 +200,22 @@ impl CloudConfig {
     }
 
     /// Update API key and save
-    pub fn set_api_key(&mut self, api_key: String, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
+    pub async fn set_api_key(&mut self, api_key: String, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
         self.api_key = Some(api_key);
-        self.save_to_store(app_handle)
+        self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Enable cloud connectivity
-    pub fn enable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
+    pub async fn enable(&mut self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
         self.enabled = true;
         self.validate()?;
-        self.save_to_store(app_handle)
+        self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Disable cloud connectivity
-    pub fn disable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
+    pub async fn disable(&mut self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
         self.enabled = false;
-        self.save_to_store(app_handle)
+        self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Check if a command is allowed - now maximally permissive
@@ -250,5 +238,49 @@ impl CloudConfig {
     fn is_safe_command(&self, command: &str) -> bool {
         // Check against denied list - if not denied, it's safe
         !self.denied_commands.iter().any(|denied| command.contains(denied))
+    }
+
+    /// Convert CloudConfig to CloudSettings for centralized storage
+    pub fn to_centralized_settings(&self) -> CloudSettings {
+        CloudSettings {
+            enabled: self.enabled,
+            server_url: self.server_url.clone(),
+            device_id: self.device_id.clone(),
+            device_name: self.device_name.clone(),
+            api_key: self.api_key.clone(),
+            auto_connect: self.auto_connect,
+            reconnect_interval: self.reconnect_interval,
+            heartbeat_interval: self.heartbeat_interval,
+            command_timeout: self.command_timeout,
+            security_level: match self.security_level {
+                SecurityLevel::Low => "low".to_string(),
+                SecurityLevel::Medium => "medium".to_string(),
+                SecurityLevel::High => "high".to_string(),
+            },
+        }
+    }
+
+    /// Create CloudConfig from CloudSettings
+    pub fn from_centralized_settings(settings: &CloudSettings) -> Self {
+        Self {
+            enabled: settings.enabled,
+            server_url: settings.server_url.clone(),
+            device_id: settings.device_id.clone(),
+            device_name: settings.device_name.clone(),
+            api_key: settings.api_key.clone(),
+            auto_connect: settings.auto_connect,
+            reconnect_interval: settings.reconnect_interval,
+            heartbeat_interval: settings.heartbeat_interval,
+            command_timeout: settings.command_timeout,
+            security_level: match settings.security_level.as_str() {
+                "low" => SecurityLevel::Low,
+                "medium" => SecurityLevel::Medium,
+                "high" => SecurityLevel::High,
+                _ => SecurityLevel::Low, // Default to low (maximally permissive)
+            },
+            // Set default values for fields not in CloudSettings
+            allowed_commands: Self::default().allowed_commands,
+            denied_commands: Self::default().denied_commands,
+        }
     }
 }

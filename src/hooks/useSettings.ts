@@ -193,6 +193,63 @@ export function useSettings() {
 		return () => unlisten?.();
 	}, []);
 
+	// Listen for provider settings changes from backend
+	useEffect(() => {
+		let unlisten: (() => void) | undefined;
+
+		const setupProviderListener = async () => {
+			unlisten = await listen<{
+				active_provider: string;
+				providers: {
+					id: string;
+					api_key?: string;
+					model?: string;
+					max_tokens?: number;
+					temperature?: number;
+					system_prompt?: string;
+				}[];
+			}>("provider_settings_changed", (event) => {
+				console.log("useSettings: Received provider settings update:", event.payload);
+				const fullProviderSettings = event.payload;
+
+				// Update active provider if it changed
+				if (fullProviderSettings.active_provider !== activeProvider) {
+					console.log(`useSettings: Active provider changed to: ${fullProviderSettings.active_provider}`);
+					setActiveProvider(fullProviderSettings.active_provider);
+				}
+
+				// Find the current provider's settings
+				const currentProviderSettings = fullProviderSettings.providers.find(
+					p => p.id === fullProviderSettings.active_provider
+				);
+
+				if (currentProviderSettings) {
+					console.log("useSettings: Updating provider settings for:", fullProviderSettings.active_provider);
+
+					// Update provider settings state
+					setProviderSettings(currentProviderSettings);
+
+					// Update form data to reflect the changes
+					setFormData({
+						apiKey: currentProviderSettings.api_key || "",
+						model: currentProviderSettings.model || "",
+						maxTokens: currentProviderSettings.max_tokens?.toString() || "",
+						temperature: currentProviderSettings.temperature?.toString() || "",
+						systemPrompt: currentProviderSettings.system_prompt || "",
+					});
+				} else {
+					console.warn("useSettings: Could not find settings for active provider:", fullProviderSettings.active_provider);
+				}
+
+				// Invalidate cache to force fresh data on next request
+				invalidateCache();
+			});
+		};
+
+		setupProviderListener();
+		return () => unlisten?.();
+	}, [activeProvider]); // Include activeProvider in deps to handle provider changes
+
 	const loadAllSettings = useCallback(async () => {
 		setIsLoading(true);
 		try {
@@ -356,6 +413,7 @@ export function useSettings() {
 
 	const handleActiveProviderChange = useCallback(async (providerId: string) => {
 		try {
+			console.log(`Switching active provider to: ${providerId}`);
 			await invokeCommand("set_active_provider", { providerId });
 			setActiveProvider(providerId);
 
@@ -363,6 +421,8 @@ export function useSettings() {
 			invalidateCache('activeProvider');
 			invalidateCache('providers');
 
+			// Load settings specifically for the new provider
+			console.log(`Loading settings for provider: ${providerId}`);
 			const settings = await invokeCommand<ProviderSettings>("get_provider_settings", {
 				providerId,
 			});
@@ -375,12 +435,24 @@ export function useSettings() {
 				systemPrompt: settings.system_prompt || "",
 			});
 
+			console.log(`Active AI provider set to: ${providerId}`, { settings });
 			toast.success(`Active AI provider set to: ${providerId}`);
 		} catch (error) {
 			console.error("Failed to change active provider:", error);
 			toast.error(`Failed to change provider: ${error}`);
 		}
 	}, [invokeCommand]);
+
+	// Debug function to check current settings state
+	const debugSettings = useCallback(() => {
+		console.log("=== Settings Debug Info ===");
+		console.log("Active Provider:", activeProvider);
+		console.log("Available Providers:", providers);
+		console.log("Provider Settings:", providerSettings);
+		console.log("Form Data:", formData);
+		console.log("Is Loading:", isLoading);
+		console.log("========================");
+	}, [activeProvider, providers, providerSettings, formData, isLoading]);
 
 	const handleSaveProviderSettings = async () => {
 		if (!activeProvider) {
@@ -389,6 +461,8 @@ export function useSettings() {
 		}
 
 		try {
+			console.log("Saving provider settings changes...");
+
 			// Update API key
 			if (formData.apiKey !== providerSettings?.api_key) {
 				await invoke("update_provider_api_key", {
@@ -429,8 +503,24 @@ export function useSettings() {
 				});
 			}
 
+			// Only reload the specific provider settings instead of all settings
+			console.log("Reloading specific provider settings...");
+			const updatedSettings = await invokeCommand<ProviderSettings>("get_provider_settings", {
+				providerId: activeProvider,
+			});
+			setProviderSettings(updatedSettings);
+
+			// Update form data to reflect saved changes
+			setFormData({
+				apiKey: updatedSettings.api_key || "",
+				model: updatedSettings.model || "",
+				maxTokens: updatedSettings.max_tokens?.toString() || "",
+				temperature: updatedSettings.temperature?.toString() || "",
+				systemPrompt: updatedSettings.system_prompt || "",
+			});
+
 			toast.success("Provider settings saved successfully");
-			await loadAllSettings(); // Reload to get updated settings
+			console.log("Provider settings saved and reloaded successfully");
 		} catch (error) {
 			console.error("Failed to save provider settings:", error);
 			toast.error("Failed to save provider settings");
@@ -586,5 +676,6 @@ export function useSettings() {
 		loadKeyboardShortcuts,
 		loadToolConfigurations,
 		loadMcpServers,
+		debugSettings,
 	};
 }

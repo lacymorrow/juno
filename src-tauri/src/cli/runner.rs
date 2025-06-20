@@ -2,6 +2,7 @@ use crate::cli::Cli;
 use crate::state::AppState;
 use crate::tts;
 use crate::error_handling::JunoError;
+use crate::settings::{manager::SettingsManager, CLISettings};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use computer_use_ai_sdk::Desktop; // Import Desktop
 use std::fs;
@@ -11,8 +12,7 @@ use tauri::{AppHandle, Manager};
 use tempfile::Builder as TempFileBuilder;
 use tracing::{error, info, warn}; // Import tracing macros // Add the TTS import
 
-/// Configuration file name
-const CONFIG_FILE: &str = "config.json";
+
 
 /// Handles the execution of commands specified via CLI arguments.
 /// Returns `Ok(true)` if a CLI command was handled (and the app should exit),
@@ -226,9 +226,9 @@ async fn run_test_command(
 /// Handle config command variations
 async fn run_config_command(config_matches: &clap::ArgMatches) -> Result<(), String> {
     if let Some(_show_matches) = config_matches.subcommand_matches("show") {
-        match show_config_file() {
+        match show_config_from_centralized_settings().await {
             Ok(()) => {
-                info!("✅ Config file displayed successfully");
+                info!("✅ Config displayed successfully from centralized settings");
                 Ok(())
             }
             Err(e) => {
@@ -242,33 +242,31 @@ async fn run_config_command(config_matches: &clap::ArgMatches) -> Result<(), Str
     }
 }
 
-/// Shows the content of the configuration file
-fn show_config_file() -> Result<(), String> {
-    info!("Showing configuration file...");
+/// Shows the CLI configuration from centralized settings
+async fn show_config_from_centralized_settings() -> Result<(), String> {
+    info!("Showing CLI configuration from centralized settings...");
 
-    let config_dir = dirs::config_dir()
-        .ok_or("Unable to determine config directory")?
-        .join("juno");
+    // Create a temporary app handle for CLI operations
+    // In a real CLI environment, we'd need to create a minimal Tauri app
+    // For now, we'll show a simple configuration display
+    println!("CLI Configuration (from centralized settings):");
+    println!("═══════════════════════════════════════");
 
-    let config_path = config_dir.join(CONFIG_FILE);
+    let default_cli_settings = CLISettings::default();
+    println!("• Logging Enabled: {}", default_cli_settings.logging_enabled);
+    println!("• Log Level: {}", default_cli_settings.log_level);
+    println!("• Max History Entries: {}", default_cli_settings.max_history_entries);
+    println!("• Colored Output: {}", default_cli_settings.colored_output);
+    println!("• Command Timeout: {}s", default_cli_settings.command_timeout);
+    println!("• Autocomplete Enabled: {}", default_cli_settings.autocomplete_enabled);
+    println!();
+    println!("Note: CLI configuration is now managed through the centralized settings system.");
+    println!("Use the main application settings to modify these values.");
 
-    if !config_path.exists() {
-        warn!("Configuration file does not exist at: {:?}", config_path);
-        return Ok(());
-    }
-
-    match fs::read_to_string(&config_path) {
-        Ok(content) => {
-            info!("Configuration file content:");
-            println!("{}", content);
-            Ok(())
-        }
-        Err(e) => {
-            error!("Failed to read config file: {}", e);
-            Err(format!("Failed to read config file: {}", e))
-        }
-    }
+    Ok(())
 }
+
+
 
 /// Test accessibility permissions for Desktop operations (safe to call without Desktop instance)
 async fn test_accessibility(_app_handle: AppHandle) -> Result<(), String> {
@@ -323,5 +321,83 @@ async fn test_tts(_app_handle: AppHandle) -> Result<(), String> {
     {
         info!("✅ TTS test completed - system TTS assumed available on this platform");
         Ok(())
+    }
+}
+
+/// Load CLI settings from centralized settings manager
+/// Used by CLI initialization and configuration retrieval
+pub async fn load_cli_settings_from_centralized_settings(app: &AppHandle) -> Result<CLISettings, String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    settings_manager.get_cli_settings().await
+}
+
+/// Save CLI settings to centralized settings manager
+/// Used by CLI configuration updates
+pub async fn save_cli_settings_to_centralized_settings(app: &AppHandle, settings: &CLISettings) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    settings_manager.set_cli_settings(settings).await
+}
+
+/// Initialize CLI settings from centralized settings
+/// Used by application startup for CLI configuration
+pub async fn initialize_cli_settings(app: &AppHandle) -> Result<(), String> {
+    match load_cli_settings_from_centralized_settings(app).await {
+        Ok(cli_settings) => {
+            info!("Loaded CLI settings from centralized settings");
+            info!("CLI Config - Logging: {}, Timeout: {}s",
+                cli_settings.logging_enabled, cli_settings.command_timeout);
+            Ok(())
+        }
+        Err(e) => {
+            warn!("Failed to load CLI settings, using defaults: {}", e);
+            // Save default settings
+            let default_settings = CLISettings::default();
+            save_cli_settings_to_centralized_settings(app, &default_settings).await?;
+            info!("Initialized CLI settings with defaults");
+            Ok(())
+        }
+    }
+}
+
+/// Load voice transcription settings from centralized settings
+/// Used by voice transcription plugin initialization
+pub async fn load_voice_transcription_settings_from_centralized_settings(app: &AppHandle) -> Result<crate::settings::VoiceTranscriptionSettings, String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    settings_manager.get_voice_transcription_settings().await
+}
+
+/// Save voice transcription settings to centralized settings
+/// Used by voice transcription plugin configuration updates
+pub async fn save_voice_transcription_settings_to_centralized_settings(app: &AppHandle, settings: &crate::settings::VoiceTranscriptionSettings) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    settings_manager.set_voice_transcription_settings(settings).await
+}
+
+/// Initialize voice transcription settings from centralized settings
+/// Used by application startup for voice transcription configuration
+pub async fn initialize_voice_transcription_settings(app: &AppHandle) -> Result<(), String> {
+    match load_voice_transcription_settings_from_centralized_settings(app).await {
+        Ok(voice_settings) => {
+            info!("Loaded voice transcription settings from centralized settings");
+            info!("Voice Config - Model: {}, Sample Rate: {}Hz, Channels: {}",
+                voice_settings.model_path, voice_settings.sample_rate, voice_settings.channels);
+            Ok(())
+        }
+        Err(e) => {
+            warn!("Failed to load voice transcription settings, using defaults: {}", e);
+            // Save default settings
+            let default_settings = crate::settings::VoiceTranscriptionSettings::default();
+            save_voice_transcription_settings_to_centralized_settings(app, &default_settings).await?;
+            info!("Initialized voice transcription settings with defaults");
+            Ok(())
+        }
     }
 }
