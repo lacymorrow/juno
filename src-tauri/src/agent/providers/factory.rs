@@ -147,50 +147,87 @@ impl Provider {
     /// Get model definitions for the provider
     pub fn model_definitions(&self) -> &'static [ModelDefinition] {
         match self {
-            Provider::Anthropic => &[
-                ModelDefinition {
-                    id: model_ids::CLAUDE_4_SONNET,
-                    name: "Claude 4 Sonnet",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_4_OPUS,
-                    name: "Claude 4 Opus",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_7_SONNET,
-                    name: "Claude 3.7 Sonnet",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: true,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_5_SONNET,
-                    name: "Claude 3.5 Sonnet",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: false,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_5_HAIKU,
-                    name: "Claude 3.5 Haiku",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: false,
-                },
-                ModelDefinition {
-                    id: model_ids::CLAUDE_3_OPUS,
-                    name: "Claude 3 Opus (Legacy)",
-                    category: ModelCategory::ComputerUse,
-                    supports_computer_use: true,
-                    is_recommended: false,
-                },
-            ],
+            Provider::Anthropic => {
+                // In development mode, show all models including Opus
+                if cfg!(debug_assertions) {
+                    &[
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_SONNET,
+                            name: "Claude 4 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: true,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_OPUS,
+                            name: "Claude 4 Opus (Dev Only)",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_7_SONNET,
+                            name: "Claude 3.7 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_SONNET,
+                            name: "Claude 3.5 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_HAIKU,
+                            name: "Claude 3.5 Haiku",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_OPUS,
+                            name: "Claude 3 Opus (Legacy - Dev Only)",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                    ]
+                } else {
+                    // In production mode, hide Opus models
+                    &[
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_4_SONNET,
+                            name: "Claude 4 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: true,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_7_SONNET,
+                            name: "Claude 3.7 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_SONNET,
+                            name: "Claude 3.5 Sonnet",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                        ModelDefinition {
+                            id: model_ids::CLAUDE_3_5_HAIKU,
+                            name: "Claude 3.5 Haiku",
+                            category: ModelCategory::ComputerUse,
+                            supports_computer_use: true,
+                            is_recommended: false,
+                        },
+                    ]
+                }
+            },
             Provider::OpenAI => &[
                 ModelDefinition {
                     id: model_ids::OPENAI_CUA,
@@ -321,7 +358,7 @@ impl Provider {
             .unwrap_or_else(|| {
                 // Fallback constants if no definitions exist (shouldn't happen)
                 match self {
-                    Provider::Anthropic => model_ids::CLAUDE_3_7_SONNET,
+                    Provider::Anthropic => model_ids::CLAUDE_4_SONNET,
                     Provider::OpenAI => model_ids::OPENAI_CUA,
                     Provider::Rig => model_ids::GPT_4O,
                     Provider::Gemini => model_ids::GEMINI_1_5_PRO,
