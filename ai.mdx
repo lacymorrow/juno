@@ -1,0 +1,100 @@
+# Juno AI Computer Use Agent - Centralized Settings Refactoring Plan
+
+## 🎯 Goal
+Replace 12 scattered JSON configuration files with a single, reactive, centralized settings system.
+
+## 📋 Step-by-Step Implementation Plan
+
+### ✅ Phase 1: Foundation & Constants (COMPLETED)
+- [x] **Step 1.1**: Create `src-tauri/src/constants/settings.rs` with all magic strings
+- [x] **Step 1.2**: Create unified `AppSettings` schema in `src-tauri/src/settings/mod.rs`
+- [x] **Step 1.3**: Create centralized `SettingsManager` in `src-tauri/src/settings/manager.rs`
+- [x] **Step 1.4**: Add settings module to main lib.rs
+- [x] **Step 1.5**: Create initial settings commands in `src-tauri/src/commands/settings.rs`
+
+**Foundation Status**: ✅ All core structures created, compiles successfully with minor warnings
+
+### 🔄 Phase 2: Replace One File At A Time (CURRENT)
+- [ ] **Step 2.1**: Migrate `onboarding.json` (**NEXT TARGET**)
+  - [ ] Update `src-tauri/src/commands/onboarding.rs`
+  - [ ] Test onboarding flow works
+  - [ ] Update plan with any issues found
+- [ ] **Step 2.2**: Migrate `keyboard_shortcuts.json`
+  - [ ] Update `src-tauri/src/commands/shortcuts.rs`
+  - [ ] Test keyboard shortcuts work
+- [ ] **Step 2.3**: Migrate `agent_settings.json`
+  - [ ] Update `src-tauri/src/commands/core.rs`
+  - [ ] Test agent trigger modes work
+- [ ] **Step 2.4**: Migrate `floating_bar_config.json`
+  - [ ] Update `src-tauri/src/commands/floating_bar.rs`
+  - [ ] Test floating bar configuration
+- [ ] **Step 2.5**: Migrate `cloud_config.json`
+  - [ ] Update `src-tauri/src/cloud/config.rs`
+  - [ ] Test cloud connectivity
+- [ ] **Step 2.6**: Migrate `provider_config.json`
+  - [ ] Update `src-tauri/src/agent/providers/config.rs`
+  - [ ] Test AI provider settings
+- [ ] **Step 2.7**: Migrate `tool_config.json`
+  - [ ] Update `src-tauri/src/agent/tools/tool_config.rs`
+  - [ ] Test tool enable/disable
+- [ ] **Step 2.8**: Migrate `prompt_config.json`
+  - [ ] Update `src-tauri/src/agent/prompts/manager.rs`
+  - [ ] Test AI prompts
+- [ ] **Step 2.9**: Migrate `autostart.json`
+  - [ ] Update `src-tauri/src/commands/autostart.rs`
+  - [ ] Test autostart functionality
+
+### 🎨 Phase 3: Frontend Integration
+- [ ] **Step 3.1**: Create centralized React hook `src/hooks/useAppSettings.ts`
+- [ ] **Step 3.2**: Replace existing `useSettings` hook usage
+- [ ] **Step 3.3**: Test all settings windows sync properly
+
+### 🧹 Phase 4: Cleanup
+- [ ] **Step 4.1**: Remove legacy JSON store files
+- [ ] **Step 4.2**: Update documentation
+- [ ] **Step 4.3**: Final testing across all features
+
+## 📊 Current File Status
+
+| File | Status | Location | Dependencies |
+|------|--------|----------|-------------|
+| `onboarding.json` | ❌ Scattered | `commands/onboarding.rs` | Low - Simple boolean flags |
+| `keyboard_shortcuts.json` | ❌ Scattered | `commands/shortcuts.rs` | Medium - Event system |
+| `agent_settings.json` | ❌ Scattered | `commands/core.rs` | Low - Simple string values |
+| `floating_bar_config.json` | ❌ Scattered | `commands/floating_bar.rs` | Medium - UI state |
+| `cloud_config.json` | ❌ Scattered | `cloud/config.rs` | High - Network connectivity |
+| `provider_config.json` | ❌ Scattered | `agent/providers/config.rs` | High - AI functionality |
+| `tool_config.json` | ❌ Scattered | `agent/tools/tool_config.rs` | High - Core functionality |
+| `prompt_config.json` | ❌ Scattered | `agent/prompts/manager.rs` | Medium - AI prompts |
+| `autostart.json` | ❌ Scattered | `commands/autostart.rs` | Low - System integration |
+
+## 🏗️ Architecture Overview
+
+```rust
+// Single centralized store
+pub struct SettingsManager {
+    store: Store,
+    app_handle: AppHandle,
+}
+
+// Unified settings schema
+pub struct AppSettings {
+    pub keyboard_shortcuts: KeyboardShortcuts,
+    pub floating_bar: FloatingBarSettings,
+    pub agent: AgentSettings,
+    pub providers: ProviderSettings,
+    pub cloud: CloudSettings,
+    pub audio: AudioSettings,
+    pub onboarding: OnboardingSettings,
+    pub autostart_enabled: bool,
+}
+```
+
+## 📝 Progress Notes
+- **Started**: Phase 1 - Foundation & Constants
+- **Next Step**: Create constants/settings.rs
+- **Current Focus**: Building foundation before any migrations
+- **Risk Level**: LOW (no existing functionality broken yet)
+
+---
+**⚠️ IMPORTANT**: Update this plan after each step completion to track progress and note any issues encountered.
