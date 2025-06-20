@@ -312,6 +312,7 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
         }
     });
 
+    // Listen for dictation state changes (both immediate and confirmed)
     let _ = app_handle.listen("dictation-active", {
         let app_handle = app_handle_clone.clone();
         move |event| {
@@ -323,6 +324,62 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
                     } else {
                         determine_current_state(&app_handle).await
                     };
+                    update_tray_icon_state(new_state).await;
+                }
+            });
+        }
+    });
+
+    // Listen for immediate dictation input state changes (when user presses/releases shortcut)
+    let _ = app_handle.listen("dictation-input-state-changed", {
+        let app_handle = app_handle_clone.clone();
+        move |event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(is_pressed) = serde_json::from_str::<bool>(&event.payload()) {
+                    let new_state = if is_pressed {
+                        TrayIconState::DictationActive
+                    } else {
+                        determine_current_state(&app_handle).await
+                    };
+                    update_tray_icon_state(new_state).await;
+                }
+            });
+        }
+    });
+
+    // Listen for immediate agent mode starts (when user presses agent shortcut)
+    let _ = app_handle.listen("app-dictation-started", {
+        let app_handle = app_handle_clone.clone();
+        move |_event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // Set to Processing state initially, will change to AgentActive once agent actually starts
+                update_tray_icon_state(TrayIconState::Processing).await;
+            });
+        }
+    });
+
+    // Listen for dictation completion events (when transcription finishes)
+    let _ = app_handle.listen("app-dictation-finished", {
+        let app_handle = app_handle_clone.clone();
+        move |event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // When dictation finishes, check if it's transitioning to agent mode
+                // If there's a query payload, it means agent mode is starting
+                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
+                    if payload.get("query").is_some() {
+                        // Dictation finished and agent is about to start
+                        update_tray_icon_state(TrayIconState::Processing).await;
+                    } else {
+                        // Just dictation finishing without agent mode
+                        let new_state = determine_current_state(&app_handle).await;
+                        update_tray_icon_state(new_state).await;
+                    }
+                } else {
+                    // Fallback - just determine current state
+                    let new_state = determine_current_state(&app_handle).await;
                     update_tray_icon_state(new_state).await;
                 }
             });
@@ -365,6 +422,38 @@ async fn setup_state_monitoring(app_handle: &AppHandle) {
                         }
                     }
                 }
+            });
+        }
+    });
+
+        // Listen for voice system errors
+    let _ = app_handle.listen("voice-error", {
+        let app_handle = app_handle_clone.clone();
+        move |_event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                update_tray_icon_state(TrayIconState::Error).await;
+
+                // After a delay, reset to current state
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                let new_state = determine_current_state(&app_handle).await;
+                update_tray_icon_state(new_state).await;
+            });
+        }
+    });
+
+    // Listen for voice transcription errors
+    let _ = app_handle.listen("voice-transcription:error", {
+        let app_handle = app_handle_clone.clone();
+        move |_event| {
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                update_tray_icon_state(TrayIconState::Error).await;
+
+                // After a delay, reset to current state
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                let new_state = determine_current_state(&app_handle).await;
+                update_tray_icon_state(new_state).await;
             });
         }
     });
