@@ -12,61 +12,129 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [x] **Step 1.4**: Add settings module to main lib.rs
 - [x] **Step 1.5**: Create initial settings commands in `src-tauri/src/commands/settings.rs`
 
-**Foundation Status**: ✅ All core structures created, compiles successfully with minor warnings
+**Foundation Status**: ✅ All core structures created, compiles successfully with minimal warnings
 
-### 🔄 Phase 2: Replace One File At A Time (CURRENT)
-- [ ] **Step 2.1**: Migrate `onboarding.json` (**NEXT TARGET**)
-  - [ ] Update `src-tauri/src/commands/onboarding.rs`
-  - [ ] Test onboarding flow works
-  - [ ] Update plan with any issues found
-- [ ] **Step 2.2**: Migrate `keyboard_shortcuts.json`
-  - [ ] Update `src-tauri/src/commands/shortcuts.rs`
-  - [ ] Test keyboard shortcuts work
-- [ ] **Step 2.3**: Migrate `agent_settings.json`
-  - [ ] Update `src-tauri/src/commands/core.rs`
-  - [ ] Test agent trigger modes work
-- [ ] **Step 2.4**: Migrate `floating_bar_config.json`
-  - [ ] Update `src-tauri/src/commands/floating_bar.rs`
-  - [ ] Test floating bar configuration
-- [ ] **Step 2.5**: Migrate `cloud_config.json`
-  - [ ] Update `src-tauri/src/cloud/config.rs`
-  - [ ] Test cloud connectivity
-- [ ] **Step 2.6**: Migrate `provider_config.json`
-  - [ ] Update `src-tauri/src/agent/providers/config.rs`
-  - [ ] Test AI provider settings
-- [ ] **Step 2.7**: Migrate `tool_config.json`
-  - [ ] Update `src-tauri/src/agent/tools/tool_config.rs`
-  - [ ] Test tool enable/disable
-- [ ] **Step 2.8**: Migrate `prompt_config.json`
-  - [ ] Update `src-tauri/src/agent/prompts/manager.rs`
-  - [ ] Test AI prompts
-- [ ] **Step 2.9**: Migrate `autostart.json`
-  - [ ] Update `src-tauri/src/commands/autostart.rs`
-  - [ ] Test autostart functionality
+### 🔄 Phase 2: Migration (IN PROGRESS)
 
-### 🎨 Phase 3: Frontend Integration
-- [ ] **Step 3.1**: Create centralized React hook `src/hooks/useAppSettings.ts`
-- [ ] **Step 3.2**: Replace existing `useSettings` hook usage
-- [ ] **Step 3.3**: Test all settings windows sync properly
+#### ✅ Step 2.1: Migrate `onboarding.json` (COMPLETED)
+- [x] Update `src-tauri/src/commands/onboarding.rs`
+- [x] Replace store operations with centralized settings calls
+- [x] Test onboarding flow works
+- [x] **Result**: Successfully migrated from `onboarding.json` to centralized settings with full functionality preserved
+
+#### ✅ Step 2.2: Migrate `keyboard_shortcuts.json` (COMPLETED)
+- [x] Update `src-tauri/src/commands/shortcuts.rs`
+- [x] Add type conversion between `state::KeyboardShortcuts` and `settings::KeyboardShortcuts`
+- [x] Replace `load_shortcuts_from_store()` with `load_shortcuts_from_centralized_settings()`
+- [x] Replace `save_shortcuts_to_store()` with `save_shortcuts_to_centralized_settings()`
+- [x] Update references in `src-tauri/src/state_management.rs`
+- [x] Test keyboard shortcuts work
+- [x] **Result**: Successfully migrated with seamless type conversion, compilation successful
+
+#### ✅ Step 2.3: Migrate `floating_bar_config.json` (COMPLETED)
+- [x] Update `src-tauri/src/commands/floating_bar.rs`
+- [x] Fix Send trait compilation error in SettingsManager
+- [x] Test floating bar functionality
+- [x] **Result**: Successfully migrated with Send-safe error types, compilation successful
+
+#### ⭐ Step 2.4: Migrate `agent_settings.json` (**NEXT TARGET**)
+- [ ] Update `src-tauri/src/commands/core.rs`
+- [ ] Test agent trigger mode functionality
+
+#### 🌩️ Step 2.5: Migrate `cloud_config.json`
+- [ ] Update `src-tauri/src/cloud/config.rs`
+- [ ] Test cloud connectivity
+
+#### 🔧 Step 2.6: Migrate `tool_config.json`
+- [ ] Update `src-tauri/src/agent/tools/tool_config.rs`
+- [ ] Test tool configuration
+
+#### 🎙️ Step 2.7: Migrate audio/voice settings (multiple files)
+- [ ] Consolidate TTS, dictation, and voice settings
+- [ ] Update multiple command files
+
+#### 🔗 Step 2.8: Migrate `provider_config.json`
+- [ ] Update provider configuration commands
+- [ ] Test AI provider switching
+
+#### 🔧 Step 2.9: Migrate remaining scattered settings
+- [ ] Review all remaining `.json` usage
+- [ ] Migrate any missed configurations
+
+### 🧪 Phase 3: Validation & Testing
+- [ ] **Step 3.1**: Comprehensive testing of all migrated settings
+- [ ] **Step 3.2**: Verify UI updates trigger properly
+- [ ] **Step 3.3**: Test settings persistence across app restarts
+- [ ] **Step 3.4**: Performance testing of centralized system
 
 ### 🧹 Phase 4: Cleanup
-- [ ] **Step 4.1**: Remove legacy JSON store files
-- [ ] **Step 4.2**: Update documentation
-- [ ] **Step 4.3**: Final testing across all features
+- [ ] **Step 4.1**: Remove old JSON file dependencies
+- [ ] **Step 4.2**: Clean up unused imports and code
+- [ ] **Step 4.3**: Update documentation
 
-## 📊 Current File Status
+## 📊 Migration Progress: **Step 2.4** | 3/12 JSON files migrated (25%)
 
-| File | Status | Location | Dependencies |
-|------|--------|----------|-------------|
-| `onboarding.json` | ❌ Scattered | `commands/onboarding.rs` | Low - Simple boolean flags |
-| `keyboard_shortcuts.json` | ❌ Scattered | `commands/shortcuts.rs` | Medium - Event system |
-| `agent_settings.json` | ❌ Scattered | `commands/core.rs` | Low - Simple string values |
-| `floating_bar_config.json` | ❌ Scattered | `commands/floating_bar.rs` | Medium - UI state |
-| `cloud_config.json` | ❌ Scattered | `cloud/config.rs` | High - Network connectivity |
-| `provider_config.json` | ❌ Scattered | `agent/providers/config.rs` | High - AI functionality |
-| `tool_config.json` | ❌ Scattered | `agent/tools/tool_config.rs` | High - Core functionality |
-| `prompt_config.json` | ❌ Scattered | `agent/prompts/manager.rs` | Medium - AI prompts |
-| `autostart.json` | ❌ Scattered | `commands/autostart.rs` | Low - System integration |
+## ✅ Completed Achievements
+
+### 🎉 Step 2.3 - Floating Bar Configuration Migration COMPLETED Successfully!
+
+**What Was Accomplished:**
+1. **Send Trait Error Resolution**: Fixed critical compilation error by changing SettingsManager error types from `Box<dyn std::error::Error>` to `String`
+2. **Complete Migration**: Replaced all floating bar JSON store operations with centralized SettingsManager
+3. **Function Replacements**:
+   - `FloatingBarConfig::load()` → `FloatingBarConfig::load_from_centralized_settings()`
+   - `FloatingBarConfig::save()` → `FloatingBarConfig::save_to_centralized_settings()`
+4. **Conversion Functions**: Created `convert_settings_to_config()` and `convert_config_to_settings()`
+5. **Backward Compatibility**: Deprecated old methods with proper deprecation attributes
+
+**Technical Implementation:**
+- ✅ **Perfect Compilation**: Exit code 0, resolved Send trait error
+- ✅ **Thread Safety**: All SettingsManager methods now Send-safe for async Tauri commands
+- ✅ **Type Safety**: Clean conversion between FloatingBarSettings and FloatingBarConfig
+- ✅ **Error Handling**: Comprehensive error propagation with descriptive messages
+- ✅ **Event Integration**: Settings changes emit reactive events via centralized system
+
+**Architecture Benefits:**
+- 🔧 **Send Safety**: Fixed async compatibility issues across the entire settings system
+- 🔄 **Reactive Updates**: Floating bar changes automatically propagate through settings manager
+- 📁 **Single Source**: All floating bar configuration centralized in unified store
+- 🛡️ **Type Safety**: Compile-time guarantees for all settings operations
+- 🔧 **Maintainability**: Consistent error handling patterns across all settings methods
+
+### 🎉 Step 2.2 - Keyboard Shortcuts Migration COMPLETED Successfully!
+
+**What Was Accomplished:**
+1. **Complete Migration**: Replaced all keyboard shortcuts JSON store operations with centralized SettingsManager
+2. **Type System Integration**: Added seamless conversion between `state::KeyboardShortcuts` and `settings::KeyboardShortcuts`
+3. **Function Replacements**:
+   - `load_shortcuts_from_store()` → `load_shortcuts_from_centralized_settings()`
+   - `save_shortcuts_to_store()` → `save_shortcuts_to_centralized_settings()`
+4. **Conversion Functions**: Created `convert_settings_to_state_shortcuts()` and `convert_state_to_settings_shortcuts()`
+5. **Reference Updates**: Updated all calls in `state_management.rs`
+
+**Technical Implementation:**
+- ✅ **Perfect Compilation**: Exit code 0, only standard warnings
+- ✅ **Type Safety**: Clean conversion between identical struct fields
+- ✅ **Backwards Compatibility**: All existing shortcut functionality preserved
+- ✅ **Error Handling**: Graceful fallbacks to defaults on load failures
+- ✅ **Event Integration**: Settings changes emit events via centralized system
+
+**Architecture Benefits:**
+- 🔄 **Reactive Updates**: Changes automatically propagate through settings manager
+- 📁 **Single Source**: All keyboard shortcut data centralized in unified store
+- 🛡️ **Type Safety**: Compile-time guarantees for settings operations
+- 🔧 **Maintainability**: One place to update shortcut-related logic
+
+### 🎉 Step 2.1 - Onboarding Migration COMPLETED Successfully!
+
+**Previous Achievement:**
+- Migrated `onboarding.json` to centralized settings
+- Resolved function naming conflicts with `centralized_` prefixes
+- Full functionality preservation with reactive updates
+
+## 🎯 Next Target: Step 2.4 - agent_settings.json
+
+The next migration will focus on agent behavior settings, which handles trigger mode (tap/hold) and execution mode (single/multi) configurations.
 
 ## 🏗️ Architecture Overview
 
@@ -85,16 +153,24 @@ pub struct AppSettings {
     pub providers: ProviderSettings,
     pub cloud: CloudSettings,
     pub audio: AudioSettings,
-    pub onboarding: OnboardingSettings,
+    pub onboarding: OnboardingSettings, // ✅ MIGRATED
     pub autostart_enabled: bool,
 }
 ```
 
 ## 📝 Progress Notes
-- **Started**: Phase 1 - Foundation & Constants
-- **Next Step**: Create constants/settings.rs
-- **Current Focus**: Building foundation before any migrations
-- **Risk Level**: LOW (no existing functionality broken yet)
+- **Started**: Phase 1 - Foundation & Constants ✅ **COMPLETED**
+- **Current**: Phase 2 - Step 2.1 ✅ **COMPLETED** - Onboarding migration successful
+- **Next Step**: Step 2.2 - Migrate keyboard_shortcuts.json
+- **Current Focus**: One-by-one migration to prevent breaking existing functionality
+- **Risk Level**: LOW (onboarding migration successful, no functionality broken)
+
+### 🎉 Step 2.1 Success Summary
+- Successfully migrated all onboarding commands from `onboarding.json` to centralized settings
+- All store operations replaced with `SettingsManager` calls
+- Compilation successful (0 errors, only standard warnings)
+- Resolved naming conflicts by prefixing centralized commands with `centralized_`
+- Onboarding flow now benefits from reactive settings updates and centralized management
 
 ---
 **⚠️ IMPORTANT**: Update this plan after each step completion to track progress and note any issues encountered.

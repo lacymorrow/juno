@@ -9,6 +9,7 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use crate::constants::{timeouts, events};
 use crate::state::AppState;
+use crate::settings::{manager::SettingsManager, FloatingBarSettings};
 
 // Floating bar configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,9 +34,47 @@ impl Default for FloatingBarConfig {
 }
 
 impl FloatingBarConfig {
+    /// Load configuration from centralized settings or create default.
+    /// Uses centralized SettingsManager instead of individual JSON store.
+    /// Used by: Application startup and configuration management.
+    pub async fn load_from_centralized_settings(app_handle: &AppHandle) -> Result<Self, String> {
+        let settings_manager = SettingsManager::new(app_handle.clone())
+            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+        let load_result = settings_manager.get_floating_bar_settings().await;
+
+        if let Ok(settings) = load_result {
+            debug!("Loaded floating bar configuration from centralized settings");
+            return Ok(convert_settings_to_config(&settings));
+        }
+
+        // Handle error case
+        debug!("Failed to load floating bar settings, creating default");
+        let default_config = Self::default();
+        default_config.save_to_centralized_settings(app_handle).await?;
+        Ok(default_config)
+    }
+
+    /// Save configuration to centralized settings.
+    /// Uses centralized SettingsManager instead of individual JSON store.
+    /// Used by: Settings UI and configuration updates.
+    pub async fn save_to_centralized_settings(&self, app_handle: &AppHandle) -> Result<(), String> {
+        let settings_manager = SettingsManager::new(app_handle.clone())
+            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+        let settings = convert_config_to_settings(self);
+        settings_manager.set_floating_bar_settings(&settings).await
+            .map_err(|e| format!("Failed to save floating bar settings: {}", e))?;
+
+        debug!("Saved floating bar configuration to centralized settings");
+        Ok(())
+    }
+
     /// Load configuration from Tauri store or create default.
+    /// DEPRECATED: Use load_from_centralized_settings instead.
     /// Attempts to load existing configuration, creates default if missing.
     /// Used by: Application startup and settings management.
+    #[deprecated(note = "Use load_from_centralized_settings instead")]
     pub async fn load(app_handle: &AppHandle) -> Result<Self, String> {
         let store = app_handle.store("floating_bar_config.json")
             .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
@@ -61,8 +100,10 @@ impl FloatingBarConfig {
     }
 
     /// Save configuration to Tauri store.
+    /// DEPRECATED: Use save_to_centralized_settings instead.
     /// Serializes current configuration to JSON and saves to store.
     /// Used by: Settings UI and configuration updates.
+    #[deprecated(note = "Use save_to_centralized_settings instead")]
     pub async fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
         let store = app_handle.store("floating_bar_config.json")
             .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
@@ -76,6 +117,30 @@ impl FloatingBarConfig {
 
         debug!("Saved floating bar configuration to store");
         Ok(())
+    }
+}
+
+/// Convert centralized FloatingBarSettings to FloatingBarConfig
+/// Provides seamless integration between centralized settings and existing code.
+fn convert_settings_to_config(settings: &FloatingBarSettings) -> FloatingBarConfig {
+    FloatingBarConfig {
+        show_voice_indicator: settings.show_voice_indicator,
+        enable_animations: settings.enable_animations,
+        auto_hide: settings.auto_hide,
+        auto_hide_delay: settings.auto_hide_delay,
+        opacity: settings.opacity,
+    }
+}
+
+/// Convert FloatingBarConfig to centralized FloatingBarSettings
+/// Provides seamless integration between existing code and centralized settings.
+fn convert_config_to_settings(config: &FloatingBarConfig) -> FloatingBarSettings {
+    FloatingBarSettings {
+        show_voice_indicator: config.show_voice_indicator,
+        enable_animations: config.enable_animations,
+        auto_hide: config.auto_hide,
+        auto_hide_delay: config.auto_hide_delay,
+        opacity: config.opacity,
     }
 }
 
@@ -881,40 +946,41 @@ pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
 
 // Configuration commands
 
-/// Get the current floating bar configuration
+/// Get the current floating bar configuration using centralized settings
 #[tauri::command]
 pub async fn get_floating_bar_config(
     app_handle: AppHandle,
 ) -> Result<FloatingBarConfig, String> {
-    info!("Getting floating bar configuration");
+    info!("Getting floating bar configuration from centralized settings");
 
-    match FloatingBarConfig::load(&app_handle).await {
+    match FloatingBarConfig::load_from_centralized_settings(&app_handle).await {
         Ok(config) => {
-            debug!("Successfully loaded floating bar config: {:?}", config);
+            debug!("Successfully loaded floating bar config from centralized settings: {:?}", config);
             Ok(config)
         },
         Err(e) => {
-            warn!("Failed to load floating bar config, using defaults: {}", e);
+            warn!("Failed to load floating bar config from centralized settings, using defaults: {}", e);
             Ok(FloatingBarConfig::default())
         }
     }
 }
 
-/// Set the floating bar configuration
+/// Set the floating bar configuration using centralized settings
 #[tauri::command]
 pub async fn set_floating_bar_config(
     app_handle: AppHandle,
     config: FloatingBarConfig,
 ) -> Result<(), String> {
-    info!("Setting floating bar configuration: {:?}", config);
+    info!("Setting floating bar configuration in centralized settings: {:?}", config);
 
-    config.save(&app_handle).await?;
+    // Save to centralized settings (which will also emit settings events)
+    config.save_to_centralized_settings(&app_handle).await?;
 
-    // Emit event to notify frontend of config change
+    // Emit event to notify frontend of config change (for backward compatibility)
     if let Err(e) = app_handle.emit("floating-bar-config-changed", &config) {
         warn!("Failed to emit config change event: {}", e);
     }
 
-    info!("Floating bar configuration updated successfully");
+    info!("Floating bar configuration updated successfully in centralized settings");
     Ok(())
 }

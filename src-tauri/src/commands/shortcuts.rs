@@ -1,9 +1,9 @@
 // Commands for managing keyboard shortcuts configuration
 
 use crate::state::{AppState, KeyboardShortcuts};
-use tauri::{State, AppHandle};
+use crate::settings::manager::SettingsManager;
+use tauri::{State, AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, Code};
-use tauri_plugin_store::StoreExt;
 use tracing::{info, error, warn};
 use serde_json;
 
@@ -58,8 +58,8 @@ pub async fn set_keyboard_shortcut(
         }
     }
 
-    // Save to persistent storage
-    save_shortcuts_to_store(&app, &state).await?;
+    // Save to centralized settings
+    save_shortcuts_to_centralized_settings(&app, &state).await?;
 
     // Re-register global shortcuts with new values
     update_global_shortcuts(&app, &state).await?;
@@ -108,8 +108,8 @@ pub async fn set_keyboard_shortcuts(
         *current_shortcuts = shortcuts.clone();
     }
 
-    // Save to persistent storage
-    save_shortcuts_to_store(&app, &state).await?;
+    // Save to centralized settings
+    save_shortcuts_to_centralized_settings(&app, &state).await?;
 
     // Re-register global shortcuts
     update_global_shortcuts(&app, &state).await?;
@@ -133,8 +133,8 @@ pub async fn reset_keyboard_shortcuts(
         *shortcuts = default_shortcuts.clone();
     }
 
-    // Save to persistent storage
-    save_shortcuts_to_store(&app, &state).await?;
+    // Save to centralized settings
+    save_shortcuts_to_centralized_settings(&app, &state).await?;
 
     // Re-register global shortcuts
     update_global_shortcuts(&app, &state).await?;
@@ -143,68 +143,67 @@ pub async fn reset_keyboard_shortcuts(
     Ok(())
 }
 
-/// Load keyboard shortcuts from persistent storage
-pub async fn load_shortcuts_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let store = app.store("keyboard_shortcuts.json")
-        .map_err(|e| format!("Failed to access shortcuts store: {}", e))?;
+/// Load keyboard shortcuts from centralized settings
+pub async fn load_shortcuts_from_centralized_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let settings_manager = app.state::<SettingsManager>();
 
-        // Try to load each shortcut from the store
-    let agent_mode_toggle = store.get("agent_mode_toggle")
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-    let dictation_input = store.get("dictation_input")
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-    let stop_current_task = store.get("stop_current_task")
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-    let open_settings = store.get("open_settings")
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-    // If any shortcuts exist in store, use them, otherwise use defaults
-    if agent_mode_toggle.is_some() || dictation_input.is_some() ||
-       stop_current_task.is_some() || open_settings.is_some() {
-
-        let defaults = KeyboardShortcuts::default();
-        let loaded_shortcuts = KeyboardShortcuts {
-            agent_mode_toggle: agent_mode_toggle.unwrap_or(defaults.agent_mode_toggle),
-            dictation_input: dictation_input.unwrap_or(defaults.dictation_input),
-            stop_current_task: stop_current_task.unwrap_or(defaults.stop_current_task),
-            open_settings: open_settings.unwrap_or(defaults.open_settings),
-        };
-
-        let mut shortcuts = state.keyboard_shortcuts.lock()
-            .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
-        *shortcuts = loaded_shortcuts;
-        info!("Loaded keyboard shortcuts from store");
-    } else {
-        info!("No shortcuts found in store, using defaults");
+    match settings_manager.get_keyboard_shortcuts().await {
+        Ok(settings_shortcuts) => {
+            // Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts
+            let state_shortcuts = convert_settings_to_state_shortcuts(&settings_shortcuts);
+            let mut current_shortcuts = state.keyboard_shortcuts.lock()
+                .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
+            *current_shortcuts = state_shortcuts;
+            info!("Loaded keyboard shortcuts from centralized settings");
+        }
+        Err(e) => {
+            warn!("Failed to load shortcuts from centralized settings: {}, using defaults", e);
+            let default_shortcuts = crate::state::KeyboardShortcuts::default();
+            let mut current_shortcuts = state.keyboard_shortcuts.lock()
+                .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?;
+            *current_shortcuts = default_shortcuts;
+        }
     }
 
     Ok(())
 }
 
-/// Save keyboard shortcuts to persistent storage
-async fn save_shortcuts_to_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let store = app.store("keyboard_shortcuts.json")
-        .map_err(|e| format!("Failed to access shortcuts store: {}", e))?;
+/// Save keyboard shortcuts to centralized settings
+async fn save_shortcuts_to_centralized_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let settings_manager = app.state::<SettingsManager>();
 
-    let shortcuts = state.keyboard_shortcuts.lock()
+    let state_shortcuts = state.keyboard_shortcuts.lock()
         .map_err(|e| format!("Failed to lock keyboard shortcuts: {}", e))?
         .clone();
 
-        // Store each shortcut individually
-    store.set("agent_mode_toggle", serde_json::Value::String(shortcuts.agent_mode_toggle));
-    store.set("dictation_input", serde_json::Value::String(shortcuts.dictation_input));
-    store.set("stop_current_task", serde_json::Value::String(shortcuts.stop_current_task));
-    store.set("open_settings", serde_json::Value::String(shortcuts.open_settings));
+    // Convert from state::KeyboardShortcuts to settings::KeyboardShortcuts
+    let settings_shortcuts = convert_state_to_settings_shortcuts(&state_shortcuts);
 
-    // Save the store to disk
-    store.save()
-        .map_err(|e| format!("Failed to save shortcuts store: {}", e))?;
+    settings_manager.set_keyboard_shortcuts(&settings_shortcuts).await
+        .map_err(|e| format!("Failed to save shortcuts to centralized settings: {}", e))?;
 
-    info!("Saved keyboard shortcuts to store");
+    info!("Saved keyboard shortcuts to centralized settings");
     Ok(())
+}
+
+/// Convert from settings::KeyboardShortcuts to state::KeyboardShortcuts
+fn convert_settings_to_state_shortcuts(settings: &crate::settings::KeyboardShortcuts) -> crate::state::KeyboardShortcuts {
+    crate::state::KeyboardShortcuts {
+        agent_mode_toggle: settings.agent_mode_toggle.clone(),
+        dictation_input: settings.dictation_input.clone(),
+        stop_current_task: settings.stop_current_task.clone(),
+        open_settings: settings.open_settings.clone(),
+    }
+}
+
+/// Convert from state::KeyboardShortcuts to settings::KeyboardShortcuts
+fn convert_state_to_settings_shortcuts(state: &crate::state::KeyboardShortcuts) -> crate::settings::KeyboardShortcuts {
+    crate::settings::KeyboardShortcuts {
+        agent_mode_toggle: state.agent_mode_toggle.clone(),
+        dictation_input: state.dictation_input.clone(),
+        stop_current_task: state.stop_current_task.clone(),
+        open_settings: state.open_settings.clone(),
+    }
 }
 
 /// Validate shortcut format with enhanced checks and detailed error messages

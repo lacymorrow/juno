@@ -98,9 +98,9 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
 
     let app_state = app_handle.state::<AppState>();
 
-    // Load keyboard shortcuts from persistent storage
-    if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&app_handle, &*app_state).await {
-        warn!("Failed to load keyboard shortcuts from store: {} - using defaults", e);
+    // Load keyboard shortcuts from centralized settings
+    if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_centralized_settings(&app_handle, &*app_state).await {
+        warn!("Failed to load keyboard shortcuts from centralized settings: {} - using defaults", e);
     }
 
     // Load agent trigger mode from persistent storage

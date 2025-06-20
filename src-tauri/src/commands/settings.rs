@@ -37,7 +37,7 @@ pub async fn save_all_settings(
 
 // Individual section getters
 #[command]
-pub async fn get_keyboard_shortcuts(
+pub async fn get_centralized_keyboard_shortcuts(
     app_handle: AppHandle,
 ) -> Result<KeyboardShortcuts, String> {
     let settings_manager = SettingsManager::new(app_handle)
@@ -70,7 +70,7 @@ pub async fn get_agent_settings(
 }
 
 #[command]
-pub async fn get_provider_settings(
+pub async fn get_centralized_provider_settings(
     app_handle: AppHandle,
 ) -> Result<ProviderSettings, String> {
     let settings_manager = SettingsManager::new(app_handle)
@@ -126,7 +126,7 @@ pub async fn get_onboarding_settings(
 
 // Individual section setters
 #[command]
-pub async fn set_keyboard_shortcuts(
+pub async fn set_centralized_keyboard_shortcuts(
     app_handle: AppHandle,
     shortcuts: KeyboardShortcuts,
 ) -> Result<(), String> {
@@ -162,7 +162,7 @@ pub async fn set_agent_settings(
 }
 
 #[command]
-pub async fn set_provider_settings(
+pub async fn set_centralized_provider_settings(
     app_handle: AppHandle,
     settings: ProviderSettings,
 ) -> Result<(), String> {
@@ -247,7 +247,7 @@ pub async fn migrate_legacy_settings(
 
 /// Reset all settings to defaults
 #[command]
-pub async fn reset_all_settings(
+pub async fn reset_centralized_settings(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let settings_manager = SettingsManager::new(app_handle)

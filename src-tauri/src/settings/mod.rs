@@ -47,22 +47,11 @@ pub struct KeyboardShortcuts {
 /// Replaces: floating_bar_config.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FloatingBarSettings {
-    pub ui_state: String,
-    pub position: Option<FloatingBarPosition>,
-    pub size: Option<FloatingBarSize>,
-    pub visibility: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FloatingBarPosition {
-    pub x: f64,
-    pub y: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FloatingBarSize {
-    pub width: f64,
-    pub height: f64,
+    pub show_voice_indicator: bool,
+    pub enable_animations: bool,
+    pub auto_hide: bool,
+    pub auto_hide_delay: u32,
+    pub opacity: f32,
 }
 
 /// Agent behavior and execution settings
@@ -193,10 +182,11 @@ impl Default for KeyboardShortcuts {
 impl Default for FloatingBarSettings {
     fn default() -> Self {
         Self {
-            ui_state: "compact".to_string(),
-            position: None,
-            size: None,
-            visibility: true,
+            show_voice_indicator: true,
+            enable_animations: true,
+            auto_hide: false,
+            auto_hide_delay: crate::constants::timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
+            opacity: 0.95,
         }
     }
 }
