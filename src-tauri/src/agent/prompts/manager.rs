@@ -1,12 +1,8 @@
 use super::types::{PromptConfig, PromptContext, PromptTemplate, PromptType};
 use super::templates::DefaultPrompts;
 use crate::agent::structs::AgentError;
-use serde_json;
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
 
 // Add centralized settings support

@@ -4,8 +4,7 @@
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
+
 use tracing::info;
 
 // Re-export MCP types for convenience
@@ -339,58 +338,7 @@ impl ToolConfigManager {
         }
     }
 
-    /// Load configuration from Tauri store or create default.
-    /// Attempts to load existing configuration, creates default if missing.
-    /// Used by: Application startup for configuration initialization.
-    ///
-    /// # Arguments
-    /// * `app_handle` - Tauri app handle for store access
-    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, String> {
-        let store = app_handle.store("tool_config.json")
-            .map_err(|e| format!("Failed to access tool config store: {}", e))?;
 
-        // Try to load the full configuration from store
-        if let Some(config_value) = store.get("tool_config") {
-            match serde_json::from_value::<Self>(config_value) {
-                Ok(mut config) => {
-                    // Ensure all default tools are present (for backwards compatibility)
-                    Self::ensure_default_tools(&mut config.tools);
-                    info!("Loaded tool configuration from store");
-                    return Ok(config);
-                }
-                Err(e) => {
-                    info!("Failed to parse stored tool config ({}), creating default", e);
-                }
-            }
-        }
-
-        // No valid configuration found, create and save default
-        info!("No tool configuration found in store, creating default");
-        let default_config = Self::default();
-        default_config.save_to_store(app_handle)?;
-        Ok(default_config)
-    }
-
-    /// Save configuration to Tauri store.
-    /// Serializes current configuration to JSON and saves to store.
-    /// Used by: Settings UI and application shutdown for persistence.
-    ///
-    /// # Arguments
-    /// * `app_handle` - Tauri app handle for store access
-    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), String> {
-        let store = app_handle.store("tool_config.json")
-            .map_err(|e| format!("Failed to access tool config store: {}", e))?;
-
-        let config_value = serde_json::to_value(self)
-            .map_err(|e| format!("Failed to serialize tool config: {}", e))?;
-
-        store.set("tool_config", config_value);
-        store.save()
-            .map_err(|e| format!("Failed to save tool config store: {}", e))?;
-
-        info!("Saved tool configuration to store");
-        Ok(())
-    }
 
     /// Check if a tool is enabled.
     /// Checks both individual tool setting and category enablement state.

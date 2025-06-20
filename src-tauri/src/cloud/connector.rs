@@ -356,7 +356,8 @@ impl HardwareMonitor {
 impl ProductionCloudConnector {
     /// Create new production cloud connector with enhanced monitoring
     pub async fn new(app_handle: AppHandle) -> Result<Self, CloudError> {
-        let config = CloudConfig::load_from_store(&app_handle)?;
+        let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())?;
+        let config = CloudConfig::load_from_centralized_settings(&settings_manager).await?;
         let auth = DeviceAuth::new(config.clone());
         let security = CloudSecurity::new(config.clone(), auth.clone());
         let command_processor = CloudCommandProcessor::new(app_handle.clone(), security.clone());
