@@ -178,6 +178,15 @@ impl SettingsManager {
         self.get_onboarding_settings_from_store(&store)
     }
 
+    pub async fn get_autostart_enabled(&self) -> Result<bool, String> {
+        let store = self.app_handle.store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        Ok(store
+            .get(store_keys::AUTOSTART_ENABLED)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false))
+    }
+
     // Individual setters with validation and events
     pub async fn set_keyboard_shortcuts(&self, shortcuts: &KeyboardShortcuts) -> Result<(), String> {
         let store = self.app_handle.store(SETTINGS_STORE_FILE)

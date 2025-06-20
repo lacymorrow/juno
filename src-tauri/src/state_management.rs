@@ -286,8 +286,11 @@ async fn initialize_monitoring_state(app_handle: AppHandle) -> Result<(), String
     info!("[State] Initializing monitoring state...");
 
     // Initialize autostart configuration
-    crate::commands::autostart::init_autostart(&app_handle);
-    info!("Autostart configuration initialized successfully");
+    if let Err(e) = crate::commands::autostart::init_autostart(&app_handle) {
+        warn!("Failed to initialize autostart configuration: {}", e);
+    } else {
+        info!("Autostart configuration initialized successfully");
+    }
 
     Ok(())
 }
