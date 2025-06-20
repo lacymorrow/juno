@@ -14,10 +14,10 @@
 //! Configuration: Stored in cloud_config.json store
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+
 use super::types::CloudError;
 use tracing::info;
-use crate::settings::{manager::SettingsManager, CloudSettings};
+use crate::settings::CloudSettings;
 
 /// Cloud configuration settings - maximally permissive
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,18 +113,8 @@ impl CloudConfig {
     /// Load configuration from centralized settings or create default.
     /// Attempts to load existing configuration, creates default if missing.
     /// Used by: Cloud service initialization and settings management.
-    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, CloudError> {
-        let settings_manager = SettingsManager::new(app_handle.clone())
-            .map_err(|e| CloudError::ConfigError(format!("Failed to initialize settings manager: {}", e)))?;
-
-        // Try to load from centralized settings using async runtime
-        let cloud_settings_result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                settings_manager.get_cloud_settings().await
-            })
-        });
-
-        match cloud_settings_result {
+    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, CloudError> {
+        match settings_manager.get_cloud_settings().await {
             Ok(cloud_settings) => {
                 let mut config = Self::from_centralized_settings(&cloud_settings);
                 // Ensure we're using maximally permissive defaults for existing configs
@@ -136,7 +126,7 @@ impl CloudConfig {
                 info!("Failed to load cloud settings from centralized system ({}), creating maximally permissive default", e);
                 // No valid configuration found, create and save maximally permissive default
                 let default_config = Self::default();
-                default_config.save_to_store(app_handle)?;
+                default_config.save_to_centralized_settings(settings_manager).await?;
                 Ok(default_config)
             }
         }
@@ -180,19 +170,11 @@ impl CloudConfig {
     /// Save configuration to centralized settings.
     /// Converts current configuration to CloudSettings and saves via SettingsManager.
     /// Used by: Cloud settings UI and configuration updates.
-    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), CloudError> {
-        let settings_manager = SettingsManager::new(app_handle.clone())
-            .map_err(|e| CloudError::ConfigError(format!("Failed to initialize settings manager: {}", e)))?;
-
+    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
         let cloud_settings = self.to_centralized_settings();
 
-        // Use async runtime to save settings
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                settings_manager.set_cloud_settings(&cloud_settings).await
-            })
-        })
-        .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud settings: {}", e)))?;
+        settings_manager.set_cloud_settings(&cloud_settings).await
+            .map_err(|e| CloudError::ConfigError(format!("Failed to save cloud settings: {}", e)))?;
 
         info!("Saved maximally permissive cloud configuration to centralized settings");
         Ok(())
@@ -218,22 +200,22 @@ impl CloudConfig {
     }
 
     /// Update API key and save
-    pub fn set_api_key(&mut self, api_key: String, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
+    pub async fn set_api_key(&mut self, api_key: String, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
         self.api_key = Some(api_key);
-        self.save_to_store(app_handle)
+        self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Enable cloud connectivity
-    pub fn enable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
+    pub async fn enable(&mut self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
         self.enabled = true;
         self.validate()?;
-        self.save_to_store(app_handle)
+        self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Disable cloud connectivity
-    pub fn disable(&mut self, app_handle: &tauri::AppHandle) -> Result<(), CloudError> {
+    pub async fn disable(&mut self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), CloudError> {
         self.enabled = false;
-        self.save_to_store(app_handle)
+        self.save_to_centralized_settings(settings_manager).await
     }
 
     /// Check if a command is allowed - now maximally permissive

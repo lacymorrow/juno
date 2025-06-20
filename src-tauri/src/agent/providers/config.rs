@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::env;
-use tracing::{info, error, warn};
+use tracing::{info, warn};
 use crate::agent::structs::AgentError;
 use crate::agent::prompts::manager::PromptManager;
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
+
 
 // Add centralized settings support
 use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
