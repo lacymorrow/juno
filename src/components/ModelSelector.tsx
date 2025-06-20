@@ -10,6 +10,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { Brain, Cpu } from "lucide-react";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 interface ModelSelectorProps {
   variant?: "compact" | "full";
@@ -31,12 +32,31 @@ export function ModelSelector({
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
 
-  // Load models when active provider changes
+  // Load models when active provider changes or on initial load
   useEffect(() => {
     if (settings.activeProvider && !settings.isLoading) {
+      console.log(`Loading models for provider: ${settings.activeProvider}`);
       loadModelsForProvider(settings.activeProvider);
     }
   }, [settings.activeProvider, settings.isLoading]);
+
+  // Listen for provider settings changes from backend to update model when changed
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupProviderListener = async () => {
+      unlisten = await listen("provider_settings_changed", (event) => {
+        console.log("ModelSelector: Received provider settings update");
+        // Models list might have changed, reload models for current provider
+        if (settings.activeProvider) {
+          loadModelsForProvider(settings.activeProvider);
+        }
+      });
+    };
+
+    setupProviderListener();
+    return () => unlisten?.();
+  }, [settings.activeProvider]);
 
   const loadModelsForProvider = async (providerId: string) => {
     setLoadingModels(true);
@@ -45,6 +65,13 @@ export function ModelSelector({
         providerId,
       });
       setAvailableModels(models);
+
+      console.log(
+        `ModelSelector: Loaded ${models.length} models for provider: ${providerId}`
+      );
+
+      // If current model is not valid for this provider, we let the backend handle setting defaults
+      // The useSettings hook will get the updated settings via the provider_settings_changed event
     } catch (error) {
       console.error("Failed to load models for provider:", error);
       setAvailableModels([]);
@@ -81,9 +108,10 @@ export function ModelSelector({
     );
   }
 
-  const selectedModel = availableModels.find(
-    (m) => m.id === settings.formData.model
-  );
+  // Use the model from settings - this is the single source of truth
+  const currentModelId =
+    settings.formData.model || settings.providerSettings?.model || "";
+  const selectedModel = availableModels.find((m) => m.id === currentModelId);
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
@@ -95,7 +123,7 @@ export function ModelSelector({
       )}
 
       <Select
-        value={settings.formData.model}
+        value={currentModelId}
         onValueChange={async (value) => {
           // Validate model is available for current provider before setting
           try {
@@ -105,13 +133,31 @@ export function ModelSelector({
             });
 
             if (isValid) {
+              console.log(
+                `ModelSelector: Changing model to: ${value} for provider: ${settings.activeProvider}`
+              );
+
+              // Update form data immediately for responsive UI
               settings.setFormData((prev) => ({ ...prev, model: value }));
-              // Auto-save when model changes
-              if (settings.activeProvider) {
-                try {
-                  await settings.handleSaveProviderSettings();
-                } catch (error) {
-                  console.error("Failed to save model selection:", error);
+
+              // Save to backend - this will trigger provider_settings_changed event
+              try {
+                await invoke("update_provider_model", {
+                  providerId: settings.activeProvider,
+                  model: value,
+                });
+
+                console.log(
+                  `ModelSelector: Model updated successfully to: ${value} for provider: ${settings.activeProvider}`
+                );
+              } catch (error) {
+                console.error("Failed to save model selection:", error);
+                // Revert form data on error
+                if (settings.providerSettings?.model) {
+                  settings.setFormData((prev) => ({
+                    ...prev,
+                    model: settings.providerSettings?.model || "",
+                  }));
                 }
               }
             } else {

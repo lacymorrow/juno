@@ -1,7 +1,6 @@
 use tauri::{AppHandle, Manager};
-use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
-use serde_json::Value;
+use crate::settings::{manager::SettingsManager, OnboardingSettings};
 
 /// Check if we're running in development mode
 fn is_development_mode() -> bool {
@@ -25,30 +24,26 @@ pub async fn check_onboarding_status(app: AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
+    let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
+    let onboarding_settings = settings_manager.get_onboarding_settings().await.map_err(|e| e.to_string())?;
 
-    // Check if onboarding has been completed
-    let completed = store.get("completed").unwrap_or(Value::Bool(false));
-
-    match completed {
-        Value::Bool(true) => Ok(true),
-        _ => Ok(false),
-    }
+    Ok(onboarding_settings.completed)
 }
 
 /// Mark onboarding as completed
 #[tauri::command]
 pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
-    let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
+    let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    // Set onboarding as completed
-    store.set("completed", Value::Bool(true));
-    store.set("completed_at", Value::String(now.clone()));
-    store.set("skipped", Value::Bool(false));
+    let onboarding_settings = OnboardingSettings {
+        completed: true,
+        completed_at: Some(now.clone()),
+        skipped: false,
+        skip_count: 0,
+    };
 
-    // Save the store
-    store.save().map_err(|e| e.to_string())?;
+    settings_manager.set_onboarding_settings(&onboarding_settings).await.map_err(|e| e.to_string())?;
 
     info!("Onboarding marked as completed at {}", now);
     Ok(())
@@ -57,33 +52,38 @@ pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
 /// Mark onboarding as skipped (still counts as completed)
 #[tauri::command]
 pub async fn skip_onboarding(app: AppHandle) -> Result<(), String> {
-    let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
+    let settings_manager = SettingsManager::new(app).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
-    // Set onboarding as completed but skipped
-    store.set("completed", Value::Bool(true));
-    store.set("completed_at", Value::String(now.clone()));
-    store.set("skipped", Value::Bool(true));
+    // Get current settings to preserve skip count
+    let mut current_settings = settings_manager.get_onboarding_settings().await.map_err(|e| e.to_string())?;
 
-    // Save the store
-    store.save().map_err(|e| e.to_string())?;
+    let onboarding_settings = OnboardingSettings {
+        completed: true,
+        completed_at: Some(now.clone()),
+        skipped: true,
+        skip_count: current_settings.skip_count + 1,
+    };
 
-    info!("Onboarding skipped at {}", now);
+    settings_manager.set_onboarding_settings(&onboarding_settings).await.map_err(|e| e.to_string())?;
+
+    info!("Onboarding skipped at {} (skip count: {})", now, onboarding_settings.skip_count);
     Ok(())
 }
 
 /// Reset onboarding (for testing/development and user-requested restart)
 #[tauri::command]
 pub async fn reset_onboarding(app: AppHandle) -> Result<(), String> {
-    let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
+    let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
 
-    // Reset all onboarding values
-    store.set("completed", Value::Bool(false));
-    store.set("skipped", Value::Bool(false));
-    store.set("completed_at", Value::Null);
+    let onboarding_settings = OnboardingSettings {
+        completed: false,
+        completed_at: None,
+        skipped: false,
+        skip_count: 0,
+    };
 
-    // Save the store
-    store.save().map_err(|e| e.to_string())?;
+    settings_manager.set_onboarding_settings(&onboarding_settings).await.map_err(|e| e.to_string())?;
 
     // Reset permissions state so the permissions flow can be shown again during onboarding
     let app_state = app.state::<crate::state::AppState>();
@@ -153,11 +153,8 @@ pub async fn restart_onboarding(app: AppHandle) -> Result<(), String> {
 /// Get detailed onboarding information
 #[tauri::command]
 pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, String> {
-    let store = app.store("onboarding.json").map_err(|e| e.to_string())?;
-
-    let completed = store.get("completed").unwrap_or(Value::Bool(false));
-    let skip_count = store.get("skip_count").unwrap_or(Value::Number(0.into()));
-    let completed_at = store.get("completed_at");
+    let settings_manager = SettingsManager::new(app.clone()).map_err(|e| e.to_string())?;
+    let onboarding_settings = settings_manager.get_onboarding_settings().await.map_err(|e| e.to_string())?;
 
     // Get current keyboard shortcuts for the onboarding display
     let app_state = app.state::<crate::state::AppState>();
@@ -166,9 +163,9 @@ pub async fn get_onboarding_info(app: AppHandle) -> Result<serde_json::Value, St
         .clone();
 
     Ok(serde_json::json!({
-        "completed": completed,
-        "skip_count": skip_count,
-        "completed_at": completed_at,
+        "completed": onboarding_settings.completed,
+        "skip_count": onboarding_settings.skip_count,
+        "completed_at": onboarding_settings.completed_at,
         "is_development_mode": is_development_mode(),
         "shortcuts": {
             "agent_mode_toggle": shortcuts.agent_mode_toggle,

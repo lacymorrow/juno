@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
-use std::{env, fs::File, io::Write};
-use std::io::ErrorKind;
-use tracing::{info, error, warn};
+
+use std::env;
+use tracing::{info, warn};
 use crate::agent::structs::AgentError;
 use crate::agent::prompts::manager::PromptManager;
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
+use crate::agent::providers::factory::model_ids;
+
+// Add centralized settings support
+use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
 
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -42,31 +42,15 @@ impl AgentMode {
 }
 
 /// Configuration structure for AI providers
+/// Uses centralized ProviderSettings directly instead of duplicating the structure
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {
     /// The active provider ID
     pub active_provider: String,
     /// Agent execution mode (single vs multi-agent)
     pub agent_mode: AgentMode,
-    /// Configuration for each provider
-    pub providers: Vec<ProviderSettings>,
-}
-
-/// Settings for a specific provider
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ProviderSettings {
-    /// Provider identifier
-    pub id: String,
-    /// API key (encrypted or obscured in the future)
-    pub api_key: Option<String>,
-    /// Model name to use
-    pub model: Option<String>,
-    /// Maximum tokens to generate
-    pub max_tokens: Option<u32>,
-    /// Temperature setting (0.0-1.0)
-    pub temperature: Option<f32>,
-    /// System prompt to use (if supported)
-    pub system_prompt: Option<String>,
+    /// Configuration for each provider (uses centralized type)
+    pub providers: Vec<CentralizedProviderConfig>,
 }
 
 impl Default for ProviderConfig {
@@ -75,34 +59,34 @@ impl Default for ProviderConfig {
             active_provider: "anthropic".to_string(),
             agent_mode: AgentMode::Multi,
             providers: vec![
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "anthropic".to_string(),
                     api_key: None,
-                    model: Some("claude-3-7-sonnet-20250219".to_string()),
+                    model: Some(model_ids::CLAUDE_4_SONNET.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "openai".to_string(),
                     api_key: None,
-                    model: Some("gpt-4o".to_string()),
+                    model: Some(model_ids::GPT_4O.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "rig".to_string(),
                     api_key: None, // Rig uses OpenAI's API key by default
-                    model: Some("gpt-4o".to_string()),
+                    model: Some(model_ids::GPT_4O.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "gemini".to_string(),
                     api_key: None,
-                    model: Some("gemini-1.5-pro".to_string()),
+                    model: Some(model_ids::GEMINI_1_5_PRO.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
@@ -113,105 +97,101 @@ impl Default for ProviderConfig {
 }
 
 impl ProviderConfig {
-    /// Load configuration from Tauri store or create default.
-    /// Attempts to load existing configuration, creates default if missing.
-    /// Used by: Agent initialization and settings management.
-    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, AgentError> {
-        let store = app_handle.store("provider_config.json").map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to access provider config store: {}", e))
-        })?;
+    /// Load configuration from centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
+    /// Used by: Application startup for configuration initialization.
+    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, AgentError> {
+        let provider_settings = settings_manager.get_provider_settings().await
+            .map_err(|e| AgentError::ConfigurationError(format!("Failed to load provider settings: {}", e)))?;
 
-        // Try to load the configuration from store
-        if let Some(config_value) = store.get("provider_config") {
-            match serde_json::from_value::<Self>(config_value) {
-                Ok(mut config) => {
-                    // Perform configuration migration - add missing providers
-                    let mut needs_save = false;
-                    let default_config = Self::default();
-
-                    for default_provider in &default_config.providers {
-                        if !config.providers.iter().any(|p| p.id == default_provider.id) {
-                            info!("Adding missing provider to config: {}", default_provider.id);
-                            config.providers.push(default_provider.clone());
-                            needs_save = true;
-                        }
-                    }
-
-                    if needs_save {
-                        config.save_to_store(app_handle)?;
-                    }
-
-                    info!("Loaded provider configuration from store");
-                    return Ok(config);
-                }
-                Err(e) => {
-                    error!("Failed to parse stored provider config ({}), creating default", e);
-                }
-            }
-        }
-
-        // No valid configuration found, create and save default
-        info!("No provider configuration found in store, creating default");
-        let default_config = Self::default();
-        default_config.save_to_store(app_handle)?;
-        Ok(default_config)
+        let config = Self::from_centralized_settings(&provider_settings)?;
+        info!("Loaded provider configuration from centralized settings");
+        Ok(config)
     }
 
-    /// Save configuration to Tauri store.
-    /// Serializes current configuration to JSON and saves to store.
+    /// Save configuration to centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Settings UI and provider configuration updates.
-    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), AgentError> {
-        let store = app_handle.store("provider_config.json").map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to access provider config store: {}", e))
-        })?;
-
-        let config_value = serde_json::to_value(self).map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to serialize provider config: {}", e))
-        })?;
-
-        store.set("provider_config", config_value);
-        store.save().map_err(|e| {
-            AgentError::ConfigurationError(format!("Failed to save provider config store: {}", e))
-        })?;
-
-        info!("Saved provider configuration to store");
+    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
+        let provider_settings = self.to_centralized_settings()?;
+        settings_manager.set_provider_settings(&provider_settings).await
+            .map_err(|e| AgentError::ConfigurationError(format!("Failed to save provider settings: {}", e)))?;
+        info!("Saved provider configuration to centralized settings");
         Ok(())
     }
 
+    /// Convert from centralized ProviderSettings to ProviderConfig.
+    /// Handles schema differences between the two formats.
+    fn from_centralized_settings(settings: &CentralizedProviderSettings) -> Result<Self, AgentError> {
+        let providers = settings.providers.clone();
+
+        // Ensure all default providers are present for backwards compatibility
+        let default_config = Self::default();
+        let mut final_providers = providers.clone();
+        for default_provider in &default_config.providers {
+            if !final_providers.iter().any(|p| p.id == default_provider.id) {
+                info!("Adding missing provider from defaults: {}", default_provider.id);
+                final_providers.push(default_provider.clone());
+            }
+        }
+
+        // Use default agent mode since it's now managed in AgentSettings
+        let agent_mode = AgentMode::default();
+
+        Ok(Self {
+            active_provider: settings.active_provider.clone(),
+            agent_mode,
+            providers: final_providers,
+        })
+    }
+
+        /// Convert from ProviderConfig to centralized ProviderSettings.
+    /// Handles schema differences between the two formats.
+    fn to_centralized_settings(&self) -> Result<CentralizedProviderSettings, AgentError> {
+        let providers = self.providers.clone();
+
+        Ok(CentralizedProviderSettings {
+            active_provider: self.active_provider.clone(),
+            providers,
+        })
+    }
+
+
+
     /// Update provider API key
-    pub fn update_api_key(&mut self, provider_id: &str, api_key: String, app_handle: &AppHandle) -> Result<(), AgentError> {
+    pub fn update_api_key(&mut self, provider_id: &str, api_key: String) -> Result<(), AgentError> {
         if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
             provider.api_key = Some(api_key);
-            self.save_to_store(app_handle)
+            Ok(())
         } else {
             Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
         }
     }
 
     /// Update provider model
-    pub fn update_model(&mut self, provider_id: &str, model: String, app_handle: &AppHandle) -> Result<(), AgentError> {
+    pub fn update_model(&mut self, provider_id: &str, model: String) -> Result<(), AgentError> {
         if let Some(provider) = self.providers.iter_mut().find(|p| p.id == provider_id) {
             provider.model = Some(model);
-            self.save_to_store(app_handle)
+            Ok(())
         } else {
             Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)))
         }
     }
 
     /// Set active provider
-    pub fn set_active_provider(&mut self, provider_id: String, app_handle: &AppHandle) -> Result<(), AgentError> {
+    pub fn set_active_provider(&mut self, provider_id: String) -> Result<(), AgentError> {
         // Verify the provider exists
         if !self.providers.iter().any(|p| p.id == provider_id) {
             return Err(AgentError::ConfigurationError(format!("Provider '{}' not found", provider_id)));
         }
         self.active_provider = provider_id;
-        self.save_to_store(app_handle)
+        Ok(())
     }
 
     /// Set agent mode
-    pub fn set_agent_mode(&mut self, mode: AgentMode, app_handle: &AppHandle) -> Result<(), AgentError> {
+    pub fn set_agent_mode(&mut self, mode: AgentMode) -> Result<(), AgentError> {
         self.agent_mode = mode;
-        self.save_to_store(app_handle)
+        Ok(())
     }
 
     /// Get agent mode
@@ -220,41 +200,39 @@ impl ProviderConfig {
     }
 
     /// Get settings for the active provider
-    pub fn get_active_provider_settings(&self) -> Option<&ProviderSettings> {
+    pub fn get_active_provider_settings(&self) -> Option<&CentralizedProviderConfig> {
         self.providers.iter().find(|p| p.id == self.active_provider)
     }
 
     /// Get settings for a specific provider
-    pub fn get_provider_settings(&self, provider_id: &str) -> Option<&ProviderSettings> {
+    pub fn get_provider_settings(&self, provider_id: &str) -> Option<&CentralizedProviderConfig> {
         self.providers.iter().find(|p| p.id == provider_id)
     }
 
-    /// Get configuration file path
-    fn get_config_path() -> Result<PathBuf, AgentError> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| AgentError::ConfigurationError("Unable to find home directory".to_string()))?;
-        Ok(home.join(".juno").join("provider_config.json"))
-    }
+
 }
 
 /// Apply provider settings to environment variables (convenience method)
 /// Note: This creates a default configuration without app handle support
 pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
     let config = ProviderConfig::default();
-    let prompt_manager = PromptManager::new();
+    let prompt_manager = crate::agent::prompts::PromptManager::new();
     apply_provider_settings_internal(&config, &prompt_manager)
 }
 
 /// Apply provider settings to environment variables from a given app handle
+/// NEW: Uses centralized settings instead of direct JSON store access.
 /// Uses the centralized prompt manager for default prompts
-pub fn apply_provider_settings_to_env_with_handle(app_handle: &AppHandle) -> Result<(), AgentError> {
-    let config = ProviderConfig::load_from_store(app_handle)?;
+pub async fn apply_provider_settings_to_env_with_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
+    let config = ProviderConfig::load_from_centralized_settings(settings_manager).await?;
 
-    // Load prompt manager for default prompts
-    let prompt_manager = PromptManager::load_from_store(app_handle).unwrap_or_else(|_| PromptManager::new());
+    // Load prompt manager for default prompts - this will need to be updated in a future step
+    let prompt_manager = crate::agent::prompts::PromptManager::new();
 
     apply_provider_settings_internal(&config, &prompt_manager)
 }
+
+
 
 /// Internal function to apply provider settings to environment variables
 fn apply_provider_settings_internal(config: &ProviderConfig, prompt_manager: &PromptManager) -> Result<(), AgentError> {
@@ -368,5 +346,38 @@ fn apply_provider_settings_internal(config: &ProviderConfig, prompt_manager: &Pr
         warn!("Could not find settings for provider: {}. No specific settings applied.", provider_id_to_apply);
     }
 
+    Ok(())
+}
+
+/// Load provider configuration from centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
+/// Used by: Application startup and provider configuration initialization
+///
+/// # Arguments
+/// * `settings_manager` - Centralized settings manager
+pub async fn load_provider_config_from_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+) -> Result<ProviderConfig, String> {
+    let loaded_config = ProviderConfig::load_from_centralized_settings(settings_manager).await
+        .map_err(|e| format!("Failed to load provider config: {}", e))?;
+
+    info!("Loaded provider configuration from centralized settings on startup");
+    Ok(loaded_config)
+}
+
+/// Save provider configuration to centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
+/// Used by: Application shutdown and provider configuration changes
+///
+/// # Arguments
+/// * `settings_manager` - Centralized settings manager
+/// * `config` - Provider configuration to save
+pub async fn save_provider_config_to_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+    config: &ProviderConfig
+) -> Result<(), String> {
+    config.save_to_centralized_settings(settings_manager).await
+        .map_err(|e| format!("Failed to save provider config: {}", e))?;
+    info!("Saved provider configuration to centralized settings");
     Ok(())
 }
