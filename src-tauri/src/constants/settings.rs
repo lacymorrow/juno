@@ -27,6 +27,7 @@ pub mod store_keys {
     pub const CLOUD: &str = "cloud";
     pub const AUDIO: &str = "audio";
     pub const TOOLS: &str = "tools";
+    pub const PROMPTS: &str = "prompts";
     pub const ONBOARDING: &str = "onboarding";
     pub const AUTOSTART_ENABLED: &str = "autostart_enabled";
 }
@@ -106,6 +107,14 @@ pub mod floating_bar_keys {
     pub const VISIBILITY: &str = "visibility";
 }
 
+/// Prompt configuration keys
+pub mod prompt_keys {
+    pub const ACTIVE_PROMPTS: &str = "active_prompts";
+    pub const CUSTOM_PROMPTS: &str = "custom_prompts";
+    pub const GLOBAL_VARIABLES: &str = "global_variables";
+    pub const ALLOW_CUSTOMIZATION: &str = "allow_customization";
+}
+
 /// Settings validation constants
 pub mod validation {
     pub const MIN_SENSITIVITY: f32 = 0.0;
@@ -162,4 +171,5 @@ pub mod events {
     pub const AUDIO_SETTINGS_CHANGED: &str = "audio_settings_changed";
     pub const TOOL_SETTINGS_CHANGED: &str = "tool_settings_changed";
     pub const FLOATING_BAR_SETTINGS_CHANGED: &str = "floating_bar_settings_changed";
+    pub const PROMPT_SETTINGS_CHANGED: &str = "prompt_settings_changed";
 }

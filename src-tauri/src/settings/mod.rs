@@ -27,6 +27,8 @@ pub struct AppSettings {
     pub audio: AudioSettings,
     /// Tool enable/disable configurations
     pub tools: ToolSettings,
+    /// Prompt configuration and templates
+    pub prompts: PromptSettings,
     /// Onboarding completion status
     pub onboarding: OnboardingSettings,
     /// Application autostart setting
@@ -142,6 +144,41 @@ pub struct MCPServerConfig {
     pub max_retries: u32,
 }
 
+/// Prompt configuration and templates
+/// Replaces: prompt_config.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptSettings {
+    /// Active prompt templates by type
+    pub active_prompts: HashMap<String, String>,
+    /// Custom prompt overrides
+    pub custom_prompts: HashMap<String, PromptTemplate>,
+    /// Global variables available to all prompts
+    pub global_variables: HashMap<String, String>,
+    /// Whether to enable prompt customization in UI
+    pub allow_customization: bool,
+}
+
+/// Prompt template configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTemplate {
+    /// Unique identifier for the prompt
+    pub id: String,
+    /// Human-readable name
+    pub name: String,
+    /// Description of the prompt's purpose
+    pub description: String,
+    /// The actual prompt content with possible placeholders
+    pub content: String,
+    /// Variables that can be substituted in the content
+    pub variables: Vec<String>,
+    /// Tags for categorization and filtering
+    pub tags: Vec<String>,
+    /// Version for tracking changes
+    pub version: String,
+    /// Whether this prompt is user-customizable
+    pub customizable: bool,
+}
+
 /// Onboarding completion status
 /// Replaces: onboarding.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -162,6 +199,7 @@ impl Default for AppSettings {
             cloud: CloudSettings::default(),
             audio: AudioSettings::default(),
             tools: ToolSettings::default(),
+            prompts: PromptSettings::default(),
             onboarding: OnboardingSettings::default(),
             autostart_enabled: defaults::AUTOSTART_ENABLED,
         }
@@ -263,6 +301,17 @@ impl Default for ToolSettings {
             tools: HashMap::new(),
             category_enabled: HashMap::new(),
             mcp_servers: Vec::new(),
+        }
+    }
+}
+
+impl Default for PromptSettings {
+    fn default() -> Self {
+        Self {
+            active_prompts: HashMap::new(),
+            custom_prompts: HashMap::new(),
+            global_variables: HashMap::new(),
+            allow_customization: true,
         }
     }
 }

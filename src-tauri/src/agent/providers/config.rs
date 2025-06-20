@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
-use std::{env, fs::File, io::Write};
-use std::io::ErrorKind;
+use std::env;
 use tracing::{info, error, warn};
 use crate::agent::structs::AgentError;
 use crate::agent::prompts::manager::PromptManager;
 use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
+
+// Add centralized settings support
+use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
 
 /// Agent execution mode
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -113,9 +114,95 @@ impl Default for ProviderConfig {
 }
 
 impl ProviderConfig {
+    /// Load configuration from centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
+    /// Used by: Application startup for configuration initialization.
+    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, AgentError> {
+        let provider_settings = settings_manager.get_provider_settings().await
+            .map_err(|e| AgentError::ConfigurationError(format!("Failed to load provider settings: {}", e)))?;
+
+        let config = Self::from_centralized_settings(&provider_settings)?;
+        info!("Loaded provider configuration from centralized settings");
+        Ok(config)
+    }
+
+    /// Save configuration to centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
+    /// Used by: Settings UI and provider configuration updates.
+    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
+        let provider_settings = self.to_centralized_settings()?;
+        settings_manager.set_provider_settings(&provider_settings).await
+            .map_err(|e| AgentError::ConfigurationError(format!("Failed to save provider settings: {}", e)))?;
+        info!("Saved provider configuration to centralized settings");
+        Ok(())
+    }
+
+    /// Convert from centralized ProviderSettings to ProviderConfig.
+    /// Handles schema differences between the two formats.
+    fn from_centralized_settings(settings: &CentralizedProviderSettings) -> Result<Self, AgentError> {
+        let mut providers = Vec::new();
+
+        // Convert providers
+        for centralized_provider in &settings.providers {
+            let provider_settings = ProviderSettings {
+                id: centralized_provider.id.clone(),
+                api_key: centralized_provider.api_key.clone(),
+                model: centralized_provider.model.clone(),
+                max_tokens: centralized_provider.max_tokens,
+                temperature: centralized_provider.temperature,
+                system_prompt: centralized_provider.system_prompt.clone(),
+            };
+            providers.push(provider_settings);
+        }
+
+        // Ensure all default providers are present for backwards compatibility
+        let default_config = Self::default();
+        for default_provider in &default_config.providers {
+            if !providers.iter().any(|p| p.id == default_provider.id) {
+                info!("Adding missing provider from defaults: {}", default_provider.id);
+                providers.push(default_provider.clone());
+            }
+        }
+
+        // Use default agent mode since it's now managed in AgentSettings
+        let agent_mode = AgentMode::default();
+
+        Ok(Self {
+            active_provider: settings.active_provider.clone(),
+            agent_mode,
+            providers,
+        })
+    }
+
+        /// Convert from ProviderConfig to centralized ProviderSettings.
+    /// Handles schema differences between the two formats.
+    fn to_centralized_settings(&self) -> Result<CentralizedProviderSettings, AgentError> {
+        let mut providers = Vec::new();
+
+        // Convert providers
+        for provider in &self.providers {
+            let centralized_provider = CentralizedProviderConfig {
+                id: provider.id.clone(),
+                api_key: provider.api_key.clone(),
+                model: provider.model.clone(),
+                max_tokens: provider.max_tokens,
+                temperature: provider.temperature,
+                system_prompt: provider.system_prompt.clone(),
+            };
+            providers.push(centralized_provider);
+        }
+
+        Ok(CentralizedProviderSettings {
+            active_provider: self.active_provider.clone(),
+            providers,
+        })
+    }
+
     /// Load configuration from Tauri store or create default.
+    /// DEPRECATED: Use load_from_centralized_settings instead
     /// Attempts to load existing configuration, creates default if missing.
     /// Used by: Agent initialization and settings management.
+    #[deprecated(note = "Use load_from_centralized_settings instead")]
     pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, AgentError> {
         let store = app_handle.store("provider_config.json").map_err(|e| {
             AgentError::ConfigurationError(format!("Failed to access provider config store: {}", e))
@@ -158,8 +245,10 @@ impl ProviderConfig {
     }
 
     /// Save configuration to Tauri store.
+    /// DEPRECATED: Use save_to_centralized_settings instead
     /// Serializes current configuration to JSON and saves to store.
     /// Used by: Settings UI and provider configuration updates.
+    #[deprecated(note = "Use save_to_centralized_settings instead")]
     pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), AgentError> {
         let store = app_handle.store("provider_config.json").map_err(|e| {
             AgentError::ConfigurationError(format!("Failed to access provider config store: {}", e))
@@ -246,7 +335,21 @@ pub fn apply_provider_settings_to_env() -> Result<(), AgentError> {
 }
 
 /// Apply provider settings to environment variables from a given app handle
+/// NEW: Uses centralized settings instead of direct JSON store access.
 /// Uses the centralized prompt manager for default prompts
+pub async fn apply_provider_settings_to_env_with_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), AgentError> {
+    let config = ProviderConfig::load_from_centralized_settings(settings_manager).await?;
+
+    // Load prompt manager for default prompts - this will need to be updated in a future step
+    let prompt_manager = PromptManager::new();
+
+    apply_provider_settings_internal(&config, &prompt_manager)
+}
+
+/// Apply provider settings to environment variables from a given app handle
+/// DEPRECATED: Use apply_provider_settings_to_env_with_centralized_settings instead
+/// Uses the centralized prompt manager for default prompts
+#[deprecated(note = "Use apply_provider_settings_to_env_with_centralized_settings instead")]
 pub fn apply_provider_settings_to_env_with_handle(app_handle: &AppHandle) -> Result<(), AgentError> {
     let config = ProviderConfig::load_from_store(app_handle)?;
 
@@ -368,5 +471,38 @@ fn apply_provider_settings_internal(config: &ProviderConfig, prompt_manager: &Pr
         warn!("Could not find settings for provider: {}. No specific settings applied.", provider_id_to_apply);
     }
 
+    Ok(())
+}
+
+/// Load provider configuration from centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
+/// Used by: Application startup and provider configuration initialization
+///
+/// # Arguments
+/// * `settings_manager` - Centralized settings manager
+pub async fn load_provider_config_from_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+) -> Result<ProviderConfig, String> {
+    let loaded_config = ProviderConfig::load_from_centralized_settings(settings_manager).await
+        .map_err(|e| format!("Failed to load provider config: {}", e))?;
+
+    info!("Loaded provider configuration from centralized settings on startup");
+    Ok(loaded_config)
+}
+
+/// Save provider configuration to centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
+/// Used by: Application shutdown and provider configuration changes
+///
+/// # Arguments
+/// * `settings_manager` - Centralized settings manager
+/// * `config` - Provider configuration to save
+pub async fn save_provider_config_to_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+    config: &ProviderConfig
+) -> Result<(), String> {
+    config.save_to_centralized_settings(settings_manager).await
+        .map_err(|e| format!("Failed to save provider config: {}", e))?;
+    info!("Saved provider configuration to centralized settings");
     Ok(())
 }

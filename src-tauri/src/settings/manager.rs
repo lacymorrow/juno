@@ -22,6 +22,7 @@ use crate::settings::{
     CloudSettings,
     AudioSettings,
     ToolSettings,
+    PromptSettings,
     OnboardingSettings
 };
 
@@ -77,6 +78,7 @@ impl SettingsManager {
             cloud: self.get_cloud_settings_from_store(&store)?,
             audio: self.get_audio_settings_from_store(&store)?,
             tools: self.get_tool_settings_from_store(&store)?,
+            prompts: self.get_prompt_settings_from_store(&store)?,
             onboarding: self.get_onboarding_settings_from_store(&store)?,
             autostart_enabled: store
                 .get(store_keys::AUTOSTART_ENABLED)
@@ -107,6 +109,8 @@ impl SettingsManager {
             .map_err(|e| format!("Failed to serialize audio settings: {}", e))?);
         store.set(store_keys::TOOLS, serde_json::to_value(&settings.tools)
             .map_err(|e| format!("Failed to serialize tool settings: {}", e))?);
+        store.set(store_keys::PROMPTS, serde_json::to_value(&settings.prompts)
+            .map_err(|e| format!("Failed to serialize prompt settings: {}", e))?);
         store.set(store_keys::ONBOARDING, serde_json::to_value(&settings.onboarding)
             .map_err(|e| format!("Failed to serialize onboarding settings: {}", e))?);
         store.set(store_keys::AUTOSTART_ENABLED, Value::Bool(settings.autostart_enabled));
@@ -160,6 +164,12 @@ impl SettingsManager {
         let store = self.app_handle.store(SETTINGS_STORE_FILE)
             .map_err(|e| format!("Failed to access settings store: {}", e))?;
         self.get_tool_settings_from_store(&store)
+    }
+
+    pub async fn get_prompt_settings(&self) -> Result<PromptSettings, String> {
+        let store = self.app_handle.store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        self.get_prompt_settings_from_store(&store)
     }
 
     pub async fn get_onboarding_settings(&self) -> Result<OnboardingSettings, String> {
@@ -272,6 +282,19 @@ impl SettingsManager {
         Ok(())
     }
 
+    pub async fn set_prompt_settings(&self, settings: &PromptSettings) -> Result<(), String> {
+        let store = self.app_handle.store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        store.set(store_keys::PROMPTS, serde_json::to_value(settings)
+            .map_err(|e| format!("Failed to serialize prompt settings: {}", e))?);
+        store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
+
+        self.app_handle.emit(events::PROMPT_SETTINGS_CHANGED, settings)
+            .map_err(|e| format!("Failed to emit prompt settings changed event: {}", e))?;
+        self.emit_settings_changed().await;
+        Ok(())
+    }
+
     pub async fn set_onboarding_settings(&self, settings: &OnboardingSettings) -> Result<(), String> {
         let store = self.app_handle.store(SETTINGS_STORE_FILE)
             .map_err(|e| format!("Failed to access settings store: {}", e))?;
@@ -347,6 +370,14 @@ impl SettingsManager {
             .and_then(|v| serde_json::from_value(v.clone()).ok()) {
             Some(settings) => Ok(settings),
             None => Ok(ToolSettings::default())
+        }
+    }
+
+    fn get_prompt_settings_from_store(&self, store: &tauri_plugin_store::Store<tauri::Wry>) -> Result<PromptSettings, String> {
+        match store.get(store_keys::PROMPTS)
+            .and_then(|v| serde_json::from_value(v.clone()).ok()) {
+            Some(settings) => Ok(settings),
+            None => Ok(PromptSettings::default())
         }
     }
 
