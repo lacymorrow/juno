@@ -32,6 +32,7 @@ bun run tauri dev
 ✅ **MCP integration** for external tool server management
 ✅ **Cloud control system** with authentication and management
 ✅ **Streaming AI responses** for real-time interaction
+✅ **Dynamic system tray integration** with state-aware icons and context menus
 ✅ **Comprehensive test suite** with 95%+ pass rate
 
 ## 🧪 Testing

@@ -81,6 +81,78 @@ pub trait SpecialistAgent {
 }
 ```
 
+## 🖥️ System Tray Integration
+
+### Dynamic Tray Icon System ✅ COMPLETED
+
+**Location**: `src-tauri/src/menu/tray_menu.rs`
+
+#### Tray Icon States
+
+The tray icon system provides visual feedback about application status through 6 distinct states:
+
+1. **Default** (`🔷 Juno - Ready`): Standard blue icon when app is idle
+2. **Agent Active** (`🤖 Juno - Agent Active`): Blue-tinted icon during AI agent execution
+3. **Dictation Active** (`🎤 Juno - Dictation Active`): Orange-tinted icon during dictation
+4. **Always Listening** (`👂 Juno - Always Listening`): Green-tinted icon when always listening
+5. **Processing** (`⚙️ Juno - Processing`): Processing indicator for operations
+6. **Error** (`❌ Juno - Error`): Red-tinted icon for error states
+
+#### State Management Architecture
+
+```rust
+// Tray icon state management
+pub enum TrayIconState {
+    Default,
+    AgentActive,
+    DictationActive,
+    AlwaysListening,
+    Processing,
+    Error,
+}
+
+pub struct TrayIconManager {
+    current_state: TrayIconState,
+    state_priority: HashMap<TrayIconState, u8>,
+    event_listeners: Vec<EventListener>,
+}
+```
+
+#### Automatic State Detection
+
+- **Event-Driven Updates**: Listens to application events (`agent-active`, `dictation-active`, etc.)
+- **Priority System**: Intelligent state resolution (Agent Active > Dictation > Always Listening > Default)
+- **State Persistence**: Maintains consistent icon state across application lifecycle
+- **Error Recovery**: Graceful fallback to default state on errors
+
+#### Integration Points
+
+```rust
+// Event listener integration
+impl TrayIconManager {
+    pub async fn setup_state_monitoring(&self, app_handle: &AppHandle) {
+        // Monitor agent execution state
+        app_handle.listen("agent-active", move |event| {
+            if event.payload().unwrap_or("false") == "true" {
+                tauri::async_runtime::spawn(async move {
+                    set_tray_icon_state(TrayIconState::AgentActive).await;
+                });
+            }
+        });
+        
+        // Monitor dictation state
+        app_handle.listen("dictation-active", move |event| {
+            // Update tray icon based on dictation state
+        });
+        
+        // Monitor always listening state
+        app_handle.listen("always-listening-mode-changed", move |event| {
+            // Update tray icon based on always listening state
+        });
+    }
+}
+```
+
 ## 🛠️ Tools Framework
 
 ### Tool Provider System
