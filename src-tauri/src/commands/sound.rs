@@ -318,12 +318,28 @@ pub async fn get_available_sounds() -> Result<Vec<SoundType>, String> {
 /// Command to set sound enabled/disabled
 #[tauri::command]
 pub async fn set_sound_enabled(
+    app_handle: AppHandle,
     enabled: bool,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let mut sound_enabled = state.sound_enabled.lock()
-        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?;
-    *sound_enabled = enabled;
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
+
+    audio_settings.sound_enabled = enabled;
+
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update state for backward compatibility
+    {
+        let mut sound_enabled = state.sound_enabled.lock()
+            .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?;
+        *sound_enabled = enabled;
+    }
+
     info!("Sound effects set to: {}", enabled);
     Ok(())
 }
@@ -331,13 +347,24 @@ pub async fn set_sound_enabled(
 /// Command to get current sound enabled setting
 #[tauri::command]
 pub async fn get_sound_enabled(
+    app_handle: AppHandle,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<bool, String> {
-    let enabled = state.sound_enabled.lock()
-        .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?
-        .clone();
-    info!("Current sound enabled setting: {}", enabled);
-    Ok(enabled)
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
+
+    // Sync with state for backward compatibility
+    {
+        let mut sound_enabled = state.sound_enabled.lock()
+            .map_err(|e| format!("Failed to lock sound_enabled: {}", e))?;
+        *sound_enabled = audio_settings.sound_enabled;
+    }
+
+    info!("Current sound enabled setting: {}", audio_settings.sound_enabled);
+    Ok(audio_settings.sound_enabled)
 }
 
 // Platform-specific audio playback

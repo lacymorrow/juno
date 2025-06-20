@@ -17,8 +17,9 @@ export interface ProviderInfo {
 }
 
 export interface ProviderSettings {
-  api_key: string;
-  model: string;
+  id: string;
+  api_key?: string;
+  model?: string;
   max_tokens?: number;
   temperature?: number;
   system_prompt?: string;
