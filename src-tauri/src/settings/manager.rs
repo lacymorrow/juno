@@ -485,10 +485,5 @@ impl SettingsManager {
         }
     }
 
-    /// Migration helper: Import settings from legacy store files
-    pub async fn migrate_from_legacy_stores(&self) -> Result<(), String> {
-        // This will be implemented when we start migrating individual files
-        // For now, just ensure defaults are set
-        self.initialize_defaults().await
-    }
+
 }

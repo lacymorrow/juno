@@ -95,28 +95,8 @@ impl FloatingBarConfig {
         // No valid configuration found, create and save default
         debug!("No floating bar configuration found in store, creating default");
         let default_config = Self::default();
-        default_config.save(app_handle).await?;
+        default_config.save_to_centralized_settings(app_handle).await?;
         Ok(default_config)
-    }
-
-    /// Save configuration to Tauri store.
-    /// DEPRECATED: Use save_to_centralized_settings instead.
-    /// Serializes current configuration to JSON and saves to store.
-    /// Used by: Settings UI and configuration updates.
-    #[deprecated(note = "Use save_to_centralized_settings instead")]
-    pub async fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
-        let store = app_handle.store("floating_bar_config.json")
-            .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
-
-        let config_value = serde_json::to_value(self)
-            .map_err(|e| format!("Failed to serialize floating bar config: {}", e))?;
-
-        store.set("floating_bar_config", config_value);
-        store.save()
-            .map_err(|e| format!("Failed to save floating bar config store: {}", e))?;
-
-        debug!("Saved floating bar configuration to store");
-        Ok(())
     }
 }
 

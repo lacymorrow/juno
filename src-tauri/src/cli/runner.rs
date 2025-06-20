@@ -12,8 +12,7 @@ use tauri::{AppHandle, Manager};
 use tempfile::Builder as TempFileBuilder;
 use tracing::{error, info, warn}; // Import tracing macros // Add the TTS import
 
-/// Configuration file name (DEPRECATED - now using centralized settings)
-const CONFIG_FILE: &str = "config.json";
+
 
 /// Handles the execution of commands specified via CLI arguments.
 /// Returns `Ok(true)` if a CLI command was handled (and the app should exit),
@@ -267,36 +266,7 @@ async fn show_config_from_centralized_settings() -> Result<(), String> {
     Ok(())
 }
 
-/// Shows the content of the legacy configuration file (DEPRECATED)
-#[deprecated(note = "Use show_config_from_centralized_settings instead")]
-fn show_config_file() -> Result<(), String> {
-    warn!("show_config_file is deprecated - CLI now uses centralized settings");
 
-    let config_dir = dirs::config_dir()
-        .ok_or("Unable to determine config directory")?
-        .join("juno");
-
-    let config_path = config_dir.join(CONFIG_FILE);
-
-    if !config_path.exists() {
-        warn!("Legacy configuration file does not exist at: {:?}", config_path);
-        warn!("CLI configuration is now managed through centralized settings");
-        return Ok(());
-    }
-
-    match fs::read_to_string(&config_path) {
-        Ok(content) => {
-            warn!("Legacy configuration file content (DEPRECATED):");
-            println!("{}", content);
-            warn!("Please migrate to centralized settings system");
-            Ok(())
-        }
-        Err(e) => {
-            error!("Failed to read legacy config file: {}", e);
-            Err(format!("Failed to read legacy config file: {}", e))
-        }
-    }
-}
 
 /// Test accessibility permissions for Desktop operations (safe to call without Desktop instance)
 async fn test_accessibility(_app_handle: AppHandle) -> Result<(), String> {

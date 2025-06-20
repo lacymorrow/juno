@@ -233,17 +233,7 @@ pub async fn set_autostart_enabled(
         .map_err(|e| format!("Failed to set autostart setting: {}", e))
 }
 
-/// Migrate settings from legacy store files (used during transition)
-#[command]
-pub async fn migrate_legacy_settings(
-    app_handle: AppHandle,
-) -> Result<(), String> {
-    let settings_manager = SettingsManager::new(app_handle)
-        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
 
-    settings_manager.migrate_from_legacy_stores().await
-        .map_err(|e| format!("Failed to migrate legacy settings: {}", e))
-}
 
 /// Reset all settings to defaults
 #[command]

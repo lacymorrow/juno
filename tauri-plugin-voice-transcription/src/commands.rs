@@ -192,7 +192,7 @@ pub async fn set_model_path<R: tauri::Runtime>(
     // Update config
     let mut config = VoiceTranscriptionConfig::default();
     config.model_path = resolved_model_path.clone();
-    config.save()?;
+    // Note: Configuration is now managed through centralized settings
 
     // Reinitialize the voice controller with the new model
     match VoiceController::new(&resolved_model_path) {

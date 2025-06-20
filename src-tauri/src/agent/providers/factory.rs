@@ -398,7 +398,7 @@ impl BrainFactory {
         match config.get_agent_mode() {
             AgentMode::Single => {
                 // Create a single agent runtime
-                let brain = Self::create_brain()?;
+                let brain = Self::create_brain().await?;
 
                                 // Convert Arc<dyn ToolProvider> to concrete type if needed
                 let local_tool_provider = if let Some(ref handle) = app_handle {
@@ -478,12 +478,12 @@ impl BrainFactory {
     }
 
     /// Create an AgentBrain implementation based on provider configuration
-    pub fn create_brain() -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
-        Self::create_brain_with_app_handle(None)
+    pub async fn create_brain() -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+        Self::create_brain_with_app_handle(None).await
     }
 
     /// Create an AgentBrain implementation with app handle for proper prompt loading
-    pub fn create_brain_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
+    pub async fn create_brain_with_app_handle(app_handle: Option<&tauri::AppHandle>) -> Result<Box<dyn AgentBrain + Send + Sync>, AgentError> {
         let provider_str = env::var("AI_PROVIDER").unwrap_or_else(|_| {
             "anthropic".to_string() // Default to Anthropic for new app
         });
@@ -493,8 +493,25 @@ impl BrainFactory {
 
         // Load system prompt from prompt manager if app_handle is available
         let system_prompt = if let Some(handle) = app_handle {
-            let prompt_manager = crate::agent::prompts::PromptManager::load_from_store(handle).unwrap_or_else(|e| {
-                warn!("Failed to load prompt configuration from store: {}. Using defaults.", e);
+            // Create settings manager from app handle
+            let settings_manager = match crate::settings::manager::SettingsManager::new(handle.clone()) {
+                Ok(manager) => manager,
+                Err(e) => {
+                    warn!("Failed to create settings manager: {}. Using defaults.", e);
+                    // Use default prompt instead of returning
+                    let prompt_manager = crate::agent::prompts::PromptManager::new();
+                    return Ok(Box::new(AnthropicBrain::new(
+                        env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
+                        None,
+                        None,
+                        Some(prompt_manager.get_default_system_prompt())
+                    )?) as Box<dyn AgentBrain + Send + Sync>);
+                }
+            };
+
+            // Load prompt manager with centralized settings
+            let prompt_manager = crate::agent::prompts::PromptManager::load_from_centralized_settings(&settings_manager).await.unwrap_or_else(|e| {
+                warn!("Failed to load prompt configuration from centralized settings: {}. Using defaults.", e);
                 crate::agent::prompts::PromptManager::new()
             });
             Some(prompt_manager.get_default_system_prompt())

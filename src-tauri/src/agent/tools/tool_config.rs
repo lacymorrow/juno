@@ -782,24 +782,7 @@ pub async fn load_tool_config_from_centralized_settings(
     Ok(())
 }
 
-/// Load tool configuration from persistent storage
-/// DEPRECATED: Use load_tool_config_from_centralized_settings instead
-///
-/// Used by: Application startup for configuration initialization
-///
-/// # Arguments
-/// * `app` - Tauri app handle for store access
-/// * `state` - Application state containing tool config manager
-#[deprecated(note = "Use load_tool_config_from_centralized_settings instead")]
-pub async fn load_tool_config_from_store(app: &AppHandle, state: &crate::state::AppState) -> Result<(), String> {
-    let loaded_config = ToolConfigManager::load_from_store(app)?;
 
-    let mut config_guard = state.tool_config_manager.lock().await;
-    *config_guard = loaded_config;
-
-    info!("Loaded tool configuration from store on startup");
-    Ok(())
-}
 
 /// Save tool configuration to centralized settings
 /// NEW: Uses centralized settings instead of direct JSON store access.
