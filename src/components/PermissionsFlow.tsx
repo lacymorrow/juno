@@ -67,7 +67,7 @@ export function PermissionsFlow({
   const [error, setError] = useState<string | null>(null);
 
   // Check permissions status with optional auto-redirect
-  const checkPermissions = async (useAutoRedirect = false) => {
+  const checkPermissions = async (_useAutoRedirect = false) => {
     try {
       setIsLoading(true);
       setError(null);
