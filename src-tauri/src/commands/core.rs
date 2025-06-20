@@ -223,22 +223,47 @@ pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
 
 /// Set performance monitoring enabled state
 #[tauri::command]
-pub async fn set_performance_monitoring(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_performance_monitoring(
+    app_handle: AppHandle,
+    enabled: bool,
+    state: State<'_, AppState>
+) -> Result<(), String> {
     info!("Setting performance monitoring to: {}", enabled);
 
-    // Update the state
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
+
+    audio_settings.performance_monitoring_enabled = enabled;
+
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update state for backward compatibility
     let _ = state.set_performance_monitoring_enabled(enabled);
 
-    // TODO: In the future, this could persist the setting to a config file
-    // For now, it's stored in memory for the session
-
+    info!("Performance monitoring successfully set to: {}", enabled);
     Ok(())
 }
 
 /// Get performance monitoring enabled state
 #[tauri::command]
-pub async fn get_performance_monitoring(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(state.is_performance_monitoring_enabled())
+pub async fn get_performance_monitoring(
+    app_handle: AppHandle,
+    state: State<'_, AppState>
+) -> Result<bool, String> {
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle)
+        .map_err(|e| format!("Failed to initialize settings manager: {}", e))?;
+
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to load audio settings: {}", e))?;
+
+    // Sync with state for backward compatibility
+    let _ = state.set_performance_monitoring_enabled(audio_settings.performance_monitoring_enabled);
+
+    Ok(audio_settings.performance_monitoring_enabled)
 }
 
 /// Agent execution progress information

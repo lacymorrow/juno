@@ -24,6 +24,18 @@ export function ProviderSelector({
     (p) => p.id === settings.activeProvider
   );
 
+  const handleProviderChange = async (providerId: string) => {
+    console.log(
+      `Changing provider from ${settings.activeProvider} to ${providerId}`
+    );
+    try {
+      await settings.handleActiveProviderChange(providerId);
+      console.log(`Provider changed successfully to: ${providerId}`);
+    } catch (error) {
+      console.error("Failed to change provider:", error);
+    }
+  };
+
   if (settings.isLoading) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
@@ -44,7 +56,7 @@ export function ProviderSelector({
 
       <Select
         value={settings.activeProvider}
-        onValueChange={settings.handleActiveProviderChange}
+        onValueChange={handleProviderChange}
       >
         <SelectTrigger
           className={

@@ -4,12 +4,14 @@ import { VoiceStatusIndicator } from "@/components/VoiceStatusIndicator";
 import { ModelSelector } from "@/components/ModelSelector";
 import { AgentModeSelector } from "@/components/AgentModeSelector";
 import { ProviderSelector } from "@/components/ProviderSelector";
+import { useSettings } from "@/hooks/useSettings";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   DogIcon,
   PanelLeftClose,
   PanelLeftOpen,
+  Bug,
 } from "lucide-react";
 
 // Type for view state
@@ -32,6 +34,8 @@ export function AppHeader({
   onViewChange,
   onToggleDevPanel,
 }: AppHeaderProps) {
+  const settings = useSettings();
+
   return (
     <header className="flex items-center py-1 px-2 border-b min-h-[40px]">
       <div className="flex items-center gap-2 flex-shrink-0">
@@ -84,6 +88,23 @@ export function AppHeader({
       )}
 
       <div className="flex items-center gap-1 flex-shrink-0">
+        {/* Debug Button - temporary for troubleshooting */}
+        {currentView === "chat" && process.env.NODE_ENV === "development" && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              settings.debugSettings();
+              console.log("Manual settings reload triggered");
+              settings.loadAllSettings();
+            }}
+            title="Debug Settings (Dev Only)"
+            className="h-7 w-7 p-0"
+          >
+            <Bug size={14} />
+          </Button>
+        )}
+
         {/* Back Button - show for devtools, permissions views */}
         {(currentView === "devtools" || currentView === "permissions") && (
           <Button
