@@ -379,24 +379,7 @@ impl BrowserController {
                 log::debug!("pgrep command failed, trying alternative detection");
             }
 
-            // Method 2: Check for Chrome application running via osascript
-            let osascript_output = tokio::process::Command::new("osascript")
-                .arg("-e")
-                .arg("tell application \"System Events\" to (name of processes) contains \"Google Chrome\"")
-                .output()
-                .await;
-
-            if let Ok(output) = osascript_output {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if stdout.trim() == "true" {
-                    log::info!("Chrome detected as running application via osascript");
-                    return true;
-                }
-            } else {
-                log::debug!("osascript command failed, trying alternative detection");
-            }
-
-            // Method 3: Check for Chrome processes via ps
+            // Method 2: Check for Chrome processes via ps (native approach, no osascript)
             let ps_output = tokio::process::Command::new("ps")
                 .arg("-A")
                 .arg("-o")
@@ -408,6 +391,23 @@ impl BrowserController {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if stdout.contains("Google Chrome") || stdout.contains("chrome") {
                     log::info!("Chrome detected via ps command");
+                    return true;
+                }
+            } else {
+                log::debug!("ps command failed, trying alternative detection");
+            }
+
+            // Method 3: Check for Chrome processes via pgrep as fallback
+            let pgrep_output = tokio::process::Command::new("pgrep")
+                .arg("-f")
+                .arg("Google Chrome")
+                .output()
+                .await;
+
+            if let Ok(output) = pgrep_output {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if !stdout.trim().is_empty() {
+                    log::info!("Chrome detected via pgrep command");
                     return true;
                 }
             }

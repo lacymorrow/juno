@@ -432,6 +432,9 @@ export default function OnboardingFlow({
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
   const [currentPermission, setCurrentPermission] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  const [actualPermissionsGranted, setActualPermissionsGranted] = useState(
+    permissionsAlreadyGranted
+  );
 
   console.log(
     "OnboardingFlow: State - currentStep:",
@@ -439,8 +442,29 @@ export default function OnboardingFlow({
     "isComplete:",
     isComplete,
     "shortcutPressed:",
-    shortcutPressed
+    shortcutPressed,
+    "actualPermissionsGranted:",
+    actualPermissionsGranted
   );
+
+  // Function to check current permissions status
+  const checkPermissionsStatus = async () => {
+    try {
+      const permissionsState = await invoke("get_permissions_state");
+      if (permissionsState && typeof permissionsState === "object") {
+        const allGranted = (permissionsState as any).all_granted;
+        console.log(
+          "OnboardingFlow: Re-checked permissions, all_granted:",
+          allGranted
+        );
+        setActualPermissionsGranted(allGranted);
+        return allGranted;
+      }
+    } catch (error) {
+      console.warn("Failed to check permissions status:", error);
+    }
+    return false;
+  };
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -470,16 +494,32 @@ export default function OnboardingFlow({
         } catch (error) {
           console.warn("Failed to load keyboard shortcuts:", error);
         }
+
+        // Check current permissions status
+        await checkPermissionsStatus();
       } catch (error) {
         console.error("Failed to load onboarding data:", error);
       }
     };
 
+    // Add window focus listener to re-check permissions when window gains focus
+    const handleWindowFocus = async () => {
+      console.log(
+        "OnboardingFlow: Window gained focus, re-checking permissions"
+      );
+      await checkPermissionsStatus();
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
     loadInitialData();
+
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+    };
   }, []);
 
   const onboardingSteps = getOnboardingSteps(
-    permissionsAlreadyGranted,
+    actualPermissionsGranted,
     isDevelopmentMode
   );
 

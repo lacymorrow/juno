@@ -508,28 +508,21 @@ pub fn run() {
             get_dictation_comprehensive_status,
             update_dictation_component_state,
             transition_dictation_state,
-            // Permissions Commands
-            check_permissions_status,
+            // Permissions Commands - Native APIs Only (No Password Prompts)
             check_permissions_status_native,
-            request_accessibility_permission,
             request_accessibility_permission_native,
-            request_microphone_permission,
             request_microphone_permission_native,
-            request_screen_recording_permission,
             request_screen_recording_permission_native,
-            request_input_monitoring_permission,
             request_input_monitoring_permission_native,
             test_microphone_functionality,
             open_system_preferences,
+            open_system_settings_enhanced,
             start_permissions_monitoring,
             stop_permissions_monitoring,
-            // Enhanced Permissions Commands with Auto-Redirect
-            check_permissions_status_with_auto_redirect,
-            request_accessibility_permission_with_auto_redirect,
-            open_system_settings_enhanced,
             restart_app_after_permissions,
             prompt_app_restart_after_permissions,
             check_restart_needed_after_permissions,
+            handle_restart_after_permissions,
             // QA Test Commands from mouse.rs
             qa_test_click,
             qa_test_click_series,
@@ -823,7 +816,7 @@ mod tests {
     #[tokio::test]
     async fn test_permission_check_does_not_crash() {
         // Test that permission checking never causes segfaults
-        use crate::commands::permissions::{check_permissions_status, check_permissions_status_native};
+        use crate::commands::permissions::check_permissions_status_native;
 
         // Mock app handle - this should be safe even without real permissions
         // In a real test environment, this would use a test AppHandle

@@ -21,11 +21,11 @@ pub struct NativePermissionStatus {
 pub struct NativePermissionChecker;
 
 impl NativePermissionChecker {
-    /// Check microphone permission using system_profiler - NO admin privileges required
+    /// Check microphone permission using native APIs - NO admin privileges required
     pub fn check_microphone_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
-            // Use system_profiler without admin privileges
+            // Method 1: Try to detect microphone hardware without admin privileges
             match Command::new("system_profiler")
                 .args(&["SPAudioDataType", "-detailLevel", "mini"])
                 .output()
@@ -36,20 +36,62 @@ impl NativePermissionChecker {
                         let has_microphone = result.contains("Built-in Microphone") ||
                                            result.contains("Microphone") ||
                                            result.contains("Input");
-                        debug!("Microphone hardware detected: {}", has_microphone);
-                        Ok(has_microphone)
+                        debug!("Microphone hardware detected via system_profiler: {}", has_microphone);
+
+                        if has_microphone {
+                            return Ok(true);
+                        }
                     } else {
-                        warn!("system_profiler failed: {}", String::from_utf8_lossy(&output.stderr));
-                        // Fallback: assume microphone exists on modern Macs
-                        Ok(true)
+                        debug!("system_profiler failed, trying alternative approach");
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to run system_profiler: {}", e);
-                    // Fallback: assume microphone exists
-                    Ok(true)
+                    debug!("Failed to run system_profiler: {}", e);
                 }
             }
+
+            // Method 2: Check if audio units framework is available (no admin required)
+            match Command::new("ls")
+                .args(&["/System/Library/Frameworks/AudioToolbox.framework"])
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        debug!("AudioToolbox framework available - microphone support likely present");
+                        return Ok(true);
+                    }
+                }
+                Err(e) => {
+                    debug!("Framework check failed: {}", e);
+                }
+            }
+
+            // Method 3: Check if we can query Core Audio (no admin required)
+            match Command::new("ioreg")
+                .args(&["-r", "-c", "IOAudioDevice"])
+                .output()
+            {
+                Ok(output) => {
+                    if output.status.success() {
+                        let result = String::from_utf8_lossy(&output.stdout);
+                        let has_audio_device = result.contains("IOAudioDevice") ||
+                                              result.contains("Input") ||
+                                              result.contains("Microphone");
+                        debug!("Audio devices detected via ioreg: {}", has_audio_device);
+
+                        if has_audio_device {
+                            return Ok(true);
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("ioreg check failed: {}", e);
+                }
+            }
+
+            // Fallback: Modern Macs typically have built-in microphones
+            info!("Unable to definitively detect microphone, assuming available on macOS");
+            Ok(true)
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -186,41 +228,36 @@ impl NativePermissionChecker {
     }
 
     /// Check screen recording permission using Desktop API - NO admin privileges required
-    pub fn check_screen_recording_permission() -> Result<bool, String> {
+    pub async fn check_screen_recording_permission() -> Result<bool, String> {
         #[cfg(target_os = "macos")]
         {
             use computer_use_ai_sdk::Desktop;
             use std::time::Duration;
 
             // Use the same approach as test_screen_recording_access() - proper native API
-            let rt = tokio::runtime::Runtime::new()
-                .map_err(|e| format!("Failed to create runtime: {}", e))?;
-
-            let result = rt.block_on(async {
-                // Set a reasonable timeout for permission testing
-                tokio::time::timeout(Duration::from_millis(3000), async {
-                    // Try creating a minimal Desktop instance just for screenshot test
-                    match Desktop::new(false, false) {
-                        Ok(desktop) => {
-                            // Try to take a screenshot using the native API
-                            match desktop.capture_screenshot_base64() {
-                                                                 Ok(_) => {
-                                     debug!("Screenshot test successful - screen recording permission granted");
-                                     Ok::<bool, String>(true)
-                                 },
-                                 Err(e) => {
-                                     debug!("Screenshot test failed: {} - screen recording permission not granted", e);
-                                     Ok::<bool, String>(false)
-                                 }
+            // No need to create a new runtime since we're already in an async context
+            let result = tokio::time::timeout(Duration::from_millis(3000), async {
+                // Try creating a minimal Desktop instance just for screenshot test
+                match Desktop::new(false, false) {
+                    Ok(desktop) => {
+                        // Try to take a screenshot using the native API
+                        match desktop.capture_screenshot_base64() {
+                            Ok(_) => {
+                                debug!("Screenshot test successful - screen recording permission granted");
+                                Ok::<bool, String>(true)
+                            },
+                            Err(e) => {
+                                debug!("Screenshot test failed: {} - screen recording permission not granted", e);
+                                Ok::<bool, String>(false)
                             }
-                                                 },
-                         Err(e) => {
-                             warn!("Could not create Desktop instance for screenshot test: {}", e);
-                             Ok::<bool, String>(false)
-                         }
+                        }
+                    },
+                    Err(e) => {
+                        warn!("Could not create Desktop instance for screenshot test: {}", e);
+                        Ok::<bool, String>(false)
                     }
-                }).await
-            });
+                }
+            }).await;
 
             match result {
                 Ok(Ok(granted)) => {
@@ -412,7 +449,7 @@ impl NativePermissionChecker {
 
     /// Get comprehensive screen recording permission status using native APIs
     pub async fn get_screen_recording_status() -> Result<NativePermissionStatus, String> {
-        let granted = Self::check_screen_recording_permission()?;
+        let granted = Self::check_screen_recording_permission().await?;
 
         Ok(Self::create_permission_status(
             "screen_recording",
