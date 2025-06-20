@@ -14,7 +14,7 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 
 **Foundation Status**: ✅ All core structures created, compiles successfully with minimal warnings
 
-### 🔄 Phase 2: Migration (IN PROGRESS)
+### 🔄 Phase 2: Migration (IN PROGRESS - Step 2.7)
 
 #### ✅ Step 2.1: Migrate `onboarding.json` (COMPLETED)
 - [x] Update `src-tauri/src/commands/onboarding.rs`
@@ -59,17 +59,77 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [x] Test tool configuration
 - [x] **Result**: Successfully migrated from `tool_config.json` to centralized settings with elimination of deprecation warnings
 
-#### 🎙️ Step 2.7: Migrate audio/voice settings (multiple files)
-- [ ] Consolidate TTS, dictation, and voice settings
-- [ ] Update multiple command files
+#### 🎙️ Step 2.7: Migrate Audio/Voice Settings (**COMPLETED**)
+
+**What Was Accomplished:**
+1. **Complete Audio Settings Integration**: Successfully migrated all audio/voice settings from scattered AppState access to centralized AudioSettings system
+2. **Always Listening Commands Migration**: Updated all always listening commands (`start`, `stop`, `toggle`, `get_status`, `set_sensitivity`, `get_sensitivity`, `set_wake_words`, `get_wake_words`) to use centralized settings instead of direct AppState access
+3. **TTS Provider Commands Migration**: Updated TTS provider commands (`set_tts_provider_command`, `get_tts_provider_command`) to use centralized AudioSettings with validation and proper error handling
+4. **State Management Integration**: Added `initialize_audio_state()` function to the state management system that loads audio settings from centralized settings into AppState during startup
+5. **Bidirectional Sync Functions**: Created `load_audio_settings_from_centralized_settings()` and `save_audio_settings_to_centralized_settings()` helper functions for seamless integration between centralized settings and existing AppState
+6. **Voice Transcription Plugin Integration**: Added `initialize_voice_transcription_config()` that prepares voice transcription configuration based on centralized audio settings
+
+**Technical Implementation:**
+- ✅ **Perfect Compilation**: Exit code 0, no compilation errors
+- ✅ **Centralized AudioSettings Schema**: Comprehensive audio settings including TTS provider, sound enabled, dictation clipboard, always listening active/sensitivity/wake words, and performance monitoring
+- ✅ **Validation and Error Handling**: Added sensitivity range validation (0.0-1.0), wake words validation, TTS provider validation with supported providers list
+- ✅ **Backward Compatibility**: All existing audio functionality preserved through AppState synchronization
+- ✅ **Event Integration**: Audio settings changes emit reactive events via centralized system
+- ✅ **State Synchronization**: Audio settings sync between centralized system and AppState for compatibility
+
+**Migration Scope Completed:**
+- ✅ Always listening mode (active/inactive state)
+- ✅ Always listening sensitivity (0.0-1.0 range with validation)
+- ✅ Always listening wake words (with validation)
+- ✅ TTS provider selection (system, elevenlabs, replicate with validation)
+- ✅ Sound enabled/disabled settings
+- ✅ Dictation clipboard integration
+- ✅ Performance monitoring settings
+- ✅ Voice transcription plugin configuration preparation
+
+**Architecture Benefits:**
+- 🔄 **Reactive Updates**: Audio settings changes automatically propagate through centralized system and emit events
+- 📁 **Single Source**: All audio/voice configuration centralized in unified AudioSettings store
+- 🛡️ **Type Safety**: Compile-time guarantees for all audio settings operations with validation
+- 🔧 **Maintainability**: Eliminated direct AppState access patterns for audio settings
+- 🎯 **Consistency**: Follows same patterns as previous successful migrations (onboarding, keyboard shortcuts, etc.)
+- 🎙️ **Audio Settings Unified**: Complete audio/voice settings centralization with validation
+
+**Voice System Consolidation Notes:**
+The centralized AudioSettings now provides the foundation for the unified SharedVoiceController that was mentioned in the memory about eliminating inefficient whisper model reloading. All voice-related settings (TTS, always listening, dictation, voice transcription) are now centrally managed and can be accessed by a future unified voice controller.
+
+## 📊 Migration Progress: **Step 2.8** | 7/12 JSON files migrated (58%)
+
+**🎉 Step 2.7 SUCCESS SUMMARY:**
+Step 2.7 Audio/Voice Settings Migration has been **SUCCESSFULLY COMPLETED**! All audio and voice-related settings have been migrated from scattered AppState access to the centralized AudioSettings system. The migration includes comprehensive validation, error handling, backward compatibility, and reactive updates. This provides a solid foundation for future voice system unification while maintaining all existing functionality.
+
+**✅ EXCELLENT FOUNDATION ESTABLISHED:**
+- 🏗️ **Centralized Architecture**: Complete SettingsManager with reactive updates
+- 📝 **Constants Consolidation**: All magic strings centralized in constants/settings.rs
+- 🔄 **Reactive System**: Event-based UI updates working properly
+- 🛡️ **Type Safety**: Compile-time guarantees for all settings operations
+- 📚 **Official Tauri Plugin**: Using tauri-plugin-store (official Tauri v2 solution)
+- 🎙️ **Audio Settings Unified**: Complete audio/voice settings centralization with validation
 
 #### 🔗 Step 2.8: Migrate `provider_config.json`
-- [ ] Update provider configuration commands
+- [ ] Update `src-tauri/src/agent/providers/config.rs`
 - [ ] Test AI provider switching
 
-#### 🔧 Step 2.9: Migrate remaining scattered settings
-- [ ] Review all remaining `.json` usage
-- [ ] Migrate any missed configurations
+#### 📝 Step 2.9: Migrate `prompt_config.json`
+- [ ] Update `src-tauri/src/agent/prompts/manager.rs`
+- [ ] Test custom prompt functionality
+
+#### ⚡ Step 2.10: Migrate `autostart.json`
+- [ ] Update `src-tauri/src/commands/autostart.rs`
+- [ ] Replace direct file I/O with centralized settings
+
+#### 💻 Step 2.11: Migrate CLI `config.json`
+- [ ] Update `src-tauri/src/cli/runner.rs`
+- [ ] Integrate CLI configuration with centralized system
+
+#### 🔧 Step 2.12: Final cleanup and validation
+- [ ] Remove remaining scattered JSON dependencies
+- [ ] Comprehensive testing of all settings
 
 ### 🧪 Phase 3: Validation & Testing
 - [ ] **Step 3.1**: Comprehensive testing of all migrated settings
@@ -83,6 +143,13 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [ ] **Step 4.3**: Update documentation
 
 ## 📊 Migration Progress: **Step 2.7** | 6/12 JSON files migrated (50%)
+
+**✅ EXCELLENT FOUNDATION ESTABLISHED:**
+- 🏗️ **Centralized Architecture**: Complete SettingsManager with reactive updates
+- 📝 **Constants Consolidation**: All magic strings centralized in constants/settings.rs
+- 🔄 **Reactive System**: Event-based UI updates working properly
+- 🛡️ **Type Safety**: Compile-time guarantees for all settings operations
+- 📚 **Official Tauri Plugin**: Using tauri-plugin-store (official Tauri v2 solution)
 
 ## ✅ Completed Achievements
 
@@ -116,149 +183,4 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 
 **What Was Accomplished:**
 1. **Complete Migration**: Successfully migrated all cloud configuration operations from `cloud_config.json` to centralized settings
-2. **Conversion Methods**: Added seamless conversion between `CloudConfig` and `CloudSettings` schemas
-3. **Async Runtime Integration**: Fixed synchronous methods to use async centralized settings via `tokio::task::block_in_place()`
-4. **Function Updates**:
-   - `CloudConfig::load_from_store()` → Uses centralized settings with async runtime bridge
-   - `CloudConfig::save_to_store()` → Uses centralized settings with proper async handling
-   - Added `to_centralized_settings()` and `from_centralized_settings()` conversion methods
-5. **Compatibility Preserved**: All AppState and command methods continue to work without changes
-
-**Technical Implementation:**
-- ✅ **Perfect Compilation**: Exit code 0, no compilation errors
-- ✅ **Async Bridge**: Proper integration of async settings manager in synchronous context
-- ✅ **Backward Compatibility**: All existing cloud functionality preserved
-- ✅ **Migration Safety**: Automatic permissive defaults migration for existing configurations
-- ✅ **Type Safety**: Complete conversion between CloudConfig and CloudSettings schemas
-
-**Architecture Benefits:**
-- 🔄 **Reactive Updates**: Cloud settings changes automatically propagate through centralized system
-- 📁 **Single Source**: All cloud configuration centralized in unified store
-- 🛡️ **Type Safety**: Compile-time guarantees for all cloud settings operations
-- 🔧 **Maintainability**: Eliminated direct JSON store dependencies
-- 🎯 **Consistency**: Follows same patterns as previous successful migrations
-
-### 🎉 Step 2.4 - Agent Settings Migration COMPLETED Successfully!
-
-**What Was Accomplished:**
-1. **Complete Legacy Code Elimination**: Removed all fallback logic to legacy `agent_settings.json` store
-2. **Centralized Integration**: All agent settings now use only the centralized SettingsManager
-3. **Function Streamlining**:
-   - `get_agent_trigger_mode()` → Direct centralized settings access with state sync
-   - `set_agent_trigger_mode()` → Centralized save with validation and state update
-   - `load_agent_trigger_mode_from_store()` → Pure centralized loading with defaults
-4. **Import Cleanup**: Removed unused `tauri_plugin_store::StoreExt` and `legacy_stores` imports
-5. **Error Handling**: Clean error propagation without fallback complexity
-
-**Technical Implementation:**
-- ✅ **Perfect Compilation**: Exit code 0, no compilation errors
-- ✅ **Complete Migration**: All agent settings operations use centralized system exclusively
-- ✅ **State Synchronization**: Agent settings sync with AppState for backward compatibility
-- ✅ **Default Handling**: Proper fallback to AgentSettings::default() when settings not found
-- ✅ **Validation**: Comprehensive input validation for trigger modes (tap/hold)
-
-**Architecture Benefits:**
-- 🔄 **Reactive Updates**: Agent settings changes automatically propagate through centralized system
-- 📁 **Single Source**: All agent configuration centralized in unified store
-- 🛡️ **Type Safety**: Compile-time guarantees for all agent settings operations
-- 🔧 **Maintainability**: Eliminated complex fallback logic and legacy dependencies
-- 🎯 **Consistency**: Follows same patterns as previous successful migrations
-
-### 🎉 Step 2.3 - Floating Bar Configuration Migration COMPLETED Successfully!
-
-**What Was Accomplished:**
-1. **Send Trait Error Resolution**: Fixed critical compilation error by changing SettingsManager error types from `Box<dyn std::error::Error>` to `String`
-2. **Complete Migration**: Replaced all floating bar JSON store operations with centralized SettingsManager
-3. **Function Replacements**:
-   - `FloatingBarConfig::load()` → `FloatingBarConfig::load_from_centralized_settings()`
-   - `FloatingBarConfig::save()` → `FloatingBarConfig::save_to_centralized_settings()`
-4. **Conversion Functions**: Created `convert_settings_to_config()` and `convert_config_to_settings()`
-5. **Backward Compatibility**: Deprecated old methods with proper deprecation attributes
-
-**Technical Implementation:**
-- ✅ **Perfect Compilation**: Exit code 0, resolved Send trait error
-- ✅ **Thread Safety**: All SettingsManager methods now Send-safe for async Tauri commands
-- ✅ **Type Safety**: Clean conversion between FloatingBarSettings and FloatingBarConfig
-- ✅ **Error Handling**: Comprehensive error propagation with descriptive messages
-- ✅ **Event Integration**: Settings changes emit reactive events via centralized system
-
-**Architecture Benefits:**
-- 🔧 **Send Safety**: Fixed async compatibility issues across the entire settings system
-- 🔄 **Reactive Updates**: Floating bar changes automatically propagate through settings manager
-- 📁 **Single Source**: All floating bar configuration centralized in unified store
-- 🛡️ **Type Safety**: Compile-time guarantees for all settings operations
-- 🔧 **Maintainability**: Consistent error handling patterns across all settings methods
-
-### 🎉 Step 2.2 - Keyboard Shortcuts Migration COMPLETED Successfully!
-
-**What Was Accomplished:**
-1. **Complete Migration**: Replaced all keyboard shortcuts JSON store operations with centralized SettingsManager
-2. **Type System Integration**: Added seamless conversion between `state::KeyboardShortcuts` and `settings::KeyboardShortcuts`
-3. **Function Replacements**:
-   - `load_shortcuts_from_store()` → `load_shortcuts_from_centralized_settings()`
-   - `save_shortcuts_to_store()` → `save_shortcuts_to_centralized_settings()`
-4. **Conversion Functions**: Created `convert_settings_to_state_shortcuts()` and `convert_state_to_settings_shortcuts()`
-5. **Reference Updates**: Updated all calls in `state_management.rs`
-
-**Technical Implementation:**
-- ✅ **Perfect Compilation**: Exit code 0, only standard warnings
-- ✅ **Type Safety**: Clean conversion between identical struct fields
-- ✅ **Backwards Compatibility**: All existing shortcut functionality preserved
-- ✅ **Error Handling**: Graceful fallbacks to defaults on load failures
-- ✅ **Event Integration**: Settings changes emit events via centralized system
-
-**Architecture Benefits:**
-- 🔄 **Reactive Updates**: Changes automatically propagate through settings manager
-- 📁 **Single Source**: All keyboard shortcut data centralized in unified store
-- 🛡️ **Type Safety**: Compile-time guarantees for settings operations
-- 🔧 **Maintainability**: One place to update shortcut-related logic
-
-### 🎉 Step 2.1 - Onboarding Migration COMPLETED Successfully!
-
-**Previous Achievement:**
-- Migrated `onboarding.json` to centralized settings
-- Resolved function naming conflicts with `centralized_` prefixes
-- Full functionality preservation with reactive updates
-
-## 🎯 Next Target: Step 2.7 - Audio/Voice Settings
-
-The next migration will focus on consolidating audio/voice settings from multiple files into the centralized system, including TTS, dictation, and voice transcription configurations.
-
-## 🏗️ Architecture Overview
-
-```rust
-// Single centralized store
-pub struct SettingsManager {
-    store: Store,
-    app_handle: AppHandle,
-}
-
-// Unified settings schema
-pub struct AppSettings {
-    pub keyboard_shortcuts: KeyboardShortcuts,
-    pub floating_bar: FloatingBarSettings,
-    pub agent: AgentSettings,
-    pub providers: ProviderSettings,
-    pub cloud: CloudSettings,
-    pub audio: AudioSettings,
-    pub onboarding: OnboardingSettings, // ✅ MIGRATED
-    pub autostart_enabled: bool,
-}
-```
-
-## 📝 Progress Notes
-- **Started**: Phase 1 - Foundation & Constants ✅ **COMPLETED**
-- **Current**: Phase 2 - Step 2.1 ✅ **COMPLETED** - Onboarding migration successful
-- **Next Step**: Step 2.2 - Migrate keyboard_shortcuts.json
-- **Current Focus**: One-by-one migration to prevent breaking existing functionality
-- **Risk Level**: LOW (onboarding migration successful, no functionality broken)
-
-### 🎉 Step 2.1 Success Summary
-- Successfully migrated all onboarding commands from `onboarding.json` to centralized settings
-- All store operations replaced with `SettingsManager` calls
-- Compilation successful (0 errors, only standard warnings)
-- Resolved naming conflicts by prefixing centralized commands with `centralized_`
-- Onboarding flow now benefits from reactive settings updates and centralized management
-
----
-**⚠️ IMPORTANT**: Update this plan after each step completion to track progress and note any issues encountered.
+2. **Conversion Methods**: Added seamless conversion between `CloudConfig`
