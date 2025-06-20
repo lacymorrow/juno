@@ -28,6 +28,29 @@ cargo check --manifest-path src-tauri/Cargo.toml --quiet
 
 After every code modification made to Rust files, run `cargo check --manifest-path src-tauri/Cargo.toml`. Ensure the command completes successfully (exit code 0). If `cargo check` fails, address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
 
+### Quality Assurance Procedures
+
+For major feature implementations, follow comprehensive QA validation:
+
+```bash
+# Full QA validation suite
+./scripts/qa-full-validation.sh
+
+# Performance benchmarking
+./scripts/benchmark-token-selection.sh
+
+# Multi-monitor testing
+./scripts/test-multi-monitor-scenarios.sh
+```
+
+**QA Requirements**:
+
+- All automated tests must pass (18/18 minimum for UI token selection)
+- Performance targets must be met (33%+ computational cost reduction)
+- Multi-monitor scenarios must be validated
+- Error handling must be comprehensive
+- Documentation must be complete
+
 ### Hierarchical Agent Architecture (Enhanced)
 
 - **Orchestrator**: `src-tauri/src/anthropic.rs` - personality + memory + delegation + advanced workflow management
