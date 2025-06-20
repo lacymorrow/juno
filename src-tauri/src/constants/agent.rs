@@ -40,8 +40,8 @@ pub mod tool_names {
 
 // Agent configuration
 pub mod config {
-    pub const MAX_ITERATIONS: u32 = 25;
-    pub const MAX_ITERATIONS_REDUCED: u32 = 10; // For focused tasks
+    pub const MAX_ITERATIONS: u32 = 40;
+    pub const MAX_ITERATIONS_REDUCED: u32 = 20;
 
     // Token limits
     pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
@@ -55,18 +55,18 @@ pub mod config {
     pub const MAX_RECOVERY_ATTEMPTS: usize = 5;
 
     // Tool call limits
-    pub const MAX_TOOL_CALLS_PER_ITERATION: usize = 10;
+    pub const MAX_TOOL_CALLS_PER_ITERATION: usize = 20;
     pub const MAX_MEMORY_ENTRIES: usize = 1000;
 }
 
 // Monitor session settings
 pub mod monitor_sessions {
-    pub const HOLD_DURATION_MS: u64 = 500;
+    pub const HOLD_DURATION_MS: u64 = 300;
     pub const IMMEDIATE_START_MS: u64 = 0;
 
     // Max durations
     pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000;  // 30 seconds
-    pub const MAX_AGENT_DURATION_MS: u64 = 120_000;         // 2 minutes
+    pub const MAX_AGENT_DURATION_MS: u64 = 180_000;         // 2 minutes
 
     // Cleanup timeouts
     pub const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000;       // 5 seconds
