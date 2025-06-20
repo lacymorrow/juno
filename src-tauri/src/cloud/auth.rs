@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
 use super::types::{CloudError, DeviceRegistration, AuthResponse};
-use super::config::CloudConfig;
+use crate::settings::CloudConfig;
 use base64::{Engine as _, engine::general_purpose};
 
 /// Device authentication credentials

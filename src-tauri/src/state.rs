@@ -643,9 +643,10 @@ impl AppState {
 
     /// Initialize cloud client
     pub async fn init_cloud_client(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        // Load cloud configuration
-        let config = CloudConfig::load_from_store(app_handle)
-            .map_err(|e| format!("Failed to load cloud config: {}", e))?;
+        // Load cloud configuration from centralized settings
+        let settings_manager = crate::settings::SettingsManager::new(app_handle.clone());
+        let settings = settings_manager.get_settings();
+        let config = settings.cloud;
 
         // Update stored config
         {
@@ -719,9 +720,12 @@ impl AppState {
         config: CloudConfig,
         app_handle: &tauri::AppHandle,
     ) -> Result<(), String> {
-        // Save to file
-        config
-            .save_to_store(app_handle)
+        // Save to centralized settings
+        let settings_manager = crate::settings::SettingsManager::new(app_handle.clone());
+        let mut settings = settings_manager.get_settings();
+        settings.cloud = config.clone();
+        settings_manager.save_settings(&settings)
+            .await
             .map_err(|e| format!("Failed to save cloud config: {}", e))?;
 
         // Update stored config

@@ -42,7 +42,7 @@ pub async fn get_cloud_config(
         server_url: config.server_url,
         device_name: config.device_name,
         device_id: config.device_id,
-        security_level: format!("{:?}", config.security_level),
+        security_level: "medium".to_string(), // Default value since field was removed
         auto_connect: config.auto_connect,
     })
 }
@@ -78,13 +78,9 @@ pub async fn update_cloud_config(
         config.api_key = Some(key);
     }
 
-    if let Some(level) = security_level {
-        config.security_level = match level.as_str() {
-            "low" => crate::cloud::config::SecurityLevel::Low,
-            "medium" => crate::cloud::config::SecurityLevel::Medium,
-            "high" => crate::cloud::config::SecurityLevel::High,
-            _ => config.security_level, // Keep existing if invalid
-        };
+    // Security level removed from simplified schema
+    if security_level.is_some() {
+        info!("Security level setting ignored (not supported in simplified schema)");
     }
 
     if let Some(auto) = auto_connect {

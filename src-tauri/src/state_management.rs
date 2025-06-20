@@ -99,7 +99,7 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
     let app_state = app_handle.state::<AppState>();
 
     // Load keyboard shortcuts from persistent storage
-    if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_store(&app_handle, &*app_state).await {
+    if let Err(e) = crate::commands::shortcuts::load_shortcuts_from_settings(&app_handle).await {
         warn!("Failed to load keyboard shortcuts from store: {} - using defaults", e);
     }
 
@@ -113,9 +113,9 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         warn!("Failed to load tool configuration: {} - using defaults", e);
     }
 
-    // Register global shortcuts after loading configuration
-    if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(&app_handle, &*app_state).await {
-        warn!("Failed to register global shortcuts: {} - continuing without shortcuts", e);
+    // Update global shortcuts based on settings
+    if let Err(e) = crate::commands::shortcuts::update_global_shortcuts(&app_handle).await {
+        error!("Failed to update global shortcuts during state update: {}", e);
     }
 
     // Initialize dictation input monitoring system

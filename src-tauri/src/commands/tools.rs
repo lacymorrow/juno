@@ -298,3 +298,7 @@ pub async fn clear_pending_tool_approvals(
     state.clear_pending_tool_approvals().await;
     Ok(())
 }
+
+// Duplicate function removed - using the one above
+
+// NOTE: MCP functions are implemented in commands/mcp.rs - no duplicates needed here

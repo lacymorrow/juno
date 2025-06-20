@@ -11,6 +11,6 @@ pub use connector::ProductionCloudConnector;
 pub use auth::{DeviceAuth, CloudCredentials};
 pub use commands::{CloudCommandProcessor, RemoteCommand};
 pub use security::CloudSecurity;
-pub use config::SecurityLevel;
+// SecurityLevel removed from simplified schema
 pub use types::*;
-pub use config::CloudConfig;
+pub use crate::settings::CloudConfig;

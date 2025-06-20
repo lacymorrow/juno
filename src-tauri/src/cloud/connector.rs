@@ -7,7 +7,7 @@ use tracing::{info, warn, error, debug};
 use tauri::{AppHandle, Manager, Emitter};
 use uuid::Uuid;
 use crate::cloud::types::*;
-use crate::cloud::config::CloudConfig;
+use crate::settings::CloudConfig;
 use crate::cloud::auth::DeviceAuth;
 use crate::cloud::security::CloudSecurity;
 use crate::cloud::commands::CloudCommandProcessor;
@@ -356,7 +356,9 @@ impl HardwareMonitor {
 impl ProductionCloudConnector {
     /// Create new production cloud connector with enhanced monitoring
     pub async fn new(app_handle: AppHandle) -> Result<Self, CloudError> {
-        let config = CloudConfig::load_from_store(&app_handle)?;
+        let settings_manager = crate::settings::SettingsManager::new(app_handle.clone());
+        let settings = settings_manager.get_settings();
+        let config = settings.cloud;
         let auth = DeviceAuth::new(config.clone());
         let security = CloudSecurity::new(config.clone(), auth.clone());
         let command_processor = CloudCommandProcessor::new(app_handle.clone(), security.clone());

@@ -6,10 +6,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsManager } from "@/hooks/useSettingsManager";
 import { Brain, Cpu } from "lucide-react";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface ModelSelectorProps {
   variant?: "compact" | "full";
@@ -23,41 +31,52 @@ interface ModelInfo {
   is_recommended: boolean;
 }
 
+interface Model {
+  id: string;
+  name: string;
+  description: string;
+  maxTokens: number;
+  provider: string;
+}
+
 export function ModelSelector({
   variant = "compact",
   className = "",
 }: ModelSelectorProps) {
-  const settings = useSettings();
-  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
+  const settingsManager = useSettingsManager();
+  const [models, setModels] = useState<Model[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+
+  const currentProvider =
+    settingsManager.providers?.active_provider || "anthropic";
+  const currentModel =
+    settingsManager.providers?.providers.find((p) => p.id === currentProvider)
+      ?.model || "claude-3-5-sonnet-20241022";
 
   // Load models when active provider changes
   useEffect(() => {
-    if (settings.activeProvider && !settings.isLoading) {
-      loadModelsForProvider(settings.activeProvider);
+    if (currentProvider && !settingsManager.isLoading) {
+      loadModelsForProvider(currentProvider);
     }
-  }, [settings.activeProvider, settings.isLoading]);
+  }, [currentProvider, settingsManager.isLoading]);
 
   const loadModelsForProvider = async (providerId: string) => {
-    setLoadingModels(true);
+    setLoading(true);
     try {
-      const models = await invoke<ModelInfo[]>("get_provider_models", {
+      const models = await invoke<Model[]>("get_provider_models", {
         providerId,
       });
-      setAvailableModels(models);
+      setModels(models);
     } catch (error) {
       console.error("Failed to load models for provider:", error);
-      setAvailableModels([]);
+      setModels([]);
     } finally {
-      setLoadingModels(false);
+      setLoading(false);
     }
   };
 
-  const currentProvider = settings.providers.find(
-    (p) => p.id === settings.activeProvider
-  );
-
-  if (!currentProvider || settings.isLoading || loadingModels) {
+  if (!settingsManager.providers || settingsManager.isLoading || loading) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
         <div className="w-4 h-4 bg-muted animate-pulse rounded" />
@@ -67,7 +86,7 @@ export function ModelSelector({
   }
 
   // If no models are available, show an error state
-  if (availableModels.length === 0) {
+  if (models.length === 0) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
         {variant === "full" && (
@@ -81,9 +100,7 @@ export function ModelSelector({
     );
   }
 
-  const selectedModel = availableModels.find(
-    (m) => m.id === settings.formData.model
-  );
+  const selectedModel = models.find((m) => m.id === currentModel);
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
@@ -95,28 +112,31 @@ export function ModelSelector({
       )}
 
       <Select
-        value={settings.formData.model}
+        value={currentModel}
         onValueChange={async (value) => {
           // Validate model is available for current provider before setting
           try {
             const isValid = await invoke<boolean>("validate_provider_model", {
-              providerId: settings.activeProvider,
+              providerId: currentProvider,
               modelId: value,
             });
 
             if (isValid) {
-              settings.setFormData((prev) => ({ ...prev, model: value }));
+              settingsManager.setFormData((prev) => ({
+                ...prev,
+                model: value,
+              }));
               // Auto-save when model changes
-              if (settings.activeProvider) {
+              if (currentProvider) {
                 try {
-                  await settings.handleSaveProviderSettings();
+                  await settingsManager.handleSaveProviderSettings();
                 } catch (error) {
                   console.error("Failed to save model selection:", error);
                 }
               }
             } else {
               console.warn(
-                `Model ${value} is not valid for provider ${settings.activeProvider}`
+                `Model ${value} is not valid for provider ${currentProvider}`
               );
             }
           } catch (error) {
@@ -150,8 +170,7 @@ export function ModelSelector({
         </SelectTrigger>
         <SelectContent>
           {/* Computer Use Models */}
-          {availableModels.filter((model) => model.supports_computer_use)
-            .length > 0 && (
+          {models.filter((model) => model.supports_computer_use).length > 0 && (
             <>
               <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-blue-50 border-b">
                 <div className="flex items-center gap-1">
@@ -159,7 +178,7 @@ export function ModelSelector({
                   Computer Use Models
                 </div>
               </div>
-              {availableModels
+              {models
                 .filter((model) => model.supports_computer_use)
                 .map((model) => (
                   <SelectItem key={model.id} value={model.id}>
@@ -181,8 +200,8 @@ export function ModelSelector({
           )}
 
           {/* General Chat Models */}
-          {availableModels.filter((model) => !model.supports_computer_use)
-            .length > 0 && (
+          {models.filter((model) => !model.supports_computer_use).length >
+            0 && (
             <>
               <div className="px-2 py-1 text-xs font-medium text-muted-foreground bg-gray-50 border-b">
                 <div className="flex items-center gap-1">
@@ -190,7 +209,7 @@ export function ModelSelector({
                   General Chat Models
                 </div>
               </div>
-              {availableModels
+              {models
                 .filter((model) => !model.supports_computer_use)
                 .map((model) => (
                   <SelectItem key={model.id} value={model.id}>

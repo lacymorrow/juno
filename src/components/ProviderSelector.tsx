@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -6,130 +7,79 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSettings } from "@/hooks/useSettings";
-import { Brain, CheckCircle, AlertCircle } from "lucide-react";
+import { useSettingsManager } from "@/hooks/useSettingsManager";
+import { Brain, Zap, Check } from "lucide-react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 interface ProviderSelectorProps {
   variant?: "compact" | "full";
+  disabled?: boolean;
   className?: string;
 }
 
 export function ProviderSelector({
   variant = "compact",
+  disabled = false,
   className = "",
 }: ProviderSelectorProps) {
-  const settings = useSettings();
+  const settingsManager = useSettingsManager();
+  const [loading, setLoading] = useState(false);
 
-  const currentProvider = settings.providers.find(
-    (p) => p.id === settings.activeProvider
-  );
+  const handleProviderChange = async (providerId: string) => {
+    setLoading(true);
+    try {
+      await settingsManager.updateProviders({ active_provider: providerId });
+    } catch (error) {
+      console.error("Failed to update provider:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  if (settings.isLoading) {
+  const currentProvider =
+    settingsManager.providers?.active_provider || "anthropic";
+  const providers = settingsManager.providers?.providers || [];
+
+  if (settingsManager.loading) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
-        <div className="w-4 h-4 bg-muted animate-pulse rounded" />
-        <div className="w-20 h-4 bg-muted animate-pulse rounded" />
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+        <span className="text-sm text-gray-600">Loading providers...</span>
       </div>
     );
   }
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      {variant === "full" && (
-        <div className="flex items-center gap-1">
-          <Brain size={14} className="text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">Provider:</span>
-        </div>
-      )}
-
+    <div className={`space-y-2 ${className}`}>
       <Select
-        value={settings.activeProvider}
-        onValueChange={settings.handleActiveProviderChange}
+        value={currentProvider}
+        onValueChange={handleProviderChange}
+        disabled={disabled || loading}
       >
-        <SelectTrigger
-          className={
-            variant === "compact"
-              ? "h-7 text-xs border-none bg-transparent hover:bg-muted/50 w-auto"
-              : "h-8"
-          }
-        >
-          <SelectValue placeholder="Select provider">
-            {currentProvider && (
-              <div className="flex items-center gap-1">
-                <div className="flex items-center gap-1">
-                  {currentProvider.is_available ? (
-                    <CheckCircle size={10} className="text-green-500" />
-                  ) : (
-                    <AlertCircle size={10} className="text-red-500" />
-                  )}
-                </div>
-                <span className="text-xs font-medium">
-                  {variant === "compact"
-                    ? currentProvider.name.replace(
-                        /\s+(Claude|GPT|Gemini)/i,
-                        ""
-                      )
-                    : currentProvider.name}
-                </span>
-              </div>
-            )}
-          </SelectValue>
+        <SelectTrigger className="min-w-[180px]">
+          <SelectValue placeholder="Select AI Provider" />
         </SelectTrigger>
         <SelectContent>
-          {settings.providers.map((provider) => (
+          {providers.map((provider) => (
             <SelectItem key={provider.id} value={provider.id}>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  {provider.is_available ? (
-                    <CheckCircle size={12} className="text-green-500" />
-                  ) : (
-                    <AlertCircle size={12} className="text-red-500" />
-                  )}
-                </div>
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{provider.name}</span>
-                    {provider.computer_use_supported && (
-                      <Badge
-                        variant="outline"
-                        className="text-xs bg-blue-50 text-blue-700 border-blue-200"
-                      >
-                        Computer Use
-                      </Badge>
-                    )}
-                    {provider.is_default && (
-                      <Badge
-                        variant="outline"
-                        className="text-xs bg-green-50 text-green-700 border-green-200"
-                      >
-                        Active
-                      </Badge>
-                    )}
-                  </div>
-                  {variant === "full" && (
-                    <span className="text-xs text-muted-foreground">
-                      {provider.description}
-                    </span>
-                  )}
-                </div>
+                <Brain className="h-4 w-4" />
+                <span>{provider.display_name}</span>
+                {provider.id === currentProvider && (
+                  <Check className="h-4 w-4 text-green-600" />
+                )}
               </div>
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
 
-      {variant === "full" && currentProvider && (
-        <div className="text-xs text-muted-foreground">
-          <Badge
-            variant="outline"
-            className={`text-xs ${
-              currentProvider.is_available
-                ? "bg-green-50 text-green-700 border-green-200"
-                : "bg-red-50 text-red-700 border-red-200"
-            }`}
-          >
-            {currentProvider.is_available ? "Available" : "API Key Required"}
-          </Badge>
+      {variant === "full" && (
+        <div className="text-xs text-gray-500">
+          Current:{" "}
+          {providers.find((p) => p.id === currentProvider)?.display_name ||
+            "Unknown"}
         </div>
       )}
     </div>

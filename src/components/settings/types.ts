@@ -1,5 +1,5 @@
 import React from "react";
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsManager } from "@/hooks/useSettingsManager";
 
 export interface SettingsCategory {
   id: string;
@@ -72,9 +72,63 @@ export interface MCPToolInfo {
   enabled: boolean;
 }
 
+export interface SettingsFieldProps {
+  label: string;
+  description?: string;
+  children: React.ReactNode;
+  error?: string;
+  helpText?: string;
+}
+
 export interface SettingsSectionProps {
-  settings: ReturnType<typeof useSettings>;
-  onNavigateToDevTools?: () => void;
-  onNavigateToChat?: () => void;
-  onNavigateToPermissions?: () => void;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+export interface ShortcutInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+  error?: string;
+}
+
+export interface ProviderFormData {
+  name: string;
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  temperature: number;
+  systemPrompt: string;
+}
+
+export interface ProviderValidationErrors {
+  name?: string;
+  apiKey?: string;
+  model?: string;
+  maxTokens?: string;
+  temperature?: string;
+  systemPrompt?: string;
+}
+
+export interface MCPServerData {
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  enabled: boolean;
+}
+
+export interface SettingsProps {
+  settingsManager: ReturnType<typeof useSettingsManager>;
+}
+
+// Base settings component props
+export interface BaseSettingsProps {
+  settingsManager: ReturnType<typeof useSettingsManager>;
+  className?: string;
 }

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Listener, State};
-use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn, info};
@@ -9,75 +8,10 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use crate::constants::{timeouts, events};
 use crate::state::AppState;
+use crate::settings::{SettingsManager, FloatingBarConfig};
+use crate::utils::async_runtime::safe_spawn_async_task;
 
-// Floating bar configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FloatingBarConfig {
-    pub show_voice_indicator: bool,
-    pub enable_animations: bool,
-    pub auto_hide: bool,
-    pub auto_hide_delay: u32,
-    pub opacity: f32,
-}
-
-impl Default for FloatingBarConfig {
-    fn default() -> Self {
-        Self {
-            show_voice_indicator: true,
-            enable_animations: true,
-            auto_hide: false,
-            auto_hide_delay: crate::constants::timeouts::UI_NOTIFICATION_DISPLAY_MS as u32,
-            opacity: 0.95,
-        }
-    }
-}
-
-impl FloatingBarConfig {
-    /// Load configuration from Tauri store or create default.
-    /// Attempts to load existing configuration, creates default if missing.
-    /// Used by: Application startup and settings management.
-    pub async fn load(app_handle: &AppHandle) -> Result<Self, String> {
-        let store = app_handle.store("floating_bar_config.json")
-            .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
-
-        // Try to load the configuration from store
-        if let Some(config_value) = store.get("floating_bar_config") {
-            match serde_json::from_value::<Self>(config_value) {
-                Ok(config) => {
-                    debug!("Loaded floating bar configuration from store");
-                    return Ok(config);
-                }
-                Err(e) => {
-                    debug!("Failed to parse stored floating bar config ({}), creating default", e);
-                }
-            }
-        }
-
-        // No valid configuration found, create and save default
-        debug!("No floating bar configuration found in store, creating default");
-        let default_config = Self::default();
-        default_config.save(app_handle).await?;
-        Ok(default_config)
-    }
-
-    /// Save configuration to Tauri store.
-    /// Serializes current configuration to JSON and saves to store.
-    /// Used by: Settings UI and configuration updates.
-    pub async fn save(&self, app_handle: &AppHandle) -> Result<(), String> {
-        let store = app_handle.store("floating_bar_config.json")
-            .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
-
-        let config_value = serde_json::to_value(self)
-            .map_err(|e| format!("Failed to serialize floating bar config: {}", e))?;
-
-        store.set("floating_bar_config", config_value);
-        store.save()
-            .map_err(|e| format!("Failed to save floating bar config store: {}", e))?;
-
-        debug!("Saved floating bar configuration to store");
-        Ok(())
-    }
-}
+// Note: FloatingBarConfig is now defined in settings/schema.rs and managed by SettingsManager
 
 // Bar states that match the frontend
 #[derive(Debug, Clone, PartialEq)]
@@ -594,8 +528,7 @@ pub async fn initialize_bar_manager(app_handle: AppHandle) {
     setup_agent_event_listeners(app_handle, manager).await;
 }
 
-// Import the safe async spawning utility
-use crate::utils::async_runtime::safe_spawn_async_task;
+// Duplicate import removed - already imported at top of file
 
 // Set up event listeners for agent status changes
 async fn setup_agent_event_listeners(app_handle: AppHandle, manager: Arc<TokioMutex<FloatingBarManager>>) {
@@ -881,40 +814,37 @@ pub async fn handle_agent_cancelled(app_handle: &AppHandle) {
 
 // Configuration commands
 
-/// Get the current floating bar configuration
+/// Get the current floating bar configuration via SettingsManager
 #[tauri::command]
-pub async fn get_floating_bar_config(
-    app_handle: AppHandle,
-) -> Result<FloatingBarConfig, String> {
-    info!("Getting floating bar configuration");
+pub async fn get_floating_bar_config(app: AppHandle) -> Result<serde_json::Value, String> {
+    let settings_manager = SettingsManager::new(app);
+    let settings = settings_manager.get_settings();
 
-    match FloatingBarConfig::load(&app_handle).await {
-        Ok(config) => {
-            debug!("Successfully loaded floating bar config: {:?}", config);
-            Ok(config)
-        },
-        Err(e) => {
-            warn!("Failed to load floating bar config, using defaults: {}", e);
-            Ok(FloatingBarConfig::default())
-        }
-    }
+    Ok(serde_json::json!({
+        "show_voice_indicator": settings.floating_bar.show_voice_indicator,
+        "enable_animations": settings.floating_bar.enable_animations,
+        "auto_hide": settings.floating_bar.auto_hide,
+        "opacity": settings.floating_bar.opacity
+    }))
 }
 
-/// Set the floating bar configuration
+/// Set the floating bar configuration via SettingsManager
+#[tauri::command]
+pub async fn update_floating_bar_config(
+    app: AppHandle,
+    config: serde_json::Value,
+) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app);
+    settings_manager.update_section("floating_bar", config).await?;
+    info!("✅ Floating bar configuration updated");
+    Ok(())
+}
+
+/// Set floating bar config (alias for update_floating_bar_config)
 #[tauri::command]
 pub async fn set_floating_bar_config(
-    app_handle: AppHandle,
-    config: FloatingBarConfig,
+    app: AppHandle,
+    config: serde_json::Value,
 ) -> Result<(), String> {
-    info!("Setting floating bar configuration: {:?}", config);
-
-    config.save(&app_handle).await?;
-
-    // Emit event to notify frontend of config change
-    if let Err(e) = app_handle.emit("floating-bar-config-changed", &config) {
-        warn!("Failed to emit config change event: {}", e);
-    }
-
-    info!("Floating bar configuration updated successfully");
-    Ok(())
+    update_floating_bar_config(app, config).await
 }

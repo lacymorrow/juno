@@ -1,4 +1,4 @@
-import { useSettings } from "@/hooks/useSettings";
+import { useSettingsManager } from "@/hooks/useSettingsManager";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -69,8 +69,21 @@ const settingsCategories: SettingsCategory[] = [
 
 export default function ModularSettingsWindow() {
   const [selectedCategory, setSelectedCategory] = useState("general");
-  const settings = useSettings();
+  const settingsManager = useSettingsManager();
   const window = getCurrentWindow();
+
+  useEffect(() => {
+    // Initialize the settings manager
+    const initializeSettings = async () => {
+      try {
+        await settingsManager.initialize();
+      } catch (error) {
+        console.error("Failed to initialize settings manager:", error);
+      }
+    };
+
+    initializeSettings();
+  }, [settingsManager]);
 
   useEffect(() => {
     // Set up the window properly for macOS
@@ -78,7 +91,9 @@ export default function ModularSettingsWindow() {
       try {
         await window.setTitle("Juno Settings");
         if (window.label === "settings") {
-          console.log("Modular settings window initialized");
+          console.log(
+            "Modular settings window initialized with centralized settings"
+          );
         }
       } catch (error) {
         console.error("Failed to setup modular settings window:", error);
@@ -97,23 +112,39 @@ export default function ModularSettingsWindow() {
   };
 
   const renderCategoryContent = () => {
+    if (settingsManager.loading) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-gray-500">Loading settings...</div>
+        </div>
+      );
+    }
+
+    if (settingsManager.error) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-red-500">Error: {settingsManager.error}</div>
+        </div>
+      );
+    }
+
     switch (selectedCategory) {
       case "general":
-        return <GeneralSettings settings={settings} />;
+        return <GeneralSettings settingsManager={settingsManager} />;
       case "voice":
-        return <VoiceSettings settings={settings} />;
+        return <VoiceSettings settingsManager={settingsManager} />;
       case "ai":
-        return <AIProviderSettings settings={settings} />;
+        return <AIProviderSettings settingsManager={settingsManager} />;
       case "network":
-        return <NetworkSettings settings={settings} />;
+        return <NetworkSettings settingsManager={settingsManager} />;
       case "security":
-        return <SecuritySettings settings={settings} />;
+        return <SecuritySettings settingsManager={settingsManager} />;
       case "shortcuts":
-        return <ShortcutsSettings settings={settings} />;
+        return <ShortcutsSettings settingsManager={settingsManager} />;
       case "advanced":
-        return <AdvancedSettings settings={settings} />;
+        return <AdvancedSettings settingsManager={settingsManager} />;
       default:
-        return <GeneralSettings settings={settings} />;
+        return <GeneralSettings settingsManager={settingsManager} />;
     }
   };
 

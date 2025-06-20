@@ -1,107 +1,93 @@
+import React from "react";
+import { useSettingsManager } from "@/hooks/useSettingsManager";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useSettings } from "@/hooks/useSettings";
-import { Users, User, Zap } from "lucide-react";
+import { Settings, Users, User, Bot } from "lucide-react";
 
 interface AgentModeSelectorProps {
   variant?: "compact" | "full";
+  disabled?: boolean;
   className?: string;
 }
 
-const AGENT_MODES = [
+const agentModes = [
   {
     id: "single",
-    name: "Single",
-    fullName: "Single Agent",
-    description: "One AI model handles all tasks",
-    icon: <User size={12} />,
-    emoji: "🤖",
-    dotColor: "bg-green-500",
+    name: "Single Agent",
+    description: "One AI assistant handles all tasks",
+    icon: <User className="h-4 w-4" />,
+    badge: "Simple",
   },
   {
     id: "multi",
-    name: "Multiple",
-    fullName: "Multi-Agent",
-    description: "Specialized agents for different tasks",
-    icon: <Users size={12} />,
-    emoji: "👥",
-    dotColor: "bg-blue-500",
+    name: "Multi-Agent",
+    description: "Specialized agents collaborate on complex tasks",
+    icon: <Users className="h-4 w-4" />,
+    badge: "Advanced",
   },
 ];
 
 export function AgentModeSelector({
   variant = "compact",
+  disabled = false,
   className = "",
 }: AgentModeSelectorProps) {
-  const settings = useSettings();
+  const settingsManager = useSettingsManager();
 
-  const currentMode = AGENT_MODES.find(
-    (mode) => mode.id === settings.agentMode
-  );
-
-  const handleToggle = async () => {
-    const newMode = settings.agentMode === "single" ? "multi" : "single";
+  const handleModeChange = async (mode: string) => {
     try {
-      await settings.handleAgentModeChange(newMode);
+      await settingsManager.updateAgent({ mode });
     } catch (error) {
-      console.error("Failed to change agent mode:", error);
-      // The error handling is already done in the hook, but we can add additional UI feedback here if needed
+      console.error("Failed to update agent mode:", error);
     }
   };
 
-  if (settings.isLoading) {
+  const currentMode = settingsManager.agent?.mode || "multi";
+
+  if (settingsManager.loading) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
-        <div className="w-4 h-4 bg-muted animate-pulse rounded" />
-        <div className="w-20 h-4 bg-muted animate-pulse rounded" />
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+        <span className="text-sm text-gray-600">Loading agent mode...</span>
       </div>
     );
   }
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      {variant === "full" && (
-        <div className="flex items-center gap-1">
-          <Zap size={14} className="text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">Mode:</span>
-        </div>
-      )}
-
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={handleToggle}
-        className={
-          variant === "compact"
-            ? "h-7 text-xs border-none bg-transparent hover:bg-muted/50 px-2 gap-2"
-            : "h-8 px-3 gap-2"
-        }
-        title={`Switch to ${
-          settings.agentMode === "single" ? "Multi" : "Single"
-        } Agent Mode`}
+    <div className={`space-y-2 ${className}`}>
+      <Select
+        value={currentMode}
+        onValueChange={handleModeChange}
+        disabled={disabled}
       >
-        <div
-          className={`w-2 h-2 rounded-full ${
-            currentMode?.dotColor || "bg-gray-400"
-          }`}
-        />
-        <span className="text-xs font-medium">
-          {currentMode?.name || "Single"}
-        </span>
-      </Button>
+        <SelectTrigger className="min-w-[180px]">
+          <SelectValue placeholder="Select Agent Mode" />
+        </SelectTrigger>
+        <SelectContent>
+          {agentModes.map((mode) => (
+            <SelectItem key={mode.id} value={mode.id}>
+              <div className="flex items-center gap-2">
+                {mode.icon}
+                <span>{mode.name}</span>
+                <Badge variant="outline" className="text-xs">
+                  {mode.badge}
+                </Badge>
+              </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
-      {variant === "full" && currentMode && (
-        <div className="text-xs text-muted-foreground">
-          <Badge
-            variant="outline"
-            className={`text-xs ${
-              currentMode.id === "multi"
-                ? "bg-blue-50 text-blue-700 border-blue-200"
-                : "bg-gray-50 text-gray-700 border-gray-200"
-            }`}
-          >
-            {currentMode.description}
-          </Badge>
+      {variant === "full" && (
+        <div className="text-xs text-gray-500">
+          {agentModes.find((m) => m.id === currentMode)?.description}
         </div>
       )}
     </div>

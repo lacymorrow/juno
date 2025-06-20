@@ -2,326 +2,184 @@ use crate::cli::Cli;
 use crate::state::AppState;
 use crate::tts;
 use crate::error_handling::JunoError;
+use crate::settings::SettingsManager;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use computer_use_ai_sdk::Desktop; // Import Desktop
-use std::fs;
-use std::io::Write;
+use computer_use_ai_sdk::Desktop;
 use std::process::Command;
 use tauri::{AppHandle, Manager};
 use tempfile::Builder as TempFileBuilder;
-use tracing::{error, info, warn}; // Import tracing macros // Add the TTS import
-
-/// Configuration file name
-const CONFIG_FILE: &str = "config.json";
+use tracing::{error, info, warn};
 
 /// Handles the execution of commands specified via CLI arguments.
 /// Returns `Ok(true)` if a CLI command was handled (and the app should exit),
-/// `Ok(false)` if no CLI command was handled (and the Tauri app should launch),
-/// `Err` if there was an error executing the CLI command.
-pub(crate) fn handle_cli_commands(cli: &Cli, _desktop_instance: &Desktop) -> Result<bool, JunoError> {
-    // Prefix unused desktop_instance with _
-    let _command_handled = false;
+/// `Ok(false)` if no CLI command was handled (and the Tauri app should continue),
+/// or `Err(JunoError)` if an error occurred during command execution.
+pub async fn handle_cli_commands(cli: Cli, app: &AppHandle) -> Result<bool, JunoError> {
+    info!("Handling CLI commands: {:?}", cli);
 
-    // --- TTS Test Handling ---
-    if let Some(provider) = &cli.tts_provider {
-        let text = cli
-            .tts_text
-            .clone()
-            .unwrap_or_else(|| "This is a test of the text to speech system.".to_string());
-        println!(
-            "[CLI] Requesting TTS test for provider '{}' with text: '{}'",
-            provider, text
-        );
-
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| JunoError::SystemError(format!("Failed to create Tokio runtime for TTS test: {}", e)))?;
-
-        match rt.block_on(tts::invoke_tts_for_provider(text, None, provider)) {
-            Ok(base64_audio) => {
-                info!("[CLI TTS Success] Received base64 audio data ({} bytes). Attempting playback...", base64_audio.len());
-                match BASE64_STANDARD.decode(base64_audio) {
-                    Ok(audio_bytes) => {
-                        let temp_file_result = TempFileBuilder::new()
-                            .prefix("tts_test_")
-                            .suffix(".m4a")
-                            .tempfile();
-
-                        match temp_file_result {
-                            Ok(mut temp_file) => {
-                                let temp_path = temp_file.path().to_path_buf();
-                                info!("Writing decoded audio to temporary file: {:?}", temp_path);
-
-                                if let Err(e) = temp_file.write_all(&audio_bytes) {
-                                    error!("[CLI Playback Error] Failed to write audio bytes to temp file: {}", e);
-                                    return Err(JunoError::FileSystemError(format!("Failed to write audio bytes to temp file: {}", e)));
-                                }
-                                temp_file.flush().ok();
-
-                                #[cfg(target_os = "macos")]
-                                {
-                                    println!("[CLI Playback] Playing audio using afplay...");
-                                    let afplay_status = Command::new("afplay")
-                                        .arg(&temp_path) // Borrow temp_path
-                                        .status();
-
-                                    match afplay_status {
-                                        Ok(status) if status.success() => {
-                                            println!(
-                                                "[CLI Playback] Playback finished successfully."
-                                            );
-                                        }
-                                        Ok(status) => {
-                                            error!("[CLI Playback Error] afplay exited with status: {}", status);
-                                        }
-                                        Err(e) => {
-                                            error!("[CLI Playback Error] Failed to execute afplay: {}. Is it installed and in PATH?", e);
-                                        }
-                                    }
-                                }
-                                #[cfg(not(target_os = "macos"))]
-                                {
-                                    println!("[CLI Playback] Playback command not implemented for this OS.");
-                                }
-                                // Temp file is automatically deleted when `temp_file` goes out of scope
-                            }
-                            Err(e) => {
-                                error!("[CLI Playback Error] Failed to create temporary audio file: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("[CLI Playback Error] Failed to decode base64 audio: {}", e);
-                    }
-                }
-            }
-            Err(e) => error!("[CLI TTS Error] {}", e),
-        }
-        return Ok(true); // TTS test was run, so exit
+    // Handle TTS test command
+    if let Some(provider) = cli.tts_provider {
+        let text = cli.tts_text.unwrap_or_else(|| "This is a test of the text to speech system.".to_string());
+        perform_tts_cli(&text, &provider, app).await?;
+        return Ok(true);
     }
 
-    // --- Other Test Handlers ---
-    let mut ran_test = false;
-    let mut test_result: Result<(), String> = Ok(());
-
-    if cli.test_focused_element_ns {
-        #[cfg(target_os = "macos")]
-        {
-            // utils::run_test_focused_element_ns() was removed - this CLI flag is no longer functional
-            warn!("test_focused_element_ns CLI flag is no longer functional");
-            test_result = Err("Function not available".to_string());
-            ran_test = true;
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            eprintln!("Error: --test-focused-element-ns is only supported on macOS.");
-            test_result = Err("Unsupported platform".to_string());
-            ran_test = true;
-        }
-    }
+    // Handle accessibility test
     if cli.check_accessibility {
-        #[cfg(target_os = "macos")]
-        {
-            // utils::run_check_accessibility() was removed - this CLI flag is no longer functional
-            warn!("check_accessibility CLI flag is no longer functional");
-            test_result = Err("Function not available".to_string());
-            ran_test = true;
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            println!("Warning: --check-accessibility is macOS-specific. Skipping check.");
-            ran_test = true; /* Treat as success on other platforms for now */
-        }
+        perform_accessibility_check_cli().await?;
+        return Ok(true);
     }
 
-    if ran_test {
-        match test_result {
-            Ok(_) => {
-                println!("[CLI Test] Test completed successfully.");
-                return Ok(true); // Indicate that we handled a CLI command and should exit
-            }
-            Err(e) => {
-                error!("[CLI Test Error] {}", e);
-                return Err(JunoError::ApplicationError(format!("CLI test failed: {}", e)));
-            }
-        }
+    // Handle focused element test (macOS only)
+    if cli.test_focused_element_ns {
+        perform_focused_element_test_cli().await?;
+        return Ok(true);
     }
 
-    // No CLI-specific commands were handled that require exiting
     Ok(false)
 }
 
-/// Handles CLI commands that don't require desktop access when permissions are missing.
-/// Returns `true` if a CLI command was handled (and the app should exit),
-/// `false` otherwise (and the Tauri app should launch).
-pub(crate) fn handle_non_desktop_cli_commands(cli: &crate::cli::Cli) -> bool {
-    // Handle CLI commands that don't require desktop access
+/// Perform text-to-speech via CLI using the specified provider
+async fn perform_tts_cli(text: &str, provider: &str, app: &AppHandle) -> Result<(), JunoError> {
+    info!("Performing TTS via CLI with provider '{}': {}", provider, text);
 
-    // Handle TTS test command
-    if cli.tts_provider.is_some() {
-        // TTS test would require full app initialization
-        warn!("TTS test requires full app initialization");
-        warn!("Please start the app normally to run TTS tests");
-        return true;
-    }
+    // Get TTS settings from SettingsManager
+    let settings_manager = SettingsManager::new(app.clone());
+    let settings = settings_manager.get_settings();
 
-    // For now, return false since there's no config show command in the current CLI structure
-    // Other non-desktop commands can be added here as needed
+    // Get the app state for TTS function
+    let app_state = app.state::<AppState>();
 
-    false
-}
+    // Use the specified provider
+    match tts::invoke_tts_for_provider(text.to_string(), Some(app_state), provider).await {
+        Ok(base64_audio) => {
+            info!("[CLI TTS Success] Received base64 audio data ({} bytes). Attempting playback...", base64_audio.len());
 
-/// Runs CLI commands and returns the result without exiting the process
-pub async fn run_cli_command(
-    app_handle: AppHandle,
-    matches: &clap::ArgMatches,
-) -> Result<(), String> {
-    info!("CLI command execution started");
+            // Decode and play audio
+            let audio_bytes = BASE64_STANDARD.decode(base64_audio).map_err(|e| {
+                JunoError::ApplicationError(format!("Failed to decode base64 audio: {}", e))
+            })?;
 
-    // Handle test command
-    if let Some(test_matches) = matches.subcommand_matches("test") {
-        return run_test_command(app_handle, test_matches).await;
-    }
+            let temp_file = TempFileBuilder::new()
+                .prefix("tts_test_")
+                .suffix(".m4a")
+                .tempfile()
+                .map_err(|e| {
+                    JunoError::ApplicationError(format!("Failed to create temporary file: {}", e))
+                })?;
 
-    // Handle config command
-    if let Some(config_matches) = matches.subcommand_matches("config") {
-        return run_config_command(config_matches).await;
-    }
+            let temp_path = temp_file.path().to_path_buf();
+            std::fs::write(&temp_path, &audio_bytes).map_err(|e| {
+                JunoError::ApplicationError(format!("Failed to write audio file: {}", e))
+            })?;
 
-    // For any other commands, return success without processing
-    Ok(())
-}
+            #[cfg(target_os = "macos")]
+            {
+                println!("[CLI Playback] Playing audio using afplay...");
+                let status = Command::new("afplay")
+                    .arg(&temp_path)
+                    .status()
+                    .map_err(|e| {
+                        JunoError::ApplicationError(format!("Failed to execute afplay: {}", e))
+                    })?;
 
-/// Handle test command variations with TTS test
-async fn run_test_command(
-    app_handle: AppHandle,
-    test_matches: &clap::ArgMatches,
-) -> Result<(), String> {
-    if test_matches.get_flag("tts") || test_matches.subcommand_matches("tts").is_some() {
-        let _text = "Testing TTS functionality";
-        let _provider = "system";
-
-        // Create a runtime for blocking on async function
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create runtime: {}", e))?;
-
-        // Use the system TTS test instead of full TTS
-        match rt.block_on(test_tts(app_handle)) {
-            Ok(()) => {
-                info!("✅ TTS test completed successfully");
-                Ok(())
+                if status.success() {
+                    println!("[CLI Playback] Playback finished successfully.");
+                } else {
+                    return Err(JunoError::ApplicationError(format!("afplay exited with status: {}", status)));
+                }
             }
-            Err(e) => {
-                error!("❌ TTS test failed: {}", e);
-                Err(format!("TTS test failed: {}", e))
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                println!("[CLI Playback] Playback command not implemented for this OS.");
             }
-        }
-    } else {
-        // For other test types, just return success
-        Ok(())
-    }
-}
 
-/// Handle config command variations
-async fn run_config_command(config_matches: &clap::ArgMatches) -> Result<(), String> {
-    if let Some(_show_matches) = config_matches.subcommand_matches("show") {
-        match show_config_file() {
-            Ok(()) => {
-                info!("✅ Config file displayed successfully");
-                Ok(())
-            }
-            Err(e) => {
-                error!("❌ Failed to show config: {}", e);
-                Err(format!("Failed to show config: {}", e))
-            }
-        }
-    } else {
-        // For other config types, just return success
-        Ok(())
-    }
-}
-
-/// Shows the content of the configuration file
-fn show_config_file() -> Result<(), String> {
-    info!("Showing configuration file...");
-
-    let config_dir = dirs::config_dir()
-        .ok_or("Unable to determine config directory")?
-        .join("juno");
-
-    let config_path = config_dir.join(CONFIG_FILE);
-
-    if !config_path.exists() {
-        warn!("Configuration file does not exist at: {:?}", config_path);
-        return Ok(());
-    }
-
-    match fs::read_to_string(&config_path) {
-        Ok(content) => {
-            info!("Configuration file content:");
-            println!("{}", content);
+            info!("TTS CLI test completed successfully");
             Ok(())
         }
         Err(e) => {
-            error!("Failed to read config file: {}", e);
-            Err(format!("Failed to read config file: {}", e))
+            error!("[CLI TTS Error] {}", e);
+            Err(JunoError::ApplicationError(format!("TTS test failed: {}", e)))
         }
     }
 }
 
-/// Test accessibility permissions for Desktop operations (safe to call without Desktop instance)
-async fn test_accessibility(_app_handle: AppHandle) -> Result<(), String> {
-    info!("Testing accessibility permissions...");
+/// Perform accessibility check via CLI
+async fn perform_accessibility_check_cli() -> Result<(), JunoError> {
+    info!("Performing accessibility check via CLI");
 
-    // Get app state and check if desktop instance is available
-    let app_state = _app_handle.state::<AppState>();
-
-    // Use the desktop wrapper's get_desktop method
-    match app_state.desktop.get_desktop() {
-        Ok(_desktop) => {
-            info!("✅ Desktop instance available - accessibility permissions are working");
-            Ok(())
-        }
-        Err(e) => {
-            error!(
-                "❌ Desktop instance not available - accessibility permissions may be missing: {}",
-                e
-            );
-            Err(format!(
-                "Desktop instance not available - check accessibility permissions: {}",
-                e
-            ))
-        }
-    }
-}
-
-/// Test TTS functionality (safe to run without permissions)
-async fn test_tts(_app_handle: AppHandle) -> Result<(), String> {
-    info!("Testing TTS functionality...");
-
-    // For now, just test that the system TTS is available
     #[cfg(target_os = "macos")]
     {
-        match std::process::Command::new("say").arg("--version").output() {
-            Ok(output) if output.status.success() => {
-                info!("✅ TTS test completed successfully - macOS system TTS is available");
+        // Use Desktop to check accessibility permissions
+        let desktop = Desktop::new(false, true).map_err(|e| {
+            JunoError::SystemError(format!("Failed to initialize desktop interface: {}", e))
+        })?;
+
+        // Try a simple operation to test accessibility
+        match desktop.applications() {
+            Ok(apps) => {
+                println!("✅ Accessibility check passed. Found {} applications.", apps.len());
+                info!("Accessibility check completed successfully");
                 Ok(())
             }
-            Ok(_) => {
-                error!("❌ TTS test failed: macOS 'say' command not working properly");
-                Err("macOS 'say' command not working properly".to_string())
-            }
             Err(e) => {
-                error!("❌ TTS test failed: {}", e);
-                Err(format!("Failed to test TTS: {}", e))
+                println!("❌ Accessibility check failed: {}", e);
+                Err(JunoError::PermissionError(format!("Accessibility permission check failed: {}", e)))
             }
         }
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        info!("✅ TTS test completed - system TTS assumed available on this platform");
+        println!("⚠️  Accessibility check is macOS-specific. Skipping on this platform.");
         Ok(())
     }
+}
+
+/// Perform focused element test via CLI (macOS only)
+async fn perform_focused_element_test_cli() -> Result<(), JunoError> {
+    info!("Performing focused element test via CLI");
+
+    #[cfg(target_os = "macos")]
+    {
+        // For now, just indicate the test would run
+        println!("🔍 Focused element test would run here (implementation specific to macOS).");
+        println!("This test checks the currently focused UI element using NSWorkspace.");
+
+        // You could implement the actual test here if needed
+        warn!("Focused element test is not fully implemented in CLI");
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        println!("⚠️  Focused element test is macOS-specific. Skipping on this platform.");
+        Ok(())
+    }
+}
+
+/// Handles CLI commands that don't require desktop access when permissions are missing.
+/// This is a fallback for when full desktop integration isn't available.
+pub fn handle_cli_commands_minimal(cli: &Cli) -> Result<bool, JunoError> {
+    info!("Handling CLI commands in minimal mode: {:?}", cli);
+
+    // Only handle commands that don't require desktop access
+    if cli.tts_provider.is_some() {
+        println!("TTS test requires full application mode with desktop access.");
+        return Err(JunoError::PermissionError("TTS test unavailable in minimal mode".to_string()));
+    }
+
+    if cli.check_accessibility {
+        println!("❌ Accessibility check cannot be performed without desktop access permissions.");
+        return Err(JunoError::PermissionError("Accessibility check requires desktop permissions".to_string()));
+    }
+
+    if cli.test_focused_element_ns {
+        println!("❌ Focused element test cannot be performed without desktop access permissions.");
+        return Err(JunoError::PermissionError("Focused element test requires desktop permissions".to_string()));
+    }
+
+    // No CLI commands to handle
+    Ok(false)
 }

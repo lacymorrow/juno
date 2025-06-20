@@ -13,7 +13,7 @@ use super::types::{
     CloudError, CloudCommand, DeviceResponse, DeviceStatus, AuthResponse,
     WebSocketMessage, MessageType, ConnectionState, HardwareInfo, DeviceState, SystemInfo
 };
-use super::config::CloudConfig;
+use crate::settings::CloudConfig;
 use super::auth::DeviceAuth;
 use super::security::CloudSecurity;
 use super::commands::CloudCommandProcessor;
@@ -48,7 +48,9 @@ pub struct CloudClient {
 impl CloudClient {
     /// Create new cloud client
     pub async fn new(app_handle: AppHandle) -> Result<Self, CloudError> {
-        let config = CloudConfig::load_from_store(&app_handle)?;
+        let settings_manager = crate::settings::SettingsManager::new(app_handle.clone());
+        let settings = settings_manager.get_settings();
+        let config = settings.cloud;
         let auth = DeviceAuth::new(config.clone());
         let security = CloudSecurity::new(config.clone(), auth.clone());
         let command_processor = CloudCommandProcessor::new(app_handle.clone(), security.clone());

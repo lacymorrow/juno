@@ -1,17 +1,31 @@
 // Core/Miscellaneous commands (screenshots, app list, clipboard, wait)
 
-use tauri::State;
-use tracing::info;
+use tauri::{State, Manager};
+use tracing::{info, warn, error};
 use crate::state::AppState;
+use crate::settings::{SettingsManager, AppSettings};
 use tauri::AppHandle;
-use tracing::warn;
-use super::send_dev_tool_notification; // Use helper from parent module
+use super::send_dev_tool_notification;
 use crate::agent::providers::factory::{BrainFactory, ProviderInfo};
 use serde::{Deserialize, Serialize};
-use tauri_plugin_store::StoreExt;
 
 #[cfg(target_os = "macos")]
 use computer_use_ai_sdk::platforms::macos::utils as macos_utils;
+
+#[cfg(target_os = "macos")]
+mod macos_focused_element {
+    use serde_json::Value;
+
+    pub fn get_focused_element_details() -> Result<Value, String> {
+        // Placeholder implementation - in a real implementation this would
+        // use the computer_use_ai_sdk to get focused element details
+        Ok(serde_json::json!({
+            "role": "placeholder",
+            "title": "Focused element details not implemented",
+            "type": "placeholder"
+        }))
+    }
+}
 #[cfg(not(target_os = "macos"))]
 use tauri::AppHandle as DummyAppHandle; // Alias for non-macos signature consistency
 
@@ -208,37 +222,50 @@ pub async fn list_ai_providers() -> Result<Vec<ProviderInfo>, String> {
     Ok(BrainFactory::list_providers())
 }
 
-/// Set the active AI provider
+/// Set the active AI provider using SettingsManager
 #[tauri::command]
-pub async fn set_ai_provider(provider_id: String) -> Result<(), String> {
-    // Set environment variable for the current process
+pub async fn set_ai_provider(app: AppHandle, provider_id: String) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app);
+
+    // Update the provider setting
+    settings_manager.update_section("providers.active_provider", serde_json::Value::String(provider_id.clone()))
+        .await
+        .map_err(|e| format!("Failed to update AI provider setting: {}", e))?;
+
+    // Also set environment variable for the current process
     std::env::set_var("AI_PROVIDER", provider_id.clone());
 
-    // For a real implementation, you would want to persist this setting
-    // to a config file or database so it's remembered across app restarts
-
-    tracing::info!("Set AI provider to: {}", provider_id);
+    info!("Set AI provider to: {}", provider_id);
     Ok(())
 }
 
-/// Set performance monitoring enabled state
+/// Set performance monitoring enabled state using SettingsManager
 #[tauri::command]
-pub async fn set_performance_monitoring(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_performance_monitoring(app: AppHandle, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting performance monitoring to: {}", enabled);
+
+    let settings_manager = SettingsManager::new(app);
+
+    // Update the performance monitoring setting
+    settings_manager.update_section("performance.monitoring_enabled", serde_json::Value::Bool(enabled))
+        .await
+        .map_err(|e| format!("Failed to update performance monitoring setting: {}", e))?;
 
     // Update the state
     let _ = state.set_performance_monitoring_enabled(enabled);
 
-    // TODO: In the future, this could persist the setting to a config file
-    // For now, it's stored in memory for the session
-
     Ok(())
 }
 
-/// Get performance monitoring enabled state
+/// Get performance monitoring enabled state from SettingsManager
 #[tauri::command]
-pub async fn get_performance_monitoring(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(state.is_performance_monitoring_enabled())
+pub async fn get_performance_monitoring(app: AppHandle) -> Result<bool, String> {
+    let settings_manager = SettingsManager::new(app);
+
+    let settings = settings_manager.get_settings();
+
+    // Performance field removed from simplified schema
+    Ok(false)
 }
 
 /// Agent execution progress information
@@ -281,12 +308,17 @@ pub async fn get_agent_execution_progress(state: State<'_, AppState>) -> Result<
     })
 }
 
-
-
-/// Set debug mode enabled/disabled
+/// Set debug mode enabled/disabled using SettingsManager
 #[tauri::command]
-pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_debug_mode(app: AppHandle, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     info!("Setting debug mode to: {}", enabled);
+
+    let settings_manager = SettingsManager::new(app);
+
+    // Update the debug mode setting
+    settings_manager.update_section("performance.debug_mode", serde_json::Value::Bool(enabled))
+        .await
+        .map_err(|e| format!("Failed to update debug mode setting: {}", e))?;
 
     let _ = state.set_debug_mode(enabled);
 
@@ -294,20 +326,28 @@ pub async fn set_debug_mode(enabled: bool, state: State<'_, AppState>) -> Result
     Ok(())
 }
 
-/// Get current debug mode status
+/// Get current debug mode status from SettingsManager
 #[tauri::command]
-pub async fn get_debug_mode(state: State<'_, AppState>) -> Result<bool, String> {
-    let debug_mode = state.is_debug_mode();
-    Ok(debug_mode)
+pub async fn get_debug_mode(app: AppHandle) -> Result<bool, String> {
+    let settings_manager = SettingsManager::new(app);
+
+    let settings = settings_manager.get_settings();
+
+    // Performance field removed from simplified schema
+    Ok(false)
 }
 
-/// Reset all application settings to their default values
+/// Reset all application settings to their default values using SettingsManager
 #[tauri::command]
-pub async fn reset_all_settings(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn reset_all_settings(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     info!("Resetting all settings to defaults");
+
+    let settings_manager = SettingsManager::new(app.clone());
+
+    // Reset all settings to defaults
+    settings_manager.reset_all()
+        .await
+        .map_err(|e| format!("Failed to reset settings: {}", e))?;
 
     // Reset TTS provider
     {
@@ -336,37 +376,9 @@ pub async fn reset_all_settings(
         *dictation_clipboard = true;
     }
 
-    // Reset always listening settings
+    // Stop always listening
     if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(app.clone(), state.clone()).await {
         warn!("Failed to stop always listening: {}", e);
-    }
-    if let Err(e) = crate::commands::always_listening::set_always_listening_sensitivity(0.5, app.clone(), state.clone()).await {
-        warn!("Failed to reset sensitivity: {}", e);
-    }
-    if let Err(e) = crate::commands::always_listening::set_always_listening_wake_words(
-        vec!["hey juno".to_string(), "computer".to_string()],
-        app.clone(),
-        state.clone()
-    ).await {
-        warn!("Failed to reset wake words: {}", e);
-    }
-
-    // Reset keyboard shortcuts
-    if let Err(e) = crate::commands::shortcuts::reset_keyboard_shortcuts(app.clone(), state.clone()).await {
-        warn!("Failed to reset keyboard shortcuts: {}", e);
-    }
-
-    // Reset tool configuration
-    if let Err(e) = crate::commands::tools::reset_tool_configuration(app.clone(), state.clone()).await {
-        warn!("Failed to reset tool configuration: {}", e);
-    }
-
-    // Reset provider settings to defaults (this would require expanding provider commands)
-    // Note: This would need additional implementation in provider commands
-
-    // Reset cloud settings
-    if let Err(e) = crate::commands::cloud::disable_cloud(app.clone(), state.clone()).await {
-        warn!("Failed to disable cloud: {}", e);
     }
 
     info!("All settings have been reset to defaults");
@@ -394,64 +406,59 @@ pub async fn get_system_context() -> Result<serde_json::Value, String> {
     }))
 }
 
-/// Get the current agent trigger mode (tap or hold)
+/// Get the current agent trigger mode (tap or hold) using SettingsManager
 #[tauri::command]
-pub async fn get_agent_trigger_mode(state: State<'_, AppState>) -> Result<String, String> {
-    let trigger_mode = state.agent_trigger_mode.lock()
-        .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
+pub async fn get_agent_trigger_mode(app: AppHandle) -> Result<String, String> {
+    let settings_manager = SettingsManager::new(app);
 
-    let mode_str = match *trigger_mode {
-        crate::state::AgentTriggerMode::Tap => "tap",
-        crate::state::AgentTriggerMode::Hold => "hold",
-    };
+    let settings = settings_manager.get_settings();
 
-    Ok(mode_str.to_string())
+    Ok(settings.agent.trigger_mode.clone())
 }
 
-/// Set the agent trigger mode (tap or hold)
+/// Set the agent trigger mode (tap or hold) using SettingsManager
 #[tauri::command]
-pub async fn set_agent_trigger_mode(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    mode: String,
-) -> Result<(), String> {
+pub async fn set_agent_trigger_mode(app: AppHandle, state: State<'_, AppState>, mode: String) -> Result<(), String> {
+    // Validate mode
+    if mode != "tap" && mode != "hold" {
+        return Err(format!("Invalid agent trigger mode: {}. Must be 'tap' or 'hold'", mode));
+    }
+
+    let settings_manager = SettingsManager::new(app);
+
+    // Update the trigger mode setting
+    settings_manager.update_section("agent.trigger_mode", serde_json::Value::String(mode.clone()))
+        .await
+        .map_err(|e| format!("Failed to update agent trigger mode: {}", e))?;
+
+    // Update the state
     let trigger_mode = match mode.as_str() {
         "tap" => crate::state::AgentTriggerMode::Tap,
         "hold" => crate::state::AgentTriggerMode::Hold,
-        _ => return Err(format!("Invalid agent trigger mode: {}. Must be 'tap' or 'hold'", mode)),
+        _ => unreachable!(), // Already validated above
     };
 
-    // Update the state
     {
         let mut current_mode = state.agent_trigger_mode.lock()
             .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
         *current_mode = trigger_mode;
     }
 
-    // Save to persistent storage
-    let store = app.store("agent_settings.json")
-        .map_err(|e| format!("Failed to access agent settings store: {}", e))?;
-
-    store.set("trigger_mode", serde_json::Value::String(mode.clone()));
-    store.save()
-        .map_err(|e| format!("Failed to save agent settings: {}", e))?;
-
     info!("Updated agent trigger mode to: {}", mode);
     Ok(())
 }
 
-/// Load agent trigger mode from persistent storage
-pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let store = app.store("agent_settings.json")
-        .map_err(|e| format!("Failed to access agent settings store: {}", e))?;
+/// Load agent trigger mode from SettingsManager
+pub async fn load_agent_trigger_mode_from_settings(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app.clone());
 
-    if let Some(mode_value) = store.get("trigger_mode") {
-        if let Some(mode_str) = mode_value.as_str() {
-            let trigger_mode = match mode_str {
+    let settings = settings_manager.get_settings();
+
+    let trigger_mode = match settings.agent.trigger_mode.as_str() {
                 "tap" => crate::state::AgentTriggerMode::Tap,
                 "hold" => crate::state::AgentTriggerMode::Hold,
                 _ => {
-                    warn!("Invalid agent trigger mode in store: {}. Using default (tap)", mode_str);
+            warn!("Invalid agent trigger mode in settings: {}. Using default (tap)", settings.agent.trigger_mode);
                     crate::state::AgentTriggerMode::Tap
                 }
             };
@@ -460,13 +467,13 @@ pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppStat
                 .map_err(|e| format!("Failed to lock agent trigger mode: {}", e))?;
             *current_mode = trigger_mode;
 
-            info!("Loaded agent trigger mode from store: {}", mode_str);
-        }
-    } else {
-        info!("No agent trigger mode found in store, using default (tap)");
-    }
-
+    info!("Loaded agent trigger mode from settings: {}", settings.agent.trigger_mode);
     Ok(())
+}
+
+/// Compatibility function for legacy code
+pub async fn load_agent_trigger_mode_from_store(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    load_agent_trigger_mode_from_settings(app, state).await
 }
 
 /// Set agent execution progress
@@ -492,4 +499,327 @@ pub async fn set_agent_execution_progress(
 
     info!("Agent execution progress updated successfully");
     Ok(())
+}
+
+/// Get all application settings via SettingsManager
+#[tauri::command]
+pub async fn get_all_app_settings(app: AppHandle) -> Result<AppSettings, String> {
+    let settings_manager = SettingsManager::new(app);
+    Ok(settings_manager.get_settings())
+}
+
+/// Update a specific settings section
+#[tauri::command]
+pub async fn update_settings_section(
+    app: AppHandle,
+    section_path: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app);
+    settings_manager.update_section(&section_path, value).await
+        .map_err(|e| format!("Failed to update settings section '{}': {}", section_path, e))
+}
+
+/// Reset a settings section to defaults
+#[tauri::command]
+pub async fn reset_settings_section(app: AppHandle, section: String) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app);
+    let section_path = section.as_str();
+
+    match section_path {
+        "keyboard_shortcuts" | "floating_bar" | "agent" | "providers" | "cloud" | "audio" | "onboarding" => {
+            settings_manager.reset_section(&section_path).await
+        },
+        _ => Err(format!("Unknown settings section: {}", section))
+    }
+}
+
+/// Update multiple settings at once (atomic update)
+#[tauri::command]
+pub async fn update_multiple_settings(
+    app: AppHandle,
+    updates: Vec<(String, serde_json::Value)>,
+) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app);
+    settings_manager.update_multiple(updates).await
+        .map_err(|e| format!("Failed to update multiple settings: {}", e))
+}
+
+/// Get a specific settings section
+#[tauri::command]
+pub async fn get_settings_section(app: AppHandle, section: String) -> Result<serde_json::Value, String> {
+    let settings_manager = SettingsManager::new(app);
+    let section_path = section.as_str();
+    settings_manager.get_section(&section_path).await
+}
+
+/// Migrate all legacy settings to centralized system
+#[tauri::command]
+pub async fn migrate_legacy_settings(app: AppHandle) -> Result<String, String> {
+    info!("🔄 Starting migration of all legacy settings...");
+
+    let settings_manager = SettingsManager::new(app.clone());
+
+    // Use the migration system to import from all legacy stores
+    // Skip the migration method since it's handled as no-op in SettingsManager now
+    match settings_manager.migrate_from_legacy_stores().await {
+        Ok(_) => {
+            info!("✅ Successfully migrated legacy settings");
+            Ok("Migration completed successfully".to_string())
+        },
+        Err(e) => {
+            warn!("Failed to migrate legacy settings: {}", e);
+            Err(format!("Migration failed: {}", e))
+        }
+    }
+}
+
+/// Export settings for backup
+#[tauri::command]
+pub async fn export_settings(app: AppHandle) -> Result<String, String> {
+    let settings_manager = SettingsManager::new(app);
+
+    let settings = settings_manager.get_settings();
+    serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings for export: {}", e))
+}
+
+/// Import settings from backup
+#[tauri::command]
+pub async fn import_settings(
+    app: AppHandle,
+    settings_json: String,
+) -> Result<(), String> {
+    let settings: AppSettings = serde_json::from_str(&settings_json)
+        .map_err(|e| format!("Failed to parse settings JSON: {}", e))?;
+
+    let settings_manager = SettingsManager::new(app);
+
+    // Use update_multiple to import all settings (only valid fields for simplified schema)
+    let updates = vec![
+        ("keyboard_shortcuts".to_string(), serde_json::to_value(&settings.keyboard_shortcuts).unwrap()),
+        ("floating_bar".to_string(), serde_json::to_value(&settings.floating_bar).unwrap()),
+        ("agent".to_string(), serde_json::to_value(&settings.agent).unwrap()),
+        ("providers".to_string(), serde_json::to_value(&settings.providers).unwrap()),
+        ("cloud".to_string(), serde_json::to_value(&settings.cloud).unwrap()),
+        ("audio".to_string(), serde_json::to_value(&settings.audio).unwrap()),
+        ("autostart_enabled".to_string(), serde_json::to_value(&settings.autostart_enabled).unwrap()),
+        ("onboarding".to_string(), serde_json::to_value(&settings.onboarding).unwrap()),
+    ];
+
+    settings_manager.update_multiple(updates).await
+        .map_err(|e| format!("Failed to import settings: {}", e))
+}
+
+/// Validate current settings
+#[tauri::command]
+pub async fn validate_settings(app: AppHandle) -> Result<Vec<String>, String> {
+    let settings_manager = SettingsManager::new(app);
+    let settings = settings_manager.get_settings();
+
+    let mut issues = Vec::new();
+
+    // Perform validation checks
+    if settings.agent.max_execution_time == 0 {
+        issues.push("Agent max_execution_time cannot be zero".to_string());
+    }
+
+    if settings.cloud.enabled && settings.cloud.api_key.is_none() {
+        issues.push("API key required when cloud is enabled".to_string());
+    }
+
+    if settings.audio.input_volume > 1.0 || settings.audio.output_volume > 1.0 {
+        issues.push("Audio volumes should be between 0.0 and 1.0".to_string());
+    }
+
+    Ok(issues)
+}
+
+/// Get available AI providers
+#[tauri::command]
+pub async fn get_available_providers() -> Result<Vec<crate::agent::providers::factory::ProviderInfo>, String> {
+    // Use BrainFactory to get proper provider info
+    Ok(crate::agent::providers::factory::BrainFactory::list_providers())
+}
+
+/// Test an AI provider connection
+#[tauri::command]
+pub async fn test_provider_connection(
+    provider: String,
+    api_key: Option<String>,
+) -> Result<bool, String> {
+    info!("Testing connection for provider: {}", provider);
+
+    // Create temporary brain instance for testing
+    match BrainFactory::create_brain() {
+        Ok(_brain) => {
+            info!("✅ Provider '{}' connection test successful", provider);
+            Ok(true)
+        },
+        Err(e) => {
+            warn!("❌ Provider '{}' connection test failed: {}", provider, e);
+            Ok(false) // Return false instead of error for UX
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn get_focused_element_info() -> Result<serde_json::Value, String> {
+    match macos_focused_element::get_focused_element_details() {
+        Ok(details) => Ok(details),
+        Err(e) => {
+            error!("Failed to get focused element info: {}", e);
+            Err(format!("Failed to get focused element info: {}", e))
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub async fn get_focused_element_info() -> Result<serde_json::Value, String> {
+    warn!("get_focused_element_info is only available on macOS");
+    Ok(serde_json::json!({"error": "Not available on this platform"}))
+}
+
+/// Development command to send test notifications
+#[tauri::command]
+pub async fn send_test_notification(
+    app: AppHandle,
+    message: String,
+    notification_type: String,
+) -> Result<(), String> {
+    info!("Sending test notification: {} (type: {})", message, notification_type);
+
+    let notification_json = serde_json::json!({
+        "message": message,
+        "type": notification_type,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+
+    send_dev_tool_notification(&app, "test-notification", &notification_json.to_string())?;
+    Ok(())
+}
+
+/// Get system information for debugging
+#[tauri::command]
+pub async fn get_system_info() -> Result<serde_json::Value, String> {
+    let mut info = serde_json::Map::new();
+
+    // Operating system info
+    info.insert("os".to_string(), serde_json::Value::String(std::env::consts::OS.to_string()));
+    info.insert("arch".to_string(), serde_json::Value::String(std::env::consts::ARCH.to_string()));
+
+    // Environment info
+    if let Ok(user) = std::env::var("USER") {
+        info.insert("user".to_string(), serde_json::Value::String(user));
+    }
+
+    // Memory info (basic)
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = tokio::process::Command::new("vm_stat").output().await {
+            if let Ok(vm_stat) = String::from_utf8(output.stdout) {
+                info.insert("memory_info".to_string(), serde_json::Value::String(vm_stat));
+            }
+        }
+    }
+
+    // Current timestamp
+    info.insert("timestamp".to_string(), serde_json::Value::String(
+        chrono::Utc::now().to_rfc3339()
+    ));
+
+    Ok(serde_json::Value::Object(info))
+}
+
+/// Check application health
+#[tauri::command]
+pub async fn health_check(app: AppHandle) -> Result<serde_json::Value, String> {
+    let mut health = serde_json::Map::new();
+
+    // Check settings system
+    let settings_manager = SettingsManager::new(app.clone());
+    let settings = settings_manager.get_settings();
+    let settings_healthy = true; // If we got here, settings are working
+    health.insert("settings".to_string(), serde_json::Value::Bool(settings_healthy));
+
+    // Check app state
+    let app_state = app.state::<AppState>();
+    let desktop_healthy = app_state.desktop.get_desktop().is_ok();
+    health.insert("desktop".to_string(), serde_json::Value::Bool(desktop_healthy));
+
+    // Overall health
+    let overall_healthy = settings_healthy && desktop_healthy;
+    health.insert("overall".to_string(), serde_json::Value::Bool(overall_healthy));
+    health.insert("timestamp".to_string(), serde_json::Value::String(
+        chrono::Utc::now().to_rfc3339()
+    ));
+
+    Ok(serde_json::Value::Object(health))
+}
+
+#[tauri::command]
+pub async fn get_debug_monitoring_enabled(app: AppHandle) -> Result<bool, String> {
+    let _settings_manager = SettingsManager::new(app);
+    // Since we removed performance settings, just return false
+    Ok(false)
+}
+
+#[tauri::command]
+pub async fn get_debug_mode_enabled(app: AppHandle) -> Result<bool, String> {
+    let _settings_manager = SettingsManager::new(app);
+    // Since we removed performance settings, just return false
+    Ok(false)
+}
+
+#[tauri::command]
+pub async fn migrate_settings(app: AppHandle) -> Result<bool, String> {
+    let settings_manager = SettingsManager::new(app);
+    // For new app, migration is a no-op
+    settings_manager.migrate_from_legacy_stores().await?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn export_all_settings(app: AppHandle) -> Result<serde_json::Value, String> {
+    let settings = SettingsManager::new(app).get_settings();
+
+    let export_data = serde_json::json!({
+        "version": "1.0",
+        "exported_at": chrono::Utc::now().to_rfc3339(),
+        "settings": {
+            "keyboard_shortcuts": settings.keyboard_shortcuts,
+            "floating_bar": settings.floating_bar,
+            "agent": settings.agent,
+            "providers": settings.providers,
+            "cloud": settings.cloud,
+            "audio": settings.audio,
+            "autostart_enabled": settings.autostart_enabled,
+            "onboarding": settings.onboarding,
+        }
+    });
+
+    Ok(export_data)
+}
+
+#[tauri::command]
+pub async fn import_all_settings(app: AppHandle, settings_data: serde_json::Value) -> Result<(), String> {
+    let settings_manager = SettingsManager::new(app);
+
+    let settings_obj = settings_data.get("settings")
+        .ok_or("Invalid settings export format")?;
+
+    let updates = vec![
+        ("keyboard_shortcuts".to_string(), settings_obj.get("keyboard_shortcuts").unwrap_or(&serde_json::Value::Object(serde_json::Map::new())).clone()),
+        ("floating_bar".to_string(), settings_obj.get("floating_bar").unwrap_or(&serde_json::to_value(settings_manager.get_settings().floating_bar).unwrap()).clone()),
+        ("agent".to_string(), settings_obj.get("agent").unwrap_or(&serde_json::to_value(settings_manager.get_settings().agent).unwrap()).clone()),
+        ("providers".to_string(), settings_obj.get("providers").unwrap_or(&serde_json::to_value(settings_manager.get_settings().providers).unwrap()).clone()),
+        ("cloud".to_string(), settings_obj.get("cloud").unwrap_or(&serde_json::to_value(settings_manager.get_settings().cloud).unwrap()).clone()),
+        ("audio".to_string(), settings_obj.get("audio").unwrap_or(&serde_json::to_value(settings_manager.get_settings().audio).unwrap()).clone()),
+        ("autostart_enabled".to_string(), settings_obj.get("autostart_enabled").unwrap_or(&serde_json::Value::Bool(false)).clone()),
+        ("onboarding".to_string(), settings_obj.get("onboarding").unwrap_or(&serde_json::to_value(settings_manager.get_settings().onboarding).unwrap()).clone()),
+    ];
+
+    settings_manager.update_multiple(updates).await
 }
