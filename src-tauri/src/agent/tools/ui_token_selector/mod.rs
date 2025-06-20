@@ -12,7 +12,7 @@
 //! Used by: Anthropic Computer Use tools for optimized screenshot processing
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn, error};
 
@@ -236,10 +236,13 @@ impl UITokenSelector {
         };
 
         // Step 6: Update performance metrics
-        self.performance_tracker.record_processing(
+        self.performance_tracker.record_operation(
             reduction_stats.original_count,
             optimized_tokens.len() as u32,
             total_processing_time,
+            display_info.as_ref().map(|d| d.id).unwrap_or(0),
+            display_info.as_ref().map(|d| (d.bounds.width as u32, d.bounds.height as u32)).unwrap_or((width, height)),
+            0.0, // TODO: Implement actual memory tracking
         ).map_err(|e| TokenSelectionError::PerformanceTracking(e.to_string()))?;
 
         info!(
@@ -254,13 +257,8 @@ impl UITokenSelector {
     }
 
     /// Gets current performance metrics
-    pub fn get_performance_metrics(&self) -> PerformanceMetrics {
+    pub fn get_performance_metrics(&self) -> Result<PerformanceMetrics, String> {
         self.performance_tracker.get_metrics()
-    }
-
-    /// Resets performance metrics (useful for benchmarking)
-    pub fn reset_performance_metrics(&self) {
-        self.performance_tracker.reset();
     }
 
     /// Updates configuration (useful for runtime optimization)

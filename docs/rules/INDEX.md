@@ -11,7 +11,7 @@
 - **[System Architecture Guide](SYSTEM_ARCHITECTURE_GUIDE.md)** - Technical architecture and design patterns  
 - **[Comprehensive Security Guide](COMPREHENSIVE_SECURITY_GUIDE.md)** - Enterprise security framework and permissions
 - **[Comprehensive Voice Guide](COMPREHENSIVE_VOICE_GUIDE.md)** - Three-mode voice system with debugging
-- **[Research Implementation Guide](RESEARCH_IMPLEMENTATION_GUIDE.md)** ✅ **NEW** - Research-backed improvements and methodology
+- **[Research Implementation Guide](RESEARCH_IMPLEMENTATION_GUIDE.md)** ✅ **UPDATED**
 
 ### Overview Documents
 
@@ -79,27 +79,40 @@ Juno AI Computer Use Agent is a **production-ready** macOS desktop application t
 - Audio processing optimization and performance metrics
 - Configuration options and testing procedures
 
-#### 🔬 [Research Implementation Guide](RESEARCH_IMPLEMENTATION_GUIDE.md) ✅ **NEW**
+#### 🔬 [Research Implementation Guide](RESEARCH_IMPLEMENTATION_GUIDE.md) ✅ **UPDATED**
 
 **Purpose**: Research-backed improvements and systematic implementation methodology  
 **Contents**:
 
 - ✅ Enhanced Tool Calling Reliability (COMPLETED) - 67% improvement achieved
-- 📋 UI-Guided Visual Token Selection (READY) - 33% cost reduction with multi-monitor support
+- 🚧 UI-Guided Visual Token Selection (WEEK 3 IN PROGRESS) - Weeks 1-2 complete, compilation fixes needed
 - Research citation standards and documentation requirements
 - Performance validation and benchmarking methodology
 - Implementation phases and success metrics framework
 
-#### 🎨 [UI-Guided Visual Token Selection Plan](../UI_GUIDED_VISUAL_TOKEN_SELECTION_PLAN.md) 📋 **NEW**
+#### 🎨 [UI-Guided Visual Token Selection Plan](../UI_GUIDED_VISUAL_TOKEN_SELECTION_PLAN.md) 🚧 **WEEK 3 IN PROGRESS**
 
 **Purpose**: Priority 2 implementation strategy with comprehensive multi-monitor support  
 **Contents**:
 
-- ShowUI paper research analysis and performance projections
-- Multi-monitor integration strategy leveraging existing Juno infrastructure
-- 4-week implementation roadmap with specific deliverables
-- Expected performance improvements across display configurations
-- Complete technical architecture and testing strategy
+- ShowUI Paper research foundation (33% computational cost reduction)
+- ✅ Week 1: Core Token Selection System (COMPLETED)
+- ✅ Week 2: Integration & Advanced Features (COMPLETED)  
+- 🚧 Week 3: Multi-Monitor Optimization & Production Readiness (IN PROGRESS)
+- 📋 Week 4: Performance Validation & Documentation (PLANNED)
+- Modular architecture with `ui_token_selector` module
+- Multi-monitor integration with existing Juno display infrastructure
+- Performance benchmarking and validation framework
+
+#### 📊 [Implementation Checkpoints](../IMPLEMENTATION_CHECKPOINT_WEEK1.md) ✅ **COMPLETED**
+
+**Purpose**: Weekly progress tracking and validation  
+**Contents**:
+
+- ✅ [Week 1 Checkpoint](../IMPLEMENTATION_CHECKPOINT_WEEK1.md) - Core Token Selection System complete
+- ✅ [Week 2 Checkpoint](../IMPLEMENTATION_CHECKPOINT_WEEK2.md) - Integration & Advanced Features complete
+- 🚧 Week 3 - Multi-Monitor Optimization in progress
+- 📋 Week 4 - Performance Validation & Production planned
 
 ## 🔧 Development Quick Start
 
@@ -109,7 +122,7 @@ Juno AI Computer Use Agent is a **production-ready** macOS desktop application t
 2. **System Architecture Guide** - Learn technical implementation patterns
 3. **Security Guide** - Understand security requirements and patterns
 4. **Voice Guide** - Master voice system debugging and configuration
-5. **Research Implementation Guide** ✅ **NEW** - Learn research-backed improvement methodology
+5. **Research Implementation Guide** ✅ **UPDATED** - Learn research-backed improvement methodology
 
 ### Key Development Patterns
 
