@@ -339,6 +339,10 @@ export function PermissionsManager({
   };
 
   const getPermissionPriorityIcon = (permission: PermissionStatus) => {
+    if (!permission?.permissionType) {
+      return <Shield className="h-5 w-5 text-gray-600" />;
+    }
+
     switch (permission.permissionType) {
       case "accessibility":
         return <Lock className="h-5 w-5 text-blue-600" />;
@@ -371,6 +375,12 @@ export function PermissionsManager({
 
   // Render permission card based on variant
   const renderPermissionCard = (permission: PermissionStatus) => {
+    // Safety check for permission type
+    if (!permission || !permission.permissionType) {
+      console.warn("Invalid permission object:", permission);
+      return null;
+    }
+
     const isRequired = permission.required;
     const onRequest = getPermissionRequestFunction(permission.permissionType);
     const onRequestEnhanced =
@@ -388,8 +398,9 @@ export function PermissionsManager({
             {getPermissionIcon(permission)}
             <span className="text-sm">
               {permission.permissionType
-                .replace("_", " ")
-                .replace(/\b\w/g, (l) => l.toUpperCase())}
+                ?.replace("_", " ")
+                ?.replace(/\b\w/g, (l) => l.toUpperCase()) ||
+                "Unknown Permission"}
             </span>
           </div>
           {getPermissionBadge(permission)}
@@ -416,8 +427,9 @@ export function PermissionsManager({
                 <div className="flex items-center space-x-2 mb-1">
                   <CardTitle className="text-lg">
                     {permission.permissionType
-                      .replace("_", " ")
-                      .replace(/\b\w/g, (l) => l.toUpperCase())}{" "}
+                      ?.replace("_", " ")
+                      ?.replace(/\b\w/g, (l) => l.toUpperCase()) ||
+                      "Unknown"}{" "}
                     Access
                   </CardTitle>
                   {getPermissionBadge(permission)}
@@ -560,8 +572,8 @@ export function PermissionsManager({
               <CheckCircle className="h-4 w-4 text-green-600" />
               <p className="text-sm text-green-800 font-medium">
                 Permission granted -{" "}
-                {permission.permissionType.replace("_", " ")} access is working
-                properly
+                {permission.permissionType?.replace("_", " ") || "Unknown"}{" "}
+                access is working properly
               </p>
             </div>
           )}
@@ -629,12 +641,12 @@ export function PermissionsManager({
   const requiredPermissions = [
     permissions.accessibility,
     permissions.screenRecording,
-  ].filter((p) => p.required);
+  ].filter((p) => p && p.permissionType && p.required);
 
   const optionalPermissions = [
     permissions.microphone,
     permissions.inputMonitoring,
-  ].filter((p) => !p.required);
+  ].filter((p) => p && p.permissionType && !p.required);
 
   // Compact variant for settings
   if (variant === "compact") {
@@ -751,7 +763,11 @@ export function PermissionsManager({
             with your desktop.
           </p>
           <div className="space-y-3">
-            {requiredPermissions.map(renderPermissionCard)}
+            {requiredPermissions.map((permission, index) => (
+              <div key={permission.permissionType || index}>
+                {renderPermissionCard(permission)}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -779,7 +795,11 @@ export function PermissionsManager({
               enable them later.
             </p>
             <div className="space-y-3">
-              {optionalPermissions.map(renderPermissionCard)}
+              {optionalPermissions.map((permission, index) => (
+                <div key={permission.permissionType || index}>
+                  {renderPermissionCard(permission)}
+                </div>
+              ))}
             </div>
           </div>
         </>
