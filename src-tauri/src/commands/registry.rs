@@ -149,6 +149,7 @@ macro_rules! generate_invoke_handler {
 
             // Permissions Commands - Native APIs Only (No Password Prompts)
             check_permissions_status_native,
+            get_permissions_state,
             request_accessibility_permission_native,
             request_microphone_permission_native,
             request_screen_recording_permission_native,
