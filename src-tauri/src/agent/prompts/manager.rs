@@ -2,7 +2,7 @@ use super::types::{PromptConfig, PromptContext, PromptTemplate, PromptType};
 use super::templates::DefaultPrompts;
 use crate::agent::structs::AgentError;
 use std::collections::HashMap;
-use std::path::PathBuf;
+
 use tracing::{info, warn};
 
 // Add centralized settings support
@@ -339,12 +339,7 @@ impl PromptManager {
         Ok(result)
     }
 
-    /// Get configuration file path
-    fn get_config_path() -> Result<PathBuf, AgentError> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| AgentError::ConfigurationError("Unable to find home directory".to_string()))?;
-        Ok(home.join(".juno").join("prompts.json"))
-    }
+
 }
 
 impl Default for PromptManager {
