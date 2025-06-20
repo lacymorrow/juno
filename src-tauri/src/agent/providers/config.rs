@@ -62,7 +62,7 @@ impl Default for ProviderConfig {
                 CentralizedProviderConfig {
                     id: "anthropic".to_string(),
                     api_key: None,
-                    model: Some("claude-3-7-sonnet-20250219".to_string()),
+                    model: Some("claude-sonnet-4-20250514".to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,

@@ -231,7 +231,7 @@ impl RGBConnectedGraphAnalyzer {
         y: u32,
         width: u32,
         height: u32,
-    ) -> Result<RGBAColor, TokenSelectorError> {
+    ) -> Result<RGBAColor, TokenSelectionError> {
         let mut r_sum = 0u64;
         let mut g_sum = 0u64;
         let mut b_sum = 0u64;
@@ -407,7 +407,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
         display_info: &DisplayInfo,
-    ) -> Result<RGBAnalysisResult, TokenSelectorError> {
+    ) -> Result<RGBAnalysisResult, TokenSelectionError> {
         let start_time = std::time::Instant::now();
 
         // Determine optimal patch size based on image characteristics
@@ -423,7 +423,7 @@ impl RGBConnectedGraphAnalyzer {
         );
 
         // Create patches with adaptive sizing
-        let patches = self.create_adaptive_patches(image_buffer, adaptive_patch_size)?;
+        let patches = self.create_adaptive_patches(image_buffer, adaptive_patch_size.clone())?;
 
         // Perform advanced color similarity analysis
         let similarity_graph = self.build_advanced_similarity_graph(&patches, display_info).await?;
@@ -437,7 +437,7 @@ impl RGBConnectedGraphAnalyzer {
         let processing_time = start_time.elapsed();
 
         Ok(RGBAnalysisResult {
-            patches,
+            patches: patches.clone(),
             connected_components,
             importance_scores,
             processing_time_ms: processing_time.as_millis() as u64,
@@ -452,7 +452,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
         display_info: &DisplayInfo,
-    ) -> Result<PatchSize, TokenSelectorError> {
+    ) -> Result<PatchSize, TokenSelectionError> {
         let width = image_buffer.width();
         let height = image_buffer.height();
 
@@ -498,7 +498,7 @@ impl RGBConnectedGraphAnalyzer {
     fn calculate_image_complexity(
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ) -> Result<f32, TokenSelectorError> {
+    ) -> Result<f32, TokenSelectionError> {
         let width = image_buffer.width();
         let height = image_buffer.height();
 
@@ -556,7 +556,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
         patch_size: PatchSize,
-    ) -> Result<Vec<ImagePatch>, TokenSelectorError> {
+    ) -> Result<Vec<ImagePatch>, TokenSelectionError> {
         let width = image_buffer.width();
         let height = image_buffer.height();
         let mut patches = Vec::new();
@@ -608,7 +608,7 @@ impl RGBConnectedGraphAnalyzer {
         y: u32,
         width: u32,
         height: u32,
-    ) -> Result<PatchType, TokenSelectorError> {
+    ) -> Result<PatchType, TokenSelectionError> {
         // Analyze color uniformity
         let mut color_variance = 0.0;
         let mut pixel_count = 0;
@@ -640,21 +640,21 @@ impl RGBConnectedGraphAnalyzer {
         if color_std_dev < 10.0 {
             // Very uniform color - likely background
             if avg_color.r > 240 && avg_color.g > 240 && avg_color.b > 240 {
-                PatchType::Background
+                Ok(PatchType::Background)
             } else if avg_color.r < 50 && avg_color.g < 50 && avg_color.b < 50 {
-                PatchType::Text
+                Ok(PatchType::Text)
             } else {
-                PatchType::Background
+                Ok(PatchType::Background)
             }
         } else if color_std_dev < 30.0 {
             // Moderate variance - could be UI element
-            PatchType::UIElement
+            Ok(PatchType::UIElement)
         } else {
             // High variance - likely interactive element or content
             if self.has_high_contrast_edges(image_buffer, x, y, width, height)? {
-                PatchType::Interactive
+                Ok(PatchType::Interactive)
             } else {
-                PatchType::Content
+                Ok(PatchType::Content)
             }
         }
     }
@@ -667,7 +667,7 @@ impl RGBConnectedGraphAnalyzer {
         y: u32,
         width: u32,
         height: u32,
-    ) -> Result<bool, TokenSelectorError> {
+    ) -> Result<bool, TokenSelectionError> {
         let mut edge_count = 0;
         let mut total_checks = 0;
 
@@ -702,7 +702,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         patches: &[ImagePatch],
         display_info: &DisplayInfo,
-    ) -> Result<SimilarityGraph, TokenSelectorError> {
+    ) -> Result<SimilarityGraph, TokenSelectionError> {
         let mut graph = SimilarityGraph::new(patches.len());
 
         // Calculate similarities in parallel chunks
@@ -711,7 +711,7 @@ impl RGBConnectedGraphAnalyzer {
 
         for chunk_start in (0..patches.len()).step_by(chunk_size) {
             let chunk_end = (chunk_start + chunk_size).min(patches.len());
-            let chunk_patches = &patches[chunk_start..chunk_end];
+            let chunk_patches = patches[chunk_start..chunk_end].to_vec();
             let all_patches = patches.to_vec();
             let display_info_clone = display_info.clone();
             let config = self.config.clone();
@@ -833,7 +833,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         graph: &SimilarityGraph,
         patches: &[ImagePatch],
-    ) -> Result<Vec<ConnectedComponent>, TokenSelectorError> {
+    ) -> Result<Vec<ConnectedComponent>, TokenSelectionError> {
         let mut visited = vec![false; patches.len()];
         let mut components = Vec::new();
 
@@ -890,7 +890,7 @@ impl RGBConnectedGraphAnalyzer {
         patches: &[ImagePatch],
         components: &[ConnectedComponent],
         display_info: &DisplayInfo,
-    ) -> Result<Vec<f32>, TokenSelectorError> {
+    ) -> Result<Vec<f32>, TokenSelectionError> {
         let mut importance_scores = vec![0.0; patches.len()];
 
         for component in components {
@@ -922,7 +922,7 @@ impl RGBConnectedGraphAnalyzer {
         component: &ConnectedComponent,
         patches: &[ImagePatch],
         display_info: &DisplayInfo,
-    ) -> Result<f32, TokenSelectorError> {
+    ) -> Result<f32, TokenSelectionError> {
         let mut total_importance = 0.0;
         let mut total_area = 0;
 
