@@ -482,6 +482,11 @@ impl AppState {
             })
     }
 
+    /// Check if agent is currently active (alias for is_agent_mode_active)
+    pub fn is_agent_active(&self) -> bool {
+        self.is_agent_mode_active()
+    }
+
     // Method to get or initialize the Playwright driver
     async fn get_or_init_playwright_driver(&self) -> Result<Arc<Playwright>, String> {
         let mut driver_guard = self.playwright_driver.lock().await;
