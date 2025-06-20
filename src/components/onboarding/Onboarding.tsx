@@ -433,7 +433,9 @@ export default function OnboardingFlow({
   const [currentPermission, setCurrentPermission] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [actualPermissionsGranted, setActualPermissionsGranted] = useState(
-    permissionsAlreadyGranted
+    // Always start with false to ensure we re-check permissions on mount
+    // This is critical for the "Restart onboarding" functionality
+    false
   );
 
   console.log(
@@ -444,7 +446,9 @@ export default function OnboardingFlow({
     "shortcutPressed:",
     shortcutPressed,
     "actualPermissionsGranted:",
-    actualPermissionsGranted
+    actualPermissionsGranted,
+    "permissionsAlreadyGranted prop:",
+    permissionsAlreadyGranted
   );
 
   // Function to check current permissions status
@@ -469,6 +473,17 @@ export default function OnboardingFlow({
   useEffect(() => {
     const loadInitialData = async () => {
       try {
+        console.log("OnboardingFlow: Loading initial data...");
+
+        // CRITICAL: Always re-check permissions when component mounts
+        // This ensures "Restart onboarding" properly resets the permissions flow
+        console.log("OnboardingFlow: Re-checking permissions status...");
+        const permissionsState = await checkPermissionsStatus();
+        console.log(
+          "OnboardingFlow: Fresh permissions check result:",
+          permissionsState
+        );
+
         // Load onboarding info and shortcuts
         const onboardingInfo = await invoke("get_onboarding_info");
         if (
@@ -494,9 +509,6 @@ export default function OnboardingFlow({
         } catch (error) {
           console.warn("Failed to load keyboard shortcuts:", error);
         }
-
-        // Check current permissions status
-        await checkPermissionsStatus();
       } catch (error) {
         console.error("Failed to load onboarding data:", error);
       }

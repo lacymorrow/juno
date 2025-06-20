@@ -85,6 +85,22 @@ fn convert_native_to_frontend_status(native: NativePermissionStatus) -> Permissi
     }
 }
 
+/// Get cached permissions state (for onboarding flow) - returns reset state if available
+#[tauri::command]
+pub async fn get_permissions_state(app: AppHandle) -> Result<PermissionsState, String> {
+    let app_state = app.state::<crate::state::AppState>();
+
+    // Check if we have cached permissions state (from reset_onboarding)
+    if let Some(cached_state) = app_state.get_permissions_state().await {
+        info!("Returning cached permissions state: all_granted={}", cached_state.all_granted);
+        return Ok(cached_state);
+    }
+
+    // Fallback to checking actual system permissions
+    info!("No cached permissions state, checking system permissions");
+    check_permissions_status_native(app).await
+}
+
 /// Request accessibility permissions using native APIs - NO password prompts
 #[tauri::command]
 pub async fn request_accessibility_permission_native() -> Result<bool, String> {
