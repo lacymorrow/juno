@@ -9,9 +9,34 @@ import {
   Monitor,
   Shield,
   Sparkles,
+  RefreshCw,
+  Settings,
+  ExternalLink,
+  AlertCircle,
+  Info,
+  Mic,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import AudioVisualizer from "../bar/audio-visualizer";
+
+// Permission status interface matching backend
+interface PermissionStatus {
+  permissionType: string;
+  granted: boolean;
+  required: boolean;
+  description: string;
+  instructions: string;
+}
+
+// Complete permissions state interface
+interface PermissionsState {
+  accessibility: PermissionStatus;
+  screenRecording: PermissionStatus;
+  microphone: PermissionStatus;
+  inputMonitoring: PermissionStatus;
+  allGranted: boolean;
+  appName: string;
+}
 
 const permissions = [
   {
@@ -341,67 +366,142 @@ function KeyboardShortcut({
   );
 }
 
-// Mock macOS permission dialog
-function PermissionDialog({
+// Component for individual permission card
+function PermissionCard({
   permission,
-  onAllow,
-  onDeny,
+  permissionStatus,
+  onRequest,
+  isRequesting,
 }: {
   permission: any;
-  onAllow: () => void;
-  onDeny: () => void;
+  permissionStatus: PermissionStatus | null;
+  onRequest: () => void;
+  isRequesting: boolean;
 }) {
+  const granted = permissionStatus?.granted ?? false;
+  const isRequired = permission.required;
+
+  // Map permission IDs to icons
+  const getPermissionIcon = () => {
+    switch (permission.id) {
+      case "accessibility":
+        return <Eye className="w-5 h-5" />;
+      case "screen-recording":
+        return <Monitor className="w-5 h-5" />;
+      case "microphone":
+        return <Mic className="w-5 h-5" />;
+      case "input-monitoring":
+        return <Keyboard className="w-5 h-5" />;
+      default:
+        return <Shield className="w-5 h-5" />;
+    }
+  };
+
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]"
+    <div
+      className={`p-4 rounded-xl border-2 transition-all duration-200 ${
+        granted
+          ? "border-green-200 bg-green-50/30"
+          : isRequired
+          ? "border-red-200 bg-red-50/30"
+          : "border-yellow-200 bg-yellow-50/30"
+      }`}
     >
-      <div className="bg-white rounded-xl shadow-2xl w-[420px] overflow-hidden">
-        <div className="p-6">
-          <div className="flex items-start gap-4">
-            <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-              <div className="w-8 h-8 rounded bg-blue-500 flex items-center justify-center text-white">
-                J
+      <div className="flex items-start gap-4">
+        {/* Icon and Status */}
+        <div className="flex items-center gap-2">
+          <div
+            className={`w-10 h-10 rounded-full flex items-center justify-center ${
+              granted
+                ? "bg-green-100 text-green-600"
+                : isRequired
+                ? "bg-red-100 text-red-600"
+                : "bg-yellow-100 text-yellow-600"
+            }`}
+          >
+            {granted ? (
+              <CheckCircle className="w-5 h-5" />
+            ) : (
+              getPermissionIcon()
+            )}
+          </div>
+          {granted && (
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <h4 className="font-semibold text-gray-900">{permission.title}</h4>
+            {isRequired && (
+              <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-medium">
+                Required
+              </span>
+            )}
+            {granted && (
+              <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                Granted
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-gray-600 mb-3">{permission.description}</p>
+
+          {!granted && permissionStatus && (
+            <div
+              className={`text-xs p-2 rounded-md mb-3 ${
+                isRequired
+                  ? "bg-red-50 border border-red-200 text-red-700"
+                  : "bg-yellow-50 border border-yellow-200 text-yellow-700"
+              }`}
+            >
+              <div className="flex items-start gap-1">
+                {isRequired ? (
+                  <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                ) : (
+                  <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                )}
+                <span>{permissionStatus.instructions}</span>
               </div>
             </div>
-            <div className="flex-1 pt-2">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                "Juno" would like to{" "}
-                {permission.title.toLowerCase() === "accessibility"
-                  ? "control this computer using accessibility features"
-                  : permission.description.toLowerCase()}
-              </h3>
-              <p className="text-sm text-gray-600 leading-relaxed">
-                {permission.title === "Accessibility" &&
-                  "This will allow Juno to automate tasks by controlling other applications and system functions."}
-                {permission.title === "Screen Recording" &&
-                  "This will allow Juno to see what's on your screen to provide contextual assistance."}
-                {permission.title === "Microphone" &&
-                  "This will allow Juno to use voice features like dictation and voice commands."}
-                {permission.title === "Input Monitoring" &&
-                  "This will allow Juno to monitor keyboard and mouse input for advanced automation features."}
-              </p>
+          )}
+
+          {/* Action Buttons */}
+          {!granted && (
+            <div className="flex gap-2">
+              <button
+                onClick={onRequest}
+                disabled={isRequesting}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                  isRequired
+                    ? "bg-blue-600 hover:bg-blue-700 text-white"
+                    : "bg-gray-600 hover:bg-gray-700 text-white"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {isRequesting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Opening...
+                  </>
+                ) : (
+                  <>
+                    <Settings className="w-4 h-4" />
+                    Grant Permission
+                  </>
+                )}
+              </button>
             </div>
-          </div>
-        </div>
-        <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
-          <button
-            onClick={onDeny}
-            className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
-          >
-            Don't Allow
-          </button>
-          <button
-            onClick={onAllow}
-            className="px-6 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Allow
-          </button>
+          )}
+
+          {granted && (
+            <div className="flex items-center gap-2 text-sm text-green-700">
+              <CheckCircle className="w-4 h-4" />
+              <span className="font-medium">Ready to use</span>
+            </div>
+          )}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -428,14 +528,20 @@ export default function OnboardingFlow({
   const [_backendShortcutsWorking, setBackendShortcutsWorking] =
     useState(false);
   const [keyboardShortcuts, setKeyboardShortcuts] = useState<any>(null);
-  const [showPermissionDialog, setShowPermissionDialog] = useState(false);
-  const [currentPermission, setCurrentPermission] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [actualPermissionsGranted, setActualPermissionsGranted] = useState(
     // Always start with false to ensure we re-check permissions on mount
     // This is critical for the "Restart onboarding" functionality
     false
   );
+
+  // New state for granular permissions
+  const [permissionsState, setPermissionsState] =
+    useState<PermissionsState | null>(null);
+  const [isRequestingPermission, setIsRequestingPermission] = useState<
+    string | null
+  >(null);
+  const [permissionsError, setPermissionsError] = useState<string | null>(null);
 
   console.log(
     "OnboardingFlow: State - currentStep:",
@@ -453,20 +559,63 @@ export default function OnboardingFlow({
   // Function to check current permissions status
   const checkPermissionsStatus = async () => {
     try {
-      const permissionsState = await invoke("get_permissions_state");
-      if (permissionsState && typeof permissionsState === "object") {
-        const allGranted = (permissionsState as any).all_granted;
-        console.log(
-          "OnboardingFlow: Re-checked permissions, all_granted:",
-          allGranted
-        );
-        setActualPermissionsGranted(allGranted);
-        return allGranted;
-      }
+      setPermissionsError(null);
+      const result = await invoke<PermissionsState>(
+        "check_permissions_status_native"
+      );
+      setPermissionsState(result);
+      setActualPermissionsGranted(result.allGranted);
+      console.log("OnboardingFlow: Updated permissions state:", result);
+      return result.allGranted;
     } catch (error) {
       console.warn("Failed to check permissions status:", error);
+      setPermissionsError(error as string);
+      return false;
     }
-    return false;
+  };
+
+  // Individual permission request functions
+  const requestPermission = async (permissionType: string) => {
+    try {
+      setIsRequestingPermission(permissionType);
+      setPermissionsError(null);
+
+      let commandName = "";
+      switch (permissionType) {
+        case "accessibility":
+          commandName = "request_accessibility_permission_native";
+          break;
+        case "screen_recording":
+          commandName = "request_screen_recording_permission_native";
+          break;
+        case "microphone":
+          commandName = "request_microphone_permission_native";
+          break;
+        case "input_monitoring":
+          commandName = "request_input_monitoring_permission_native";
+          break;
+        default:
+          throw new Error(`Unknown permission type: ${permissionType}`);
+      }
+
+      const granted = await invoke<boolean>(commandName);
+
+      if (granted) {
+        // Permission was already granted
+        await checkPermissionsStatus();
+      } else {
+        // System Settings should be open for user to grant permission
+        // Wait a moment and then refresh to check if user granted it
+        setTimeout(async () => {
+          await checkPermissionsStatus();
+        }, 2000);
+      }
+    } catch (error) {
+      console.error(`Error requesting ${permissionType} permission:`, error);
+      setPermissionsError(error as string);
+    } finally {
+      setIsRequestingPermission(null);
+    }
   };
 
   useEffect(() => {
@@ -477,11 +626,7 @@ export default function OnboardingFlow({
         // CRITICAL: Always re-check permissions when component mounts
         // This ensures "Restart onboarding" properly resets the permissions flow
         console.log("OnboardingFlow: Re-checking permissions status...");
-        const permissionsState = await checkPermissionsStatus();
-        console.log(
-          "OnboardingFlow: Fresh permissions check result:",
-          permissionsState
-        );
+        await checkPermissionsStatus();
 
         // Load onboarding info and shortcuts
         const onboardingInfo = await invoke("get_onboarding_info");
@@ -546,11 +691,7 @@ export default function OnboardingFlow({
       return;
     }
 
-    if (currentStepData?.id === "permissions") {
-      // Permissions step
-      setShowPermissionDialog(true);
-      setCurrentPermission(0);
-    } else if (currentStep < onboardingSteps.length - 1) {
+    if (currentStep < onboardingSteps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
       setIsComplete(true);
@@ -560,68 +701,6 @@ export default function OnboardingFlow({
 
   const handleShortcutPressed = () => {
     setShortcutPressed(true);
-  };
-
-  const handlePermissionAllow = async () => {
-    const permission = permissions[currentPermission];
-
-    try {
-      // Open system settings for the specific permission using native APIs
-      let success = false;
-
-      console.log(`Requesting permission: ${permission.id}`);
-
-      switch (permission.id) {
-        case "accessibility":
-          success = await invoke("request_accessibility_permission_native");
-          break;
-        case "screen-recording":
-          success = await invoke("request_screen_recording_permission_native");
-          break;
-        case "microphone":
-          success = await invoke("request_microphone_permission_native");
-          break;
-        case "input-monitoring":
-          success = await invoke("request_input_monitoring_permission_native");
-          break;
-        default:
-          success = false;
-      }
-
-      console.log(`Permission ${permission.id} request result:`, success);
-
-      // Add a delay to ensure System Settings has time to open
-      if (!success) {
-        console.log(
-          `System Settings should now be open for ${permission.title}`
-        );
-        // Give System Settings time to open and for user to interact
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-
-      if (success) {
-        console.log(`Permission ${permission.id} was already granted`);
-      }
-    } catch (error) {
-      console.error(`Error requesting permission ${permission.id}:`, error);
-    }
-
-    // Move to next permission or complete
-    if (currentPermission < permissions.length - 1) {
-      setCurrentPermission(currentPermission + 1);
-    } else {
-      setShowPermissionDialog(false);
-      setCurrentStep(currentStep + 1);
-    }
-  };
-
-  const handlePermissionDeny = () => {
-    if (currentPermission < permissions.length - 1) {
-      setCurrentPermission(currentPermission + 1);
-    } else {
-      setShowPermissionDialog(false);
-      setCurrentStep(currentStep + 1);
-    }
   };
 
   const handleSkip = () => {
@@ -642,7 +721,6 @@ export default function OnboardingFlow({
       if (currentStepData?.id === "shortcut") {
         setShortcutPressed(true); // Allow progression if they come back
       }
-      // Remove the cancel step logic since it's no longer interactive
       setCurrentStep(currentStep + 1);
     } else {
       // If this is the last step, complete onboarding
@@ -664,7 +742,7 @@ export default function OnboardingFlow({
   return (
     <>
       <div className="fixed inset-0 flex items-center justify-center z-50">
-        <div className="bg-white/90 max-w-[500px] w-full">
+        <div className="bg-white/90 max-w-[600px] w-full max-h-[90vh] overflow-y-auto">
           <div className="p-10">
             {/* Progress indicator */}
             <div className="flex gap-2 mb-10">
@@ -741,32 +819,89 @@ export default function OnboardingFlow({
                     </div>
                   )}
 
-                  {/* Permissions list */}
+                  {/* Granular permissions interface */}
                   {step.id === "permissions" && (
-                    <div className="space-y-3 mt-8">
-                      {permissions.map((permission) => (
-                        <div
-                          key={permission.id}
-                          className="flex items-center gap-4 p-4 bg-gray-50/60 rounded-xl"
-                        >
-                          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                            {permission.icon}
+                    <div className="space-y-4 mt-8 text-left">
+                      {/* Header */}
+                      <div className="text-center mb-6">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                          Grant Permissions
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          Click "Grant Permission" for each item below to enable
+                          full functionality
+                        </p>
+                        {permissionsError && (
+                          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded-md">
+                            <p className="text-sm text-red-700">
+                              Error: {permissionsError}
+                            </p>
                           </div>
-                          <div className="flex-1 text-left">
-                            <div className="font-medium text-gray-900">
-                              {permission.title}
+                        )}
+                      </div>
+
+                      {/* Permission Cards */}
+                      <div className="space-y-3">
+                        {permissions.map((permission) => {
+                          const permissionKey = permission.id.replace(
+                            "-",
+                            "_"
+                          ) as keyof PermissionsState;
+                          const permissionStatus =
+                            (permissionsState?.[
+                              permissionKey
+                            ] as PermissionStatus) || null;
+
+                          return (
+                            <PermissionCard
+                              key={permission.id}
+                              permission={permission}
+                              permissionStatus={permissionStatus}
+                              onRequest={() =>
+                                requestPermission(
+                                  permission.id.replace("-", "_")
+                                )
+                              }
+                              isRequesting={
+                                isRequestingPermission ===
+                                permission.id.replace("-", "_")
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+
+                      {/* Summary */}
+                      {permissionsState && (
+                        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              {permissionsState.allGranted ? (
+                                <>
+                                  <CheckCircle className="w-5 h-5 text-green-600" />
+                                  <span className="font-medium text-green-800">
+                                    All required permissions granted!
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <AlertCircle className="w-5 h-5 text-orange-600" />
+                                  <span className="font-medium text-orange-800">
+                                    Some permissions still needed
+                                  </span>
+                                </>
+                              )}
                             </div>
-                            <div className="text-sm text-gray-600">
-                              {permission.description}
-                            </div>
+                            <button
+                              onClick={checkPermissionsStatus}
+                              className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Refresh
+                            </button>
                           </div>
-                          {permission.required && (
-                            <div className="text-xs text-orange-600 font-medium bg-orange-50 px-2 py-1 rounded-full">
-                              Required
-                            </div>
-                          )}
                         </div>
-                      ))}
+                      )}
                     </div>
                   )}
                 </div>
@@ -792,7 +927,7 @@ export default function OnboardingFlow({
                     </button>
                   )}
 
-                  {/* Continue button - hide for shortcut step until completed, but cancel step is no longer interactive */}
+                  {/* Continue button - hide for shortcut step until completed */}
                   {(step.id !== "shortcut" || shortcutPressed) && (
                     <button
                       onClick={handleNext}
@@ -808,17 +943,6 @@ export default function OnboardingFlow({
           </div>
         </div>
       </div>
-
-      {/* Permission Dialog */}
-      <AnimatePresence>
-        {showPermissionDialog && (
-          <PermissionDialog
-            permission={permissions[currentPermission]}
-            onAllow={handlePermissionAllow}
-            onDeny={handlePermissionDeny}
-          />
-        )}
-      </AnimatePresence>
     </>
   );
 }
