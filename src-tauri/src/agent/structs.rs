@@ -22,6 +22,12 @@ pub enum AgentError {
     InputError(String),
     #[error("Output processing error: {0}")]
     OutputError(String),
+    #[error("Invalid output: {0}")]
+    InvalidOutput(String),
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("Tool unavailable: {0}")]
+    ToolUnavailable(String),
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
     #[error("Agent terminated")]
@@ -106,7 +112,7 @@ pub enum AgentAction {
     ExecuteTool(Vec<ToolCall>),
     RespondToUser(String),
     Finish(String), // Finish with a final message
-    FinishWithDualContent { 
+    FinishWithDualContent {
         typed_content: String,   // Content to display in chat/UI
         spoken_content: String,  // Concise content for TTS speech
     },

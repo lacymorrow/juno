@@ -371,7 +371,7 @@ export function FloatingBarStates({
 function getStatusText(
   barState: BarState,
   currentError: string | null,
-  agentState?: string
+  agentState?: string | null
 ) {
   switch (barState) {
     case "dictation_ready":
