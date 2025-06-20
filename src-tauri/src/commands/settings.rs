@@ -5,10 +5,11 @@
 
 use tauri::{command, AppHandle, State};
 use crate::settings::{
-    AppSettings, KeyboardShortcuts, FloatingBarSettings, AgentSettings,
+    manager::SettingsManager, AppSettings, KeyboardShortcuts, FloatingBarSettings, AgentSettings,
     ProviderSettings, CloudSettings, AudioSettings, ToolSettings, OnboardingSettings,
-    manager::SettingsManager
+    CLISettings, VoiceTranscriptionSettings
 };
+use tracing::info;
 
 /// Get all application settings
 #[command]
@@ -232,8 +233,6 @@ pub async fn set_autostart_enabled(
     settings_manager.set_autostart_enabled(enabled).await
         .map_err(|e| format!("Failed to set autostart setting: {}", e))
 }
-
-
 
 /// Reset all settings to defaults
 #[command]

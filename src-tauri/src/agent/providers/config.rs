@@ -42,31 +42,15 @@ impl AgentMode {
 }
 
 /// Configuration structure for AI providers
+/// Uses centralized ProviderSettings directly instead of duplicating the structure
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProviderConfig {
     /// The active provider ID
     pub active_provider: String,
     /// Agent execution mode (single vs multi-agent)
     pub agent_mode: AgentMode,
-    /// Configuration for each provider
-    pub providers: Vec<ProviderSettings>,
-}
-
-/// Settings for a specific provider
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ProviderSettings {
-    /// Provider identifier
-    pub id: String,
-    /// API key (encrypted or obscured in the future)
-    pub api_key: Option<String>,
-    /// Model name to use
-    pub model: Option<String>,
-    /// Maximum tokens to generate
-    pub max_tokens: Option<u32>,
-    /// Temperature setting (0.0-1.0)
-    pub temperature: Option<f32>,
-    /// System prompt to use (if supported)
-    pub system_prompt: Option<String>,
+    /// Configuration for each provider (uses centralized type)
+    pub providers: Vec<CentralizedProviderConfig>,
 }
 
 impl Default for ProviderConfig {
@@ -75,7 +59,7 @@ impl Default for ProviderConfig {
             active_provider: "anthropic".to_string(),
             agent_mode: AgentMode::Multi,
             providers: vec![
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "anthropic".to_string(),
                     api_key: None,
                     model: Some("claude-3-7-sonnet-20250219".to_string()),
@@ -83,7 +67,7 @@ impl Default for ProviderConfig {
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "openai".to_string(),
                     api_key: None,
                     model: Some("gpt-4o".to_string()),
@@ -91,7 +75,7 @@ impl Default for ProviderConfig {
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "rig".to_string(),
                     api_key: None, // Rig uses OpenAI's API key by default
                     model: Some("gpt-4o".to_string()),
@@ -99,7 +83,7 @@ impl Default for ProviderConfig {
                     temperature: Some(0.7),
                     system_prompt: None,
                 },
-                ProviderSettings {
+                CentralizedProviderConfig {
                     id: "gemini".to_string(),
                     api_key: None,
                     model: Some("gemini-1.5-pro".to_string()),
@@ -139,27 +123,15 @@ impl ProviderConfig {
     /// Convert from centralized ProviderSettings to ProviderConfig.
     /// Handles schema differences between the two formats.
     fn from_centralized_settings(settings: &CentralizedProviderSettings) -> Result<Self, AgentError> {
-        let mut providers = Vec::new();
-
-        // Convert providers
-        for centralized_provider in &settings.providers {
-            let provider_settings = ProviderSettings {
-                id: centralized_provider.id.clone(),
-                api_key: centralized_provider.api_key.clone(),
-                model: centralized_provider.model.clone(),
-                max_tokens: centralized_provider.max_tokens,
-                temperature: centralized_provider.temperature,
-                system_prompt: centralized_provider.system_prompt.clone(),
-            };
-            providers.push(provider_settings);
-        }
+        let providers = settings.providers.clone();
 
         // Ensure all default providers are present for backwards compatibility
         let default_config = Self::default();
+        let mut final_providers = providers.clone();
         for default_provider in &default_config.providers {
-            if !providers.iter().any(|p| p.id == default_provider.id) {
+            if !final_providers.iter().any(|p| p.id == default_provider.id) {
                 info!("Adding missing provider from defaults: {}", default_provider.id);
-                providers.push(default_provider.clone());
+                final_providers.push(default_provider.clone());
             }
         }
 
@@ -169,27 +141,14 @@ impl ProviderConfig {
         Ok(Self {
             active_provider: settings.active_provider.clone(),
             agent_mode,
-            providers,
+            providers: final_providers,
         })
     }
 
         /// Convert from ProviderConfig to centralized ProviderSettings.
     /// Handles schema differences between the two formats.
     fn to_centralized_settings(&self) -> Result<CentralizedProviderSettings, AgentError> {
-        let mut providers = Vec::new();
-
-        // Convert providers
-        for provider in &self.providers {
-            let centralized_provider = CentralizedProviderConfig {
-                id: provider.id.clone(),
-                api_key: provider.api_key.clone(),
-                model: provider.model.clone(),
-                max_tokens: provider.max_tokens,
-                temperature: provider.temperature,
-                system_prompt: provider.system_prompt.clone(),
-            };
-            providers.push(centralized_provider);
-        }
+        let providers = self.providers.clone();
 
         Ok(CentralizedProviderSettings {
             active_provider: self.active_provider.clone(),
@@ -241,12 +200,12 @@ impl ProviderConfig {
     }
 
     /// Get settings for the active provider
-    pub fn get_active_provider_settings(&self) -> Option<&ProviderSettings> {
+    pub fn get_active_provider_settings(&self) -> Option<&CentralizedProviderConfig> {
         self.providers.iter().find(|p| p.id == self.active_provider)
     }
 
     /// Get settings for a specific provider
-    pub fn get_provider_settings(&self, provider_id: &str) -> Option<&ProviderSettings> {
+    pub fn get_provider_settings(&self, provider_id: &str) -> Option<&CentralizedProviderConfig> {
         self.providers.iter().find(|p| p.id == provider_id)
     }
 
