@@ -11,7 +11,6 @@ import {
   Sparkles,
   RefreshCw,
   Settings,
-  ExternalLink,
   AlertCircle,
   Info,
   Mic,
