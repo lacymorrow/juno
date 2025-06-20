@@ -20,6 +20,7 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     let (
         env_result,
         shortcuts_result,
+        audio_result,
         mcp_result,
         onboarding_result,
         orchestrator_result,
@@ -29,6 +30,7 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     ) = tokio::join!(
         initialize_environment_state(app_handle.clone()),
         initialize_shortcuts_state(app_handle.clone()),
+        initialize_audio_state(app_handle.clone()),
         initialize_mcp_state(app_handle.clone()),
         initialize_onboarding_state(app_handle.clone()),
         initialize_orchestrator_state(app_handle.clone()),
@@ -45,6 +47,9 @@ pub async fn initialize_application_state(app_handle: &AppHandle) -> Result<(), 
     }
     if let Err(e) = shortcuts_result {
         errors.push(format!("Shortcuts: {}", e));
+    }
+    if let Err(e) = audio_result {
+        errors.push(format!("Audio: {}", e));
     }
     if let Err(e) = mcp_result {
         errors.push(format!("MCP: {}", e));
@@ -129,6 +134,58 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
     // Start agent monitor task for hold behavior
     let _agent_monitor_handle = crate::agent_monitor::start_agent_monitor_task(app_handle.clone());
     info!("Agent monitor task started successfully");
+
+    Ok(())
+}
+
+/// Initialize audio and voice settings state
+async fn initialize_audio_state(app_handle: AppHandle) -> Result<(), String> {
+    info!("[State] Initializing audio settings state...");
+
+    let app_state = app_handle.state::<AppState>();
+
+    // Load audio settings from centralized settings
+    if let Err(e) = crate::commands::load_audio_settings_from_centralized_settings(&app_handle, &*app_state).await {
+        warn!("Failed to load audio settings from centralized settings: {} - using defaults", e);
+    } else {
+        info!("Successfully loaded audio settings from centralized settings");
+    }
+
+    // Initialize voice transcription plugin configuration
+    if let Err(e) = initialize_voice_transcription_config(&app_handle).await {
+        warn!("Failed to initialize voice transcription config: {} - using defaults", e);
+    }
+
+    info!("Audio settings state initialized successfully");
+    Ok(())
+}
+
+/// Initialize voice transcription plugin configuration
+async fn initialize_voice_transcription_config(app_handle: &AppHandle) -> Result<(), String> {
+    info!("[State] Initializing voice transcription configuration...");
+
+    // Get current audio settings from centralized system
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Create voice transcription config based on centralized settings
+    let voice_config = tauri_plugin_voice_transcription::VoiceTranscriptionConfig {
+        model_path: "models/ggml-tiny.en.bin".to_string(),
+        sample_rate: 16000,
+        channels: 1,
+        buffer_duration_ms: 1500,
+        partial_interval_ms: 500,
+        enable_partial_transcription: true,
+        enable_playback: audio_settings.sound_enabled,
+        ..Default::default()
+    };
+
+    // Note: The voice transcription plugin currently uses stub implementation
+    // When it's fully implemented, we would apply the config here
+    info!("Voice transcription configuration prepared (plugin uses stub implementation)");
 
     Ok(())
 }

@@ -117,4 +117,77 @@ pub async fn test_system_context(state: State<'_, AppState>) -> Result<String, S
     }
 }
 
+/// Load audio settings from centralized settings into AppState
+/// Used by: Application startup for audio configuration initialization
+pub async fn load_audio_settings_from_centralized_settings(
+    app_handle: &tauri::AppHandle,
+    state: &crate::state::AppState
+) -> Result<(), String> {
+    use crate::settings::manager::SettingsManager;
+
+    let settings_manager = SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Update AppState with centralized settings values
+    if let Ok(mut tts_provider) = state.tts_provider.lock() {
+        *tts_provider = audio_settings.tts_provider;
+    }
+
+    if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
+        *always_listening_active = audio_settings.always_listening_active;
+    }
+
+    if let Ok(mut always_listening_sensitivity) = state.always_listening_sensitivity.lock() {
+        *always_listening_sensitivity = audio_settings.always_listening_sensitivity;
+    }
+
+    if let Ok(mut always_listening_wake_words) = state.always_listening_wake_words.lock() {
+        *always_listening_wake_words = audio_settings.always_listening_wake_words;
+    }
+
+    tracing::info!("Loaded audio settings from centralized settings into AppState");
+    Ok(())
+}
+
+/// Save current AppState audio settings to centralized settings
+/// Used by: Application shutdown and settings synchronization
+pub async fn save_audio_settings_to_centralized_settings(
+    app_handle: &tauri::AppHandle,
+    state: &crate::state::AppState
+) -> Result<(), String> {
+    use crate::settings::manager::SettingsManager;
+
+    let settings_manager = SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Update centralized settings with current AppState values
+    if let Ok(tts_provider) = state.tts_provider.lock() {
+        audio_settings.tts_provider = tts_provider.clone();
+    }
+
+    if let Ok(always_listening_active) = state.always_listening_active.lock() {
+        audio_settings.always_listening_active = *always_listening_active;
+    }
+
+    if let Ok(always_listening_sensitivity) = state.always_listening_sensitivity.lock() {
+        audio_settings.always_listening_sensitivity = *always_listening_sensitivity;
+    }
+
+    if let Ok(always_listening_wake_words) = state.always_listening_wake_words.lock() {
+        audio_settings.always_listening_wake_words = always_listening_wake_words.clone();
+    }
+
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    tracing::info!("Saved audio settings from AppState to centralized settings");
+    Ok(())
+}
+
 

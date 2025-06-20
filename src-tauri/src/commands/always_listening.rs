@@ -1,4 +1,5 @@
 use crate::state::AppState;
+use crate::settings::manager::SettingsManager;
 use tauri::{State, AppHandle, Manager, Emitter};
 use std::sync::{Arc, Mutex};
 use tracing::{info, error, warn};
@@ -11,11 +12,25 @@ pub async fn start_always_listening_mode(
 ) -> Result<String, String> {
     info!("[Command] start_always_listening_mode called");
 
-    // Update app state
+    // Get current settings from centralized system
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Check if already active
+    if audio_settings.always_listening_active {
+        return Ok("Always listening mode is already active".to_string());
+    }
+
+    // Update centralized settings
+    audio_settings.always_listening_active = true;
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update app state for backward compatibility
     if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
-        if *always_listening_active {
-            return Ok("Already listening mode is already active".to_string());
-        }
         *always_listening_active = true;
     } else {
         return Err("Failed to lock always listening state".to_string());
@@ -42,6 +57,12 @@ pub async fn start_always_listening_mode(
                     Ok("Always listening mode started successfully".to_string())
                 }
                 Err(e) => {
+                    // Reset centralized settings on failure
+                    audio_settings.always_listening_active = false;
+                    if let Err(save_err) = settings_manager.set_audio_settings(&audio_settings).await {
+                        warn!("[Command] Failed to reset audio settings after error: {}", save_err);
+                    }
+
                     // Reset state on failure
                     if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
                         *always_listening_active = false;
@@ -54,6 +75,12 @@ pub async fn start_always_listening_mode(
             }
         }
         None => {
+            // Reset centralized settings on failure
+            audio_settings.always_listening_active = false;
+            if let Err(save_err) = settings_manager.set_audio_settings(&audio_settings).await {
+                warn!("[Command] Failed to reset audio settings after controller error: {}", save_err);
+            }
+
             // Reset state on failure
             if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
                 *always_listening_active = false;
@@ -74,11 +101,25 @@ pub async fn stop_always_listening_mode(
 ) -> Result<String, String> {
     info!("[Command] stop_always_listening_mode called");
 
-    // Update app state
+    // Get current settings from centralized system
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Check if already inactive
+    if !audio_settings.always_listening_active {
+        return Ok("Always listening mode is already inactive".to_string());
+    }
+
+    // Update centralized settings
+    audio_settings.always_listening_active = false;
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update app state for backward compatibility
     if let Ok(mut always_listening_active) = state.always_listening_active.lock() {
-        if !*always_listening_active {
-            return Ok("Always listening mode is already inactive".to_string());
-        }
         *always_listening_active = false;
     } else {
         return Err("Failed to lock always listening state".to_string());
@@ -127,11 +168,14 @@ pub async fn toggle_always_listening_mode(
 ) -> Result<bool, String> {
     info!("[Command] toggle_always_listening_mode called");
 
-    let was_active = state.always_listening_active.lock()
-        .map(|active| *active)
-        .unwrap_or(false);
+    // Get current settings from centralized system
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    if was_active {
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    if audio_settings.always_listening_active {
         stop_always_listening_mode(app, state).await?;
         Ok(false)
     } else {
@@ -143,13 +187,16 @@ pub async fn toggle_always_listening_mode(
 /// Get always listening mode status
 #[tauri::command]
 pub async fn get_always_listening_status(
-    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<bool, String> {
-    let status = state.always_listening_active.lock()
-        .map(|active| *active)
-        .unwrap_or(false);
+    // Get status from centralized settings
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    Ok(status)
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    Ok(audio_settings.always_listening_active)
 }
 
 /// Set always listening sensitivity
@@ -161,7 +208,24 @@ pub async fn set_always_listening_sensitivity(
 ) -> Result<String, String> {
     info!("[Command] set_always_listening_sensitivity called with sensitivity: {}", sensitivity);
 
-    // Update app state
+    // Validate sensitivity range
+    if sensitivity < 0.0 || sensitivity > 1.0 {
+        return Err("Sensitivity must be between 0.0 and 1.0".to_string());
+    }
+
+    // Get current settings from centralized system
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Update centralized settings
+    audio_settings.always_listening_sensitivity = sensitivity;
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update app state for backward compatibility
     if let Ok(mut sensitivity_state) = state.always_listening_sensitivity.lock() {
         *sensitivity_state = sensitivity;
     } else {
@@ -187,8 +251,8 @@ pub async fn set_always_listening_sensitivity(
             }
         }
         None => {
-            info!("[Command] Always listening controller not available, sensitivity saved to state only");
-            Ok("Sensitivity updated in state (controller not active)".to_string())
+            info!("[Command] Always listening controller not available, sensitivity saved to centralized settings");
+            Ok("Sensitivity updated in centralized settings (controller not active)".to_string())
         }
     }
 }
@@ -196,13 +260,16 @@ pub async fn set_always_listening_sensitivity(
 /// Get always listening sensitivity
 #[tauri::command]
 pub async fn get_always_listening_sensitivity(
-    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<f32, String> {
-    let sensitivity = state.always_listening_sensitivity.lock()
-        .map(|s| *s)
-        .unwrap_or(0.5);
+    // Get sensitivity from centralized settings
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    Ok(sensitivity)
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    Ok(audio_settings.always_listening_sensitivity)
 }
 
 /// Set always listening wake words
@@ -212,9 +279,26 @@ pub async fn set_always_listening_wake_words(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    info!("[Command] set_always_listening_wake_words called with wake words: {:?}", wake_words);
+    info!("[Command] set_always_listening_wake_words called with {} wake words", wake_words.len());
 
-    // Update app state
+    // Validate wake words
+    if wake_words.is_empty() {
+        return Err("At least one wake word is required".to_string());
+    }
+
+    // Get current settings from centralized system
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+
+    let mut audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    // Update centralized settings
+    audio_settings.always_listening_wake_words = wake_words.clone();
+    settings_manager.set_audio_settings(&audio_settings).await
+        .map_err(|e| format!("Failed to save audio settings: {}", e))?;
+
+    // Update app state for backward compatibility
     if let Ok(mut wake_words_state) = state.always_listening_wake_words.lock() {
         *wake_words_state = wake_words.clone();
     } else {
@@ -240,8 +324,8 @@ pub async fn set_always_listening_wake_words(
             }
         }
         None => {
-            info!("[Command] Always listening controller not available, wake words saved to state only");
-            Ok("Wake words updated in state (controller not active)".to_string())
+            info!("[Command] Always listening controller not available, wake words saved to centralized settings");
+            Ok("Wake words updated in centralized settings (controller not active)".to_string())
         }
     }
 }
@@ -249,13 +333,16 @@ pub async fn set_always_listening_wake_words(
 /// Get always listening wake words
 #[tauri::command]
 pub async fn get_always_listening_wake_words(
-    state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<String>, String> {
-    let wake_words = state.always_listening_wake_words.lock()
-        .map(|w| w.clone())
-        .unwrap_or_default();
+    // Get wake words from centralized settings
+    let settings_manager = SettingsManager::new(app.clone())
+        .map_err(|e| format!("Failed to create settings manager: {}", e))?;
 
-    Ok(wake_words)
+    let audio_settings = settings_manager.get_audio_settings().await
+        .map_err(|e| format!("Failed to get audio settings: {}", e))?;
+
+    Ok(audio_settings.always_listening_wake_words)
 }
 
 /// Debug command to get detailed always listening status
