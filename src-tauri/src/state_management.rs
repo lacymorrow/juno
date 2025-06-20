@@ -108,9 +108,11 @@ async fn initialize_shortcuts_state(app_handle: AppHandle) -> Result<(), String>
         warn!("Failed to load agent trigger mode: {} - using defaults", e);
     }
 
-    // Load tool configuration from persistent storage
-    if let Err(e) = crate::agent::tools::tool_config::load_tool_config_from_store(&app_handle, &*app_state).await {
-        warn!("Failed to load tool configuration: {} - using defaults", e);
+    // Load tool configuration from centralized settings
+    let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+        .map_err(|e| format!("Failed to create settings manager for tool config: {}", e))?;
+    if let Err(e) = crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(&settings_manager, &*app_state).await {
+        warn!("Failed to load tool configuration from centralized settings: {} - using defaults", e);
     }
 
     // Register global shortcuts after loading configuration

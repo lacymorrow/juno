@@ -11,6 +11,9 @@ use tracing::info;
 // Re-export MCP types for convenience
 pub use super::mcp_integration::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
 
+// Add centralized settings support
+use crate::settings::{ToolSettings, ToolConfig as SettingsToolConfig, MCPServerConfig as SettingsMCPServerConfig};
+
 /// Tool category definitions for organizing tools by functionality.
 /// Used by: Settings UI and tool management for logical grouping.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -178,6 +181,162 @@ impl ToolConfigManager {
     /// Used by: Application initialization and configuration reset.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Load configuration from centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
+    /// Used by: Application startup for configuration initialization.
+    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, String> {
+        let tool_settings = settings_manager.get_tool_settings().await?;
+        let config_manager = Self::from_centralized_settings(&tool_settings)?;
+        info!("Loaded tool configuration from centralized settings");
+        Ok(config_manager)
+    }
+
+    /// Save configuration to centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
+    /// Used by: Settings UI and application shutdown for persistence.
+    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), String> {
+        let tool_settings = self.to_centralized_settings()?;
+        settings_manager.set_tool_settings(&tool_settings).await?;
+        info!("Saved tool configuration to centralized settings");
+        Ok(())
+    }
+
+    /// Convert from centralized ToolSettings to ToolConfigManager.
+    /// Handles schema differences between the two formats.
+    fn from_centralized_settings(settings: &ToolSettings) -> Result<Self, String> {
+        let mut tools = HashMap::new();
+        let mut category_enabled = HashMap::new();
+        let mut mcp_servers = HashMap::new();
+
+        // Convert tools
+        for (tool_name, settings_tool_config) in &settings.tools {
+            let tool_category = Self::parse_tool_category(&settings_tool_config.category)?;
+            let tool_config = ToolConfig {
+                name: settings_tool_config.name.clone(),
+                category: tool_category,
+                enabled: settings_tool_config.enabled,
+                description: settings_tool_config.description.clone(),
+                required: settings_tool_config.required,
+                server_id: None, // Will be populated if it's an MCP tool
+            };
+            tools.insert(tool_name.clone(), tool_config);
+        }
+
+        // Convert category enabled states
+        for (category_str, enabled) in &settings.category_enabled {
+            let category = Self::parse_tool_category(category_str)?;
+            category_enabled.insert(category, *enabled);
+        }
+
+        // Convert MCP servers
+        for settings_server in &settings.mcp_servers {
+            let server_config = MCPServerConfig {
+                id: settings_server.id.clone(),
+                name: settings_server.name.clone(),
+                description: settings_server.description.clone(),
+                command: settings_server.command.clone(),
+                args: settings_server.args.clone(),
+                working_directory: settings_server.working_directory.as_ref().map(|s| std::path::PathBuf::from(s)),
+                environment_variables: settings_server.environment_variables.clone(),
+                enabled: settings_server.enabled,
+                auto_start: settings_server.auto_start,
+                timeout_seconds: settings_server.timeout_seconds,
+                max_retries: settings_server.max_retries,
+            };
+            mcp_servers.insert(settings_server.id.clone(), server_config);
+        }
+
+        // Ensure all default tools are present for backwards compatibility
+        Self::ensure_default_tools(&mut tools);
+
+        // Ensure all categories are represented
+        for category in ToolCategory::all_categories() {
+            if !category_enabled.contains_key(&category) {
+                category_enabled.insert(category, true);
+            }
+        }
+
+        Ok(Self {
+            tools,
+            category_enabled,
+            mcp_servers,
+        })
+    }
+
+    /// Convert from ToolConfigManager to centralized ToolSettings.
+    /// Handles schema differences between the two formats.
+    fn to_centralized_settings(&self) -> Result<ToolSettings, String> {
+        let mut tools = HashMap::new();
+        let mut category_enabled = HashMap::new();
+        let mut mcp_servers = Vec::new();
+
+        // Convert tools
+        for (tool_name, tool_config) in &self.tools {
+            let settings_tool_config = SettingsToolConfig {
+                name: tool_config.name.clone(),
+                category: Self::format_tool_category(&tool_config.category),
+                enabled: tool_config.enabled,
+                description: tool_config.description.clone(),
+                required: tool_config.required,
+            };
+            tools.insert(tool_name.clone(), settings_tool_config);
+        }
+
+        // Convert category enabled states
+        for (category, enabled) in &self.category_enabled {
+            category_enabled.insert(Self::format_tool_category(category), *enabled);
+        }
+
+        // Convert MCP servers
+        for (_, server_config) in &self.mcp_servers {
+            let settings_server = SettingsMCPServerConfig {
+                id: server_config.id.clone(),
+                name: server_config.name.clone(),
+                description: server_config.description.clone(),
+                command: server_config.command.clone(),
+                args: server_config.args.clone(),
+                working_directory: server_config.working_directory.as_ref().map(|p| p.to_string_lossy().to_string()),
+                environment_variables: server_config.environment_variables.clone(),
+                enabled: server_config.enabled,
+                auto_start: server_config.auto_start,
+                timeout_seconds: server_config.timeout_seconds,
+                max_retries: server_config.max_retries,
+            };
+            mcp_servers.push(settings_server);
+        }
+
+        Ok(ToolSettings {
+            tools,
+            category_enabled,
+            mcp_servers,
+        })
+    }
+
+    /// Parse tool category string into ToolCategory enum.
+    fn parse_tool_category(category_str: &str) -> Result<ToolCategory, String> {
+        match category_str {
+            "AnthropicComputerUse" => Ok(ToolCategory::AnthropicComputerUse),
+            "Desktop" => Ok(ToolCategory::Desktop),
+            "Browser" => Ok(ToolCategory::Browser),
+            "Timer" => Ok(ToolCategory::Timer),
+            "Basic" => Ok(ToolCategory::Basic),
+            "MCP" => Ok(ToolCategory::MCP),
+            _ => Err(format!("Unknown tool category: {}", category_str)),
+        }
+    }
+
+    /// Format tool category enum into string.
+    fn format_tool_category(category: &ToolCategory) -> String {
+        match category {
+            ToolCategory::AnthropicComputerUse => "AnthropicComputerUse".to_string(),
+            ToolCategory::Desktop => "Desktop".to_string(),
+            ToolCategory::Browser => "Browser".to_string(),
+            ToolCategory::Timer => "Timer".to_string(),
+            ToolCategory::Basic => "Basic".to_string(),
+            ToolCategory::MCP => "MCP".to_string(),
+        }
     }
 
     /// Load configuration from Tauri store or create default.
@@ -603,13 +762,35 @@ impl ToolConfigManager {
     }
 }
 
+/// Load tool configuration from centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
+/// Used by: Application startup for configuration initialization
+///
+/// # Arguments
+/// * `settings_manager` - Centralized settings manager
+/// * `state` - Application state containing tool config manager
+pub async fn load_tool_config_from_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+    state: &crate::state::AppState
+) -> Result<(), String> {
+    let loaded_config = ToolConfigManager::load_from_centralized_settings(settings_manager).await?;
+
+    let mut config_guard = state.tool_config_manager.lock().await;
+    *config_guard = loaded_config;
+
+    info!("Loaded tool configuration from centralized settings on startup");
+    Ok(())
+}
+
 /// Load tool configuration from persistent storage
+/// DEPRECATED: Use load_tool_config_from_centralized_settings instead
 ///
 /// Used by: Application startup for configuration initialization
 ///
 /// # Arguments
 /// * `app` - Tauri app handle for store access
 /// * `state` - Application state containing tool config manager
+#[deprecated(note = "Use load_tool_config_from_centralized_settings instead")]
 pub async fn load_tool_config_from_store(app: &AppHandle, state: &crate::state::AppState) -> Result<(), String> {
     let loaded_config = ToolConfigManager::load_from_store(app)?;
 
@@ -617,5 +798,23 @@ pub async fn load_tool_config_from_store(app: &AppHandle, state: &crate::state::
     *config_guard = loaded_config;
 
     info!("Loaded tool configuration from store on startup");
+    Ok(())
+}
+
+/// Save tool configuration to centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
+/// Used by: Application shutdown and settings changes for persistence
+///
+/// # Arguments
+/// * `settings_manager` - Centralized settings manager
+/// * `state` - Application state containing tool config manager
+pub async fn save_tool_config_to_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+    state: &crate::state::AppState
+) -> Result<(), String> {
+    let config_guard = state.tool_config_manager.lock().await;
+    config_guard.save_to_centralized_settings(settings_manager).await?;
+
+    info!("Saved tool configuration to centralized settings");
     Ok(())
 }

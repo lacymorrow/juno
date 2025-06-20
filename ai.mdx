@@ -52,9 +52,12 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [x] Test cloud connectivity
 - [x] **Result**: Successfully migrated from `cloud_config.json` to centralized settings with complete compatibility
 
-#### 🔧 Step 2.6: Migrate `tool_config.json`
-- [ ] Update `src-tauri/src/agent/tools/tool_config.rs`
-- [ ] Test tool configuration
+#### ✅ Step 2.6: Migrate `tool_config.json` (**COMPLETED**)
+- [x] Update `src-tauri/src/agent/tools/tool_config.rs`
+- [x] Update `src-tauri/src/state_management.rs` to use centralized loading
+- [x] Update `src-tauri/src/state.rs` save/load methods to use centralized settings
+- [x] Test tool configuration
+- [x] **Result**: Successfully migrated from `tool_config.json` to centralized settings with elimination of deprecation warnings
 
 #### 🎙️ Step 2.7: Migrate audio/voice settings (multiple files)
 - [ ] Consolidate TTS, dictation, and voice settings
@@ -79,9 +82,35 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [ ] **Step 4.2**: Clean up unused imports and code
 - [ ] **Step 4.3**: Update documentation
 
-## 📊 Migration Progress: **Step 2.6** | 5/12 JSON files migrated (42%)
+## 📊 Migration Progress: **Step 2.7** | 6/12 JSON files migrated (50%)
 
 ## ✅ Completed Achievements
+
+### 🎉 Step 2.6 - Tool Configuration Migration COMPLETED Successfully!
+
+**What Was Accomplished:**
+1. **Complete Centralized Integration**: Successfully migrated all tool configuration operations from `tool_config.json` to centralized settings
+2. **State Management Updates**: Updated `state_management.rs` to use `load_tool_config_from_centralized_settings` instead of deprecated `load_tool_config_from_store`
+3. **AppState Method Modernization**: Updated `state.rs` save/load methods to use centralized settings manager
+4. **Function Replacements**:
+   - `AppState::load_tool_config()` → Uses centralized SettingsManager
+   - `AppState::save_tool_config()` → Uses centralized SettingsManager
+   - State loading → Uses `load_tool_config_from_centralized_settings()` with automatic fallback to defaults
+5. **Automatic Command Integration**: All existing command files (`tools.rs`, `mcp.rs`) automatically benefit from centralized system through updated AppState methods
+
+**Technical Implementation:**
+- ✅ **Perfect Compilation**: Exit code 0, no compilation errors
+- ✅ **Deprecation Warning Eliminated**: Removed all warnings about deprecated tool config functions
+- ✅ **Backward Compatibility**: All existing tool management functionality preserved
+- ✅ **Settings Manager Integration**: Proper async SettingsManager usage throughout the tool configuration flow
+- ✅ **Error Handling**: Comprehensive error propagation with descriptive messages
+
+**Architecture Benefits:**
+- 🔄 **Reactive Updates**: Tool settings changes automatically propagate through centralized system
+- 📁 **Single Source**: All tool configuration (tools, categories, MCP servers) centralized in unified store
+- 🛡️ **Type Safety**: Compile-time guarantees for all tool configuration operations
+- 🔧 **Maintainability**: Eliminated direct JSON store dependencies across multiple command files
+- 🎯 **Consistency**: Follows same patterns as previous successful migrations
 
 ### 🎉 Step 2.5 - Cloud Configuration Migration COMPLETED Successfully!
 
@@ -191,9 +220,9 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - Resolved function naming conflicts with `centralized_` prefixes
 - Full functionality preservation with reactive updates
 
-## 🎯 Next Target: Step 2.6 - tool_config.json
+## 🎯 Next Target: Step 2.7 - Audio/Voice Settings
 
-The next migration will focus on tool configuration settings, which handles tool enable/disable states, categories, and MCP server configurations.
+The next migration will focus on consolidating audio/voice settings from multiple files into the centralized system, including TTS, dictation, and voice transcription configurations.
 
 ## 🏗️ Architecture Overview
 

@@ -628,20 +628,18 @@ impl AppState {
         self.tool_config_manager.clone()
     }
 
-    // Method to load tool configuration from store
+    // Method to load tool configuration from centralized settings
     pub async fn load_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let loaded_config = ToolConfigManager::load_from_store(app_handle)?;
-
-        let mut config_guard = self.tool_config_manager.lock().await;
-        *config_guard = loaded_config;
-
-        Ok(())
+        let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+        crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(&settings_manager, self).await
     }
 
-    // Method to save tool configuration to store
+    // Method to save tool configuration to centralized settings
     pub async fn save_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
-        let config_guard = self.tool_config_manager.lock().await;
-        config_guard.save_to_store(app_handle)
+        let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
+            .map_err(|e| format!("Failed to create settings manager: {}", e))?;
+        crate::agent::tools::tool_config::save_tool_config_to_centralized_settings(&settings_manager, self).await
     }
 
     // Cloud connectivity methods
