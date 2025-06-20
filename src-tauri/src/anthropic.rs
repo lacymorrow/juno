@@ -1,6 +1,8 @@
 use tracing::{info, error, warn};
 use uuid;
 use std::sync::Arc;
+use std::collections::VecDeque;
+use tokio::sync::{Semaphore, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,6 +25,136 @@ use crate::agent::prompts::PromptManager;
 use crate::state::AppState;
 use crate::utils::{gather_system_context, format_system_context_for_agent};
 use crate::constants::{agent, timeouts};
+
+/// Agent execution queue system to prevent concurrent execution
+#[derive(Debug)]
+struct AgentExecutionQueue {
+    /// Semaphore to ensure only one agent executes at a time
+    execution_semaphore: Arc<Semaphore>,
+    /// Queue of pending agent queries
+    pending_queries: Arc<Mutex<VecDeque<QueuedQuery>>>,
+    /// Currently executing query ID
+    current_execution_id: Arc<Mutex<Option<String>>>,
+}
+
+#[derive(Debug, Clone)]
+struct QueuedQuery {
+    id: String,
+    query: String,
+    queued_at: std::time::Instant,
+    app_handle: tauri::AppHandle,
+}
+
+impl AgentExecutionQueue {
+    fn new() -> Self {
+        Self {
+            execution_semaphore: Arc::new(Semaphore::new(1)), // Only one agent at a time
+            pending_queries: Arc::new(Mutex::new(VecDeque::new())),
+            current_execution_id: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Queue a new query for execution, cancelling any existing execution
+    async fn queue_query(&self, query: String, app_handle: tauri::AppHandle, state: tauri::State<'_, AppState>) -> String {
+        let query_id = uuid::Uuid::new_v4().to_string();
+        let queued_query = QueuedQuery {
+            id: query_id.clone(),
+            query,
+            queued_at: std::time::Instant::now(),
+            app_handle,
+        };
+
+        // Cancel current execution if any
+        self.cancel_current_execution(state).await;
+
+        // Clear pending queue and add new query
+        {
+            let mut pending = self.pending_queries.lock().await;
+            pending.clear(); // Only keep the latest query
+            pending.push_back(queued_query);
+            info!("Queued new agent query with ID: {}", query_id);
+        }
+
+        query_id
+    }
+
+    /// Cancel the currently executing agent
+    async fn cancel_current_execution(&self, state: tauri::State<'_, AppState>) {
+        let current_id = {
+            let current = self.current_execution_id.lock().await;
+            current.clone()
+        };
+
+        if let Some(execution_id) = current_id {
+            info!("Cancelling current agent execution: {}", execution_id);
+            // Signal cancellation through the existing state mechanism
+            state.signal_cancel();
+            info!("Signalled cancellation for existing agent execution");
+
+            // Give existing agent a brief moment to clean up gracefully
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    }
+
+        /// Execute the next queued query atomically
+    async fn execute_next_query(&self, state: tauri::State<'_, AppState>) -> Option<QueuedQuery> {
+        // Try to acquire execution semaphore (non-blocking check)
+        if let Ok(permit) = self.execution_semaphore.try_acquire() {
+            let next_query = {
+                let mut pending = self.pending_queries.lock().await;
+                pending.pop_front()
+            };
+
+            if let Some(query) = next_query.clone() {
+                // Set current execution ID
+                {
+                    let mut current = self.current_execution_id.lock().await;
+                    *current = Some(query.id.clone());
+                }
+
+                // Execute the query
+                info!("Starting atomic agent execution for query ID: {}", query.id);
+
+                // Execute the actual agent logic here
+                let result = execute_agent_internal(query.query.clone(), state, query.app_handle.clone()).await;
+
+                // Clear current execution
+                {
+                    let mut current = self.current_execution_id.lock().await;
+                    *current = None;
+                }
+
+                // Release the semaphore
+                drop(permit);
+
+                if let Err(e) = result {
+                    error!("Agent execution failed for query {}: {}", query.id, e);
+                }
+
+                return Some(query);
+            } else {
+                // No queries to execute, release semaphore
+                drop(permit);
+            }
+        }
+
+        None
+    }
+
+    /// Check if execution is currently in progress
+    async fn is_executing(&self) -> bool {
+        let current = self.current_execution_id.lock().await;
+        current.is_some()
+    }
+}
+
+/// Global agent execution queue instance
+static AGENT_EXECUTION_QUEUE: std::sync::OnceLock<AgentExecutionQueue> = std::sync::OnceLock::new();
+
+/// Get or initialize the global agent execution queue
+fn get_agent_execution_queue() -> &'static AgentExecutionQueue {
+    AGENT_EXECUTION_QUEUE.get_or_init(|| AgentExecutionQueue::new())
+}
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub(crate) struct AnthropicContentBlock {
@@ -155,27 +287,25 @@ pub async fn submit_query(
 
     info!("Network connectivity confirmed, proceeding with agent execution");
 
-    // --- Check if an agent is already running and cancel it ---
-    if state.is_agent_executing() {
-        let current_execution_id = state.get_current_agent_execution_id();
-        info!("Agent is currently executing (ID: {:?}), cancelling for new command", current_execution_id);
+    // --- Use Atomic Agent Execution Queue ---
+    let queue = get_agent_execution_queue();
+    let query_id = queue.queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone()).await;
+    info!("Queued agent query with ID: {}", query_id);
 
-        // Signal cancellation for the existing agent
-        state.signal_cancel();
-        info!("Signaled cancellation for existing agent execution");
-
-        // Give existing agent a brief moment to clean up gracefully
-        tokio::time::sleep(tokio::time::Duration::from_millis(timeouts::MEDIUM_DELAY_MS)).await;
-
-        // Reset the cancellation signal for the new agent
-        state.reset_cancel();
-        info!("Reset cancellation signal for new agent");
-    } else {
-        // No agent currently running, ensure cancellation signal is reset
-        state.reset_cancel();
-        info!("No existing agent detected, proceeding with new execution");
+    // Execute the queued query atomically
+    if let Some(executed_query) = queue.execute_next_query(state).await {
+        info!("Successfully executed agent query: {}", executed_query.id);
     }
 
+    Ok(())
+}
+
+/// Internal agent execution function - handles the actual agent logic
+async fn execute_agent_internal(
+    query: String,
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     // Generate a unique execution ID for this agent run
     let execution_id = uuid::Uuid::new_v4().to_string();
 
@@ -187,6 +317,12 @@ pub async fn submit_query(
     if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
         warn!("Failed to register escape key for agent execution: {} - continuing without escape key cancellation", e);
     }
+
+    // Reset cancellation signal for the new agent
+    state.reset_cancel();
+    info!("Reset cancellation signal for new agent execution");
+
+    let trimmed_query = query.trim();
 
     // --- Gather System Context ---
     let system_context = match gather_system_context(Some(&*state)).await {
@@ -471,11 +607,11 @@ pub async fn submit_query(
             // Store the original provider to restore later if needed
             if let Some(original_provider) = original_tts_provider {
                 // We'll restore it after TTS processing below
-                let state_for_restore = state.inner().clone();
+                let tts_provider_ref = state.tts_provider.clone();
                 tokio::task::spawn(async move {
                     // Give TTS time to process
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    if let Ok(mut tts_provider) = state_for_restore.tts_provider.lock() {
+                    if let Ok(mut tts_provider) = tts_provider_ref.lock() {
                         *tts_provider = original_provider;
                         info!("Restored original TTS provider after offline/network error message");
                     }
