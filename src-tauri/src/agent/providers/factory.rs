@@ -16,7 +16,7 @@ use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::state::AppState;
 
 // Model ID Constants - Single source of truth
-mod model_ids {
+pub mod model_ids {
     // Anthropic Claude Models
     pub const CLAUDE_4_OPUS: &str = "claude-opus-4-20250514";
     pub const CLAUDE_4_SONNET: &str = "claude-sonnet-4-20250514";

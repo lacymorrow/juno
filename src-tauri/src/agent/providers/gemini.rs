@@ -9,6 +9,7 @@ use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::AgentBrain;
+use crate::agent::providers::factory::model_ids;
 
 #[derive(Serialize, Debug)]
 struct GeminiRequest {
@@ -115,7 +116,7 @@ struct GeminiSafetyRating {
 }
 
 const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_MODEL: &str = "gemini-1.5-flash"; // Smaller, faster model for orchestration
+const DEFAULT_MODEL: &str = model_ids::GEMINI_1_5_FLASH; // Smaller, faster model for orchestration
 const DEFAULT_MAX_TOKENS: i32 = 1024; // Smaller token limit for orchestrator
 
 #[derive(Clone)]

@@ -8,6 +8,7 @@ use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
 };
 use crate::agent::traits::AgentBrain;
+use crate::agent::providers::factory::model_ids;
 
 // --- OpenAI API Structs --- //
 
@@ -87,7 +88,7 @@ struct OpenAIChoice {
 // --- OpenAIBrain Implementation --- //
 
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL: &str = "gpt-4o";
+const DEFAULT_MODEL: &str = model_ids::GPT_4O;
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 const DEFAULT_TEMPERATURE: f32 = 0.7;
 

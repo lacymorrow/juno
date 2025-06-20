@@ -4,7 +4,7 @@ use std::env;
 use tracing::{info, warn};
 use crate::agent::structs::AgentError;
 use crate::agent::prompts::manager::PromptManager;
-
+use crate::agent::providers::factory::model_ids;
 
 // Add centralized settings support
 use crate::settings::{ProviderSettings as CentralizedProviderSettings, ProviderConfig as CentralizedProviderConfig};
@@ -62,7 +62,7 @@ impl Default for ProviderConfig {
                 CentralizedProviderConfig {
                     id: "anthropic".to_string(),
                     api_key: None,
-                    model: Some("claude-sonnet-4-20250514".to_string()),
+                    model: Some(model_ids::CLAUDE_4_SONNET.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
@@ -70,7 +70,7 @@ impl Default for ProviderConfig {
                 CentralizedProviderConfig {
                     id: "openai".to_string(),
                     api_key: None,
-                    model: Some("gpt-4o".to_string()),
+                    model: Some(model_ids::GPT_4O.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
@@ -78,7 +78,7 @@ impl Default for ProviderConfig {
                 CentralizedProviderConfig {
                     id: "rig".to_string(),
                     api_key: None, // Rig uses OpenAI's API key by default
-                    model: Some("gpt-4o".to_string()),
+                    model: Some(model_ids::GPT_4O.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
@@ -86,7 +86,7 @@ impl Default for ProviderConfig {
                 CentralizedProviderConfig {
                     id: "gemini".to_string(),
                     api_key: None,
-                    model: Some("gemini-1.5-pro".to_string()),
+                    model: Some(model_ids::GEMINI_1_5_PRO.to_string()),
                     max_tokens: Some(4096),
                     temperature: Some(0.7),
                     system_prompt: None,
