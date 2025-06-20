@@ -77,7 +77,7 @@ export function PermissionsManager({
 
   // Check permissions status with optional auto-redirect
   const checkPermissions = useCallback(
-    async (useAutoRedirect = false) => {
+    async (_useAutoRedirect = false) => {
       try {
         setIsLoading(true);
         setError(null);

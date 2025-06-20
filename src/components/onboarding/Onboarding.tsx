@@ -9,7 +9,6 @@ import {
   Monitor,
   Shield,
   Sparkles,
-  XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import AudioVisualizer from "../bar/audio-visualizer";

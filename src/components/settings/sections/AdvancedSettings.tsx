@@ -12,11 +12,9 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   AlertCircle,
   CheckCircle,
-  MonitorSpeaker,
   RefreshCw,
   RotateCcw,
   Shield,
-  Terminal,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
