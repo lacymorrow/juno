@@ -162,6 +162,7 @@ pub struct FloatingBarManager {
     is_always_listening: bool,
     audio_level: f32,
     voice_mode: String, // "idle", "agent", "dictation"
+    agent_state: Option<String>, // "Finished", "Failed", "Cancelled", "Offline"
     app_handle: AppHandle,
     current_transition_id: Option<String>,
 }
@@ -180,6 +181,7 @@ impl FloatingBarManager {
             is_always_listening: false,
             audio_level: 0.0,
             voice_mode: "idle".to_string(),
+            agent_state: None,
             app_handle,
             current_transition_id: None,
         }
@@ -199,6 +201,7 @@ impl FloatingBarManager {
             "isAlwaysListening": self.is_always_listening,
             "audioLevel": self.audio_level,
             "voiceMode": self.voice_mode,
+            "agentState": self.agent_state,
         });
 
         if let Err(e) = self.app_handle.emit("bar-state-update", state_data) {
@@ -341,6 +344,7 @@ impl FloatingBarManager {
         self.last_submitted_value = query.clone();
         self.input_value.clear();
         self.current_error = None;
+        self.agent_state = None; // Clear agent state for new task
         self.is_agent_working = true;
 
         // FIXED: Consolidated state transition to avoid race conditions
@@ -398,6 +402,9 @@ impl FloatingBarManager {
         self.transcription_text.clear();
         self.spoken_text.clear();
 
+        // Store the agent state for frontend to use in determining success/failure messages
+        self.agent_state = Some(agent_state.to_string());
+
         // FIXED: Consolidated state transitions to avoid race conditions
         // Store transition target to prevent race conditions with other operations
         let transition_id = Uuid::new_v4().to_string();
@@ -416,10 +423,12 @@ impl FloatingBarManager {
                     let _ = app_handle.emit("floating-bar-complete-transition", transition_id_clone);
                 });
             }
-            "Failed" | "Cancelled" => {
+            "Failed" | "Cancelled" | "Offline" => {
                 self.current_error = Some(
                     if agent_state == "Cancelled" {
                         "Agent execution was cancelled".to_string()
+                    } else if agent_state == "Offline" {
+                        "Connection unavailable".to_string()
                     } else {
                         format!("Agent failed: {}", response_text.unwrap_or_default())
                     }

@@ -32,6 +32,7 @@ export interface BarStateData {
   isAlwaysListening: boolean;
   audioLevel: number;
   voiceMode: "dictation" | "agent" | "idle";
+  agentState?: string | null; // "Finished", "Failed", "Cancelled", "Offline"
 }
 
 export interface FloatingBarConfig {

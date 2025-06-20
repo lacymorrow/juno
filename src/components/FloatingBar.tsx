@@ -61,6 +61,7 @@ export function FloatingBar() {
   const [voiceMode, setVoiceMode] = useState<"dictation" | "agent" | "idle">(
     "idle"
   );
+  const [agentState, setAgentState] = useState<string | null>(null);
 
   const { invokeCommand } = useInvoke();
   const { resizeWindow } = useWindowSize("floating-bar");
@@ -145,6 +146,7 @@ export function FloatingBar() {
     setIsAlwaysListening(data.isAlwaysListening);
     setAudioLevel(data.audioLevel || 0);
     setVoiceMode(data.voiceMode || "idle");
+    setAgentState(data.agentState || null);
 
     // Auto-focus input when in input state
     if (data.barState === "input" && inputRef.current) {
@@ -279,11 +281,6 @@ export function FloatingBar() {
   // Get enhanced status text for tooltip
   const getStatusText = () => {
     switch (barState) {
-      case "default":
-        if (isAlwaysListening) return "Always listening for wake words";
-        if (isDictationMode) return "Dictation mode active";
-        if (isAgentWorking) return "Agent working...";
-        return "Click to interact • Alt+D for AI • Option+Space to dictate";
       case "dictation_ready":
         return "Hold Option+Space to start dictating";
       case "dictation_active":
@@ -304,7 +301,16 @@ export function FloatingBar() {
       case "loading":
         return "Processing request...";
       case "success":
-        return "Task completed successfully";
+        // Check agent state to determine if it was actually successful
+        if (agentState === "Failed") {
+          return "Task failed";
+        } else if (agentState === "Cancelled") {
+          return "Task cancelled";
+        } else if (agentState === "Offline") {
+          return "Connection unavailable";
+        } else {
+          return "Task completed successfully";
+        }
       case "error":
         return currentError || "An error occurred";
       case "always-listening":
@@ -631,19 +637,53 @@ export function FloatingBar() {
                 className="flex items-center gap-3 flex-1 min-w-0"
                 data-tauri-drag-region
               >
-                <Check className="h-4 w-4 text-emerald-300" />
+                {agentState === "Failed" ? (
+                  <AlertCircle className="h-4 w-4 text-red-300" />
+                ) : agentState === "Cancelled" ? (
+                  <X className="h-4 w-4 text-yellow-300" />
+                ) : agentState === "Offline" ? (
+                  <AlertCircle className="h-4 w-4 text-orange-300" />
+                ) : (
+                  <Check className="h-4 w-4 text-emerald-300" />
+                )}
                 <span
-                  className="text-sm font-medium text-emerald-100 truncate"
+                  className={cn(
+                    "text-sm font-medium truncate",
+                    agentState === "Failed"
+                      ? "text-red-100"
+                      : agentState === "Cancelled"
+                      ? "text-yellow-100"
+                      : agentState === "Offline"
+                      ? "text-orange-100"
+                      : "text-emerald-100"
+                  )}
                   data-tauri-drag-region
                 >
-                  {lastSubmittedValue}
+                  {getStatusText()}
                 </span>
               </div>
               <div
-                className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-400"
+                className={cn(
+                  "flex items-center justify-center h-6 w-6 rounded-full",
+                  agentState === "Failed"
+                    ? "bg-red-400"
+                    : agentState === "Cancelled"
+                    ? "bg-yellow-400"
+                    : agentState === "Offline"
+                    ? "bg-orange-400"
+                    : "bg-emerald-400"
+                )}
                 data-tauri-drag-region
               >
-                <Check size={12} className="text-emerald-900" />
+                {agentState === "Failed" ? (
+                  <X size={12} className="text-red-900" />
+                ) : agentState === "Cancelled" ? (
+                  <X size={12} className="text-yellow-900" />
+                ) : agentState === "Offline" ? (
+                  <AlertCircle size={12} className="text-orange-900" />
+                ) : (
+                  <Check size={12} className="text-emerald-900" />
+                )}
               </div>
             </div>
           )}
