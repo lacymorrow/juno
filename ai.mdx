@@ -44,9 +44,13 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [x] Test agent trigger mode functionality
 - [x] **Result**: Successfully migrated from `agent_settings.json` to centralized settings with complete legacy code removal
 
-#### 🌩️ Step 2.5: Migrate `cloud_config.json`
-- [ ] Update `src-tauri/src/cloud/config.rs`
-- [ ] Test cloud connectivity
+#### ✅ Step 2.5: Migrate `cloud_config.json` (**COMPLETED**)
+- [x] Update `src-tauri/src/cloud/config.rs`
+- [x] Add conversion methods between CloudConfig and CloudSettings
+- [x] Replace legacy store operations with centralized settings
+- [x] Fix async runtime integration for synchronous context
+- [x] Test cloud connectivity
+- [x] **Result**: Successfully migrated from `cloud_config.json` to centralized settings with complete compatibility
 
 #### 🔧 Step 2.6: Migrate `tool_config.json`
 - [ ] Update `src-tauri/src/agent/tools/tool_config.rs`
@@ -75,9 +79,35 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - [ ] **Step 4.2**: Clean up unused imports and code
 - [ ] **Step 4.3**: Update documentation
 
-## 📊 Migration Progress: **Step 2.5** | 4/12 JSON files migrated (33%)
+## 📊 Migration Progress: **Step 2.6** | 5/12 JSON files migrated (42%)
 
 ## ✅ Completed Achievements
+
+### 🎉 Step 2.5 - Cloud Configuration Migration COMPLETED Successfully!
+
+**What Was Accomplished:**
+1. **Complete Migration**: Successfully migrated all cloud configuration operations from `cloud_config.json` to centralized settings
+2. **Conversion Methods**: Added seamless conversion between `CloudConfig` and `CloudSettings` schemas
+3. **Async Runtime Integration**: Fixed synchronous methods to use async centralized settings via `tokio::task::block_in_place()`
+4. **Function Updates**:
+   - `CloudConfig::load_from_store()` → Uses centralized settings with async runtime bridge
+   - `CloudConfig::save_to_store()` → Uses centralized settings with proper async handling
+   - Added `to_centralized_settings()` and `from_centralized_settings()` conversion methods
+5. **Compatibility Preserved**: All AppState and command methods continue to work without changes
+
+**Technical Implementation:**
+- ✅ **Perfect Compilation**: Exit code 0, no compilation errors
+- ✅ **Async Bridge**: Proper integration of async settings manager in synchronous context
+- ✅ **Backward Compatibility**: All existing cloud functionality preserved
+- ✅ **Migration Safety**: Automatic permissive defaults migration for existing configurations
+- ✅ **Type Safety**: Complete conversion between CloudConfig and CloudSettings schemas
+
+**Architecture Benefits:**
+- 🔄 **Reactive Updates**: Cloud settings changes automatically propagate through centralized system
+- 📁 **Single Source**: All cloud configuration centralized in unified store
+- 🛡️ **Type Safety**: Compile-time guarantees for all cloud settings operations
+- 🔧 **Maintainability**: Eliminated direct JSON store dependencies
+- 🎯 **Consistency**: Follows same patterns as previous successful migrations
 
 ### 🎉 Step 2.4 - Agent Settings Migration COMPLETED Successfully!
 
@@ -161,9 +191,9 @@ Replace 12 scattered JSON configuration files with a single, reactive, centraliz
 - Resolved function naming conflicts with `centralized_` prefixes
 - Full functionality preservation with reactive updates
 
-## 🎯 Next Target: Step 2.5 - cloud_config.json
+## 🎯 Next Target: Step 2.6 - tool_config.json
 
-The next migration will focus on cloud connectivity settings, which handles server connections, authentication, and communication configurations.
+The next migration will focus on tool configuration settings, which handles tool enable/disable states, categories, and MCP server configurations.
 
 ## 🏗️ Architecture Overview
 
