@@ -47,22 +47,46 @@ impl Default for VoiceTranscriptionConfig {
 }
 
 impl VoiceTranscriptionConfig {
-    /// Save the configuration to a file
+    /// Save the configuration to a file (DEPRECATED)
+    /// Use centralized settings system instead
+    #[deprecated(note = "Use centralized settings system instead")]
     pub fn save(&self) -> Result<()> {
-        // For now, we'll just return Ok since we're not persisting to disk
-        // In a real implementation, you might want to save to:
-        // - app_data_dir/voice-transcription/config.json
-        // - or use tauri's config system
+        // DEPRECATED: Legacy file-based configuration is deprecated
+        // Use centralized settings system instead through:
+        // - settings_manager.set_voice_transcription_settings()
         Ok(())
     }
 
-    /// Load configuration from file
+    /// Load configuration from file (DEPRECATED)
+    /// Use centralized settings system instead
+    #[deprecated(note = "Use centralized settings system instead")]
     pub fn load() -> Result<Self> {
-        // For now, just return default
-        // In a real implementation, you might want to load from:
-        // - app_data_dir/voice-transcription/config.json
-        // - or use tauri's config system
+        // DEPRECATED: Legacy file-based configuration is deprecated
+        // Use centralized settings system instead through:
+        // - settings_manager.get_voice_transcription_settings()
         Ok(Self::default())
+    }
+
+    /// Create configuration from centralized settings
+    /// NEW: Uses centralized settings system for voice transcription configuration
+    pub fn from_centralized_settings(
+        model_path: String,
+        sample_rate: u32,
+        channels: u16,
+        buffer_duration_ms: u64,
+        partial_interval_ms: u64,
+        enable_partial_transcription: bool,
+        enable_playback: bool,
+    ) -> Self {
+        Self {
+            model_path,
+            sample_rate,
+            channels,
+            buffer_duration_ms,
+            partial_interval_ms,
+            enable_partial_transcription,
+            enable_playback,
+        }
     }
 }
 

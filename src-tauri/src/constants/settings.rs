@@ -30,6 +30,8 @@ pub mod store_keys {
     pub const PROMPTS: &str = "prompts";
     pub const ONBOARDING: &str = "onboarding";
     pub const AUTOSTART_ENABLED: &str = "autostart_enabled";
+    pub const CLI: &str = "cli";
+    pub const VOICE_TRANSCRIPTION: &str = "voice_transcription";
 }
 
 /// Keyboard shortcut setting keys
@@ -172,4 +174,6 @@ pub mod events {
     pub const TOOL_SETTINGS_CHANGED: &str = "tool_settings_changed";
     pub const FLOATING_BAR_SETTINGS_CHANGED: &str = "floating_bar_settings_changed";
     pub const PROMPT_SETTINGS_CHANGED: &str = "prompt_settings_changed";
+    pub const CLI_SETTINGS_CHANGED: &str = "cli_settings_changed";
+    pub const VOICE_TRANSCRIPTION_SETTINGS_CHANGED: &str = "voice_transcription_settings_changed";
 }
