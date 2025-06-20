@@ -33,6 +33,10 @@ pub struct AppSettings {
     pub onboarding: OnboardingSettings,
     /// Application autostart setting
     pub autostart_enabled: bool,
+    /// CLI configuration settings
+    pub cli: CLISettings,
+    /// Voice transcription configuration
+    pub voice_transcription: VoiceTranscriptionSettings,
 }
 
 /// Keyboard shortcut configuration
@@ -189,6 +193,44 @@ pub struct OnboardingSettings {
     pub skip_count: u32,
 }
 
+/// CLI configuration settings
+/// Replaces: CLI config.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CLISettings {
+    /// Enable/disable CLI logging
+    pub logging_enabled: bool,
+    /// CLI log level
+    pub log_level: String,
+    /// Maximum number of command history entries to keep
+    pub max_history_entries: u32,
+    /// Enable colored output in CLI
+    pub colored_output: bool,
+    /// CLI timeout for commands (seconds)
+    pub command_timeout: u64,
+    /// Enable CLI autocomplete
+    pub autocomplete_enabled: bool,
+}
+
+/// Voice transcription configuration settings
+/// Replaces: voice-transcription/config.json
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceTranscriptionSettings {
+    /// Path to the Whisper model file
+    pub model_path: String,
+    /// Sample rate for audio recording (Hz)
+    pub sample_rate: u32,
+    /// Number of channels in the audio recording
+    pub channels: u16,
+    /// Buffer duration for partial transcriptions (ms)
+    pub buffer_duration_ms: u64,
+    /// Interval between partial transcriptions (ms)
+    pub partial_interval_ms: u64,
+    /// Enable partial transcription results
+    pub enable_partial_transcription: bool,
+    /// Enable playback of the transcription
+    pub enable_playback: bool,
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -202,6 +244,8 @@ impl Default for AppSettings {
             prompts: PromptSettings::default(),
             onboarding: OnboardingSettings::default(),
             autostart_enabled: defaults::AUTOSTART_ENABLED,
+            cli: CLISettings::default(),
+            voice_transcription: VoiceTranscriptionSettings::default(),
         }
     }
 }
@@ -323,6 +367,33 @@ impl Default for OnboardingSettings {
             completed_at: None,
             skipped: false,
             skip_count: 0,
+        }
+    }
+}
+
+impl Default for CLISettings {
+    fn default() -> Self {
+        Self {
+            logging_enabled: true,
+            log_level: "info".to_string(),
+            max_history_entries: 100,
+            colored_output: true,
+            command_timeout: 30,
+            autocomplete_enabled: true,
+        }
+    }
+}
+
+impl Default for VoiceTranscriptionSettings {
+    fn default() -> Self {
+        Self {
+            model_path: "models/ggml-tiny.en.bin".to_string(),
+            sample_rate: 16000,
+            channels: 1,
+            buffer_duration_ms: 1500,
+            partial_interval_ms: 500,
+            enable_partial_transcription: true,
+            enable_playback: true,
         }
     }
 }

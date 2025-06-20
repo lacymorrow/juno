@@ -23,7 +23,9 @@ use crate::settings::{
     AudioSettings,
     ToolSettings,
     PromptSettings,
-    OnboardingSettings
+    OnboardingSettings,
+    CLISettings,
+    VoiceTranscriptionSettings
 };
 
 /// Centralized settings manager with reactive updates
@@ -84,6 +86,8 @@ impl SettingsManager {
                 .get(store_keys::AUTOSTART_ENABLED)
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            cli: self.get_cli_settings_from_store(&store)?,
+            voice_transcription: self.get_voice_transcription_settings_from_store(&store)?,
         };
 
         Ok(settings)
@@ -114,6 +118,10 @@ impl SettingsManager {
         store.set(store_keys::ONBOARDING, serde_json::to_value(&settings.onboarding)
             .map_err(|e| format!("Failed to serialize onboarding settings: {}", e))?);
         store.set(store_keys::AUTOSTART_ENABLED, Value::Bool(settings.autostart_enabled));
+        store.set(store_keys::CLI, serde_json::to_value(&settings.cli)
+            .map_err(|e| format!("Failed to serialize CLI settings: {}", e))?);
+        store.set(store_keys::VOICE_TRANSCRIPTION, serde_json::to_value(&settings.voice_transcription)
+            .map_err(|e| format!("Failed to serialize voice transcription settings: {}", e))?);
 
         store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
 
@@ -185,6 +193,18 @@ impl SettingsManager {
             .get(store_keys::AUTOSTART_ENABLED)
             .and_then(|v| v.as_bool())
             .unwrap_or(false))
+    }
+
+    pub async fn get_cli_settings(&self) -> Result<CLISettings, String> {
+        let store = self.app_handle.store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        self.get_cli_settings_from_store(&store)
+    }
+
+    pub async fn get_voice_transcription_settings(&self) -> Result<VoiceTranscriptionSettings, String> {
+        let store = self.app_handle.store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        self.get_voice_transcription_settings_from_store(&store)
     }
 
     // Individual setters with validation and events
@@ -325,6 +345,48 @@ impl SettingsManager {
         Ok(())
     }
 
+    pub async fn set_cli_settings(&self, settings: &CLISettings) -> Result<(), String> {
+        // Validate CLI settings
+        if settings.command_timeout == 0 || settings.command_timeout > 3600 {
+            return Err("Command timeout must be between 1 and 3600 seconds".to_string());
+        }
+
+        let store = self.app_handle.store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        store.set(store_keys::CLI, serde_json::to_value(settings)
+            .map_err(|e| format!("Failed to serialize CLI settings: {}", e))?);
+        store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
+
+        self.app_handle.emit(events::CLI_SETTINGS_CHANGED, settings)
+            .map_err(|e| format!("Failed to emit CLI settings changed event: {}", e))?;
+        self.emit_settings_changed().await;
+        Ok(())
+    }
+
+    pub async fn set_voice_transcription_settings(&self, settings: &VoiceTranscriptionSettings) -> Result<(), String> {
+        // Validate voice transcription settings
+        if settings.sample_rate == 0 || settings.sample_rate > 96000 {
+            return Err("Sample rate must be between 1 and 96000 Hz".to_string());
+        }
+        if settings.channels == 0 || settings.channels > 8 {
+            return Err("Channels must be between 1 and 8".to_string());
+        }
+        if settings.buffer_duration_ms == 0 || settings.buffer_duration_ms > 10000 {
+            return Err("Buffer duration must be between 1 and 10000 ms".to_string());
+        }
+
+        let store = self.app_handle.store(SETTINGS_STORE_FILE)
+            .map_err(|e| format!("Failed to access settings store: {}", e))?;
+        store.set(store_keys::VOICE_TRANSCRIPTION, serde_json::to_value(settings)
+            .map_err(|e| format!("Failed to serialize voice transcription settings: {}", e))?);
+        store.save().map_err(|e| format!("Failed to save settings store: {}", e))?;
+
+        self.app_handle.emit(events::VOICE_TRANSCRIPTION_SETTINGS_CHANGED, settings)
+            .map_err(|e| format!("Failed to emit voice transcription settings changed event: {}", e))?;
+        self.emit_settings_changed().await;
+        Ok(())
+    }
+
     // Internal helpers
     fn get_keyboard_shortcuts_from_store(&self, store: &tauri_plugin_store::Store<tauri::Wry>) -> Result<KeyboardShortcuts, String> {
         match store.get(store_keys::KEYBOARD_SHORTCUTS)
@@ -395,6 +457,22 @@ impl SettingsManager {
             .and_then(|v| serde_json::from_value(v.clone()).ok()) {
             Some(settings) => Ok(settings),
             None => Ok(OnboardingSettings::default())
+        }
+    }
+
+    fn get_cli_settings_from_store(&self, store: &tauri_plugin_store::Store<tauri::Wry>) -> Result<CLISettings, String> {
+        match store.get(store_keys::CLI)
+            .and_then(|v| serde_json::from_value(v.clone()).ok()) {
+            Some(settings) => Ok(settings),
+            None => Ok(CLISettings::default())
+        }
+    }
+
+    fn get_voice_transcription_settings_from_store(&self, store: &tauri_plugin_store::Store<tauri::Wry>) -> Result<VoiceTranscriptionSettings, String> {
+        match store.get(store_keys::VOICE_TRANSCRIPTION)
+            .and_then(|v| serde_json::from_value(v.clone()).ok()) {
+            Some(settings) => Ok(settings),
+            None => Ok(VoiceTranscriptionSettings::default())
         }
     }
 
