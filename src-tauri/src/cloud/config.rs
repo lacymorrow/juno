@@ -11,7 +11,7 @@
 //!
 //! ## Usage
 //! Used by: Cloud service initialization, settings UI
-//! Configuration: Stored in cloud_config.json store
+//! Configuration: Managed by centralized settings system
 
 use serde::{Deserialize, Serialize};
 

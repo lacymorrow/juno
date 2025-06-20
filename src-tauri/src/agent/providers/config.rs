@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+
 use std::env;
 use tracing::{info, warn};
 use crate::agent::structs::AgentError;
@@ -250,12 +250,7 @@ impl ProviderConfig {
         self.providers.iter().find(|p| p.id == provider_id)
     }
 
-    /// Get configuration file path
-    fn get_config_path() -> Result<PathBuf, AgentError> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| AgentError::ConfigurationError("Unable to find home directory".to_string()))?;
-        Ok(home.join(".juno").join("provider_config.json"))
-    }
+
 }
 
 /// Apply provider settings to environment variables (convenience method)

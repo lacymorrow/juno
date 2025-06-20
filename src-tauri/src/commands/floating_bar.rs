@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Listener, State};
-use tauri_plugin_store::StoreExt;
+
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::{debug, error, warn, info};
@@ -70,34 +70,7 @@ impl FloatingBarConfig {
         Ok(())
     }
 
-    /// Load configuration from Tauri store or create default.
-    /// DEPRECATED: Use load_from_centralized_settings instead.
-    /// Attempts to load existing configuration, creates default if missing.
-    /// Used by: Application startup and settings management.
-    #[deprecated(note = "Use load_from_centralized_settings instead")]
-    pub async fn load(app_handle: &AppHandle) -> Result<Self, String> {
-        let store = app_handle.store("floating_bar_config.json")
-            .map_err(|e| format!("Failed to access floating bar config store: {}", e))?;
 
-        // Try to load the configuration from store
-        if let Some(config_value) = store.get("floating_bar_config") {
-            match serde_json::from_value::<Self>(config_value) {
-                Ok(config) => {
-                    debug!("Loaded floating bar configuration from store");
-                    return Ok(config);
-                }
-                Err(e) => {
-                    debug!("Failed to parse stored floating bar config ({}), creating default", e);
-                }
-            }
-        }
-
-        // No valid configuration found, create and save default
-        debug!("No floating bar configuration found in store, creating default");
-        let default_config = Self::default();
-        default_config.save_to_centralized_settings(app_handle).await?;
-        Ok(default_config)
-    }
 }
 
 /// Convert centralized FloatingBarSettings to FloatingBarConfig
