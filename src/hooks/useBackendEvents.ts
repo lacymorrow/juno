@@ -23,6 +23,11 @@ type BackendResponsePayload = {
 type StreamingTextEvent = {
     chunk: string;
     message_id?: string;
+    is_tts_separated?: boolean;
+    is_tts_only?: boolean;
+    is_response_only?: boolean;
+    tts_content?: string;
+    response_content?: string;
 };
 
 type StreamStartEvent = {
@@ -324,19 +329,79 @@ export function useBackendEvents({
             "agent-text-stream",
             (event) => {
                 console.log("Stream text chunk:", event.payload);
-                const { chunk, message_id } = event.payload;
+                const { chunk, message_id, is_tts_separated, is_tts_only, is_response_only, tts_content, response_content } = event.payload;
 
-                setConversationWithPruning((prev) =>
-                    prev.map((msg) => {
-                        if (msg.messageId === message_id && msg.isStreaming) {
-                            return {
-                                ...msg,
-                                content: msg.content + chunk,
-                            };
+                // Handle TTS-separated format
+                if (is_tts_separated && tts_content && response_content) {
+                    console.log("TTS-separated content received - TTS:", tts_content, "Response:", response_content);
+                    
+                    // Update the streaming message with the response content only (TTS is handled separately)
+                    setConversationWithPruning((prev) =>
+                        prev.map((msg) => {
+                            if (msg.messageId === message_id && msg.isStreaming) {
+                                return {
+                                    ...msg,
+                                    content: response_content, // Only show response content in chat
+                                };
+                            }
+                            return msg;
+                        })
+                    );
+                } else if (is_tts_only && tts_content) {
+                    console.log("TTS-only chunk received:", tts_content);
+                    // TTS-only chunks don't update the chat display, they're just for audio
+                    // The message remains with empty content until response chunk arrives
+                } else if (is_response_only && response_content) {
+                    console.log("Response-only chunk received:", response_content);
+                    
+                    // Update the streaming message with response content
+                    setConversationWithPruning((prev) =>
+                        prev.map((msg) => {
+                            if (msg.messageId === message_id && msg.isStreaming) {
+                                return {
+                                    ...msg,
+                                    content: msg.content + response_content,
+                                };
+                            }
+                            return msg;
+                        })
+                    );
+                } else {
+                    // Handle legacy/standard streaming format
+                    let displayChunk = chunk;
+                    
+                    // Parse TTS-separated format if present in chunk
+                    if (chunk.includes("=========TTS") && chunk.includes("========= RESPONSE")) {
+                        const parts = chunk.split("========= RESPONSE");
+                        if (parts.length === 2) {
+                            const ttspart = parts[0].replace("=========TTS", "").replace(/={9,}/g, "").trim();
+                            const responsepart = parts[1].trim();
+                            
+                            console.log("Parsed TTS-separated chunk - TTS:", ttspart, "Response:", responsepart);
+                            displayChunk = responsepart; // Only display response content
                         }
-                        return msg;
-                    })
-                );
+                    } else if (chunk.includes("=========TTS") && chunk.includes("=========")) {
+                        // TTS-only chunk, don't display in chat
+                        console.log("TTS-only chunk detected, not updating chat display");
+                        return;
+                    } else if (chunk.includes("========= RESPONSE")) {
+                        // Response-only chunk
+                        displayChunk = chunk.replace("========= RESPONSE", "").trim();
+                        console.log("Response-only chunk detected:", displayChunk);
+                    }
+
+                    setConversationWithPruning((prev) =>
+                        prev.map((msg) => {
+                            if (msg.messageId === message_id && msg.isStreaming) {
+                                return {
+                                    ...msg,
+                                    content: msg.content + displayChunk,
+                                };
+                            }
+                            return msg;
+                        })
+                    );
+                }
 
                 throttledAutoScroll();
             }
@@ -348,13 +413,26 @@ export function useBackendEvents({
                 console.log("Stream ended:", event.payload);
                 const { message_id, complete_text, agent_state } = event.payload;
 
+                // Parse TTS-separated content if present
+                let finalDisplayText = complete_text;
+                if (complete_text.includes("=========TTS") && complete_text.includes("========= RESPONSE")) {
+                    const parts = complete_text.split("========= RESPONSE");
+                    if (parts.length === 2) {
+                        const ttspart = parts[0].replace("=========TTS", "").replace(/={9,}/g, "").trim();
+                        const responsepart = parts[1].trim();
+                        
+                        console.log("Stream end - parsed TTS-separated content - TTS:", ttspart, "Response:", responsepart);
+                        finalDisplayText = responsepart; // Only display response content in final message
+                    }
+                }
+
                 setConversationWithPruning((prev) =>
                     prev.map((msg) => {
                         if (msg.messageId === message_id && msg.isStreaming) {
                             return {
                                 ...msg,
-                                content: complete_text,
-                                isJsx: isJsxContent(complete_text),
+                                content: finalDisplayText,
+                                isJsx: isJsxContent(finalDisplayText),
                                 isStreaming: false,
                                 agent_state,
                             };

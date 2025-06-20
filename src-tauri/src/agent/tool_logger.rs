@@ -1198,3 +1198,75 @@ pub fn emit_stream_end_with_state(app_handle: &AppHandle, message_id: String, co
         warn!("Failed to emit agent-stream-end event: {}", e);
     }
 }
+
+/// Emit TTS-separated streaming text chunk with TTS content first, then response content
+pub fn emit_tts_separated_streaming_text_chunk(
+    app_handle: &AppHandle, 
+    tts_content: String, 
+    response_content: String, 
+    message_id: Option<String>
+) {
+    // Create the separated format: "=========TTS content ========= RESPONSE response content"
+    let separated_content = format!(
+        "=========TTS {} ========= RESPONSE {}", 
+        tts_content.trim(), 
+        response_content.trim()
+    );
+    
+    let event_data = serde_json::json!({
+        "chunk": separated_content,
+        "message_id": message_id,
+        "is_tts_separated": true,
+        "tts_content": tts_content.trim(),
+        "response_content": response_content.trim()
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::TEXT_STREAM, event_data) {
+        warn!("Failed to emit TTS-separated agent-text-stream event: {}", e);
+    }
+}
+
+/// Emit streaming text chunk with TTS content that should be spoken immediately
+pub fn emit_streaming_tts_chunk(app_handle: &AppHandle, tts_content: String, message_id: Option<String>) {
+    let tts_chunk = format!("=========TTS {} =========", tts_content.trim());
+    
+    let event_data = serde_json::json!({
+        "chunk": tts_chunk,
+        "message_id": message_id,
+        "is_tts_only": true,
+        "tts_content": tts_content.trim()
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::TEXT_STREAM, event_data) {
+        warn!("Failed to emit TTS-only streaming text chunk event: {}", e);
+    }
+}
+
+/// Emit streaming response chunk (after TTS has been spoken)
+pub fn emit_streaming_response_chunk(app_handle: &AppHandle, response_content: String, message_id: Option<String>) {
+    let response_chunk = format!("========= RESPONSE {}", response_content.trim());
+    
+    let event_data = serde_json::json!({
+        "chunk": response_chunk,
+        "message_id": message_id,
+        "is_response_only": true,
+        "response_content": response_content.trim()
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::TEXT_STREAM, event_data) {
+        warn!("Failed to emit response-only streaming text chunk event: {}", e);
+    }
+}
+
+/// Helper function to extract TTS and response content from separated format
+pub fn parse_tts_separated_content(content: &str) -> Option<(String, String)> {
+    if content.contains("=========TTS") && content.contains("========= RESPONSE") {
+        let parts: Vec<&str> = content.split("========= RESPONSE").collect();
+        if parts.len() == 2 {
+            let tts_part = parts[0].replace("=========TTS", "").replace("=========", "").trim();
+            let response_part = parts[1].trim();
+            return Some((tts_part.to_string(), response_part.to_string()));
+        }
+    }
+    None
+}

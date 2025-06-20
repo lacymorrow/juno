@@ -12,7 +12,7 @@ use regex::Regex;
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Filter content to prevent code, emojis, and unwanted content from being spoken
-fn filter_tts_content(text: &str) -> String {
+pub fn filter_tts_content(text: &str) -> String {
     debug!("[TTS Filter] Original text length: {} chars", text.len());
 
     let mut filtered_text = text.to_string();

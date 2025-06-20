@@ -99,6 +99,45 @@ fn is_jsx_content(content: &str) -> bool {
     )
 }
 
+/// Generate a concise TTS summary from response text
+fn generate_tts_summary(response_text: &str, agent_state: &str) -> String {
+    match agent_state {
+        "Failed" => "I encountered an error while processing your request.".to_string(),
+        "Cancelled" => "The operation was cancelled.".to_string(),
+        "Offline" => "I'm currently offline and cannot complete this request.".to_string(),
+        "Finished" => {
+            // Extract first meaningful sentence or create a brief summary
+            let cleaned_text = response_text
+                .lines()
+                .map(|line| line.trim())
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            // If the response is short enough, use it directly
+            if cleaned_text.len() <= 100 {
+                return cleaned_text;
+            }
+
+            // Try to find the first complete sentence
+            if let Some(first_sentence_end) = cleaned_text.find('.') {
+                let first_sentence = &cleaned_text[..=first_sentence_end];
+                if first_sentence.len() <= 120 && first_sentence.len() >= 10 {
+                    return first_sentence.to_string();
+                }
+            }
+
+            // Fallback: truncate to first 80 characters at word boundary
+            if let Some(space_pos) = cleaned_text[..80.min(cleaned_text.len())].rfind(' ') {
+                format!("{}...", &cleaned_text[..space_pos])
+            } else {
+                "Task completed successfully.".to_string()
+            }
+        }
+        _ => "Processing your request.".to_string(),
+    }
+}
+
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
 
 #[tauri::command]
@@ -493,48 +532,98 @@ pub async fn submit_query(
     // Clear spoken content from app state now that we've used it
     let _ = state.clear_last_spoken_content();
 
-    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone(), app_handle.clone()).await {
-        Ok(audio_result) => {
-            if audio_result != "TTS_DISABLED_BY_SETTING" {
-                final_response.audio_base64 = Some(audio_result.clone());
-                info!("TTS audio generated successfully for response");
-
-                // Emit TTS audio event for frontend to play, regardless of streaming status
-                let tts_app_handle = app_handle.clone();
-                let tts_audio_data = audio_result.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = tts_app_handle.emit("tts-audio-ready", serde_json::json!({
-                        "audio_base64": tts_audio_data
-                    })) {
-                        warn!("Failed to emit TTS audio event: {}", e);
-                    }
-                });
-
-                // Update floating bar manager for TTS start
-                let app_handle_for_tts = app_handle.clone();
-                let tts_text = final_response.text.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::commands::floating_bar::handle_tts_started(&app_handle_for_tts, tts_text).await;
-                    // Note: TTS finish event and success sound are now handled by handle_tts_completion
-                    // when the frontend notifies us that audio playback has completed
-                });
-                true // TTS is enabled and audio was generated
-            } else {
-                info!("TTS is disabled, skipping audio generation");
-                false // TTS is disabled
-            }
-        }
-        Err(e) => {
-            warn!("Failed to generate TTS audio: {}. Continuing without audio.", e);
-            // Don't fail the whole response, just continue without audio
-            false // TTS failed, treat as disabled
-        }
+    // --- Implement TTS-first streaming ---
+    // Generate a unique message ID for this response
+    let message_id = uuid::Uuid::new_v4().to_string();
+    
+    // Start the stream
+    crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
+    
+    // Determine TTS content and response content
+    let (tts_text, response_text) = if let Some(spoken_text) = &final_response.spoken_text {
+        // If we have separate spoken text, use it for TTS and main text for response
+        (spoken_text.clone(), final_response.text.clone())
+    } else {
+        // Extract a summary for TTS from the main response text
+        let tts_summary = generate_tts_summary(&final_response.text, &final_response.agent_state);
+        (tts_summary, final_response.text.clone())
     };
 
+    // Filter TTS content to ensure it's appropriate for speech
+    let filtered_tts_content = crate::tts::filter_tts_content(&tts_text);
+    
+    if !filtered_tts_content.is_empty() {
+        // Emit TTS chunk first for immediate speaking
+        crate::agent::tool_logger::emit_streaming_tts_chunk(&app_handle, filtered_tts_content.clone(), Some(message_id.clone()));
+        
+        // Generate and play TTS audio
+        let tts_enabled = match crate::tts::invoke_tts(filtered_tts_content.clone(), state.clone(), app_handle.clone()).await {
+            Ok(audio_result) => {
+                if audio_result != "TTS_DISABLED_BY_SETTING" {
+                    final_response.audio_base64 = Some(audio_result.clone());
+                    info!("TTS audio generated successfully for TTS-first response");
+
+                    // Emit TTS audio event for frontend to play
+                    let tts_app_handle = app_handle.clone();
+                    let tts_audio_data = audio_result.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(e) = tts_app_handle.emit("tts-audio-ready", serde_json::json!({
+                            "audio_base64": tts_audio_data
+                        })) {
+                            warn!("Failed to emit TTS audio event: {}", e);
+                        }
+                    });
+
+                    // Update floating bar manager for TTS start
+                    let app_handle_for_tts = app_handle.clone();
+                    let tts_text_for_bar = filtered_tts_content.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::commands::floating_bar::handle_tts_started(&app_handle_for_tts, tts_text_for_bar).await;
+                    });
+                    
+                    true // TTS is enabled and audio was generated
+                } else {
+                    info!("TTS is disabled, continuing to response without TTS delay");
+                    false // TTS is disabled
+                }
+            }
+            Err(e) => {
+                warn!("Failed to generate TTS audio: {}. Continuing to response without TTS.", e);
+                false // TTS failed, treat as disabled
+            }
+        };
+
+        // Wait a brief moment for TTS to start playing before showing response
+        if tts_enabled {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    } else {
+        info!("TTS content was filtered out (appears to be code/unwanted content), skipping TTS and proceeding to response");
+    }
+
+    // Now emit the response content chunk
+    crate::agent::tool_logger::emit_streaming_response_chunk(&app_handle, response_text.clone(), Some(message_id.clone()));
+    
+    // End the stream with complete content in TTS-separated format
+    let complete_separated_content = if !filtered_tts_content.is_empty() {
+        format!("=========TTS {} ========= RESPONSE {}", filtered_tts_content, response_text)
+    } else {
+        response_text.clone()
+    };
+    
+    crate::agent::tool_logger::emit_stream_end_with_state(
+        &app_handle, 
+        message_id, 
+        complete_separated_content, 
+        final_response.agent_state.clone()
+    );
+
     // Play agent success sound immediately if TTS is disabled, otherwise it will be played when TTS finishes
-    if !tts_enabled && final_response.agent_state == "Finished" {
-        if let Err(e) = crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await {
-            warn!("Failed to play success sound: {}", e);
+    if filtered_tts_content.is_empty() || final_response.agent_state != "Finished" {
+        if final_response.agent_state == "Finished" {
+            if let Err(e) = crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await {
+                warn!("Failed to play success sound: {}", e);
+            }
         }
     }
 
