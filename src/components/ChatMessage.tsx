@@ -33,6 +33,7 @@ export type ChatMessage = {
   timestamp?: number;
   isStreaming?: boolean;
   messageId?: string;
+  agent_state?: string;
 };
 
 interface ChatMessageProps {
@@ -113,8 +114,32 @@ export function ChatMessageComponent({
         {msg.role === "assistant" &&
         (!msg.content || msg.content.trim() === "") ? (
           <span className="text-muted-foreground italic flex items-center gap-2">
-            <span>✓</span>
-            <span>Task completed successfully</span>
+            {msg.agent_state === "Finished" ? (
+              <>
+                <span>✓</span>
+                <span>Task completed successfully</span>
+              </>
+            ) : msg.agent_state === "Failed" ? (
+              <>
+                <span className="text-red-500">✗</span>
+                <span className="text-red-500">Task failed</span>
+              </>
+            ) : msg.agent_state === "Cancelled" ? (
+              <>
+                <span className="text-yellow-500">⊘</span>
+                <span className="text-yellow-500">Task cancelled</span>
+              </>
+            ) : msg.agent_state === "Offline" ? (
+              <>
+                <span className="text-orange-500">⚠</span>
+                <span className="text-orange-500">Connection unavailable</span>
+              </>
+            ) : (
+              <>
+                <span>✓</span>
+                <span>Task completed</span>
+              </>
+            )}
           </span>
         ) : msg.isJsx ||
           (msg.role === "assistant" &&
@@ -213,9 +238,7 @@ export function ChatMessageComponent({
                       ? "bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 scale-95"
                       : "hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950 dark:hover:text-purple-400 hover:scale-105"
                   )}
-                  onClick={() =>
-                    onSaveResponse(msg.content, "markdown", index)
-                  }
+                  onClick={() => onSaveResponse(msg.content, "markdown", index)}
                   disabled={savingMessageId === `save-markdown-${index}`}
                   title={
                     savingMessageId === `save-markdown-${index}`

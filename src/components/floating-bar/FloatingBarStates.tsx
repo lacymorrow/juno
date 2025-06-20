@@ -23,6 +23,7 @@ interface FloatingBarStatesProps {
   lastSubmittedValue: string;
   inputValue: string;
   audioLevel: number;
+  agentState?: string | null;
   onInputChange: (value: string) => void;
   onInputBlur: () => void;
   onSubmit: (e: React.FormEvent) => void;
@@ -106,6 +107,7 @@ export function FloatingBarStates({
   lastSubmittedValue,
   inputValue,
   audioLevel,
+  agentState,
   onInputChange,
   onInputBlur,
   onSubmit,
@@ -189,7 +191,7 @@ export function FloatingBarStates({
               className="text-sm font-medium truncate"
               data-tauri-drag-region
             >
-              {getStatusText(barState, currentError)}
+              {getStatusText(barState, currentError, agentState)}
             </div>
             {transcriptionText && (
               <div
@@ -366,7 +368,11 @@ export function FloatingBarStates({
 }
 
 // Get enhanced status text for tooltip
-function getStatusText(barState: BarState, currentError: string | null) {
+function getStatusText(
+  barState: BarState,
+  currentError: string | null,
+  agentState?: string
+) {
   switch (barState) {
     case "dictation_ready":
       return "Hold Option+Space to start dictating";
@@ -388,7 +394,16 @@ function getStatusText(barState: BarState, currentError: string | null) {
     case "loading":
       return "Processing request...";
     case "success":
-      return "Task completed successfully";
+      // Check agent state to determine if it was actually successful
+      if (agentState === "Failed") {
+        return "Task failed";
+      } else if (agentState === "Cancelled") {
+        return "Task cancelled";
+      } else if (agentState === "Offline") {
+        return "Connection unavailable";
+      } else {
+        return "Task completed successfully";
+      }
     case "error":
       return currentError || "An error occurred";
     case "always-listening":

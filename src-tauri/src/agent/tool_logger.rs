@@ -1186,3 +1186,15 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
         warn!("Failed to emit agent-stream-end event: {}", e);
     }
 }
+
+pub fn emit_stream_end_with_state(app_handle: &AppHandle, message_id: String, complete_text: String, agent_state: String) {
+    let event_data = serde_json::json!({
+        "message_id": message_id,
+        "complete_text": complete_text,
+        "agent_state": agent_state
+    });
+
+    if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_END, event_data) {
+        warn!("Failed to emit agent-stream-end event: {}", e);
+    }
+}

@@ -32,6 +32,7 @@ type StreamStartEvent = {
 type StreamEndEvent = {
     message_id: string;
     complete_text: string;
+    agent_state?: string; // "Finished", "Failed", "Cancelled", "Offline"
 };
 
 interface AgentEventTauri {
@@ -345,7 +346,7 @@ export function useBackendEvents({
             "agent-stream-end",
             (event) => {
                 console.log("Stream ended:", event.payload);
-                const { message_id, complete_text } = event.payload;
+                const { message_id, complete_text, agent_state } = event.payload;
 
                 setConversationWithPruning((prev) =>
                     prev.map((msg) => {
@@ -355,6 +356,7 @@ export function useBackendEvents({
                                 content: complete_text,
                                 isJsx: isJsxContent(complete_text),
                                 isStreaming: false,
+                                agent_state,
                             };
                         }
                         return msg;
