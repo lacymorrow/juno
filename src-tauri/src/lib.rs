@@ -216,7 +216,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 }
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{autostart::*, app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*};
+use commands::{autostart::*, app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*, ui_token_selection::*};
 
 // Import specific sound commands from sound.rs
 use crate::commands::sound::{
@@ -571,6 +571,16 @@ pub fn run() {
             deny_tool_execution,
             get_pending_tool_approvals,
             clear_pending_tool_approvals,
+            // UI Token Selection Commands
+            initialize_ui_token_selection,
+            test_ui_token_selection,
+            run_performance_benchmark,
+            get_performance_metrics,
+            validate_cost_reduction_target,
+            test_multi_monitor_optimization,
+            reset_performance_metrics,
+            get_ui_token_config,
+            set_ui_token_config,
             // Autostart Commands
             enable_autostart,
             disable_autostart,

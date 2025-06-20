@@ -907,22 +907,20 @@ export default function OnboardingFlow({
 
                 {/* Actions */}
                 <div className="flex gap-4">
-                  {/* Show skip button on all steps except the final complete step */}
-                  {currentStep < onboardingSteps.length - 1 && (
+                  {/* Show skip all button on final step */}
+                  {[0, onboardingSteps.length - 1].includes(currentStep) ? (
+                    <button
+                      onClick={handleSkip}
+                      className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
+                    >
+                      Skip
+                    </button>
+                  ) : (
                     <button
                       onClick={handleSkipStep}
                       className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
                     >
                       Skip
-                    </button>
-                  )}
-                  {/* Show complete skip button on final step */}
-                  {currentStep === onboardingSteps.length - 1 && (
-                    <button
-                      onClick={handleSkip}
-                      className="flex-1 py-3 text-gray-500 hover:text-gray-700 font-medium transition-colors"
-                    >
-                      Skip All
                     </button>
                   )}
 

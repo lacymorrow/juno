@@ -3,10 +3,10 @@
 //! Implements the ShowUI paper's approach to treating screenshots as connected graphs
 //! using RGB color space analysis for identifying redundant visual relationships.
 
-use crate::agent::tools::ui_token_selector::{TokenSelectionError, RGBColor, VisualToken, TokenType};
+use crate::agent::tools::ui_token_selector::{TokenSelectionError, RGBColor, VisualToken, TokenType, DisplayInfo};
 use crate::agent::tools::ui_token_selector::config::TokenSelectionConfig;
 use image::{DynamicImage, ImageBuffer, Rgba};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// RGB Connected Graph representation for visual analysis
 #[derive(Debug, Clone)]
@@ -116,7 +116,7 @@ impl RGBConnectedGraphAnalyzer {
     async fn extract_visual_tokens(&self, image: &image::RgbImage) -> Result<Vec<VisualToken>, String> {
         let (width, height) = image.dimensions();
         let mut tokens = Vec::new();
-        let mut token_id = 0;
+        let mut _token_id = 0;
 
         let patch_size = self.config.rgb_analysis.min_patch_size;
 
@@ -154,7 +154,7 @@ impl RGBConnectedGraphAnalyzer {
                 };
 
                 tokens.push(token);
-                token_id += 1;
+                _token_id += 1;
             }
         }
 
@@ -231,7 +231,7 @@ impl RGBConnectedGraphAnalyzer {
         y: u32,
         width: u32,
         height: u32,
-    ) -> Result<RGBAColor, TokenSelectorError> {
+    ) -> Result<RGBAColor, TokenSelectionError> {
         let mut r_sum = 0u64;
         let mut g_sum = 0u64;
         let mut b_sum = 0u64;
@@ -407,7 +407,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
         display_info: &DisplayInfo,
-    ) -> Result<RGBAnalysisResult, TokenSelectorError> {
+    ) -> Result<RGBAnalysisResult, TokenSelectionError> {
         let start_time = std::time::Instant::now();
 
         // Determine optimal patch size based on image characteristics
@@ -423,7 +423,7 @@ impl RGBConnectedGraphAnalyzer {
         );
 
         // Create patches with adaptive sizing
-        let patches = self.create_adaptive_patches(image_buffer, adaptive_patch_size)?;
+        let patches = self.create_adaptive_patches(image_buffer, adaptive_patch_size.clone())?;
 
         // Perform advanced color similarity analysis
         let similarity_graph = self.build_advanced_similarity_graph(&patches, display_info).await?;
@@ -435,6 +435,7 @@ impl RGBConnectedGraphAnalyzer {
         let importance_scores = self.calculate_ui_importance_scores(&patches, &connected_components, display_info)?;
 
         let processing_time = start_time.elapsed();
+        let total_patches = patches.len();
 
         Ok(RGBAnalysisResult {
             patches,
@@ -443,7 +444,7 @@ impl RGBConnectedGraphAnalyzer {
             processing_time_ms: processing_time.as_millis() as u64,
             patch_size: adaptive_patch_size,
             similarity_threshold: self.config.rgb_analysis.color_similarity_threshold,
-            total_patches: patches.len(),
+            total_patches,
         })
     }
 
@@ -452,15 +453,20 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
         display_info: &DisplayInfo,
-    ) -> Result<PatchSize, TokenSelectorError> {
+    ) -> Result<PatchSize, TokenSelectionError> {
         let width = image_buffer.width();
         let height = image_buffer.height();
 
-        // Base patch size calculation
-        let base_size = match display_info.resolution_category {
-            ResolutionCategory::HighDPI => 32,      // 4K+ displays
-            ResolutionCategory::Standard => 24,     // 1080p-1440p displays
-            ResolutionCategory::Low => 16,          // Sub-1080p displays
+        // Base patch size calculation based on display resolution
+        let display_width = display_info.bounds.width as u32;
+        let display_height = display_info.bounds.height as u32;
+
+        let base_size = if display_width >= 3840 || display_height >= 2160 {
+            32  // HighDPI - 4K+ displays
+        } else if display_width >= 1920 || display_height >= 1080 {
+            24  // Standard - 1080p-1440p displays
+        } else {
+            16  // Low - Sub-1080p displays
         };
 
         // Adaptive sizing based on image complexity
@@ -498,7 +504,7 @@ impl RGBConnectedGraphAnalyzer {
     fn calculate_image_complexity(
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ) -> Result<f32, TokenSelectorError> {
+    ) -> Result<f32, TokenSelectionError> {
         let width = image_buffer.width();
         let height = image_buffer.height();
 
@@ -556,7 +562,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
         patch_size: PatchSize,
-    ) -> Result<Vec<ImagePatch>, TokenSelectorError> {
+    ) -> Result<Vec<ImagePatch>, TokenSelectionError> {
         let width = image_buffer.width();
         let height = image_buffer.height();
         let mut patches = Vec::new();
@@ -608,7 +614,7 @@ impl RGBConnectedGraphAnalyzer {
         y: u32,
         width: u32,
         height: u32,
-    ) -> Result<PatchType, TokenSelectorError> {
+    ) -> Result<PatchType, TokenSelectionError> {
         // Analyze color uniformity
         let mut color_variance = 0.0;
         let mut pixel_count = 0;
@@ -640,21 +646,21 @@ impl RGBConnectedGraphAnalyzer {
         if color_std_dev < 10.0 {
             // Very uniform color - likely background
             if avg_color.r > 240 && avg_color.g > 240 && avg_color.b > 240 {
-                PatchType::Background
+                Ok(PatchType::Background)
             } else if avg_color.r < 50 && avg_color.g < 50 && avg_color.b < 50 {
-                PatchType::Text
+                Ok(PatchType::Text)
             } else {
-                PatchType::Background
+                Ok(PatchType::Background)
             }
         } else if color_std_dev < 30.0 {
             // Moderate variance - could be UI element
-            PatchType::UIElement
+            Ok(PatchType::UIElement)
         } else {
             // High variance - likely interactive element or content
             if self.has_high_contrast_edges(image_buffer, x, y, width, height)? {
-                PatchType::Interactive
+                Ok(PatchType::Interactive)
             } else {
-                PatchType::Content
+                Ok(PatchType::Content)
             }
         }
     }
@@ -667,7 +673,7 @@ impl RGBConnectedGraphAnalyzer {
         y: u32,
         width: u32,
         height: u32,
-    ) -> Result<bool, TokenSelectorError> {
+    ) -> Result<bool, TokenSelectionError> {
         let mut edge_count = 0;
         let mut total_checks = 0;
 
@@ -702,7 +708,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         patches: &[ImagePatch],
         display_info: &DisplayInfo,
-    ) -> Result<SimilarityGraph, TokenSelectorError> {
+    ) -> Result<SimilarityGraph, TokenSelectionError> {
         let mut graph = SimilarityGraph::new(patches.len());
 
         // Calculate similarities in parallel chunks
@@ -711,7 +717,7 @@ impl RGBConnectedGraphAnalyzer {
 
         for chunk_start in (0..patches.len()).step_by(chunk_size) {
             let chunk_end = (chunk_start + chunk_size).min(patches.len());
-            let chunk_patches = &patches[chunk_start..chunk_end];
+            let chunk_patches = patches[chunk_start..chunk_end].to_vec(); // Clone the chunk
             let all_patches = patches.to_vec();
             let display_info_clone = display_info.clone();
             let config = self.config.clone();
@@ -790,7 +796,9 @@ impl RGBConnectedGraphAnalyzer {
         let distance = ((center1_x - center2_x).powi(2) + (center1_y - center2_y).powi(2)).sqrt();
 
         // Normalize distance by display size
-        let max_distance = ((display_info.width.pow(2) + display_info.height.pow(2)) as f32).sqrt();
+        let display_width = display_info.bounds.width as u32;
+        let display_height = display_info.bounds.height as u32;
+        let max_distance = ((display_width.pow(2) + display_height.pow(2)) as f32).sqrt();
         let normalized_distance = distance / max_distance;
 
         // Exponential decay for spatial weight
@@ -833,7 +841,7 @@ impl RGBConnectedGraphAnalyzer {
         &self,
         graph: &SimilarityGraph,
         patches: &[ImagePatch],
-    ) -> Result<Vec<ConnectedComponent>, TokenSelectorError> {
+    ) -> Result<Vec<ConnectedComponent>, TokenSelectionError> {
         let mut visited = vec![false; patches.len()];
         let mut components = Vec::new();
 
@@ -890,7 +898,7 @@ impl RGBConnectedGraphAnalyzer {
         patches: &[ImagePatch],
         components: &[ConnectedComponent],
         display_info: &DisplayInfo,
-    ) -> Result<Vec<f32>, TokenSelectorError> {
+    ) -> Result<Vec<f32>, TokenSelectionError> {
         let mut importance_scores = vec![0.0; patches.len()];
 
         for component in components {
@@ -922,7 +930,7 @@ impl RGBConnectedGraphAnalyzer {
         component: &ConnectedComponent,
         patches: &[ImagePatch],
         display_info: &DisplayInfo,
-    ) -> Result<f32, TokenSelectorError> {
+    ) -> Result<f32, TokenSelectionError> {
         let mut total_importance = 0.0;
         let mut total_area = 0;
 
@@ -941,8 +949,8 @@ impl RGBConnectedGraphAnalyzer {
             };
 
             // Position-based importance (center of screen is more important)
-            let center_x = display_info.width as f32 / 2.0;
-            let center_y = display_info.height as f32 / 2.0;
+            let center_x = display_info.bounds.width as f32 / 2.0;
+            let center_y = display_info.bounds.height as f32 / 2.0;
             let patch_center_x = patch.x as f32 + patch.width as f32 / 2.0;
             let patch_center_y = patch.y as f32 + patch.height as f32 / 2.0;
 
@@ -952,7 +960,8 @@ impl RGBConnectedGraphAnalyzer {
             let position_importance = 1.0 - (distance_from_center / max_distance).min(1.0);
 
             // Size-based importance (moderate size is more important than very large or very small)
-            let patch_size_ratio = patch_area as f32 / (display_info.width * display_info.height) as f32;
+            let display_area = display_info.bounds.width * display_info.bounds.height;
+            let patch_size_ratio = patch_area as f32 / display_area as f32;
             let size_importance = if patch_size_ratio < 0.001 {
                 0.3 // Very small patches
             } else if patch_size_ratio > 0.5 {
@@ -1000,41 +1009,9 @@ pub enum PatchType {
     Content,
 }
 
-#[derive(Debug, Clone)]
-pub enum ResolutionCategory {
-    HighDPI,    // 4K+ displays
-    Standard,   // 1080p-1440p displays
-    Low,        // Sub-1080p displays
-}
 
-#[derive(Debug, Clone)]
-pub struct DisplayInfo {
-    pub id: u32,
-    pub width: u32,
-    pub height: u32,
-    pub resolution_category: ResolutionCategory,
-    pub is_primary: bool,
-}
 
-impl DisplayInfo {
-    pub fn new(id: u32, width: u32, height: u32, is_primary: bool) -> Self {
-        let resolution_category = if width >= 3840 || height >= 2160 {
-            ResolutionCategory::HighDPI
-        } else if width >= 1920 || height >= 1080 {
-            ResolutionCategory::Standard
-        } else {
-            ResolutionCategory::Low
-        };
 
-        Self {
-            id,
-            width,
-            height,
-            resolution_category,
-            is_primary,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct SimilarityGraph {

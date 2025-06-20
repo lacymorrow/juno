@@ -90,7 +90,7 @@ impl TokenReducer {
         &self,
         tokens: &mut Vec<VisualToken>,
         redundancy_groups: &[Vec<u32>],
-        connections: &[Vec<bool>],
+        _connections: &[Vec<bool>],
     ) -> Result<Vec<VisualToken>, String> {
         if !self.config.token_reduction.enable_redundancy_grouping {
             return Ok(tokens.clone());
@@ -181,7 +181,7 @@ impl TokenReducer {
     }
 
     /// Simplifies background tokens based on configuration
-    async fn simplify_background_tokens(&self, mut tokens: Vec<VisualToken>) -> Result<Vec<VisualToken>, String> {
+    async fn simplify_background_tokens(&self, tokens: Vec<VisualToken>) -> Result<Vec<VisualToken>, String> {
         let simplification_level = self.config.token_reduction.background_simplification_level;
 
         if simplification_level == 0 {
