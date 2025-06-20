@@ -4,12 +4,14 @@
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
+
 use tracing::info;
 
 // Re-export MCP types for convenience
 pub use super::mcp_integration::{MCPServerConfig, MCPServerStatus, MCPToolInfo};
+
+// Add centralized settings support
+use crate::settings::{ToolSettings, ToolConfig as SettingsToolConfig, MCPServerConfig as SettingsMCPServerConfig};
 
 /// Tool category definitions for organizing tools by functionality.
 /// Used by: Settings UI and tool management for logical grouping.
@@ -180,58 +182,163 @@ impl ToolConfigManager {
         Self::default()
     }
 
-    /// Load configuration from Tauri store or create default.
-    /// Attempts to load existing configuration, creates default if missing.
+    /// Load configuration from centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
     /// Used by: Application startup for configuration initialization.
-    ///
-    /// # Arguments
-    /// * `app_handle` - Tauri app handle for store access
-    pub fn load_from_store(app_handle: &AppHandle) -> Result<Self, String> {
-        let store = app_handle.store("tool_config.json")
-            .map_err(|e| format!("Failed to access tool config store: {}", e))?;
+    pub async fn load_from_centralized_settings(settings_manager: &crate::settings::manager::SettingsManager) -> Result<Self, String> {
+        let tool_settings = settings_manager.get_tool_settings().await?;
+        let config_manager = Self::from_centralized_settings(&tool_settings)?;
+        info!("Loaded tool configuration from centralized settings");
+        Ok(config_manager)
+    }
 
-        // Try to load the full configuration from store
-        if let Some(config_value) = store.get("tool_config") {
-            match serde_json::from_value::<Self>(config_value) {
-                Ok(mut config) => {
-                    // Ensure all default tools are present (for backwards compatibility)
-                    Self::ensure_default_tools(&mut config.tools);
-                    info!("Loaded tool configuration from store");
-                    return Ok(config);
-                }
-                Err(e) => {
-                    info!("Failed to parse stored tool config ({}), creating default", e);
-                }
+    /// Save configuration to centralized settings manager.
+    /// NEW: Uses centralized settings instead of direct JSON store access.
+    /// Used by: Settings UI and application shutdown for persistence.
+    pub async fn save_to_centralized_settings(&self, settings_manager: &crate::settings::manager::SettingsManager) -> Result<(), String> {
+        let tool_settings = self.to_centralized_settings()?;
+        settings_manager.set_tool_settings(&tool_settings).await?;
+        info!("Saved tool configuration to centralized settings");
+        Ok(())
+    }
+
+    /// Convert from centralized ToolSettings to ToolConfigManager.
+    /// Handles schema differences between the two formats.
+    fn from_centralized_settings(settings: &ToolSettings) -> Result<Self, String> {
+        let mut tools = HashMap::new();
+        let mut category_enabled = HashMap::new();
+        let mut mcp_servers = HashMap::new();
+
+        // Convert tools
+        for (tool_name, settings_tool_config) in &settings.tools {
+            let tool_category = Self::parse_tool_category(&settings_tool_config.category)?;
+            let tool_config = ToolConfig {
+                name: settings_tool_config.name.clone(),
+                category: tool_category,
+                enabled: settings_tool_config.enabled,
+                description: settings_tool_config.description.clone(),
+                required: settings_tool_config.required,
+                server_id: None, // Will be populated if it's an MCP tool
+            };
+            tools.insert(tool_name.clone(), tool_config);
+        }
+
+        // Convert category enabled states
+        for (category_str, enabled) in &settings.category_enabled {
+            let category = Self::parse_tool_category(category_str)?;
+            category_enabled.insert(category, *enabled);
+        }
+
+        // Convert MCP servers
+        for settings_server in &settings.mcp_servers {
+            let server_config = MCPServerConfig {
+                id: settings_server.id.clone(),
+                name: settings_server.name.clone(),
+                description: settings_server.description.clone(),
+                command: settings_server.command.clone(),
+                args: settings_server.args.clone(),
+                working_directory: settings_server.working_directory.as_ref().map(|s| std::path::PathBuf::from(s)),
+                environment_variables: settings_server.environment_variables.clone(),
+                enabled: settings_server.enabled,
+                auto_start: settings_server.auto_start,
+                timeout_seconds: settings_server.timeout_seconds,
+                max_retries: settings_server.max_retries,
+            };
+            mcp_servers.insert(settings_server.id.clone(), server_config);
+        }
+
+        // Ensure all default tools are present for backwards compatibility
+        Self::ensure_default_tools(&mut tools);
+
+        // Ensure all categories are represented
+        for category in ToolCategory::all_categories() {
+            if !category_enabled.contains_key(&category) {
+                category_enabled.insert(category, true);
             }
         }
 
-        // No valid configuration found, create and save default
-        info!("No tool configuration found in store, creating default");
-        let default_config = Self::default();
-        default_config.save_to_store(app_handle)?;
-        Ok(default_config)
+        Ok(Self {
+            tools,
+            category_enabled,
+            mcp_servers,
+        })
     }
 
-    /// Save configuration to Tauri store.
-    /// Serializes current configuration to JSON and saves to store.
-    /// Used by: Settings UI and application shutdown for persistence.
-    ///
-    /// # Arguments
-    /// * `app_handle` - Tauri app handle for store access
-    pub fn save_to_store(&self, app_handle: &AppHandle) -> Result<(), String> {
-        let store = app_handle.store("tool_config.json")
-            .map_err(|e| format!("Failed to access tool config store: {}", e))?;
+    /// Convert from ToolConfigManager to centralized ToolSettings.
+    /// Handles schema differences between the two formats.
+    fn to_centralized_settings(&self) -> Result<ToolSettings, String> {
+        let mut tools = HashMap::new();
+        let mut category_enabled = HashMap::new();
+        let mut mcp_servers = Vec::new();
 
-        let config_value = serde_json::to_value(self)
-            .map_err(|e| format!("Failed to serialize tool config: {}", e))?;
+        // Convert tools
+        for (tool_name, tool_config) in &self.tools {
+            let settings_tool_config = SettingsToolConfig {
+                name: tool_config.name.clone(),
+                category: Self::format_tool_category(&tool_config.category),
+                enabled: tool_config.enabled,
+                description: tool_config.description.clone(),
+                required: tool_config.required,
+            };
+            tools.insert(tool_name.clone(), settings_tool_config);
+        }
 
-        store.set("tool_config", config_value);
-        store.save()
-            .map_err(|e| format!("Failed to save tool config store: {}", e))?;
+        // Convert category enabled states
+        for (category, enabled) in &self.category_enabled {
+            category_enabled.insert(Self::format_tool_category(category), *enabled);
+        }
 
-        info!("Saved tool configuration to store");
-        Ok(())
+        // Convert MCP servers
+        for (_, server_config) in &self.mcp_servers {
+            let settings_server = SettingsMCPServerConfig {
+                id: server_config.id.clone(),
+                name: server_config.name.clone(),
+                description: server_config.description.clone(),
+                command: server_config.command.clone(),
+                args: server_config.args.clone(),
+                working_directory: server_config.working_directory.as_ref().map(|p| p.to_string_lossy().to_string()),
+                environment_variables: server_config.environment_variables.clone(),
+                enabled: server_config.enabled,
+                auto_start: server_config.auto_start,
+                timeout_seconds: server_config.timeout_seconds,
+                max_retries: server_config.max_retries,
+            };
+            mcp_servers.push(settings_server);
+        }
+
+        Ok(ToolSettings {
+            tools,
+            category_enabled,
+            mcp_servers,
+        })
     }
+
+    /// Parse tool category string into ToolCategory enum.
+    fn parse_tool_category(category_str: &str) -> Result<ToolCategory, String> {
+        match category_str {
+            "AnthropicComputerUse" => Ok(ToolCategory::AnthropicComputerUse),
+            "Desktop" => Ok(ToolCategory::Desktop),
+            "Browser" => Ok(ToolCategory::Browser),
+            "Timer" => Ok(ToolCategory::Timer),
+            "Basic" => Ok(ToolCategory::Basic),
+            "MCP" => Ok(ToolCategory::MCP),
+            _ => Err(format!("Unknown tool category: {}", category_str)),
+        }
+    }
+
+    /// Format tool category enum into string.
+    fn format_tool_category(category: &ToolCategory) -> String {
+        match category {
+            ToolCategory::AnthropicComputerUse => "AnthropicComputerUse".to_string(),
+            ToolCategory::Desktop => "Desktop".to_string(),
+            ToolCategory::Browser => "Browser".to_string(),
+            ToolCategory::Timer => "Timer".to_string(),
+            ToolCategory::Basic => "Basic".to_string(),
+            ToolCategory::MCP => "MCP".to_string(),
+        }
+    }
+
+
 
     /// Check if a tool is enabled.
     /// Checks both individual tool setting and category enablement state.
@@ -603,19 +710,42 @@ impl ToolConfigManager {
     }
 }
 
-/// Load tool configuration from persistent storage
-///
+/// Load tool configuration from centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
 /// Used by: Application startup for configuration initialization
 ///
 /// # Arguments
-/// * `app` - Tauri app handle for store access
+/// * `settings_manager` - Centralized settings manager
 /// * `state` - Application state containing tool config manager
-pub async fn load_tool_config_from_store(app: &AppHandle, state: &crate::state::AppState) -> Result<(), String> {
-    let loaded_config = ToolConfigManager::load_from_store(app)?;
+pub async fn load_tool_config_from_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+    state: &crate::state::AppState
+) -> Result<(), String> {
+    let loaded_config = ToolConfigManager::load_from_centralized_settings(settings_manager).await?;
 
     let mut config_guard = state.tool_config_manager.lock().await;
     *config_guard = loaded_config;
 
-    info!("Loaded tool configuration from store on startup");
+    info!("Loaded tool configuration from centralized settings on startup");
+    Ok(())
+}
+
+
+
+/// Save tool configuration to centralized settings
+/// NEW: Uses centralized settings instead of direct JSON store access.
+/// Used by: Application shutdown and settings changes for persistence
+///
+/// # Arguments
+/// * `settings_manager` - Centralized settings manager
+/// * `state` - Application state containing tool config manager
+pub async fn save_tool_config_to_centralized_settings(
+    settings_manager: &crate::settings::manager::SettingsManager,
+    state: &crate::state::AppState
+) -> Result<(), String> {
+    let config_guard = state.tool_config_manager.lock().await;
+    config_guard.save_to_centralized_settings(settings_manager).await?;
+
+    info!("Saved tool configuration to centralized settings");
     Ok(())
 }
