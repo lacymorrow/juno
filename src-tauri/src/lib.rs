@@ -503,7 +503,6 @@ pub fn run() {
             // Dictation Settings Commands
             get_dictation_clipboard_enabled,
             set_dictation_clipboard_enabled,
-            // Dictation Reset Commands (LEGACY)
             // Dictation State Management Commands
             force_reset_dictation_state,
             get_dictation_comprehensive_status,
