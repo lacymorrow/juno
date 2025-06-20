@@ -201,16 +201,3 @@ pub fn modifier_name_to_flags(modifier_name: &str) -> Option<CGEventFlags> {
         _ => None,
     }
 }
-
-// Legacy compatibility for existing code
-// TODO: Remove these once all code is migrated
-pub const KEY_RETURN: u16 = key_codes::RETURN as u16;
-pub const KEY_TAB: u16 = key_codes::TAB as u16;
-pub const KEY_SPACE: u16 = key_codes::SPACE as u16;
-pub const KEY_DELETE: u16 = key_codes::DELETE as u16;
-pub const KEY_ESCAPE: u16 = key_codes::ESCAPE as u16;
-pub const KEY_ARROW_LEFT: u16 = key_codes::ARROW_LEFT as u16;
-pub const KEY_ARROW_RIGHT: u16 = key_codes::ARROW_RIGHT as u16;
-pub const KEY_ARROW_DOWN: u16 = key_codes::ARROW_DOWN as u16;
-pub const KEY_ARROW_UP: u16 = key_codes::ARROW_UP as u16;
-pub const KEY_V: u16 = key_codes::V as u16;

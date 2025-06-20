@@ -18,7 +18,7 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
 
     // Strategy 1: Try bundled resources (production apps)
     tracing::info!("Strategy 1: Checking bundled resources...");
-    
+
     // First try the direct resource resolution
     if let Ok(resource_path) = app.path().resolve(model_path, tauri::path::BaseDirectory::Resource) {
         tracing::info!("  Resource path resolved to: {}", resource_path.display());
@@ -35,24 +35,21 @@ pub fn resolve_model_path<R: Runtime>(app: &tauri::AppHandle<R>, model_path: &st
     // Try the _up_ directory pattern used by other bundled resources in production
     if let Ok(resource_dir) = app.path().resource_dir() {
         tracing::info!("  Resource directory: {:?}", resource_dir);
-        
-        // Try multiple possible paths in the bundled resources following the pattern from sound files
-        let possible_bundled_paths = vec![
-            // Primary bundled path in production builds (_up_ directory)
-            resource_dir.join("_up_").join(model_path),                         // resources/_up_/models/ggml-tiny.en.bin
-            resource_dir.join("_up_").join("tauri-plugin-voice-transcription").join(model_path), // resources/_up_/tauri-plugin-voice-transcription/models/...
-            // Try without the models prefix in case the bundling flattens the structure
-            if model_path.starts_with("models/") {
-                resource_dir.join("_up_").join(&model_path[7..])                // resources/_up_/ggml-tiny.en.bin
-            } else {
-                resource_dir.join("_up_").join(model_path)
-            },
-            // Legacy direct paths for backward compatibility
-            resource_dir.join(model_path),                                      // resources/models/ggml-tiny.en.bin
-            resource_dir.join("tauri-plugin-voice-transcription").join(model_path), // resources/tauri-plugin-voice-transcription/models/...
+
+        // Modern bundled paths in production builds (_up_ directory)
+        let bundled_paths = vec![
+            // _up_ paths for production builds
+            resource_dir.join("_up_").join("models").join(model_path),
+            resource_dir.join("_up_").join(model_path),
+            // Standard resource paths
+            resource_dir.join("models").join(model_path),
+            resource_dir.join(model_path),
+            // Additional paths for development and production compatibility
+            std::path::PathBuf::from("models").join(model_path),
+            std::path::PathBuf::from(model_path),
         ];
 
-        for test_path in possible_bundled_paths.iter() {
+        for test_path in bundled_paths.iter() {
             tracing::info!("  Checking bundled path: {:?}", test_path);
             if test_path.exists() {
                 tracing::info!("Found model in bundled resources: {:?}", test_path);
