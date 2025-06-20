@@ -37,6 +37,7 @@ pub mod always_listening;
 pub mod notifications;
 pub mod stop_operations;
 pub mod onboarding;
+pub mod settings;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;
@@ -74,6 +75,7 @@ pub use self::memory::*;
 pub use self::always_listening::*;
 pub use self::stop_operations::*;
 pub use self::onboarding::*;
+pub use self::settings::*;
 
 // Explicitly re-export tool functions to ensure they're available
 pub use self::tools::{

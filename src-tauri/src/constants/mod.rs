@@ -28,6 +28,9 @@ pub mod errors;
 // File and system constants
 pub mod files;
 
+// Settings management constants
+pub mod settings;
+
 // Audio processing constants
 pub mod audio;
 
@@ -48,6 +51,7 @@ pub use crate::constants::files::*;
 pub use crate::constants::menus::*;
 pub use crate::constants::permissions::*;
 pub use crate::constants::ports::*;
+pub use crate::constants::settings::*;
 pub use crate::constants::timeouts::*;
 pub use crate::constants::ui::*;
 pub use crate::constants::errors::*;
