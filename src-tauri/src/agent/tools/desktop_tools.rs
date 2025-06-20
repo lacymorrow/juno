@@ -32,6 +32,7 @@ use crate::commands::window; // Add window for scroll command
 use std::sync::Arc;
 
 use tokio;
+use std::time::Duration;
 
 
 // Removed unused imports: capture_screenshot_command, dev_get_clipboard, dev_set_clipboard
@@ -1234,37 +1235,158 @@ pub async fn register_desktop_tools(
             let args = serde_json::from_value::<OpenFileAndTypeArgs>(input)
                 .map_err(|e| format!("Failed to parse open_file_and_type input: {}", e))?;
 
-            // Step 1: Open file with default application
+            // Step 0: Validate accessibility permission before any keyboard operations
+            if let Err(e) = validate_permission(&app, RequiredPermission::Accessibility, "open_file_and_type").await {
+                return Err(format!("Accessibility permission required for open_file_and_type: {}", e));
+            }
+
+            // Step 1: Check if file path is accessible and create directory if needed
+            let file_path = std::path::Path::new(&args.file_path);
+            if let Some(parent_dir) = file_path.parent() {
+                if !parent_dir.exists() {
+                    if let Err(e) = std::fs::create_dir_all(parent_dir) {
+                        return Err(format!("Failed to create directory '{}': {}", parent_dir.display(), e));
+                    }
+                }
+            }
+
+            // Step 2: Attempt direct file creation if it doesn't exist
+            if !file_path.exists() {
+                match std::fs::write(&args.file_path, "") {
+                    Ok(_) => {
+                        info!("Created empty file: {}", args.file_path);
+                    }
+                    Err(e) => {
+                        warn!("Failed to create file directly, will try opening with default app: {}", e);
+                    }
+                }
+            }
+
+            // Step 3: Open file with default application (with timeout)
             let open_command = format!("open '{}'", args.file_path);
             let open_result = commands::shell::dev_bash_command(
                 app.clone(),
                 state_manager,
                 open_command,
-                Some(10), // 10 second timeout for opening
+                Some(15), // Increased timeout for opening (15 seconds)
                 None,
             ).await;
 
             if let Err(e) = open_result {
-                return Err(format!("Failed to open file '{}': {}", args.file_path, e));
+                // Fallback: Try to write content directly to file
+                warn!("Failed to open file with default app, attempting direct write: {}", e);
+
+                let content_to_write = if args.append.unwrap_or(false) {
+                    // Read existing content and append
+                    match std::fs::read_to_string(&args.file_path) {
+                        Ok(existing) => format!("{}\n{}", existing, args.content),
+                        Err(_) => args.content.clone(),
+                    }
+                } else {
+                    args.content.clone()
+                };
+
+                match std::fs::write(&args.file_path, content_to_write) {
+                    Ok(_) => {
+                        info!("Successfully wrote content directly to file: {}", args.file_path);
+                        return Ok(json!({
+                            "success": true,
+                            "file_path": args.file_path,
+                            "content_length": args.content.len(),
+                            "operation": if args.append.unwrap_or(false) { "append" } else { "write" },
+                            "method": "direct_write",
+                            "message": "File written directly (app opening failed)"
+                        }));
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to open file '{}' and direct write also failed: {}", args.file_path, e));
+                    }
+                }
             }
 
-            // Step 2: Wait a moment for the application to launch
-            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            // Step 4: Wait for application to launch (with adaptive timing)
+            info!("Waiting for application to launch...");
+            tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
 
-            // Step 3: Type the content (get fresh state reference)
+            // Step 5: Type the content with timeout using tokio::time::timeout
             let state_manager = app.state::<AppState>();
-            match commands::keyboard::type_text(args.content.clone(), app.clone(), state_manager).await {
-                Ok(_) => {
+            let typing_timeout = Duration::from_secs(30); // 30 second timeout for typing
+
+            let typing_result = tokio::time::timeout(
+                typing_timeout,
+                commands::keyboard::type_text(args.content.clone(), app.clone(), state_manager)
+            ).await;
+
+            match typing_result {
+                Ok(Ok(_)) => {
                     info!("Successfully opened file and typed content: {}", args.file_path);
                     Ok(json!({
                         "success": true,
                         "file_path": args.file_path,
                         "content_length": args.content.len(),
-                        "operation": if args.append.unwrap_or(false) { "append" } else { "write" }
+                        "operation": if args.append.unwrap_or(false) { "append" } else { "write" },
+                        "method": "app_and_type"
                     }))
                 }
-                Err(e) => {
-                    Err(format!("Failed to type content into file '{}': {}", args.file_path, e))
+                Ok(Err(e)) => {
+                    // Typing failed, try fallback direct write
+                    warn!("Typing failed, attempting direct write fallback: {}", e);
+
+                    let content_to_write = if args.append.unwrap_or(false) {
+                        match std::fs::read_to_string(&args.file_path) {
+                            Ok(existing) => format!("{}\n{}", existing, args.content),
+                            Err(_) => args.content.clone(),
+                        }
+                    } else {
+                        args.content.clone()
+                    };
+
+                    match std::fs::write(&args.file_path, content_to_write) {
+                        Ok(_) => {
+                            info!("Fallback: Successfully wrote content directly to file: {}", args.file_path);
+                            Ok(json!({
+                                "success": true,
+                                "file_path": args.file_path,
+                                "content_length": args.content.len(),
+                                "operation": if args.append.unwrap_or(false) { "append" } else { "write" },
+                                "method": "direct_write_fallback",
+                                "message": "Used direct write after typing failed"
+                            }))
+                        }
+                        Err(write_err) => {
+                            Err(format!("Typing failed and direct write fallback also failed. Typing error: {}. Write error: {}", e, write_err))
+                        }
+                    }
+                }
+                Err(_) => {
+                    // Timeout occurred
+                    warn!("Typing operation timed out after {} seconds, attempting direct write fallback", typing_timeout.as_secs());
+
+                    let content_to_write = if args.append.unwrap_or(false) {
+                        match std::fs::read_to_string(&args.file_path) {
+                            Ok(existing) => format!("{}\n{}", existing, args.content),
+                            Err(_) => args.content.clone(),
+                        }
+                    } else {
+                        args.content.clone()
+                    };
+
+                    match std::fs::write(&args.file_path, content_to_write) {
+                        Ok(_) => {
+                            info!("Timeout fallback: Successfully wrote content directly to file: {}", args.file_path);
+                            Ok(json!({
+                                "success": true,
+                                "file_path": args.file_path,
+                                "content_length": args.content.len(),
+                                "operation": if args.append.unwrap_or(false) { "append" } else { "write" },
+                                "method": "direct_write_timeout_fallback",
+                                "message": "Used direct write after typing timed out"
+                            }))
+                        }
+                        Err(write_err) => {
+                            Err(format!("Typing timed out after {} seconds and direct write fallback also failed: {}", typing_timeout.as_secs(), write_err))
+                        }
+                    }
                 }
             }
         }
