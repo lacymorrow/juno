@@ -13,7 +13,7 @@ pub mod tray_menu_ids {
     pub const NEW_CHAT: &str = "new-chat";
     pub const SETTINGS: &str = "tray-settings";
 
-    // Legacy compatibility constants
+    // Additional menu constants
     pub const SHOW_HIDE: &str = "show-hide";
     pub const SHOW_HIDE_FLOATING_BAR: &str = "show-hide-floating-bar";
     pub const DEVELOPER_TOOLS: &str = "developer-tools";

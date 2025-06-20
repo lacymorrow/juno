@@ -47,28 +47,7 @@ impl Default for VoiceTranscriptionConfig {
 }
 
 impl VoiceTranscriptionConfig {
-    /// Save the configuration to a file (DEPRECATED)
-    /// Use centralized settings system instead
-    #[deprecated(note = "Use centralized settings system instead")]
-    pub fn save(&self) -> Result<()> {
-        // DEPRECATED: Legacy file-based configuration is deprecated
-        // Use centralized settings system instead through:
-        // - settings_manager.set_voice_transcription_settings()
-        Ok(())
-    }
-
-    /// Load configuration from file (DEPRECATED)
-    /// Use centralized settings system instead
-    #[deprecated(note = "Use centralized settings system instead")]
-    pub fn load() -> Result<Self> {
-        // DEPRECATED: Legacy file-based configuration is deprecated
-        // Use centralized settings system instead through:
-        // - settings_manager.get_voice_transcription_settings()
-        Ok(Self::default())
-    }
-
-    /// Create configuration from centralized settings
-    /// NEW: Uses centralized settings system for voice transcription configuration
+    /// Create configuration from centralized settings values
     pub fn from_centralized_settings(
         model_path: String,
         sample_rate: u32,

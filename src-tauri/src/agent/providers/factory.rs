@@ -188,7 +188,7 @@ impl Provider {
                         },
                         ModelDefinition {
                             id: model_ids::CLAUDE_3_OPUS,
-                            name: "Claude 3 Opus (Legacy - Dev Only)",
+                            name: "Claude 3 Opus (Dev Only)",
                             category: ModelCategory::ComputerUse,
                             supports_computer_use: true,
                             is_recommended: false,
@@ -573,46 +573,22 @@ impl BrainFactory {
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::OpenAI) => {
-                info!("Attempting to initialize OpenAI brain...");
-                match OpenAIBrain::from_env() {
-                    Ok(brain) => Ok(Box::new(brain) as Box<dyn AgentBrain + Send + Sync>),
-                    Err(e) => {
-                        warn!("Failed to initialize OpenAI brain ({}). Falling back to Anthropic.", e);
-                        env::set_var("AI_PROVIDER", "anthropic");
-                        apply_provider_settings_to_env()?;
-                        AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
-                    }
-                }
+                info!("Initializing OpenAI brain...");
+                OpenAIBrain::from_env()
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::Rig) => {
-                info!("Attempting to initialize Rig brain...");
-                match RigBrain::from_env() {
-                    Ok(brain) => Ok(Box::new(brain) as Box<dyn AgentBrain + Send + Sync>),
-                    Err(e) => {
-                        warn!("Failed to initialize Rig brain ({}). Falling back to Anthropic.", e);
-                        env::set_var("AI_PROVIDER", "anthropic");
-                        apply_provider_settings_to_env()?;
-                        AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
-                    }
-                }
+                info!("Initializing Rig brain...");
+                RigBrain::from_env()
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::Gemini) => {
-                info!("Attempting to initialize Gemini brain...");
-                match GeminiBrain::from_env() {
-                    Ok(brain) => Ok(Box::new(brain) as Box<dyn AgentBrain + Send + Sync>),
-                    Err(e) => {
-                        warn!("Failed to initialize Gemini brain ({}). Falling back to Anthropic.", e);
-                        env::set_var("AI_PROVIDER", "anthropic");
-                        apply_provider_settings_to_env()?;
-                        AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
-                    }
-                }
+                info!("Initializing Gemini brain...");
+                GeminiBrain::from_env()
+                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             None => {
-                warn!("Unknown AI provider specified: '{}'. Using Anthropic as fallback.", provider_str);
-                env::set_var("AI_PROVIDER", "anthropic");
-                apply_provider_settings_to_env()?;
-                AnthropicBrain::from_env().map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                Err(AgentError::ConfigurationError(format!("Unknown AI provider: {}", provider_str)))
             }
         }
     }
@@ -637,51 +613,22 @@ impl BrainFactory {
                     .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
             }
             Some(Provider::OpenAI) => {
-                info!("Attempting to initialize OpenAI brain with custom system prompt...");
-                // For other providers, we'll need to implement similar custom constructors
-                // For now, fall back to Anthropic with the custom prompt
-                warn!("Custom system prompts not yet implemented for OpenAI. Falling back to Anthropic.");
-                let api_key = std::env::var("ANTHROPIC_API_KEY")
-                    .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
-                let model = std::env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = std::env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
-
-                AnthropicBrain::new(api_key, model, max_tokens, Some(system_prompt))
-                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                info!("Initializing OpenAI brain with custom system prompt...");
+                // TODO: Implement custom system prompt for OpenAI
+                return Err(AgentError::ConfigurationError("Custom system prompts not yet implemented for OpenAI".to_string()));
             }
             Some(Provider::Rig) => {
-                info!("Attempting to initialize Rig brain with custom system prompt...");
-                // For now, fall back to Anthropic with the custom prompt
-                warn!("Custom system prompts not yet implemented for Rig. Falling back to Anthropic.");
-                let api_key = std::env::var("ANTHROPIC_API_KEY")
-                    .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
-                let model = std::env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = std::env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
-
-                AnthropicBrain::new(api_key, model, max_tokens, Some(system_prompt))
-                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                info!("Initializing Rig brain with custom system prompt...");
+                // TODO: Implement custom system prompt for Rig
+                return Err(AgentError::ConfigurationError("Custom system prompts not yet implemented for Rig".to_string()));
             }
             Some(Provider::Gemini) => {
-                info!("Attempting to initialize Gemini brain with custom system prompt...");
-                // For now, fall back to Anthropic with the custom prompt
-                warn!("Custom system prompts not yet implemented for Gemini. Falling back to Anthropic.");
-                let api_key = std::env::var("ANTHROPIC_API_KEY")
-                    .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
-                let model = std::env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = std::env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
-
-                AnthropicBrain::new(api_key, model, max_tokens, Some(system_prompt))
-                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                info!("Initializing Gemini brain with custom system prompt...");
+                // TODO: Implement custom system prompt for Gemini
+                return Err(AgentError::ConfigurationError("Custom system prompts not yet implemented for Gemini".to_string()));
             }
             None => {
-                warn!("Unknown AI provider specified: '{}'. Using Anthropic as fallback.", provider_str);
-                let api_key = std::env::var("ANTHROPIC_API_KEY")
-                    .map_err(|_| AgentError::ConfigurationError("ANTHROPIC_API_KEY environment variable not set".to_string()))?;
-                let model = std::env::var("ANTHROPIC_MODEL").ok();
-                let max_tokens = std::env::var("ANTHROPIC_MAX_TOKENS").ok().and_then(|s| s.parse::<u32>().ok());
-
-                AnthropicBrain::new(api_key, model, max_tokens, Some(system_prompt))
-                    .map(|b| Box::new(b) as Box<dyn AgentBrain + Send + Sync>)
+                Err(AgentError::ConfigurationError(format!("Unknown AI provider: {}", provider_str)))
             }
         }
     }
