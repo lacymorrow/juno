@@ -89,6 +89,24 @@ impl StopCoordinator {
         operations.iter().any(|op| op.starts_with(operation_type))
     }
 
+    /// Atomically check if an operation type is active and register a new one if not
+    /// Returns Some(operation_id) if successfully registered, None if already active
+    pub async fn try_register_operation(&self, operation_type: &str) -> Option<String> {
+        let mut operations = self.active_operations.write().await;
+
+        // Check if operation type is already active
+        if operations.iter().any(|op| op.starts_with(operation_type)) {
+            debug!("[StopCoordinator] Operation type '{}' already active, skipping registration", operation_type);
+            return None;
+        }
+
+        // Register the new operation atomically
+        let operation_id = format!("{}_{}", operation_type, self.operation_counter.fetch_add(1, Ordering::SeqCst));
+        operations.insert(operation_id.clone());
+        debug!("[StopCoordinator] Atomically registered operation: {}", operation_id);
+        Some(operation_id)
+    }
+
     /// Coordinated stop all operations with deduplication
     pub async fn stop_all_operations(&self, app_handle: &AppHandle, reason: &str) -> Result<String, String> {
         info!("[StopCoordinator] Stop all operations requested: {}", reason);
@@ -119,8 +137,7 @@ impl StopCoordinator {
         let mut cleanup_results = Vec::new();
 
         // 1. Stop TTS immediately (highest priority)
-        if !self.is_operation_active("tts_stop").await {
-            let tts_op_id = self.register_operation("tts_stop").await;
+        if let Some(tts_op_id) = self.try_register_operation("tts_stop").await {
             info!("[StopCoordinator] Stopping TTS");
             crate::tts::stop_speech();
 
@@ -133,8 +150,7 @@ impl StopCoordinator {
         }
 
         // 2. Signal agent cancellation
-        if !self.is_operation_active("agent_stop").await {
-            let agent_op_id = self.register_operation("agent_stop").await;
+        if let Some(agent_op_id) = self.try_register_operation("agent_stop").await {
             info!("[StopCoordinator] Signaling agent cancellation");
 
             let cancel_requested = *app_state.cancel_rx.borrow();
@@ -148,8 +164,7 @@ impl StopCoordinator {
         }
 
         // 3. Stop dictation through state manager
-        if !self.is_operation_active("dictation_stop").await {
-            let dictation_op_id = self.register_operation("dictation_stop").await;
+        if let Some(dictation_op_id) = self.try_register_operation("dictation_stop").await {
             info!("[StopCoordinator] Stopping dictation");
 
             if let Err(e) = crate::commands::dictation_state_manager::force_stop_dictation(app_handle).await {
@@ -161,8 +176,7 @@ impl StopCoordinator {
         }
 
         // 4. Stop always listening mode
-        if !self.is_operation_active("always_listening_stop").await {
-            let al_op_id = self.register_operation("always_listening_stop").await;
+        if let Some(al_op_id) = self.try_register_operation("always_listening_stop").await {
             info!("[StopCoordinator] Stopping always listening mode");
 
             if let Err(e) = crate::commands::always_listening::stop_always_listening_mode(
@@ -177,8 +191,7 @@ impl StopCoordinator {
         }
 
         // 5. Force reset monitoring states
-        if !self.is_operation_active("monitor_reset").await {
-            let monitor_op_id = self.register_operation("monitor_reset").await;
+        if let Some(monitor_op_id) = self.try_register_operation("monitor_reset").await {
             info!("[StopCoordinator] Resetting monitoring states");
 
             crate::agent_monitor::force_reset_agent_input_state().await;
