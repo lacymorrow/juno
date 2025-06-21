@@ -32,34 +32,41 @@ impl StopCoordinator {
         }
     }
 
-    /// Check if we should perform cleanup based on timing and state
-    async fn should_perform_cleanup(&self) -> bool {
-        // Check if cleanup is already in progress
-        if self.cleanup_in_progress.load(Ordering::SeqCst) {
+    /// Atomically try to start cleanup, checking timing and state in one operation
+    /// Returns true if cleanup was successfully started, false if already in progress or too recent
+    async fn try_start_cleanup(&self) -> bool {
+        // First, atomically try to set cleanup_in_progress from false to true
+        let was_already_in_progress = self.cleanup_in_progress.compare_exchange(
+            false,
+            true,
+            Ordering::SeqCst,
+            Ordering::SeqCst
+        ).is_err();
+
+        if was_already_in_progress {
             debug!("[StopCoordinator] Cleanup already in progress, skipping");
             return false;
         }
 
-        // Check timing to prevent rapid successive cleanups
+        // We successfully set the flag, now check timing
         if let Ok(last_cleanup_guard) = self.last_cleanup.lock() {
             if let Some(last_time) = *last_cleanup_guard {
                 let elapsed = last_time.elapsed();
                 if elapsed < Duration::from_millis(500) {
                     debug!("[StopCoordinator] Recent cleanup detected ({}ms ago), skipping", elapsed.as_millis());
+                    // Reset the flag since we're not proceeding
+                    self.cleanup_in_progress.store(false, Ordering::SeqCst);
                     return false;
                 }
             }
         }
 
-        true
-    }
-
-    /// Mark cleanup as started and update timestamp
-    async fn mark_cleanup_started(&self) {
-        self.cleanup_in_progress.store(true, Ordering::SeqCst);
+        // Update timestamp now that we're proceeding
         if let Ok(mut last_cleanup_guard) = self.last_cleanup.lock() {
             *last_cleanup_guard = Some(Instant::now());
         }
+
+        true
     }
 
     /// Mark cleanup as completed
@@ -111,14 +118,13 @@ impl StopCoordinator {
     pub async fn stop_all_operations(&self, app_handle: &AppHandle, reason: &str) -> Result<String, String> {
         info!("[StopCoordinator] Stop all operations requested: {}", reason);
 
-        // Check if we should perform cleanup
-        if !self.should_perform_cleanup().await {
+        // Atomically try to start cleanup
+        if !self.try_start_cleanup().await {
             return Ok("Cleanup skipped - already in progress or too recent".to_string());
         }
 
         // Register this cleanup operation
         let cleanup_id = self.register_operation("cleanup").await;
-        self.mark_cleanup_started().await;
 
         let result = self.perform_coordinated_cleanup(app_handle, reason).await;
 

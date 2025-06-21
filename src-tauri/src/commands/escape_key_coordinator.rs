@@ -34,32 +34,40 @@ impl EscapeKeyCoordinator {
         }
     }
 
-    /// Check if we should perform registration/unregistration based on timing
-    async fn should_perform_operation(&self) -> bool {
-        // Check if operation is already in progress
-        if self.registration_in_progress.load(Ordering::SeqCst) {
+    /// Atomically try to start an operation, checking timing and state in one operation
+    /// Returns true if operation was successfully started, false if already in progress or too recent
+    async fn try_start_operation(&self) -> bool {
+        // First, atomically try to set registration_in_progress from false to true
+        let was_already_in_progress = self.registration_in_progress.compare_exchange(
+            false,
+            true,
+            Ordering::SeqCst,
+            Ordering::SeqCst
+        ).is_err();
+
+        if was_already_in_progress {
             debug!("[EscapeKeyCoordinator] Registration operation already in progress, skipping");
             return false;
         }
 
-        // Check timing to prevent rapid successive operations
+        // We successfully set the flag, now check timing
         let last_op_guard = self.last_operation_time.read().await;
         if let Some(last_time) = *last_op_guard {
             let elapsed = last_time.elapsed();
             if elapsed < Duration::from_millis(100) {
                 debug!("[EscapeKeyCoordinator] Recent operation detected ({}ms ago), skipping", elapsed.as_millis());
+                // Reset the flag since we're not proceeding
+                self.registration_in_progress.store(false, Ordering::SeqCst);
                 return false;
             }
         }
+        drop(last_op_guard);
 
-        true
-    }
-
-    /// Mark operation as started
-    async fn mark_operation_started(&self) {
-        self.registration_in_progress.store(true, Ordering::SeqCst);
+        // Update timestamp now that we're proceeding
         let mut last_op_guard = self.last_operation_time.write().await;
         *last_op_guard = Some(Instant::now());
+
+        true
     }
 
     /// Mark operation as completed
@@ -71,12 +79,10 @@ impl EscapeKeyCoordinator {
     pub async fn register_escape_user(&self, app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
         debug!("[EscapeKeyCoordinator] Register escape user requested: {}", user_id);
 
-        // Check if we should perform operation
-        if !self.should_perform_operation().await {
+        // Atomically try to start operation
+        if !self.try_start_operation().await {
             return Ok(()); // Skip if too recent or in progress
         }
-
-        self.mark_operation_started().await;
 
         let result = self.perform_registration(app_handle, user_id).await;
 
@@ -114,12 +120,10 @@ impl EscapeKeyCoordinator {
     pub async fn unregister_escape_user(&self, app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
         debug!("[EscapeKeyCoordinator] Unregister escape user requested: {}", user_id);
 
-        // Check if we should perform operation
-        if !self.should_perform_operation().await {
+        // Atomically try to start operation
+        if !self.try_start_operation().await {
             return Ok(()); // Skip if too recent or in progress
         }
-
-        self.mark_operation_started().await;
 
         let result = self.perform_unregistration(app_handle, user_id).await;
 
