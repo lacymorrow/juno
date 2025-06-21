@@ -402,7 +402,7 @@ impl ExplorationEngine {
         info!("Starting application exploration for: {}", app_context.app_name);
 
         // Initialize exploration with the initial state
-        let initial_state = self.create_initial_state(initial_screenshot, app_context).await?;
+        let initial_state = self.create_initial_state(initial_screenshot, &app_context).await?;
         self.exploration_memory.add_state(initial_state.clone());
         self.gui_transition_graph.add_state(initial_state);
 
@@ -430,15 +430,16 @@ impl ExplorationEngine {
             ).await?;
 
             // Execute exploration action and capture new state
+            let action_type = exploration_action.action_type.clone();
             match self.execute_exploration_action(exploration_action).await {
-                Ok(new_state) => {
+                Ok((new_state, execution_time_ms)) => {
                     // Record transition
                     let transition = GUITransition {
                         from_state: current_state_id.clone(),
                         to_state: new_state.state_id.clone(),
-                        trigger_action: exploration_action.action_type,
+                        trigger_action: action_type,
                         confidence: 0.9, // High confidence for executed actions
-                        transition_time_ms: exploration_action.execution_time_ms,
+                        transition_time_ms: execution_time_ms,
                     };
 
                     self.gui_transition_graph.add_transition(transition);
@@ -486,7 +487,7 @@ impl ExplorationEngine {
     async fn create_initial_state(
         &self,
         screenshot: &str,
-        app_context: AppContext,
+        app_context: &AppContext,
     ) -> Result<GUIState, ExplorationError> {
         let state_id = format!("state_{}", chrono::Utc::now().timestamp_millis());
 
@@ -498,7 +499,7 @@ impl ExplorationEngine {
             screenshot: screenshot.to_string(),
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
             interactive_elements,
-            app_context,
+            app_context: app_context.clone(),
             importance_score: 1.0, // Initial state is always important
         })
     }
@@ -578,15 +579,15 @@ impl ExplorationEngine {
     /// Executes an exploration action
     async fn execute_exploration_action(
         &self,
-        mut action: ExplorationAction,
-    ) -> Result<GUIState, ExplorationError> {
+        _action: ExplorationAction,
+    ) -> Result<(GUIState, u64), ExplorationError> {
         let start_time = Instant::now();
 
         // Here we would integrate with the actual computer use system
         // For now, simulate the action execution
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        action.execution_time_ms = start_time.elapsed().as_millis() as u64;
+        let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
         // Simulate capturing new state after action
         let new_state_id = format!("state_{}", chrono::Utc::now().timestamp_millis());
@@ -594,7 +595,7 @@ impl ExplorationEngine {
         // In production, this would capture an actual screenshot
         let simulated_screenshot = "simulated_screenshot_data".to_string();
 
-        Ok(GUIState {
+        let new_state = GUIState {
             state_id: new_state_id,
             screenshot: simulated_screenshot,
             timestamp: chrono::Utc::now().timestamp_millis() as u64,
@@ -606,7 +607,9 @@ impl ExplorationEngine {
                 version: None,
             },
             importance_score: 0.8,
-        })
+        };
+
+        Ok((new_state, execution_time_ms))
     }
 
     /// Calculates exploration completeness score

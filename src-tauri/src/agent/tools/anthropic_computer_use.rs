@@ -24,8 +24,8 @@ static UBP_CACHE: Lazy<Arc<RwLock<HashMap<String, UBPResult>>>> =
 /// Stores UBP result in cache for coordinate conversion
 fn cache_ubp_result(key: String, result: UBPResult) {
     if let Ok(mut cache) = UBP_CACHE.write() {
-        cache.insert(key, result);
         debug!("Cached UBP result for key: {}", key);
+        cache.insert(key, result);
     }
 }
 
@@ -251,37 +251,34 @@ async fn capture_screenshot_with_advanced_processing(
 
                                     let ubp_config = UBPConfig::default();
                                     let ubp_parser = UniversalBlockParser::new_with_config(ubp_config);
-
-                                    match ubp_parser {
-                                        Ok(parser) => {
-                                            match parser.parse_screenshot(&image_bytes).await {
-                                                                                                Ok(ubp_result) => {
+                                            match ubp_parser.parse_screenshot_from_bytes(&image_bytes).await {
+                                                Ok(ubp_result) => {
                                                     info!(
                                                         "UBP applied: {}x{} image parsed into {} blocks with {} UI elements in {}ms",
-                                                        ubp_result.original_size.0,
-                                                        ubp_result.original_size.1,
-                                                        ubp_result.stats.total_blocks,
-                                                        ubp_result.stats.total_elements,
-                                                        ubp_result.stats.processing_time_ms
+                                                        ubp_result.image_width,
+                                                        ubp_result.image_height,
+                                                        ubp_result.blocks.len(),
+                                                        ubp_result.total_elements_detected,
+                                                        ubp_result.processing_time_ms
                                                     );
 
                                                     // Cache UBP result for coordinate conversion
-                                                    let cache_key = format!("screenshot_{}x{}", ubp_result.original_size.0, ubp_result.original_size.1);
+                                                    let cache_key = format!("screenshot_{}x{}", ubp_result.image_width, ubp_result.image_height);
                                                     cache_ubp_result(cache_key.clone(), ubp_result.clone());
 
                                                     Some(json!({
                                                         "enabled": true,
                                                         "cache_key": cache_key,
                                                         "grid_size": {
-                                                            "rows": ubp_result.grid_size.0,
-                                                            "cols": ubp_result.grid_size.1
+                                                            "rows": ubp_result.grid_dimensions.0,
+                                                            "cols": ubp_result.grid_dimensions.1
                                                         },
-                                                        "total_blocks": ubp_result.stats.total_blocks,
-                                                        "total_elements": ubp_result.stats.total_elements,
-                                                        "avg_elements_per_block": ubp_result.stats.avg_elements_per_block,
-                                                        "processing_time_ms": ubp_result.stats.processing_time_ms,
-                                                        "memory_usage_bytes": ubp_result.stats.memory_usage_bytes,
-                                                        "coordinate_mappings": ubp_result.coordinate_mapping.len()
+                                                        "total_blocks": ubp_result.blocks.len(),
+                                                        "total_elements": ubp_result.total_elements_detected,
+                                                        "avg_elements_per_block": if ubp_result.blocks.len() > 0 { ubp_result.total_elements_detected as f32 / ubp_result.blocks.len() as f32 } else { 0.0 },
+                                                        "processing_time_ms": ubp_result.processing_time_ms,
+                                                        "memory_usage_bytes": (ubp_result.blocks.len() * std::mem::size_of::<crate::agent::tools::universal_block_parser::UBPBlock>()) as u64,
+                                                        "coordinate_mappings": ubp_result.blocks.iter().map(|b| b.elements.len()).sum::<usize>()
                                                     }))
                                                 }
                                                 Err(e) => {
@@ -292,15 +289,6 @@ async fn capture_screenshot_with_advanced_processing(
                                                     }))
                                                 }
                                             }
-                                        }
-                                        Err(e) => {
-                                            warn!("Failed to create UBP parser: {}", e);
-                                            Some(json!({
-                                                "enabled": false,
-                                                "error": e.to_string()
-                                            }))
-                                        }
-                                    }
                                 } else {
                                     Some(json!({"enabled": false}))
                                 };
@@ -439,21 +427,19 @@ async fn capture_screenshot_with_advanced_processing(
                 let ubp_config = UBPConfig::default();
                 let ubp_parser = UniversalBlockParser::new_with_config(ubp_config);
 
-                match ubp_parser {
-                    Ok(parser) => {
-                        match parser.parse_screenshot(&image_bytes).await {
+                        match ubp_parser.parse_screenshot_from_bytes(&image_bytes).await {
                             Ok(ubp_result) => {
                                 info!(
                                     "UBP applied: {}x{} image parsed into {} blocks with {} UI elements in {}ms",
-                                    ubp_result.original_size.0,
-                                    ubp_result.original_size.1,
-                                    ubp_result.stats.total_blocks,
-                                    ubp_result.stats.total_elements,
-                                    ubp_result.stats.processing_time_ms
+                                    ubp_result.image_width,
+                                    ubp_result.image_height,
+                                    ubp_result.blocks.len(),
+                                    ubp_result.total_elements_detected,
+                                    ubp_result.processing_time_ms
                                 );
 
                                 // Cache UBP result for coordinate conversion
-                                let cache_key = format!("screenshot_{}x{}", ubp_result.original_size.0, ubp_result.original_size.1);
+                                let cache_key = format!("screenshot_{}x{}", ubp_result.image_width, ubp_result.image_height);
                                 cache_ubp_result(cache_key.clone(), ubp_result.clone());
 
                                 Ok(json!({
@@ -465,15 +451,15 @@ async fn capture_screenshot_with_advanced_processing(
                                         "enabled": true,
                                         "cache_key": cache_key,
                                         "grid_size": {
-                                            "rows": ubp_result.grid_size.0,
-                                            "cols": ubp_result.grid_size.1
+                                            "rows": ubp_result.grid_dimensions.0,
+                                            "cols": ubp_result.grid_dimensions.1
                                         },
-                                        "total_blocks": ubp_result.stats.total_blocks,
-                                        "total_elements": ubp_result.stats.total_elements,
-                                        "avg_elements_per_block": ubp_result.stats.avg_elements_per_block,
-                                        "processing_time_ms": ubp_result.stats.processing_time_ms,
-                                        "memory_usage_bytes": ubp_result.stats.memory_usage_bytes,
-                                        "coordinate_mappings": ubp_result.coordinate_mapping.len()
+                                        "total_blocks": ubp_result.blocks.len(),
+                                        "total_elements": ubp_result.total_elements_detected,
+                                        "avg_elements_per_block": if ubp_result.blocks.len() > 0 { ubp_result.total_elements_detected as f32 / ubp_result.blocks.len() as f32 } else { 0.0 },
+                                        "processing_time_ms": ubp_result.processing_time_ms,
+                                        "memory_usage_bytes": (ubp_result.blocks.len() * std::mem::size_of::<crate::agent::tools::universal_block_parser::UBPBlock>()) as u64,
+                                        "coordinate_mappings": ubp_result.blocks.iter().map(|b| b.elements.len()).sum::<usize>()
                                     },
                                     "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                                 }))
@@ -493,22 +479,6 @@ async fn capture_screenshot_with_advanced_processing(
                                 }))
                             }
                         }
-                    }
-                    Err(e) => {
-                        warn!("Failed to create UBP parser: {}", e);
-                        Ok(json!({
-                            "type": "image",
-                            "data": base64_image,
-                            "format": "png",
-                            "token_selection": {"enabled": false},
-                            "universal_block_parsing": {
-                                "enabled": false,
-                                "error": e.to_string()
-                            },
-                            "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
-                        }))
-                    }
-                }
             } else {
                 // Return original screenshot without any processing
                 Ok(json!({

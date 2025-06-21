@@ -183,6 +183,20 @@ impl UniversalBlockParser {
         })
     }
 
+    /// Parses a screenshot from raw image bytes
+    pub async fn parse_screenshot_from_bytes(
+        &self,
+        image_bytes: &[u8],
+    ) -> Result<UBPResult, TokenSelectionError> {
+        // Decode image bytes to ImageBuffer
+        let image_buffer = image::load_from_memory(image_bytes)
+            .map_err(|e| TokenSelectionError::ProcessingError(format!("Failed to decode image: {}", e)))?
+            .to_rgba8();
+
+        // Use the existing parse_screenshot method
+        self.parse_screenshot(&image_buffer).await
+    }
+
     /// Converts global coordinates to block-specific coordinates
     pub fn global_to_block_coordinates(
         &self,
