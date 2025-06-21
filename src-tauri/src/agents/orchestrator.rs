@@ -1151,27 +1151,40 @@ impl Orchestrator {
         Ok(split_tasks)
     }
 
-    /// NEW: Analyze and split complex tasks
-	/// TODO: CRITICAL: IS THIS SAFE/APPROPRIATE?
+    /// NEW: Analyze and split complex tasks with safe UTF-8 handling
     async fn analyze_and_split_task(&self, task: &Task) -> Result<Vec<Task>, AgentError> {
         let description = &task.description;
-        let description_lower = description.to_lowercase();
 
-        // Keywords that indicate splittable tasks with their lengths
+        // Keywords that indicate splittable tasks
         let split_indicators = [
-            ("and then", 8),
-            ("after that", 10),
-            ("next", 4),
-            ("also", 4),
-            ("additionally", 12),
-            ("furthermore", 12),
+            "and then",
+            "after that",
+            "next",
+            "also",
+            "additionally",
+            "furthermore",
         ];
 
+        // Find split points using case-insensitive matching directly on original string
         let mut split_info = Vec::new();
+        let chars: Vec<char> = description.chars().collect();
 
-        for (indicator, length) in &split_indicators {
-            if let Some(pos) = description_lower.find(indicator) {
-                split_info.push((pos, *length));
+        for indicator in &split_indicators {
+            let indicator_chars: Vec<char> = indicator.chars().collect();
+
+            // Case-insensitive search in original string
+            for i in 0..=chars.len().saturating_sub(indicator_chars.len()) {
+                let window = &chars[i..i + indicator_chars.len()];
+
+                // Compare case-insensitively
+                let matches = window.iter()
+                    .zip(indicator_chars.iter())
+                    .all(|(c1, c2)| c1.to_lowercase().eq(c2.to_lowercase()));
+
+                if matches {
+                    split_info.push((i, indicator_chars.len()));
+                    break; // Only find first occurrence of each indicator
+                }
             }
         }
 
@@ -1180,23 +1193,25 @@ impl Orchestrator {
             return Ok(vec![task.clone()]);
         }
 
-        // Sort split points by position
+        // Sort split points by character position
         split_info.sort_by_key(|(pos, _)| *pos);
 
         let mut subtasks = Vec::new();
         let mut current_start = 0;
 
         // Process each segment
-        for (i, (split_pos, keyword_length)) in split_info.iter().enumerate() {
+        for (i, (split_pos, keyword_char_len)) in split_info.iter().enumerate() {
             // Create subtask from current_start to split_pos
             if *split_pos > current_start {
-                let subtask_description = description[current_start..*split_pos].trim().to_string();
+                let subtask_chars: String = chars[current_start..*split_pos].iter().collect();
+                let subtask_description = subtask_chars.trim().to_string();
+
                 if !subtask_description.is_empty() {
                     let subtask = Task {
                         id: format!("{}-{}", task.id, i),
-                        description: subtask_description,
+                        description: subtask_description.clone(),
                         tool_calls: vec![], // Will be populated by agent
-                        agent_type: self.determine_agent_type(&description[current_start..*split_pos]).await,
+                        agent_type: self.determine_agent_type(&subtask_description).await,
                         priority: task.priority.clone(),
                         dependencies: if i == 0 { vec![] } else { vec![format!("{}-{}", task.id, i - 1)] },
                         timeout: task.timeout,
@@ -1211,23 +1226,25 @@ impl Orchestrator {
             }
 
             // Move start position past the keyword
-            current_start = split_pos + keyword_length;
+            current_start = split_pos + keyword_char_len;
 
-            // Skip whitespace after the keyword
-            while current_start < description.len() && description.chars().nth(current_start).unwrap_or('\0').is_whitespace() {
+            // Skip whitespace after the keyword (efficient single-pass)
+            while current_start < chars.len() && chars[current_start].is_whitespace() {
                 current_start += 1;
             }
         }
 
         // Process the final segment after the last split point
-        if current_start < description.len() {
-            let final_description = description[current_start..].trim().to_string();
+        if current_start < chars.len() {
+            let final_chars: String = chars[current_start..].iter().collect();
+            let final_description = final_chars.trim().to_string();
+
             if !final_description.is_empty() {
                 let final_subtask = Task {
                     id: format!("{}-{}", task.id, split_info.len()),
-                    description: final_description,
+                    description: final_description.clone(),
                     tool_calls: vec![], // Will be populated by agent
-                    agent_type: self.determine_agent_type(&description[current_start..]).await,
+                    agent_type: self.determine_agent_type(&final_description).await,
                     priority: task.priority.clone(),
                     dependencies: vec![format!("{}-{}", task.id, split_info.len() - 1)],
                     timeout: task.timeout,
