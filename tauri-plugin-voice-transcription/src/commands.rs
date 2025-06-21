@@ -229,24 +229,18 @@ pub async fn set_model_path<R: tauri::Runtime>(
             }
         }
     } else {
-        // No existing controller - create a new one and manage it
-        match VoiceController::new_with_shared_context(&resolved_model_path, shared_context.clone()) {
-            Ok(controller) => {
-                app.manage(Arc::new(Mutex::new(controller)));
-                info!("[Plugin] ✅ New voice controller created and managed with shared context");
-            }
-            Err(e) => {
-                error!("[Plugin] ❌ Failed to create new voice controller with shared context: {}", e);
-                return Err(Error::ModelError(format!("Failed to create voice controller: {}", e)));
-            }
-        }
+        // VoiceController should already be managed during plugin initialization
+        // Log this as a critical error since voice controller is essential
+        let error_msg = "VoiceController state not found - should be managed during plugin initialization";
+        error!("[Plugin] ❌ {}", error_msg);
+        return Err(Error::InitializationError(error_msg.to_string()));
     }
 
     // Update existing AlwaysListeningController with new shared context (proper state management)
     if let Some(always_listening_state) = app.try_state::<Arc<Mutex<crate::always_listening::AlwaysListeningController>>>() {
         match always_listening_state.lock() {
             Ok(mut controller) => {
-                match controller.update_shared_context(&resolved_model_path, shared_context) {
+                match controller.update_shared_context(&resolved_model_path, shared_context.clone()) {
                     Ok(_) => {
                         info!("[Plugin] ✅ AlwaysListeningController updated with shared context (no state replacement)");
                     }
@@ -262,17 +256,9 @@ pub async fn set_model_path<R: tauri::Runtime>(
             }
         }
     } else {
-        // No existing controller - create a new one and manage it
-        match crate::always_listening::AlwaysListeningController::new_with_shared_context(&resolved_model_path, shared_context) {
-            Ok(controller) => {
-                app.manage(Arc::new(Mutex::new(controller)));
-                info!("[Plugin] ✅ New AlwaysListeningController created and managed with shared context");
-            }
-            Err(e) => {
-                error!("[Plugin] ⚠️  Failed to create new AlwaysListeningController with shared context: {}", e);
-                // Don't fail the whole operation, voice controller still works
-            }
-        }
+        // AlwaysListeningController should already be managed during plugin initialization
+        // Log this as unusual but don't create duplicate state management
+        error!("[Plugin] ⚠️  AlwaysListeningController state not found - should be managed during plugin initialization");
     }
 
     Ok(())
