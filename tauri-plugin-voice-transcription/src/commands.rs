@@ -194,18 +194,74 @@ pub async fn set_model_path<R: tauri::Runtime>(
     config.model_path = resolved_model_path.clone();
     // Note: Configuration is now managed through centralized settings
 
-    // Reinitialize the voice controller with the new model
-    match VoiceController::new(&resolved_model_path) {
-        Ok(controller) => {
-            app.manage(Arc::new(Mutex::new(controller)));
-            info!("[Plugin] Voice controller reinitialized with new model: {}", resolved_model_path);
-            Ok(())
+    // Reinitialize the shared Whisper context with the new model
+    use crate::shared_whisper::SharedWhisperManager;
+
+    info!("[Plugin] Reinitializing shared Whisper context with new model path: {}", resolved_model_path);
+    let shared_context = match SharedWhisperManager::initialize(&resolved_model_path) {
+        Ok(context) => {
+            info!("[Plugin] ✅ Shared Whisper context reinitialized successfully");
+            context
         }
         Err(e) => {
-            error!("[Plugin] Failed to reinitialize voice controller: {}", e);
-            Err(Error::ModelError(format!("Failed to load model: {}", e)))
+            error!("[Plugin] ❌ Failed to reinitialize shared Whisper context: {}", e);
+            return Err(Error::ModelError(format!("Failed to load model: {}", e)));
         }
+    };
+
+    // Update existing VoiceController with new shared context (proper state management)
+    if let Some(voice_controller_state) = app.try_state::<Arc<Mutex<VoiceController>>>() {
+        match voice_controller_state.lock() {
+            Ok(mut controller) => {
+                match controller.update_shared_context(&resolved_model_path, shared_context.clone()) {
+                    Ok(_) => {
+                        info!("[Plugin] ✅ Voice controller updated with shared context (no state replacement)");
+                    }
+                    Err(e) => {
+                        error!("[Plugin] ❌ Failed to update voice controller with shared context: {}", e);
+                        return Err(Error::ModelError(format!("Failed to update voice controller: {}", e)));
+                    }
+                }
+            }
+            Err(e) => {
+                error!("[Plugin] ❌ Failed to lock VoiceController for update: {}", e);
+                return Err(Error::LockError(format!("Failed to lock VoiceController: {}", e)));
+            }
+        }
+    } else {
+        // VoiceController should already be managed during plugin initialization
+        // Log this as a critical error since voice controller is essential
+        let error_msg = "VoiceController state not found - should be managed during plugin initialization";
+        error!("[Plugin] ❌ {}", error_msg);
+        return Err(Error::InitializationError(error_msg.to_string()));
     }
+
+    // Update existing AlwaysListeningController with new shared context (proper state management)
+    if let Some(always_listening_state) = app.try_state::<Arc<Mutex<crate::always_listening::AlwaysListeningController>>>() {
+        match always_listening_state.lock() {
+            Ok(mut controller) => {
+                match controller.update_shared_context(&resolved_model_path, shared_context.clone()) {
+                    Ok(_) => {
+                        info!("[Plugin] ✅ AlwaysListeningController updated with shared context (no state replacement)");
+                    }
+                    Err(e) => {
+                        error!("[Plugin] ⚠️  Failed to update AlwaysListeningController with shared context: {}", e);
+                        // Don't fail the whole operation, voice controller still works
+                    }
+                }
+            }
+            Err(e) => {
+                error!("[Plugin] ⚠️  Failed to lock AlwaysListeningController for update: {}", e);
+                // Don't fail the whole operation, voice controller still works
+            }
+        }
+    } else {
+        // AlwaysListeningController should already be managed during plugin initialization
+        // Log this as unusual but don't create duplicate state management
+        error!("[Plugin] ⚠️  AlwaysListeningController state not found - should be managed during plugin initialization");
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

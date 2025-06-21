@@ -158,13 +158,14 @@ impl DictationStateManager {
     }
 
     /// Comprehensive force reset that coordinates all components
+    /// Direct reset to avoid recursion with stop coordinator
     pub async fn force_reset_all_state(&self, app_handle: &AppHandle, reason: String) -> Result<String, String> {
         // Set force reset flag to prevent race conditions
         *self.force_reset_in_progress.lock().await = true;
 
         warn!("[StateManager] Starting comprehensive state reset: {}", reason);
 
-        // 1. Reset voice controller with timeout
+        // Direct reset without using stop coordinator to avoid recursion
         let voice_reset_result = self.reset_voice_controller(app_handle).await;
 
         // 2. Reset dictation monitor
@@ -498,15 +499,54 @@ pub async fn transition_dictation_state(
 /// Force stop dictation (convenience function for stop operations)
 pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> {
     info!("[DictationStateManager] Force stopping dictation");
-    
+
     let manager = get_state_manager();
-    
-    // Force reset all dictation state
-    manager.force_reset_all_state(
+
+    // Direct reset without recursive call to avoid infinite recursion
+    let voice_reset_result = manager.reset_voice_controller(app_handle).await;
+
+    // Reset dictation monitor
+    crate::dictation_monitor::force_reset_dictation_input_state().await;
+
+    // Reset app state
+    let app_state = app_handle.state::<crate::state::AppState>();
+    if let Ok(mut dictation_active) = app_state.dictation_active.lock() {
+        *dictation_active = false;
+    }
+
+    // Reset floating bar with proper dictation mode change
+    crate::commands::floating_bar::handle_dictation_mode_change(app_handle, false).await;
+
+    // Reset manager's internal component states
+    *manager.component_states.write().await = ComponentStates {
+        app_state_active: false,
+        voice_controller_active: false,
+        monitor_state_active: false,
+        floating_bar_state: "default".to_string(),
+        last_updated: DictationStateManager::current_timestamp(),
+    };
+
+    // Emit comprehensive reset events
+    if let Err(e) = app_handle.emit("dictation-active", false) {
+        error!("[DictationStateManager] Failed to emit dictation-active event: {}", e);
+    }
+
+    if let Err(e) = app_handle.emit("dictation-state-force-reset", "Force stop dictation") {
+        error!("[DictationStateManager] Failed to emit force reset event: {}", e);
+    }
+
+    // Transition to idle state
+    manager.transition_to_state(
+        DictationState::Idle,
+        "Force stop completed".to_string(),
+        "force_stop_dictation".to_string(),
         app_handle,
-        "Force stop dictation requested".to_string()
     ).await?;
-    
+
+    if let Err(e) = voice_reset_result {
+        warn!("[DictationStateManager] Voice controller reset failed: {}", e);
+    }
+
     info!("[DictationStateManager] Force stop dictation completed");
     Ok(())
 }
@@ -514,13 +554,13 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
 /// Synchronize dictation state (for internal use)
 pub async fn sync_dictation_state(active: bool) -> Result<(), String> {
     let manager = get_state_manager();
-    
+
     let target_state = if active {
         DictationState::Active { started_at: DictationStateManager::current_timestamp() }
     } else {
         DictationState::Idle
     };
-    
+
     // Note: This is a simplified sync - in practice you'd need an app_handle
     // This function is mainly for internal coordination
     info!("[DictationStateManager] Syncing dictation state to: {:?}", target_state);

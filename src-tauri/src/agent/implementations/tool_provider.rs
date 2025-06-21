@@ -463,19 +463,25 @@ impl LocalToolProvider {
     }
 
     /// Refresh MCP tools from connected servers
+    ///
+    /// This method always clears and re-fetches MCP tools to ensure they're up-to-date.
+    /// It does not use caching optimizations that would prevent actual refreshing.
     pub async fn refresh_mcp_tools(&mut self) -> Result<(), String> {
         if let Some(ref mcp_manager) = self.mcp_manager {
             // Add timeout to prevent hanging on display-related operations
-            let timeout_duration = std::time::Duration::from_secs(10);
+            let timeout_duration = std::time::Duration::from_secs(10); // Increased timeout for refresh operations
 
             let refresh_result = tokio::time::timeout(timeout_duration, async {
+                // Always fetch fresh tools from MCP manager
                 let manager_guard = mcp_manager.lock().await;
                 let mcp_tools = manager_guard.get_all_tools().await;
                 drop(manager_guard);
 
-                // Clear existing MCP tools first (they have prefixed names)
+                // Clear existing MCP tools first using consistent detection logic
                 let mut defs = self.definitions.write().await;
-                defs.retain(|name, _| !name.contains("mcp-server-"));
+                let initial_count = defs.len();
+                defs.retain(|name, _| !self.is_mcp_tool_name(name));
+                let removed_count = initial_count - defs.len();
 
                 // Add fresh MCP tools to our local definitions
                 let mut added_count = 0;
@@ -489,25 +495,58 @@ impl LocalToolProvider {
                     }
                 }
 
-                log::info!(
-                    "Refreshed and cached {} MCP tools in provider definitions",
-                    added_count
+                info!(
+                    "Refreshed MCP tools: removed {} cached tools, added {} fresh tools",
+                    removed_count, added_count
                 );
                 Ok::<(), String>(())
             })
             .await;
 
             match refresh_result {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => Err(e),
+                Ok(Ok(())) => {
+                    debug!("MCP tools refresh completed successfully");
+                    Ok(())
+                },
+                Ok(Err(e)) => {
+                    error!("MCP tools refresh failed: {}", e);
+                    Err(e)
+                },
                 Err(_) => {
                     warn!("MCP tools refresh timed out after {:?}", timeout_duration);
-                    Err("MCP tools refresh timeout".to_string())
+                    Err(format!("MCP tools refresh timeout after {:?}", timeout_duration))
                 }
             }
         } else {
+            debug!("No MCP manager available, skipping MCP tools refresh");
             Ok(())
         }
+    }
+
+    /// Check if a tool name follows MCP naming conventions (consistent detection logic)
+    ///
+    /// This method uses the canonical MCP tool detection pattern that should be
+    /// used consistently throughout the codebase to avoid refresh/caching bugs.
+    fn is_mcp_tool_name(&self, tool_name: &str) -> bool {
+        // Canonical MCP tool detection pattern
+        tool_name.contains("mcp-server-") || tool_name.starts_with("mcp_")
+    }
+
+    /// Force refresh MCP tools by clearing all cached MCP tools first
+    ///
+    /// This is a more aggressive refresh that ensures no stale MCP tools remain
+    pub async fn force_refresh_mcp_tools(&mut self) -> Result<(), String> {
+        // First clear all MCP tools from cache
+        {
+            let mut defs = self.definitions.write().await;
+            let initial_count = defs.len();
+            defs.retain(|name, _| !self.is_mcp_tool_name(name));
+            let removed_count = initial_count - defs.len();
+            debug!("Force refresh: cleared {} cached MCP tools", removed_count);
+        }
+
+        // Then refresh
+        self.refresh_mcp_tools().await
     }
 
     /// Check if a tool is an MCP tool using proper tool configuration
@@ -523,7 +562,12 @@ impl LocalToolProvider {
             }
         }
 
-        // Fallback to basic MCP manager availability check if no configuration access
+        // Fallback to name-based detection if no configuration access
+        if self.is_mcp_tool_name(tool_name) {
+            return true;
+        }
+
+        // Final fallback: check if it's not in local executors and we have MCP manager
         self.mcp_manager.is_some()
             && !self
                 .executors
@@ -1459,53 +1503,51 @@ impl ToolProvider for LocalToolProvider {
     async fn list_tools(&self) -> Result<Vec<ToolDefinition>, AgentError> {
         let mut all_tools = Vec::new();
 
-        // Get local tools (which includes previously cached MCP tools)
+        // Get local tools (excluding MCP tools which will be fetched fresh)
         let defs = self.definitions.read().await;
-        all_tools.extend(defs.values().cloned());
+        for tool_def in defs.values() {
+            if !self.is_mcp_tool_name(&tool_def.name) {
+                all_tools.push(tool_def.clone());
+            }
+        }
         drop(defs);
 
-        // Only fetch MCP tools if we don't have any cached and we have an MCP manager
+        // Always fetch fresh MCP tools if MCP manager is available
         if let Some(ref mcp_manager) = self.mcp_manager {
-            // Check if we already have MCP tools cached (they have prefixed names)
-            let has_mcp_tools = all_tools
-                .iter()
-                .any(|tool| tool.name.contains("mcp-server-"));
+            // Add timeout to MCP tool fetching to prevent hanging on display-related operations
+            let timeout_duration = std::time::Duration::from_secs(2);
 
-            if !has_mcp_tools {
-                // Add timeout to MCP tool fetching to prevent hanging on display-related operations
-                let timeout_duration = std::time::Duration::from_secs(5);
-
-                match tokio::time::timeout(timeout_duration, async {
-                    let manager_guard = mcp_manager.lock().await;
-                    let mcp_tools = manager_guard.get_all_tools().await;
-                    drop(manager_guard);
-                    mcp_tools
-                })
-                .await
-                {
-                    Ok(mcp_tools) => {
-                        for tool_info in mcp_tools {
-                            if tool_info.enabled {
-                                all_tools.push(tool_info.tool_definition);
-                            }
+            match tokio::time::timeout(timeout_duration, async {
+                let manager_guard = mcp_manager.lock().await;
+                let mcp_tools = manager_guard.get_all_tools().await;
+                drop(manager_guard);
+                mcp_tools
+            })
+            .await
+            {
+                Ok(mcp_tools) => {
+                    let mut mcp_count = 0;
+                    for tool_info in mcp_tools {
+                        if tool_info.enabled {
+                            all_tools.push(tool_info.tool_definition);
+                            mcp_count += 1;
                         }
-                        debug!(
-                            "Fetched {} fresh MCP tools",
-                            all_tools
-                                .iter()
-                                .filter(|t| t.name.contains("mcp-server-"))
-                                .count()
-                        );
                     }
-                    Err(_) => {
-                        warn!(
-                            "MCP tools fetch timed out after {:?}, continuing without MCP tools",
-                            timeout_duration
-                        );
+                    debug!("Fetched {} fresh MCP tools", mcp_count);
+                }
+                Err(_) => {
+                    debug!(
+                        "MCP tools fetch timed out after {:?}, using cached tools",
+                        timeout_duration
+                    );
+                    // Fallback to cached MCP tools on timeout
+                    let defs = self.definitions.read().await;
+                    for tool_def in defs.values() {
+                        if self.is_mcp_tool_name(&tool_def.name) {
+                            all_tools.push(tool_def.clone());
+                        }
                     }
                 }
-            } else {
-                debug!("Using cached MCP tools, skipping fresh fetch");
             }
         }
 

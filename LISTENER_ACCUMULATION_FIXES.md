@@ -3,14 +3,17 @@
 ## 🔥 Critical Issues Identified
 
 ### 1. MCP Server Listener Accumulation
+
 **Problem**: MaxListenersExceededWarning with 11 drain listeners on MCP servers
 **Root Cause**: Multiple MCP server initializations without cleanup
 
 ### 2. Frontend Event Listener Duplication  
+
 **Problem**: Voice events have listeners in both VoiceContext AND App.tsx
 **Root Cause**: Incomplete migration to centralized VoiceContext
 
 ### 3. Hot Reload Resource Leaks
+
 **Problem**: Vite reloads don't clean up backend resources
 **Root Cause**: Missing cleanup handlers for development mode
 
@@ -141,20 +144,58 @@ pub async fn register_computer_use_tools(
     provider: &mut LocalToolProvider,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    // Check if already initialized
-    static TOOLS_REGISTERED: std::sync::Once = std::sync::Once::new();
-    
-    TOOLS_REGISTERED.call_once(|| {
-        info!("🔧 Registering Computer Use tools (one-time initialization)...");
-    });
-    
-    // Only register tools once
+    info!("🔧 Registering Computer Use tools (race-condition safe)...");
+
+    // Use a global mutex to ensure that only one thread can register tools at a time
+    // This prevents race conditions where multiple threads try to register the same tools simultaneously
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    lazy_static::lazy_static! {
+        static ref TOOL_REGISTRATION_MUTEX: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
+    }
+
+    // Acquire the lock to ensure exclusive access to tool registration
+    let _lock = TOOL_REGISTRATION_MUTEX.lock().await;
+
+    info!("🔧 Acquired tool registration lock, proceeding with registration...");
+
+    // Only register tools once per provider instance
     if provider.get_tool_count() > 0 {
-        info!("🔧 Tools already registered, skipping duplicate registration");
+        info!("🔧 Tools already registered for this provider instance, skipping duplicate registration");
         return Ok(());
     }
     
-    // Rest of the registration logic...
+    // Get the app state for MCP manager integration
+    let state_manager = app_handle.state::<AppState>();
+
+    // Set up MCP manager in the tool provider (per-provider instance)
+    let mcp_manager = state_manager.get_mcp_manager().await;
+    provider.set_mcp_manager(mcp_manager);
+
+    // Register the official Anthropic Computer Use tools (per-provider instance)
+    register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+
+    // Register additional desktop automation tools (per-provider instance)
+    crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
+
+    // Register timer tools for agent task scheduling and resumption (per-provider instance)
+    crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
+
+    // Register self-awareness and introspection tools (per-provider instance, development mode only)
+    crate::agent::tools::register_self_awareness_tools(provider).await;
+
+    // Simply refresh MCP tools from cache (fast operation if already loaded)
+    if let Err(e) = provider.refresh_mcp_tools().await {
+        warn!("Failed to refresh MCP tools from cache: {}", e);
+    } else {
+        info!("MCP tools refreshed from cache (no network calls)");
+    }
+
+    info!("✅ Computer Use tools registered successfully for provider instance");
+
+    // Lock is automatically released when _lock goes out of scope
+    Ok(())
 }
 ```
 
