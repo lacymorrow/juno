@@ -194,7 +194,10 @@ pub struct OrchestratorConfigDTO {
     pub enable_task_splitting: bool,
     pub enable_fallback_agents: bool,
     pub min_confidence_threshold: f32,
+    /// Enable Model Context Protocol (MCP) integration for external tool servers
     pub enable_mcp_integration: bool,
+    /// Enable intelligent task batching for performance optimization (separate from MCP)
+    pub enable_intelligent_batching: bool,
     pub task_queue_size: usize,
     pub retry_failed_tasks: bool,
     pub max_task_retries: u32,
@@ -210,7 +213,7 @@ impl From<OrchestratorConfigDTO> for OrchestratorConfig {
             min_confidence_threshold: dto.min_confidence_threshold,
             max_queue_size: dto.task_queue_size,
             queue_processing_interval: std::time::Duration::from_millis(500), // Default 500ms
-            enable_intelligent_batching: dto.enable_mcp_integration,
+            enable_intelligent_batching: dto.enable_intelligent_batching,
             batch_size: 4,
             parallel_execution_threshold: 3,
             enable_adaptive_timeout: true,
