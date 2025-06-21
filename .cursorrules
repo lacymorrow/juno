@@ -23,10 +23,16 @@ Since you're working on a new app when you create a feature, focus on the featur
 ### Mandatory Compilation Check
 
 ```bash
-cargo check --manifest-path src-tauri/Cargo.toml --quiet
+./scripts/quick-cargo-check.sh
 ```
 
-After every code modification made to Rust files, run `cargo check --manifest-path src-tauri/Cargo.toml`. Ensure the command completes successfully (exit code 0). If `cargo check` fails, address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
+OR
+
+```bash
+cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1
+```
+
+After every code modification made to Rust files, run `./scripts/quick-cargo-check.sh`. Ensure it shows "✅ Compilation passed". If it shows "❌ Compilation failed:", address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
 
 ### Quality Assurance Procedures
 
