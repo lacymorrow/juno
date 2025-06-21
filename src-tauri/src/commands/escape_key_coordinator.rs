@@ -135,21 +135,32 @@ impl EscapeKeyCoordinator {
             users.remove(user_id);
         }
 
-        let new_count = self.user_count.fetch_sub(1, Ordering::SeqCst) - 1;
-        info!("[EscapeKeyCoordinator] User '{}' unregistered, count: {}", user_id, new_count);
+        // Atomically decrement count, but never let it go below 0
+        let new_count = self.user_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+            if current > 0 {
+                Some(current - 1)
+            } else {
+                // Already at 0, don't decrement further
+                None
+            }
+        });
 
-        // Ensure count doesn't go negative
-        if new_count < 0 {
-            warn!("[EscapeKeyCoordinator] User count went negative, resetting to 0");
-            self.user_count.store(0, Ordering::SeqCst);
-            return Ok(());
-        }
+        match new_count {
+            Ok(previous_count) => {
+                let actual_new_count = previous_count - 1;
+                info!("[EscapeKeyCoordinator] User '{}' unregistered, count: {} -> {}", user_id, previous_count, actual_new_count);
 
-        // Only unregister global shortcut if no users remain and currently registered
-        if new_count == 0 && self.is_registered.load(Ordering::SeqCst) {
-            if let Err(e) = self.unregister_global_shortcut(app_handle).await {
-                warn!("[EscapeKeyCoordinator] Failed to unregister global shortcut: {}", e);
-                return Err(e);
+                // Only unregister global shortcut if no users remain and currently registered
+                if actual_new_count == 0 && self.is_registered.load(Ordering::SeqCst) {
+                    if let Err(e) = self.unregister_global_shortcut(app_handle).await {
+                        warn!("[EscapeKeyCoordinator] Failed to unregister global shortcut: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+            Err(current_count) => {
+                // Counter was already at 0, nothing to decrement
+                warn!("[EscapeKeyCoordinator] Attempted to unregister user '{}' but count was already 0 (current: {})", user_id, current_count);
             }
         }
 
