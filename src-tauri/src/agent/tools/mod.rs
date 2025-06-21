@@ -35,6 +35,7 @@ pub mod self_awareness_tools; // Self-building and introspection capabilities
 pub mod tool_mapping; // Add tool mapping service
 pub mod ui_token_selector; // UI-Guided Visual Token Selection system
 pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research
+pub mod exploration_reasoning; // Exploration-Then-Reasoning Paradigm from GUI-Xplore research
 
 pub use browser_tools::get_browser_tool_definitions;
 pub use browser_controller::BrowserController;
@@ -44,3 +45,4 @@ pub use tool_config::{ToolConfig, ToolConfigManager, ToolCategory}; // Export to
 pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service
 pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolInfo};
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
+pub use exploration_reasoning::{ExplorationEngine, ExplorationResult, ExplorationConfig}; // Export exploration-reasoning components
