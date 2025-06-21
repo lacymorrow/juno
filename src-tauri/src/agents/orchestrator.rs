@@ -1152,64 +1152,92 @@ impl Orchestrator {
     }
 
     /// NEW: Analyze and split complex tasks
+	/// TODO: CRITICAL: IS THIS SAFE/APPROPRIATE?
     async fn analyze_and_split_task(&self, task: &Task) -> Result<Vec<Task>, AgentError> {
         let description = &task.description;
+        let description_lower = description.to_lowercase();
 
-        // Keywords that indicate splittable tasks
+        // Keywords that indicate splittable tasks with their lengths
         let split_indicators = [
-            ("and then", " then "),
-            ("after that", " after "),
-            ("next", " next "),
-            ("also", " also "),
-            ("additionally", " additionally "),
-            ("furthermore", " furthermore "),
+            ("and then", 8),
+            ("after that", 10),
+            ("next", 4),
+            ("also", 4),
+            ("additionally", 12),
+            ("furthermore", 12),
         ];
 
-        let mut split_points = Vec::new();
+        let mut split_info = Vec::new();
 
-        for (indicator, _) in &split_indicators {
-            if let Some(pos) = description.to_lowercase().find(indicator) {
-                split_points.push(pos);
+        for (indicator, length) in &split_indicators {
+            if let Some(pos) = description_lower.find(indicator) {
+                split_info.push((pos, *length));
             }
         }
 
-        if split_points.is_empty() || split_points.len() > 5 {
+        if split_info.is_empty() || split_info.len() > 5 {
             // Either no clear split points or too many (overly complex)
             return Ok(vec![task.clone()]);
         }
 
-        // Sort split points and create subtasks
-        split_points.sort();
+        // Sort split points by position
+        split_info.sort_by_key(|(pos, _)| *pos);
+
         let mut subtasks = Vec::new();
-        let mut start = 0;
+        let mut current_start = 0;
 
-        for (i, &split_point) in split_points.iter().enumerate() {
-            let end = if i == split_points.len() - 1 {
-                description.len()
-            } else {
-                split_point
-            };
-
-            if end > start {
-                let subtask_description = description[start..end].trim().to_string();
+        // Process each segment
+        for (i, (split_pos, keyword_length)) in split_info.iter().enumerate() {
+            // Create subtask from current_start to split_pos
+            if *split_pos > current_start {
+                let subtask_description = description[current_start..*split_pos].trim().to_string();
                 if !subtask_description.is_empty() {
                     let subtask = Task {
                         id: format!("{}-{}", task.id, i),
                         description: subtask_description,
                         tool_calls: vec![], // Will be populated by agent
-                        agent_type: self.determine_agent_type(&description[start..end]).await,
+                        agent_type: self.determine_agent_type(&description[current_start..*split_pos]).await,
                         priority: task.priority.clone(),
                         dependencies: if i == 0 { vec![] } else { vec![format!("{}-{}", task.id, i - 1)] },
                         timeout: task.timeout,
                         metadata: serde_json::json!({
                             "parent_task": task.id,
                             "subtask_index": i,
-                            "total_subtasks": split_points.len() + 1
+                            "total_subtasks": split_info.len() + 1
                         }),
                     };
                     subtasks.push(subtask);
                 }
-                start = split_point;
+            }
+
+            // Move start position past the keyword
+            current_start = split_pos + keyword_length;
+
+            // Skip whitespace after the keyword
+            while current_start < description.len() && description.chars().nth(current_start).unwrap_or('\0').is_whitespace() {
+                current_start += 1;
+            }
+        }
+
+        // Process the final segment after the last split point
+        if current_start < description.len() {
+            let final_description = description[current_start..].trim().to_string();
+            if !final_description.is_empty() {
+                let final_subtask = Task {
+                    id: format!("{}-{}", task.id, split_info.len()),
+                    description: final_description,
+                    tool_calls: vec![], // Will be populated by agent
+                    agent_type: self.determine_agent_type(&description[current_start..]).await,
+                    priority: task.priority.clone(),
+                    dependencies: vec![format!("{}-{}", task.id, split_info.len() - 1)],
+                    timeout: task.timeout,
+                    metadata: serde_json::json!({
+                        "parent_task": task.id,
+                        "subtask_index": split_info.len(),
+                        "total_subtasks": split_info.len() + 1
+                    }),
+                };
+                subtasks.push(final_subtask);
             }
         }
 
