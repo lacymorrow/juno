@@ -45,7 +45,7 @@ export function ModelSelector({
     let unlisten: (() => void) | undefined;
 
     const setupProviderListener = async () => {
-      unlisten = await listen("provider_settings_changed", (event) => {
+      unlisten = await listen("provider_settings_changed", (_event) => {
         console.log("ModelSelector: Received provider settings update");
         // Models list might have changed, reload models for current provider
         if (settings.activeProvider) {

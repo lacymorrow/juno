@@ -12,7 +12,8 @@ import {
   AIResponse,
 } from "@/components/ui/kibo-ui/ai";
 import { cn } from "@/lib/utils";
-import { Code, Copy, FileText } from "lucide-react";
+import { Code, Copy, FileText, Volume2, ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 
 // Type for conversation messages (imported from App.tsx)
 export type ChatMessage = {
@@ -34,6 +35,11 @@ export type ChatMessage = {
   isStreaming?: boolean;
   messageId?: string;
   agent_state?: string;
+  tts_metadata?: {
+    has_spoken_content: boolean;
+    tts_parts: string[];
+    total_spoken_text: string;
+  };
 };
 
 interface ChatMessageProps {
@@ -47,6 +53,70 @@ interface ChatMessageProps {
     format: "html" | "markdown",
     index: number
   ) => void;
+}
+
+// Component for displaying TTS content decoratively
+function TTSContentDisplay({ ttsMetadata }: { ttsMetadata: ChatMessage['tts_metadata'] }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  if (!ttsMetadata?.has_spoken_content || !ttsMetadata.tts_parts.length) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 pt-2 border-t border-border/30">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors group"
+      >
+        {isExpanded ? (
+          <ChevronDown className="h-3 w-3" />
+        ) : (
+          <ChevronRight className="h-3 w-3" />
+        )}
+        <Volume2 className="h-3 w-3" />
+        <span>Spoken content ({ttsMetadata.tts_parts.length} part{ttsMetadata.tts_parts.length > 1 ? 's' : ''})</span>
+        <span className="text-muted-foreground/60 group-hover:text-muted-foreground/80 transition-colors">
+          Click to {isExpanded ? 'hide' : 'show'}
+        </span>
+      </button>
+      
+      {isExpanded && (
+        <div className="mt-2 space-y-2">
+          {ttsMetadata.tts_parts.map((ttsText, index) => (
+            <div
+              key={index}
+              className="pl-4 border-l-2 border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-900/10 rounded-r-md p-2"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Volume2 className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
+                  Spoken part {index + 1}
+                </span>
+              </div>
+              <div className="text-sm text-blue-800 dark:text-blue-200 italic leading-relaxed">
+                "{ttsText.trim()}"
+              </div>
+            </div>
+          ))}
+          
+          {ttsMetadata.tts_parts.length > 1 && (
+            <div className="pl-4 border-l-2 border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-900/10 rounded-r-md p-2">
+              <div className="flex items-center gap-2 mb-1">
+                <Volume2 className="h-3 w-3 text-green-600 dark:text-green-400" />
+                <span className="text-xs font-medium text-green-700 dark:text-green-300">
+                  Combined spoken text
+                </span>
+              </div>
+              <div className="text-sm text-green-800 dark:text-green-200 italic leading-relaxed">
+                "{ttsMetadata.total_spoken_text.trim()}"
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ChatMessageComponent({
@@ -174,6 +244,11 @@ export function ChatMessageComponent({
           <span className="inline-block w-2 h-4 bg-current ml-1 animate-pulse">
             |
           </span>
+        )}
+
+        {/* TTS Content Display - Show decoratively */}
+        {msg.role === "assistant" && !msg.isStreaming && (
+          <TTSContentDisplay ttsMetadata={msg.tts_metadata} />
         )}
 
         {/* Action buttons for assistant messages */}
