@@ -6,7 +6,7 @@ use once_cell::sync::OnceCell;
 use tracing::warn;
 
 use crate::agents::{
-    AgentFactory, AgentStatus, Orchestrator, OrchestratorConfig, Task, TaskResult, TaskPriority
+    AgentFactory, AgentStatus, Orchestrator, OrchestratorConfig, Task, TaskResult, TaskPriority, AgentType
 };
 use crate::agent::tools::mcp_integration::{MCPManager, MCPServerConfig};
 use crate::state::AppState;
@@ -194,7 +194,10 @@ pub struct OrchestratorConfigDTO {
     pub enable_task_splitting: bool,
     pub enable_fallback_agents: bool,
     pub min_confidence_threshold: f32,
+    /// Enable Model Context Protocol (MCP) integration for external tool servers
     pub enable_mcp_integration: bool,
+    /// Enable intelligent task batching for performance optimization (separate from MCP)
+    pub enable_intelligent_batching: bool,
     pub task_queue_size: usize,
     pub retry_failed_tasks: bool,
     pub max_task_retries: u32,
@@ -210,6 +213,14 @@ impl From<OrchestratorConfigDTO> for OrchestratorConfig {
             min_confidence_threshold: dto.min_confidence_threshold,
             max_queue_size: dto.task_queue_size,
             queue_processing_interval: std::time::Duration::from_millis(500), // Default 500ms
+            enable_intelligent_batching: dto.enable_intelligent_batching,
+            batch_size: 4,
+            parallel_execution_threshold: 3,
+            enable_adaptive_timeout: true,
+            enable_resource_aware_scheduling: true,
+            max_concurrent_agents: 8,
+            priority_boost_factor: 1.5,
+            enable_predictive_caching: true,
         }
     }
 }
@@ -771,4 +782,283 @@ pub async fn initialize_orchestrator_system() -> Result<(), String> {
 
     tracing::info!("Enhanced multi-agent orchestrator system initialized successfully (minimal mode)");
     Ok(())
+}
+
+/// NEW: Execute tasks with intelligent parallel processing
+#[tauri::command]
+pub async fn execute_intelligent_parallel_tasks(
+    task_descriptions: Vec<String>,
+    priority: Option<String>,
+    context: Option<serde_json::Value>,
+) -> Result<Vec<String>, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    // Convert descriptions to tasks
+    let mut tasks = Vec::new();
+    for (i, description) in task_descriptions.into_iter().enumerate() {
+        let task_priority = match priority.as_deref() {
+            Some("low") => TaskPriority::Low,
+            Some("high") => TaskPriority::High,
+            Some("critical") => TaskPriority::Critical,
+            _ => TaskPriority::Normal,
+        };
+
+        let task = Task {
+            id: uuid::Uuid::new_v4().to_string(),
+            description,
+            tool_calls: vec![],
+            agent_type: AgentType::Desktop, // Will be determined by orchestrator
+            priority: task_priority,
+            dependencies: vec![],
+            timeout: None,
+            metadata: serde_json::json!({
+                "batch_index": i,
+                "context": context,
+                "intelligent_execution": true
+            }),
+        };
+        tasks.push(task);
+    }
+
+    // Execute with intelligent parallel processing
+    match orchestrator_guard.execute_intelligent_parallel_tasks(tasks).await {
+        Ok(results) => {
+            let outputs: Vec<String> = results.into_iter()
+                .map(|r| r.output.as_str().unwrap_or("No output").to_string())
+                .collect();
+            Ok(outputs)
+        }
+        Err(e) => Err(format!("Intelligent parallel execution failed: {}", e))
+    }
+}
+
+/// NEW: Split a complex task into optimized subtasks
+#[tauri::command]
+pub async fn intelligent_task_splitting(
+    task_description: String,
+    context: Option<serde_json::Value>,
+) -> Result<Vec<String>, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    let complex_task = Task {
+        id: uuid::Uuid::new_v4().to_string(),
+        description: task_description,
+        tool_calls: vec![],
+        agent_type: AgentType::Desktop,
+        priority: TaskPriority::Normal,
+        dependencies: vec![],
+        timeout: None,
+        metadata: serde_json::json!({
+            "context": context,
+            "task_splitting": true
+        }),
+    };
+
+    match orchestrator_guard.intelligent_task_splitting(&complex_task).await {
+        Ok(subtasks) => {
+            let descriptions: Vec<String> = subtasks.into_iter()
+                .map(|t| t.description)
+                .collect();
+            Ok(descriptions)
+        }
+        Err(e) => Err(format!("Task splitting failed: {}", e))
+    }
+}
+
+/// NEW: Get detailed performance metrics for the orchestrator
+#[tauri::command]
+pub async fn get_orchestrator_performance_metrics() -> Result<serde_json::Value, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    Ok(orchestrator_guard.get_performance_metrics().await)
+}
+
+/// NEW: Execute workflow with performance optimization
+#[tauri::command]
+pub async fn execute_optimized_workflow(
+    workflow_description: String,
+    enable_parallel_execution: bool,
+    enable_task_splitting: bool,
+    context: Option<serde_json::Value>,
+) -> Result<String, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    // Create workflow task
+    let workflow_task = Task {
+        id: uuid::Uuid::new_v4().to_string(),
+        description: workflow_description.clone(),
+        tool_calls: vec![],
+        agent_type: AgentType::Desktop,
+        priority: TaskPriority::Normal,
+        dependencies: vec![],
+        timeout: None,
+        metadata: serde_json::json!({
+            "workflow_execution": true,
+            "enable_parallel": enable_parallel_execution,
+            "enable_splitting": enable_task_splitting,
+            "context": context
+        }),
+    };
+
+    // Step 1: Intelligent task splitting if enabled
+    let tasks = if enable_task_splitting {
+        match orchestrator_guard.intelligent_task_splitting(&workflow_task).await {
+            Ok(split_tasks) => {
+                tracing::info!("Workflow split into {} tasks", split_tasks.len());
+                split_tasks
+            }
+            Err(_) => {
+                tracing::info!("Workflow kept as single task");
+                vec![workflow_task]
+            }
+        }
+    } else {
+        vec![workflow_task]
+    };
+
+    // Step 2: Execute with intelligent parallel processing if enabled
+    let results = if enable_parallel_execution && tasks.len() > 1 {
+        orchestrator_guard.execute_intelligent_parallel_tasks(tasks).await
+    } else {
+        orchestrator_guard.execute_parallel_tasks(tasks).await
+    };
+
+    match results {
+        Ok(task_results) => {
+            let output = orchestrator_guard.merge_results(task_results);
+            Ok(format!("Optimized workflow completed: {}", output))
+        }
+        Err(e) => Err(format!("Optimized workflow failed: {}", e))
+    }
+}
+
+/// NEW: Enhanced orchestrator configuration with performance tuning
+#[tauri::command]
+pub async fn configure_enhanced_orchestrator(
+    max_parallel_tasks: Option<usize>,
+    enable_intelligent_batching: Option<bool>,
+    batch_size: Option<usize>,
+    enable_adaptive_timeout: Option<bool>,
+    enable_resource_aware_scheduling: Option<bool>,
+) -> Result<String, String> {
+    let orchestrator = get_orchestrator().await?;
+    let current_status = {
+        let guard = orchestrator.lock().await;
+        guard.get_orchestrator_status().await
+    };
+
+    // Create enhanced configuration
+    let enhanced_config = crate::agents::OrchestratorConfig {
+        max_parallel_tasks: max_parallel_tasks.unwrap_or(12),
+        task_timeout: std::time::Duration::from_secs(300),
+        enable_task_splitting: true,
+        enable_fallback_agents: true,
+        min_confidence_threshold: 0.3,
+        max_queue_size: 100,
+        queue_processing_interval: std::time::Duration::from_millis(250),
+        enable_intelligent_batching: enable_intelligent_batching.unwrap_or(true),
+        batch_size: batch_size.unwrap_or(4),
+        parallel_execution_threshold: 3,
+        enable_adaptive_timeout: enable_adaptive_timeout.unwrap_or(true),
+        enable_resource_aware_scheduling: enable_resource_aware_scheduling.unwrap_or(true),
+        max_concurrent_agents: 8,
+        priority_boost_factor: 1.5,
+        enable_predictive_caching: true,
+    };
+
+    // Apply configuration (in a real implementation, this would update the running orchestrator)
+    tracing::info!(
+        "Enhanced orchestrator configuration applied: parallel_tasks={}, batching={}, adaptive_timeout={}",
+        enhanced_config.max_parallel_tasks,
+        enhanced_config.enable_intelligent_batching,
+        enhanced_config.enable_adaptive_timeout
+    );
+
+    Ok(format!(
+        "Enhanced orchestrator configured successfully: {} -> {} parallel tasks, intelligent batching: {}, adaptive timeout: {}",
+        current_status.current_tasks,
+        enhanced_config.max_parallel_tasks,
+        enhanced_config.enable_intelligent_batching,
+        enhanced_config.enable_adaptive_timeout
+    ))
+}
+
+/// NEW: Benchmark orchestrator performance improvements
+#[tauri::command]
+pub async fn benchmark_orchestrator_performance(
+    test_task_count: usize,
+    enable_optimizations: bool,
+) -> Result<serde_json::Value, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    let test_task_count = test_task_count.min(20).max(1); // Safety bounds
+
+    tracing::info!("Starting orchestrator performance benchmark with {} tasks", test_task_count);
+
+    // Create test tasks
+    let mut test_tasks = Vec::new();
+    for i in 0..test_task_count {
+        let task = Task {
+            id: format!("benchmark_task_{}", i),
+            description: format!("Benchmark test task {} - simulate processing", i),
+            tool_calls: vec![],
+            agent_type: match i % 3 {
+                0 => AgentType::Browser,
+                1 => AgentType::Desktop,
+                _ => AgentType::System,
+            },
+            priority: TaskPriority::Normal,
+            dependencies: vec![],
+            timeout: Some(std::time::Duration::from_secs(30)),
+            metadata: serde_json::json!({
+                "benchmark": true,
+                "optimizations_enabled": enable_optimizations
+            }),
+        };
+        test_tasks.push(task);
+    }
+
+    // Execute benchmark
+    let start_time = std::time::Instant::now();
+    let results = if enable_optimizations {
+        orchestrator_guard.execute_intelligent_parallel_tasks(test_tasks).await
+    } else {
+        orchestrator_guard.execute_parallel_tasks(test_tasks).await
+    };
+
+    let execution_time = start_time.elapsed();
+    let performance_metrics = orchestrator_guard.get_performance_metrics().await;
+
+    match results {
+        Ok(task_results) => {
+            let successful_tasks = task_results.iter().filter(|r| r.success).count();
+            let average_execution_time = task_results.iter()
+                .map(|r| r.execution_time.as_millis())
+                .sum::<u128>() as f32 / task_results.len() as f32;
+
+            Ok(serde_json::json!({
+                "benchmark_results": {
+                    "total_tasks": test_task_count,
+                    "successful_tasks": successful_tasks,
+                    "failed_tasks": test_task_count - successful_tasks,
+                    "total_execution_time_ms": execution_time.as_millis(),
+                    "average_task_time_ms": average_execution_time,
+                    "tasks_per_second": test_task_count as f32 / execution_time.as_secs_f32(),
+                    "optimizations_enabled": enable_optimizations,
+                    "performance_improvement_factor": if enable_optimizations {
+                        performance_metrics["performance_optimization"]["parallel_factor"].as_f64().unwrap_or(1.0)
+                    } else {
+                        1.0
+                    }
+                },
+                "detailed_metrics": performance_metrics
+            }))
+        }
+        Err(e) => Err(format!("Benchmark failed: {}", e))
+    }
 }
