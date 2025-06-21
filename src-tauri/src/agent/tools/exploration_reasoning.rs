@@ -11,6 +11,7 @@ use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info, warn};
 use tokio::time::{Duration, Instant};
 use image::{ImageBuffer, Rgba};
+use chrono::{DateTime, Utc};
 
 /// Configuration for Exploration-Then-Reasoning system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -442,7 +443,8 @@ impl ExplorationEngine {
                         transition_time_ms: execution_time_ms,
                     };
 
-                    self.gui_transition_graph.add_transition(transition);
+                    self.gui_transition_graph.add_transition(transition.clone());
+                    self.exploration_memory.add_transition(transition);
                     self.exploration_memory.add_state(new_state.clone());
                     self.gui_transition_graph.add_state(new_state.clone());
 
@@ -489,7 +491,7 @@ impl ExplorationEngine {
         screenshot: &str,
         app_context: &AppContext,
     ) -> Result<GUIState, ExplorationError> {
-        let state_id = format!("state_{}", chrono::Utc::now().timestamp_millis());
+        let state_id = format!("state_{}", Utc::now().timestamp_millis());
 
         // Analyze screenshot for interactive elements
         let interactive_elements = self.detect_interactive_elements(screenshot).await?;
@@ -497,7 +499,7 @@ impl ExplorationEngine {
         Ok(GUIState {
             state_id,
             screenshot: screenshot.to_string(),
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            timestamp: Utc::now().timestamp_millis() as u64,
             interactive_elements,
             app_context: app_context.clone(),
             importance_score: 1.0, // Initial state is always important
@@ -590,7 +592,7 @@ impl ExplorationEngine {
         let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
         // Simulate capturing new state after action
-        let new_state_id = format!("state_{}", chrono::Utc::now().timestamp_millis());
+        let new_state_id = format!("state_{}", Utc::now().timestamp_millis());
 
         // In production, this would capture an actual screenshot
         let simulated_screenshot = "simulated_screenshot_data".to_string();
@@ -598,7 +600,7 @@ impl ExplorationEngine {
         let new_state = GUIState {
             state_id: new_state_id,
             screenshot: simulated_screenshot,
-            timestamp: chrono::Utc::now().timestamp_millis() as u64,
+            timestamp: Utc::now().timestamp_millis() as u64,
             interactive_elements: Vec::new(), // Would be detected from new screenshot
             app_context: AppContext {
                 app_name: "Explored App".to_string(),
@@ -737,6 +739,10 @@ impl ExplorationMemory {
             .back()
             .map(|state| state.state_id.clone())
             .ok_or_else(|| ExplorationError::InvalidState("No states in memory".to_string()))
+    }
+
+    pub fn add_transition(&mut self, transition: GUITransition) {
+        self.transition_history.push(transition);
     }
 }
 
