@@ -381,6 +381,26 @@ impl AnthropicBrain {
             }
         }
 
+        // CRITICAL FIX: Handle any remaining TTS state at end of stream
+        if in_tts_tag || !tts_buffer.is_empty() {
+            log::warn!("Stream ended with incomplete TTS state: in_tts_tag={}, buffer='{}'", in_tts_tag, tts_buffer);
+
+            // If we're in the middle of a TTS tag, extract what we have as TTS content
+            if in_tts_tag && !tts_content.trim().is_empty() {
+                log::info!("Extracting incomplete TTS content at stream end: '{}'", tts_content);
+                on_text_chunk(String::new(), vec![tts_content.clone()]);
+            }
+
+            // If there's remaining buffer content outside TTS tags, add it to accumulated text
+            if !in_tts_tag && !tts_buffer.trim().is_empty() {
+                log::debug!("Adding remaining buffer content to accumulated text: '{}'", tts_buffer);
+                accumulated_text.push_str(&tts_buffer);
+            }
+
+            // Clear the buffer to prevent leakage
+            tts_buffer.clear();
+        }
+
         Ok((accumulated_text, tool_calls, stop_reason))
     }
 
@@ -390,6 +410,7 @@ impl AnthropicBrain {
     /// - Proper buffer management to avoid character duplication/loss
     /// - Partial XML tags split across streaming chunks
     /// - Multiple TTS blocks within a single chunk
+    /// - Complete tag removal to prevent leakage
     fn process_text_with_tts_extraction(
         &self,
         text_chunk: &str,
@@ -422,6 +443,7 @@ impl AnthropicBrain {
                     continue;
                 } else if remaining_len < 5 && self.could_be_partial_opening_tag(&remaining_str) {
                     // Potential partial opening tag at end of buffer - stop processing here
+                    // CRITICAL FIX: Ensure we mark chars_to_consume correctly to not lose display text
                     break;
                 } else {
                     // Regular character outside TTS - add to display
@@ -446,9 +468,10 @@ impl AnthropicBrain {
                     continue;
                 } else if remaining_len < 6 && self.could_be_partial_closing_tag(&remaining_str) {
                     // Potential partial closing tag at end of buffer - stop processing here
+                    // CRITICAL FIX: Do not consume characters when we have a partial closing tag
                     break;
                 } else {
-                    // Content inside TTS tag - add to TTS content only
+                    // Content inside TTS tag - add to TTS content only (not to display)
                     tts_content.push(buffer_chars[i]);
                     i += 1;
                     chars_to_consume = i;
@@ -456,9 +479,22 @@ impl AnthropicBrain {
             }
         }
 
+        // CRITICAL FIX: Enhanced buffer management
         // Remove processed characters from buffer, keeping any unprocessed remainder
-        if chars_to_consume > 0 {
+        if chars_to_consume > 0 && chars_to_consume <= buffer_chars.len() {
             *tts_buffer = buffer_chars[chars_to_consume..].iter().collect();
+        }
+
+        // CRITICAL FIX: Validate that no TTS tags remain in display_text
+        // This should never happen if processing is correct
+        if display_text.contains("<TTS>") || display_text.contains("</TTS>") {
+            log::error!("CRITICAL BUG: TTS tags found in display_text during streaming processing!");
+            log::error!("Display text: '{}'", display_text);
+            log::error!("Buffer state - in_tts_tag: {}, tts_content: '{}'", *in_tts_tag, tts_content);
+            log::error!("This indicates a bug in the streaming TTS processing logic");
+
+            // Emergency cleanup to prevent tag leakage
+            display_text = display_text.replace("<TTS>", "").replace("</TTS>", "");
         }
 
         (display_text, extracted_tts_list)
@@ -764,36 +800,23 @@ impl AgentBrain for AnthropicBrain {
                 },
             ).await?;
 
-            // CRITICAL FIX: Strip any remaining TTS tags from final accumulated text as safety net
-            let final_clean_text = self.strip_tts_tags(&accumulated_text);
+            // TTS tags should now be completely removed during streaming processing
+            // If any remain, it indicates a bug in our improved processing logic
+            if accumulated_text.contains("<TTS>") || accumulated_text.contains("</TTS>") {
+                log::error!("CRITICAL BUG: TTS tags found in final accumulated text after improved processing!");
+                log::error!("This should never happen with the fixed streaming logic");
+                log::error!("Accumulated text: '{}'", accumulated_text);
 
-            // Log if any tags were found and stripped
-            if final_clean_text != accumulated_text {
-                log::warn!("Found TTS tags in final accumulated text - stripped them as safety net");
-                log::debug!("Original: '{}' -> Cleaned: '{}'", accumulated_text, final_clean_text);
+                // Emergency fallback - but this indicates a serious bug
+                let final_clean_text = self.strip_tts_tags(&accumulated_text);
+                log::error!("Emergency cleanup applied: '{}' -> '{}'", accumulated_text, final_clean_text);
+
+                return Err(AgentError::LlmError(
+                    "TTS tag processing failed - this is a critical bug in the streaming logic".to_string()
+                ));
             }
 
-            // CRITICAL FIX: If final text is empty after stripping TTS tags, provide a fallback
-            let final_display_text = if final_clean_text.trim().is_empty() {
-                // Extract TTS content as fallback for display only if there's no other content
-                let tts_fallback_regex = Regex::new(r"<TTS>(.*?)</TTS>").unwrap();
-                let tts_content_fallback: Vec<&str> = tts_fallback_regex
-                    .captures_iter(&accumulated_text)
-                    .map(|cap| cap.get(1).unwrap().as_str())
-                    .collect();
-
-                if !tts_content_fallback.is_empty() {
-                    let fallback_text = tts_content_fallback.join(" ");
-                    log::info!("Response contained only TTS content, using it as fallback display text: '{}'", fallback_text);
-                    fallback_text
-                } else {
-                    // Truly empty response
-                    log::warn!("Response is completely empty after TTS processing");
-                    final_clean_text
-                }
-            } else {
-                final_clean_text
-            };
+            let final_display_text = accumulated_text;
 
             // Emit stream end event with final display text
             crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, final_display_text.clone());
