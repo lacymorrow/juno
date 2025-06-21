@@ -32,7 +32,7 @@ OR
 cargo check --manifest-path src-tauri/Cargo.toml --message-format=short 2>&1
 ```
 
-After every code modification made to Rust files, run `./scripts/quick-cargo-check.sh`. Ensure it shows "✅ Compilation passed". If it shows "❌ Compilation failed:", address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
+After every code modification made to Rust files, run `./scripts/quick-cargo-check.sh`. Ensure it shows "✅ Compilation passed". If it doesn't show "✅ Compilation passed", address the reported errors or warnings and rerun the check until it passes before moving on to the next step or completing the request.
 
 ### Quality Assurance Procedures
 
