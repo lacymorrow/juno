@@ -626,11 +626,10 @@ async fn execute_agent_internal(
 
     let _tts_enabled = false; // TTS is now handled entirely via immediate processing during streaming
 
-    // Play agent success sound immediately since TTS is handled during streaming
+    // Success sound will be played after TTS completion via handle_tts_completion()
+    // Skip immediate sound to prevent double-playing
     if final_response.agent_state == "Finished" {
-        if let Err(e) = crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await {
-            warn!("Failed to play success sound: {}", e);
-        }
+        info!("Agent completed successfully. Success sound will play after TTS completion.");
     }
 
     info!("Agent run complete. Final state: {}", final_response.agent_state);
