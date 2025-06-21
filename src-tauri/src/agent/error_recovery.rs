@@ -458,11 +458,15 @@ impl ErrorRecoveryManager {
     }
 
     /// Enhanced tool execution with checkpoint and rollback support
-    pub async fn execute_tool_with_recovery(
+    pub async fn execute_tool_with_recovery<F, Fut>(
         &mut self,
         mut tool_call: ToolCall,
-        executor: impl Fn(ToolCall) -> Result<ToolResult, AgentError>,
-    ) -> Result<ToolResult, AgentError> {
+        executor: F,
+    ) -> Result<ToolResult, AgentError>
+    where
+        F: Fn(ToolCall) -> Fut + Clone,
+        Fut: std::future::Future<Output = Result<ToolResult, AgentError>>,
+    {
         let start_time = Instant::now();
         let mut retry_count = 0;
         let mut last_error: Option<AgentError> = None;
@@ -482,7 +486,7 @@ impl ErrorRecoveryManager {
         };
 
         while retry_count <= self.config.max_retries {
-            match executor(tool_call.clone()) {
+            match executor(tool_call.clone()).await {
                 Ok(result) => {
                     // Record successful execution
                     self.record_successful_execution(tool_call.clone(), serde_json::to_value(&result).unwrap_or_default(), start_time.elapsed());
