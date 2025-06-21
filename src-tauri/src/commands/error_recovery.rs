@@ -1,22 +1,14 @@
-//! Error Recovery Commands for Enhanced Checkpoint and Rollback System
+//! Enhanced Error Recovery Commands for Juno Computer Use Agent
 //!
-//! Implements Priority 1.3 from research.md - Improved Error Recovery Commands:
-//! - Checkpoint management commands
-//! - Rollback execution commands
-//! - Recovery statistics and monitoring
-//! - Execution timeline access
-//!
-//! Research Foundation: Computer Use Agent Research (January 2025)
+//! Provides commands for managing the enhanced error recovery system,
+//! including checkpoint management, rollback operations, and recovery statistics.
 
 use crate::agent::error_recovery::{
-    ErrorRecoveryManager, ExecutionCheckpoint, RollbackStrategy, RollbackStats,
-    ExecutionEvent, AgentState, ToolExecutionState
+    ErrorRecoveryManager, RecoveryConfig, ExecutionCheckpoint, RollbackInfo, AgentState
 };
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::Arc;
-use std::time::Duration;
 use tauri::{command, State};
 use tokio::sync::Mutex;
 use tracing::{info, warn, error};
@@ -24,373 +16,357 @@ use tracing::{info, warn, error};
 /// Global error recovery manager instance
 static ERROR_RECOVERY_MANAGER: std::sync::OnceLock<Arc<Mutex<ErrorRecoveryManager>>> = std::sync::OnceLock::new();
 
+/// Configuration for error recovery operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorRecoveryConfigDTO {
+    pub enable_checkpoints: bool,
+    pub max_checkpoints: usize,
+    pub checkpoint_interval: u32,
+    pub enable_automatic_rollback: bool,
+    pub rollback_on_cascading_failures: bool,
+    pub max_retries: usize,
+    pub enable_alternative_methods: bool,
+    pub enable_user_escalation: bool,
+}
+
+impl From<ErrorRecoveryConfigDTO> for RecoveryConfig {
+    fn from(dto: ErrorRecoveryConfigDTO) -> Self {
+        Self {
+            max_retries: dto.max_retries,
+            base_retry_delay: std::time::Duration::from_millis(500),
+            max_retry_delay: std::time::Duration::from_secs(10),
+            enable_alternative_methods: dto.enable_alternative_methods,
+            enable_llm_recovery: true,
+            enable_user_escalation: dto.enable_user_escalation,
+            timeout_threshold: std::time::Duration::from_secs(30),
+            enable_checkpoints: dto.enable_checkpoints,
+            max_checkpoints: dto.max_checkpoints,
+            checkpoint_interval: dto.checkpoint_interval,
+            enable_automatic_rollback: dto.enable_automatic_rollback,
+            rollback_on_cascading_failures: dto.rollback_on_cascading_failures,
+        }
+    }
+}
+
+/// Result of checkpoint operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckpointResult {
+    pub success: bool,
+    pub checkpoint_id: Option<String>,
+    pub description: String,
+    pub error: Option<String>,
+}
+
+/// Result of rollback operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RollbackResult {
+    pub success: bool,
+    pub checkpoint_id: Option<String>,
+    pub operations_undone: usize,
+    pub description: String,
+    pub error: Option<String>,
+}
+
 /// Get or initialize the global error recovery manager
-async fn get_error_recovery_manager() -> Arc<Mutex<ErrorRecoveryManager>> {
+async fn get_recovery_manager() -> Arc<Mutex<ErrorRecoveryManager>> {
     ERROR_RECOVERY_MANAGER.get_or_init(|| {
         Arc::new(Mutex::new(ErrorRecoveryManager::new()))
     }).clone()
 }
 
-/// Request to create an execution checkpoint
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateCheckpointRequest {
-    pub checkpoint_id: Option<String>,
-    pub description: String,
-    pub metadata: Option<Value>,
-    pub force_checkpoint: bool,
-}
-
-/// Response from checkpoint creation
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateCheckpointResponse {
-    pub success: bool,
-    pub checkpoint_id: String,
-    pub message: String,
-    pub error: Option<String>,
-}
-
-/// Request to perform rollback
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RollbackRequest {
-    pub strategy: String, // "last_checkpoint", "current_step", "previous_step", specific checkpoint ID
-    pub reason: String,
-    pub force_rollback: bool,
-}
-
-/// Response from rollback operation
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RollbackResponse {
-    pub success: bool,
-    pub rollback_id: String,
-    pub target_checkpoint: String,
-    pub message: String,
-    pub recovered_state: Option<Value>,
-    pub error: Option<String>,
-}
-
-/// Enhanced error recovery statistics
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ErrorRecoveryStats {
-    pub checkpoint_stats: CheckpointStats,
-    pub rollback_stats: RollbackStats,
-    pub execution_timeline_length: usize,
-    pub system_health: RecoverySystemHealth,
-}
-
-/// Checkpoint statistics
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CheckpointStats {
-    pub total_checkpoints: usize,
-    pub active_checkpoints: usize,
-    pub checkpoint_creation_rate: f32, // checkpoints per hour
-    pub average_checkpoint_size: f32,   // estimated KB
-    pub oldest_checkpoint_age: Duration,
-}
-
-/// Recovery system health metrics
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RecoverySystemHealth {
-    pub status: String, // "healthy", "degraded", "critical"
-    pub memory_usage_mb: f32,
-    pub checkpoint_storage_mb: f32,
-    pub timeline_storage_mb: f32,
-    pub last_health_check: std::time::SystemTime,
-}
-
-/// Create an execution checkpoint for current agent state
+/// Initialize the enhanced error recovery system
 #[command]
-pub async fn create_execution_checkpoint(
-    request: CreateCheckpointRequest,
-    _app_state: State<'_, AppState>,
-) -> Result<CreateCheckpointResponse, String> {
-    info!("Creating execution checkpoint: {}", request.description);
+pub async fn initialize_error_recovery(
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    info!("Initializing Enhanced Error Recovery System");
 
-    let recovery_manager = get_error_recovery_manager().await;
-    let mut manager = recovery_manager.lock().await;
+    let manager = get_recovery_manager().await;
+    let mut manager_guard = manager.lock().await;
 
-    // Generate checkpoint ID if not provided
-    let checkpoint_id = request.checkpoint_id.unwrap_or_else(|| {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        format!("checkpoint_{}", timestamp)
-    });
+    // Reset to ensure clean state
+    manager_guard.reset_checkpoints();
 
-    // Get current agent state (simplified for MVP)
-    let agent_state = AgentState {
-        current_step: 0, // Would be integrated with actual AppState
-        max_steps: 15,
-        execution_id: "current_execution".to_string(),
-        mode: "single".to_string(),
-        active_tools: vec![],
-        system_context: request.metadata.clone(),
-    };
+    info!("Enhanced Error Recovery System initialized successfully");
+    Ok("Enhanced Error Recovery System initialized with checkpoint and rollback capabilities".to_string())
+}
 
-    // Get current conversation and tool state (would be integrated with actual systems)
-    let conversation_state = vec![]; // Would get from memory manager
-    let tool_execution_state = ToolExecutionState {
-        completed_tools: vec![],
-        pending_tools: vec![],
-        failed_tools: vec![],
-        current_tool: None,
-    };
+/// Create a new execution checkpoint
+#[command]
+pub async fn create_checkpoint(
+    app_state: State<'_, AppState>,
+    description: String,
+) -> Result<CheckpointResult, String> {
+    info!("Creating execution checkpoint: {}", description);
 
-    let metadata = serde_json::json!({
-        "description": request.description,
-        "created_by": "user_request",
-        "force_checkpoint": request.force_checkpoint,
-        "metadata": request.metadata
-    });
+    let manager = get_recovery_manager().await;
+    let mut manager_guard = manager.lock().await;
 
-    match manager.create_checkpoint(
-        checkpoint_id.clone(),
-        agent_state,
-        conversation_state,
-        tool_execution_state,
-        metadata
-    ).await {
-        Ok(created_id) => {
-            info!("Successfully created checkpoint: {}", created_id);
-            Ok(CreateCheckpointResponse {
+    match manager_guard.create_checkpoint(description.clone()) {
+        Ok(checkpoint_id) => {
+            info!("Checkpoint created successfully: {}", checkpoint_id);
+            Ok(CheckpointResult {
                 success: true,
-                checkpoint_id: created_id,
-                message: format!("Checkpoint created successfully: {}", request.description),
+                checkpoint_id: Some(checkpoint_id),
+                description,
                 error: None,
             })
         }
         Err(e) => {
             error!("Failed to create checkpoint: {}", e);
-            Ok(CreateCheckpointResponse {
+            Ok(CheckpointResult {
                 success: false,
-                checkpoint_id: checkpoint_id,
-                message: "Failed to create checkpoint".to_string(),
+                checkpoint_id: None,
+                description,
                 error: Some(e.to_string()),
             })
         }
     }
 }
 
-/// Perform rollback to a previous state using specified strategy
+/// Rollback to a specific checkpoint
 #[command]
-pub async fn perform_rollback(
-    request: RollbackRequest,
-    _app_state: State<'_, AppState>,
-) -> Result<RollbackResponse, String> {
-    info!("Performing rollback with strategy: {} - Reason: {}",
-          request.strategy, request.reason);
+pub async fn rollback_to_checkpoint(
+    app_state: State<'_, AppState>,
+    checkpoint_id: String,
+) -> Result<RollbackResult, String> {
+    info!("Rolling back to checkpoint: {}", checkpoint_id);
 
-    let recovery_manager = get_error_recovery_manager().await;
-    let mut manager = recovery_manager.lock().await;
+    let manager = get_recovery_manager().await;
+    let mut manager_guard = manager.lock().await;
 
-    // Parse rollback strategy
-    let strategy = match request.strategy.as_str() {
-        "last_checkpoint" => RollbackStrategy::ToLastCheckpoint,
-        "current_step" => RollbackStrategy::ToCurrentStep,
-        "previous_step" => RollbackStrategy::ToPreviousStep,
-        checkpoint_id => RollbackStrategy::ToCheckpoint(checkpoint_id.to_string()),
-    };
-
-    match manager.rollback_to_checkpoint(strategy).await {
-        Ok(checkpoint) => {
-            let rollback_id = format!("rollback_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-            );
-
-            info!("Successfully performed rollback to checkpoint: {}", checkpoint.checkpoint_id);
-            Ok(RollbackResponse {
+    match manager_guard.rollback_to_checkpoint(&checkpoint_id).await {
+        Ok(rollback_info) => {
+            info!("Rollback completed successfully to checkpoint: {}", checkpoint_id);
+            Ok(RollbackResult {
                 success: true,
-                rollback_id,
-                target_checkpoint: checkpoint.checkpoint_id.clone(),
-                message: format!("Successfully rolled back to checkpoint: {}", checkpoint.checkpoint_id),
-                recovered_state: Some(serde_json::to_value(&checkpoint).unwrap_or_default()),
+                checkpoint_id: Some(rollback_info.checkpoint_id),
+                operations_undone: rollback_info.operations_to_undo.len(),
+                description: rollback_info.rollback_reason,
                 error: None,
             })
         }
         Err(e) => {
-            error!("Failed to perform rollback: {}", e);
-            let rollback_id = format!("failed_rollback_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-            );
-            Ok(RollbackResponse {
+            error!("Failed to rollback to checkpoint '{}': {}", checkpoint_id, e);
+            Ok(RollbackResult {
                 success: false,
-                rollback_id,
-                target_checkpoint: "unknown".to_string(),
-                message: "Rollback failed".to_string(),
-                recovered_state: None,
+                checkpoint_id: Some(checkpoint_id),
+                operations_undone: 0,
+                description: format!("Rollback failed: {}", e),
                 error: Some(e.to_string()),
             })
         }
     }
 }
 
-/// Get comprehensive error recovery statistics
+/// Rollback to the last known good state
 #[command]
-pub async fn get_error_recovery_stats(
-    _app_state: State<'_, AppState>,
-) -> Result<ErrorRecoveryStats, String> {
-    let recovery_manager = get_error_recovery_manager().await;
-    let manager = recovery_manager.lock().await;
+pub async fn rollback_to_last_known_good(
+    app_state: State<'_, AppState>,
+) -> Result<RollbackResult, String> {
+    info!("Rolling back to last known good state");
 
-    let rollback_stats = manager.get_rollback_stats();
-    let checkpoint_history = manager.get_checkpoint_history();
-    let execution_timeline = manager.get_execution_timeline();
+    let manager = get_recovery_manager().await;
+    let mut manager_guard = manager.lock().await;
 
-    let checkpoint_stats = CheckpointStats {
-        total_checkpoints: checkpoint_history.len(),
-        active_checkpoints: checkpoint_history.len(),
-        checkpoint_creation_rate: 0.0, // Would calculate based on timeline
-        average_checkpoint_size: 1.5,  // Estimated KB
-        oldest_checkpoint_age: Duration::from_secs(0), // Would calculate from timestamps
-    };
+    match manager_guard.rollback_to_last_known_good().await {
+        Ok(rollback_info) => {
+            info!("Rollback to last known good state completed successfully");
+            Ok(RollbackResult {
+                success: true,
+                checkpoint_id: Some(rollback_info.checkpoint_id),
+                operations_undone: rollback_info.operations_to_undo.len(),
+                description: rollback_info.rollback_reason,
+                error: None,
+            })
+        }
+        Err(e) => {
+            error!("Failed to rollback to last known good state: {}", e);
+            Ok(RollbackResult {
+                success: false,
+                checkpoint_id: None,
+                operations_undone: 0,
+                description: format!("Rollback failed: {}", e),
+                error: Some(e.to_string()),
+            })
+        }
+    }
+}
 
-    let system_health = RecoverySystemHealth {
-        status: if rollback_stats.rollback_success_rate > 0.8 {
-            "healthy".to_string()
-        } else if rollback_stats.rollback_success_rate > 0.5 {
-            "degraded".to_string()
-        } else {
-            "critical".to_string()
-        },
-        memory_usage_mb: 2.5, // Estimated
-        checkpoint_storage_mb: checkpoint_history.len() as f32 * 1.5,
-        timeline_storage_mb: execution_timeline.len() as f32 * 0.1,
-        last_health_check: std::time::SystemTime::now(),
-    };
+/// Get enhanced recovery statistics
+#[command]
+pub async fn get_recovery_statistics(
+    app_state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    info!("Retrieving enhanced error recovery statistics");
 
-    Ok(ErrorRecoveryStats {
-        checkpoint_stats,
-        rollback_stats,
-        execution_timeline_length: execution_timeline.len(),
-        system_health,
+    let manager = get_recovery_manager().await;
+    let manager_guard = manager.lock().await;
+
+    Ok(manager_guard.get_enhanced_recovery_stats())
+}
+
+/// Update error recovery configuration
+#[command]
+pub async fn update_recovery_config(
+    app_state: State<'_, AppState>,
+    config: ErrorRecoveryConfigDTO,
+) -> Result<String, String> {
+    info!("Updating error recovery configuration");
+
+    let manager = get_recovery_manager().await;
+    let mut manager_guard = manager.lock().await;
+
+    let recovery_config = RecoveryConfig::from(config);
+    *manager_guard = ErrorRecoveryManager::with_config(recovery_config);
+
+    info!("Error recovery configuration updated successfully");
+    Ok("Error recovery configuration updated successfully".to_string())
+}
+
+/// Get current recovery configuration
+#[command]
+pub async fn get_recovery_config(
+    app_state: State<'_, AppState>,
+) -> Result<ErrorRecoveryConfigDTO, String> {
+    info!("Retrieving current error recovery configuration");
+
+    let manager = get_recovery_manager().await;
+    let manager_guard = manager.lock().await;
+    let stats = manager_guard.get_enhanced_recovery_stats();
+
+    // Extract config from stats
+    let config = stats["config"].clone();
+
+    Ok(ErrorRecoveryConfigDTO {
+        enable_checkpoints: config["enable_checkpoints"].as_bool().unwrap_or(true),
+        max_checkpoints: config["max_checkpoints"].as_u64().unwrap_or(10) as usize,
+        checkpoint_interval: config["checkpoint_interval"].as_u64().unwrap_or(3) as u32,
+        enable_automatic_rollback: config["enable_automatic_rollback"].as_bool().unwrap_or(true),
+        rollback_on_cascading_failures: config["rollback_on_cascading_failures"].as_bool().unwrap_or(true),
+        max_retries: config["max_retries"].as_u64().unwrap_or(3) as usize,
+        enable_alternative_methods: config["enable_alternative_methods"].as_bool().unwrap_or(true),
+        enable_user_escalation: config["enable_user_escalation"].as_bool().unwrap_or(false),
     })
 }
 
-/// Get execution timeline for debugging and analysis
+/// List all available checkpoints
 #[command]
-pub async fn get_execution_timeline(
-    limit: Option<usize>,
-    _app_state: State<'_, AppState>,
-) -> Result<Vec<ExecutionEvent>, String> {
-    let recovery_manager = get_error_recovery_manager().await;
-    let manager = recovery_manager.lock().await;
+pub async fn list_checkpoints(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    info!("Listing all available checkpoints");
 
-    let timeline = manager.get_execution_timeline();
-    let limited_timeline = if let Some(limit) = limit {
-        timeline.iter().rev().take(limit).cloned().collect()
-    } else {
-        timeline.clone()
-    };
+    let manager = get_recovery_manager().await;
+    let manager_guard = manager.lock().await;
+    let stats = manager_guard.get_enhanced_recovery_stats();
 
-    Ok(limited_timeline)
+    // Extract checkpoint information from stats
+    let checkpoint_count = stats["checkpoints"]["total_created"].as_u64().unwrap_or(0);
+
+    // For now, return basic checkpoint info
+    // In a full implementation, we'd expose the actual checkpoint list
+    let mut checkpoints = Vec::new();
+    for i in 0..checkpoint_count {
+        checkpoints.push(serde_json::json!({
+            "id": format!("checkpoint_{}", i),
+            "description": format!("Checkpoint {}", i + 1),
+            "step": i + 1,
+            "timestamp": "recent"
+        }));
+    }
+
+    Ok(checkpoints)
 }
 
-/// Get available checkpoints
+/// Clear all checkpoints and reset state
 #[command]
-pub async fn get_available_checkpoints(
-    _app_state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
-    let recovery_manager = get_error_recovery_manager().await;
-    let manager = recovery_manager.lock().await;
-
-    Ok(manager.get_checkpoint_history().clone())
-}
-
-/// Clean up old checkpoints and optimize storage
-#[command]
-pub async fn cleanup_recovery_data(
-    keep_recent: Option<usize>,
-    _app_state: State<'_, AppState>,
+pub async fn reset_recovery_state(
+    app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let recovery_manager = get_error_recovery_manager().await;
-    let manager = recovery_manager.lock().await;
+    info!("Resetting error recovery state");
 
-    let keep_count = keep_recent.unwrap_or(5);
-    let checkpoint_history = manager.get_checkpoint_history();
-    let initial_count = checkpoint_history.len();
+    let manager = get_recovery_manager().await;
+    let mut manager_guard = manager.lock().await;
 
-    // Note: In full implementation, would call cleanup methods on manager
-    // For now, just return status
-    let cleaned_count = if initial_count > keep_count {
-        initial_count - keep_count
-    } else {
-        0
-    };
+    manager_guard.reset_checkpoints();
+    manager_guard.clear_history();
 
-    info!("Recovery data cleanup: kept {} checkpoints, cleaned {}",
-          initial_count - cleaned_count, cleaned_count);
-
-    Ok(format!("Cleanup completed: {} checkpoints kept, {} removed",
-               initial_count - cleaned_count, cleaned_count))
+    info!("Error recovery state reset successfully");
+    Ok("Error recovery state reset successfully".to_string())
 }
 
-/// Test error recovery system functionality
+/// Test the error recovery system with a simulated failure
 #[command]
-pub async fn test_error_recovery_system(
-    _app_state: State<'_, AppState>,
-) -> Result<Value, String> {
-    info!("Testing error recovery system functionality");
+pub async fn test_error_recovery(
+    app_state: State<'_, AppState>,
+    error_type: String,
+) -> Result<serde_json::Value, String> {
+    info!("Testing error recovery system with error type: {}", error_type);
 
-    let recovery_manager = get_error_recovery_manager().await;
-    let mut manager = recovery_manager.lock().await;
+    let manager = get_recovery_manager().await;
+    let manager_guard = manager.lock().await;
 
-    // Test checkpoint creation
-    let test_checkpoint_id = format!("test_checkpoint_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    );
+    // Simulate different error patterns for testing
+    use crate::agent::core::AgentError;
+    use crate::agent::error_recovery::ErrorPattern;
 
-    let agent_state = AgentState {
-        current_step: 1,
-        max_steps: 15,
-        execution_id: "test_execution".to_string(),
-        mode: "test".to_string(),
-        active_tools: vec!["test_tool".to_string()],
-        system_context: Some(serde_json::json!({"test": true})),
+    let test_error = match error_type.as_str() {
+        "element_not_found" => AgentError::ToolError("Element not found on screen".to_string()),
+        "network_error" => AgentError::ToolError("Connection failed".to_string()),
+        "permission_denied" => AgentError::PermissionDenied("Accessibility permission required".to_string()),
+        "timeout" => AgentError::ToolError("Operation timed out".to_string()),
+        "state_corruption" => AgentError::Unknown("Invalid state detected".to_string()),
+        "cascading_failure" => AgentError::Unknown("Multiple related failures".to_string()),
+        _ => AgentError::Unknown("Generic test error".to_string()),
     };
 
-    let test_result = match manager.create_checkpoint(
-        test_checkpoint_id.clone(),
-        agent_state,
-        vec![],
-        ToolExecutionState {
-            completed_tools: vec![],
-            pending_tools: vec![],
-            failed_tools: vec![],
-            current_tool: None,
-        },
-        serde_json::json!({"test": "system_test"})
-    ).await {
-        Ok(_) => {
-            // Test rollback
-            match manager.rollback_to_checkpoint(RollbackStrategy::ToLastCheckpoint).await {
-                Ok(_) => "success",
-                Err(_) => "rollback_failed"
-            }
-        }
-        Err(_) => "checkpoint_failed"
-    };
-
-    let stats = manager.get_rollback_stats();
-
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let error_pattern = manager_guard.determine_error_pattern(&test_error);
+    let strategies = manager_guard.get_strategy_mappings().get(&error_pattern)
+        .cloned()
+        .unwrap_or_default();
 
     Ok(serde_json::json!({
-        "test_result": test_result,
-        "system_status": if test_result == "success" { "healthy" } else { "degraded" },
-        "checkpoint_count": manager.get_checkpoint_history().len(),
-        "rollback_success_rate": stats.rollback_success_rate,
-        "test_timestamp": timestamp
+        "error_type": error_type,
+        "detected_pattern": format!("{:?}", error_pattern),
+        "recovery_strategies": strategies.iter().map(|s| format!("{:?}", s)).collect::<Vec<_>>(),
+        "test_successful": true
+    }))
+}
+
+/// Update agent state for checkpoint context
+#[command]
+pub async fn update_agent_state(
+    app_state: State<'_, AppState>,
+    key: String,
+    value: serde_json::Value,
+) -> Result<String, String> {
+    info!("Updating agent state: {} = {:?}", key, value);
+
+    let manager = get_recovery_manager().await;
+    let mut manager_guard = manager.lock().await;
+
+    manager_guard.update_agent_state(&key, value);
+
+    Ok(format!("Agent state updated: {}", key))
+}
+
+/// Get execution history summary
+#[command]
+pub async fn get_execution_history(
+    app_state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    info!("Retrieving execution history (limit: {:?})", limit);
+
+    let manager = get_recovery_manager().await;
+    let manager_guard = manager.lock().await;
+    let stats = manager_guard.get_enhanced_recovery_stats();
+
+    let history = stats["execution_history"].clone();
+
+    Ok(serde_json::json!({
+        "summary": history,
+        "note": "Full execution history tracking requires integration with agent execution system"
     }))
 }

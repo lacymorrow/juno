@@ -7,7 +7,7 @@ use crate::state::CancelReceiver;
 
 // --- Structs ---
 
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentError {
     #[error("LLM communication error: {0}")]
     LlmError(String),
@@ -33,8 +33,6 @@ pub enum AgentError {
     Terminated,
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-    #[error("Task execution failed: {0}")]
-    TaskExecutionFailed(String),
     #[error("Unknown error: {0}")]
     Unknown(String),
     #[error("General error: {0}")]
