@@ -22,6 +22,16 @@ pub mod codes {
     pub const MACOS_AX_NO_VALUE: i32 = -25212;
     pub const MACOS_AX_ATTRIBUTE_UNSUPPORTED: i32 = -25205;
     pub const MACOS_AX_GET_ATTRIBUTE_FAILED: i32 = -25204;
+
+    // Enhanced orchestration error codes
+    pub const ORCHESTRATION_TASK_FAILED: i32 = -32010;
+    pub const ORCHESTRATION_BATCH_FAILED: i32 = -32011;
+    pub const ORCHESTRATION_AGENT_UNAVAILABLE: i32 = -32012;
+    pub const ORCHESTRATION_RESOURCE_EXHAUSTED: i32 = -32013;
+    pub const ORCHESTRATION_CASCADING_FAILURE: i32 = -32014;
+    pub const ORCHESTRATION_TIMEOUT: i32 = -32015;
+    pub const ORCHESTRATION_INVALID_TASK: i32 = -32016;
+    pub const ORCHESTRATION_DEPENDENCY_FAILED: i32 = -32017;
 }
 
 // Error messages
@@ -34,6 +44,16 @@ pub mod messages {
     pub const UNSUPPORTED_OPERATION: &str = "unsupported operation";
     pub const UNSUPPORTED_PLATFORM: &str = "unsupported platform";
     pub const TOOL_EXECUTION_ERROR: &str = "tool execution error";
+
+    // Enhanced orchestration error messages
+    pub const ORCHESTRATION_TASK_FAILED: &str = "orchestration task failed";
+    pub const ORCHESTRATION_BATCH_FAILED: &str = "orchestration batch execution failed";
+    pub const ORCHESTRATION_AGENT_UNAVAILABLE: &str = "orchestration agent unavailable";
+    pub const ORCHESTRATION_RESOURCE_EXHAUSTED: &str = "orchestration resource exhausted";
+    pub const ORCHESTRATION_CASCADING_FAILURE: &str = "orchestration cascading failure detected";
+    pub const ORCHESTRATION_TIMEOUT: &str = "orchestration timeout exceeded";
+    pub const ORCHESTRATION_INVALID_TASK: &str = "orchestration invalid task configuration";
+    pub const ORCHESTRATION_DEPENDENCY_FAILED: &str = "orchestration task dependency failed";
 }
 
 // Error recovery constants
@@ -53,6 +73,19 @@ pub mod recovery {
     // Backoff configuration
     pub const BACKOFF_MULTIPLIER: u32 = 2;
     pub const MAX_BACKOFF_EXPONENT: u32 = 5;
+
+    // Enhanced orchestration recovery constants
+    pub const ORCHESTRATION_TASK_RETRY_DELAY_MS: u64 = 1500;
+    pub const ORCHESTRATION_BATCH_FAILURE_DELAY_MS: u64 = 3000;
+    pub const ORCHESTRATION_AGENT_FAILURE_DELAY_MS: u64 = 2000;
+    pub const ORCHESTRATION_RESOURCE_EXHAUSTION_DELAY_MS: u64 = 5000;
+    pub const ORCHESTRATION_CASCADING_FAILURE_THRESHOLD: u32 = 3;
+
+    // Orchestration performance thresholds
+    pub const MIN_PARALLEL_FACTOR: f32 = 1.0;
+    pub const TARGET_PARALLEL_FACTOR: f32 = 2.0;
+    pub const OPTIMAL_PARALLEL_FACTOR: f32 = 3.0;
+    pub const MAX_BATCH_RETRY_ATTEMPTS: u32 = 2;
 }
 
 
