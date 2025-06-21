@@ -131,8 +131,14 @@ pub fn filter_tts_content(text: &str) -> String {
     filtered_text
 }
 
-// Function to stop speech playback
+// Function to stop speech playback with deduplication
 pub fn stop_speech() {
+    // Check if already stopped to prevent redundant operations
+    if TTS_STOP_REQUESTED.load(Ordering::SeqCst) {
+        debug!("[TTS] Stop speech already requested, skipping redundant operation");
+        return;
+    }
+
     info!("[TTS] Stop speech requested");
     TTS_STOP_REQUESTED.store(true, Ordering::SeqCst);
 
