@@ -216,7 +216,7 @@ impl AnthropicBrain {
         mut on_text_chunk: F,
     ) -> Result<(String, Vec<ToolCall>, String), AgentError>
     where
-        F: FnMut(String, Option<String>) + Send, // Updated to accept optional TTS content
+        F: FnMut(String, Vec<String>) + Send, // Updated to accept multiple TTS extractions
     {
         let mut accumulated_text = String::new();
         let mut tool_calls = Vec::new();
@@ -298,7 +298,7 @@ impl AnthropicBrain {
                                         "text_delta" => {
                                             if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
                                                 // Process text for TTS XML tags
-                                                let (display_text, extracted_tts) = self.process_text_with_tts_extraction(
+                                                let (display_text, extracted_tts_list) = self.process_text_with_tts_extraction(
                                                     text,
                                                     &mut tts_buffer,
                                                     &mut in_tts_tag,
@@ -309,7 +309,7 @@ impl AnthropicBrain {
                                                 accumulated_text.push_str(&display_text);
 
                                                 // Emit chunk with separated TTS content
-                                                on_text_chunk(display_text, extracted_tts);
+                                                on_text_chunk(display_text, extracted_tts_list);
                                             }
                                         }
                                         "input_json_delta" => {
@@ -385,67 +385,97 @@ impl AnthropicBrain {
     }
 
     /// Process text chunk to extract TTS XML tags and return display text + extracted TTS content
+    ///
+    /// This function handles:
+    /// - Proper buffer management to avoid character duplication/loss
+    /// - Partial XML tags split across streaming chunks
+    /// - Multiple TTS blocks within a single chunk
     fn process_text_with_tts_extraction(
         &self,
         text_chunk: &str,
         tts_buffer: &mut String,
         in_tts_tag: &mut bool,
         tts_content: &mut String,
-    ) -> (String, Option<String>) {
+    ) -> (String, Vec<String>) {
         let mut display_text = String::new();
-        let mut extracted_tts: Option<String> = None;
+        let mut extracted_tts_list = Vec::new();
 
         // Add new text to buffer for processing
         tts_buffer.push_str(text_chunk);
 
-        // Process the buffer character by character to detect TTS tags
-        let mut processed_chars = 0;
-        let chars: Vec<char> = tts_buffer.chars().collect();
+        let mut chars_to_consume = 0;
+        let buffer_chars: Vec<char> = tts_buffer.chars().collect();
         let mut i = 0;
 
-        while i < chars.len() {
-            let remaining: String = chars[i..].iter().collect();
+        while i < buffer_chars.len() {
+            // Check for potential tag boundaries - need at least 5 chars for "<TTS>" or 6 for "</TTS>"
+            let remaining_len = buffer_chars.len() - i;
+            let remaining_str: String = buffer_chars[i..].iter().collect();
 
             if !*in_tts_tag {
-                // Look for opening <TTS> tag
-                if remaining.starts_with("<TTS>") {
+                // Outside TTS tag - look for opening tag
+                if remaining_str.starts_with("<TTS>") {
+                    // Found complete opening tag
                     *in_tts_tag = true;
-                    i += 5; // Skip "<TTS>" - CRITICAL: Don't add tags to display_text
-                    processed_chars = i;
+                    i += 5; // Skip "<TTS>"
+                    chars_to_consume = i;
                     continue;
+                } else if remaining_len < 5 && self.could_be_partial_opening_tag(&remaining_str) {
+                    // Potential partial opening tag at end of buffer - stop processing here
+                    break;
                 } else {
-                    // Regular text outside TTS tags - add to display
-                    display_text.push(chars[i]);
+                    // Regular character outside TTS - add to display
+                    display_text.push(buffer_chars[i]);
+                    i += 1;
+                    chars_to_consume = i;
                 }
             } else {
-                // Inside TTS tag - look for closing </TTS> tag
-                if remaining.starts_with("</TTS>") {
-                    // Found complete TTS block
+                // Inside TTS tag - look for closing tag
+                if remaining_str.starts_with("</TTS>") {
+                    // Found complete closing tag
                     if !tts_content.trim().is_empty() {
-                        extracted_tts = Some(tts_content.clone());
+                        extracted_tts_list.push(tts_content.clone());
                         log::info!("Extracted TTS content: '{}'", tts_content);
                     }
 
-                    // Reset TTS state
+                    // Reset TTS state for next potential block
                     *in_tts_tag = false;
                     tts_content.clear();
-                    i += 6; // Skip "</TTS>" - CRITICAL: Don't add closing tags to display_text
-                    processed_chars = i;
+                    i += 6; // Skip "</TTS>"
+                    chars_to_consume = i;
                     continue;
+                } else if remaining_len < 6 && self.could_be_partial_closing_tag(&remaining_str) {
+                    // Potential partial closing tag at end of buffer - stop processing here
+                    break;
                 } else {
-                    // CRITICAL FIX: Content inside TTS tag - add to TTS content but NOT to display_text
-                    tts_content.push(chars[i]);
+                    // Content inside TTS tag - add to TTS content only
+                    tts_content.push(buffer_chars[i]);
+                    i += 1;
+                    chars_to_consume = i;
                 }
             }
-
-            i += 1;
-            processed_chars = i;
         }
 
-        // Keep unprocessed characters in buffer for next chunk
-        *tts_buffer = chars[processed_chars..].iter().collect();
+        // Remove processed characters from buffer, keeping any unprocessed remainder
+        if chars_to_consume > 0 {
+            *tts_buffer = buffer_chars[chars_to_consume..].iter().collect();
+        }
 
-        (display_text, extracted_tts)
+        (display_text, extracted_tts_list)
+    }
+
+    /// Check if a string could be the beginning of a partial "<TTS>" tag
+    fn could_be_partial_opening_tag(&self, s: &str) -> bool {
+        if s.is_empty() { return false; }
+        let partial_tags = ["<", "<T", "<TT", "<TTS"];
+        partial_tags.iter().any(|&tag| s == tag)
+    }
+
+    /// Check if a string could be the beginning of a partial "</TTS>" tag
+    fn could_be_partial_closing_tag(&self, s: &str) -> bool {
+        if s.is_empty() { return false; }
+        let partial_tags = ["<", "</", "</T", "</TT", "</TTS"];
+        partial_tags.iter().any(|&tag| s == tag)
     }
 
     /// Strip TTS XML tags from text, removing them completely (content was already processed for TTS)
@@ -713,14 +743,24 @@ impl AgentBrain for AnthropicBrain {
 
             let (accumulated_text, tool_calls, stop_reason) = self.handle_streaming_response(
                 response,
-                |chunk, tts_content| {
-                    // Emit text chunk event
+                |chunk, tts_list| {
+                    // Emit text chunk event - pass first TTS item if available for backward compatibility
                     crate::agent::tool_logger::emit_streaming_text_chunk(
                         &app_handle,
                         chunk,
                         Some(message_id.clone()),
-                        tts_content,
+                        tts_list.first().cloned(),
                     );
+
+                    // Emit additional TTS items if there are multiple in this chunk
+                    for (i, tts_content) in tts_list.iter().enumerate().skip(1) {
+                        crate::agent::tool_logger::emit_streaming_text_chunk(
+                            &app_handle,
+                            String::new(), // Empty display text for additional TTS-only chunks
+                            Some(message_id.clone()),
+                            Some(tts_content.clone()),
+                        );
+                    }
                 },
             ).await?;
 
