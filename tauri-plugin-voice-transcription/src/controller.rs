@@ -53,6 +53,23 @@ impl VoiceController {
         })
     }
 
+    /// Create a VoiceController using a pre-loaded shared WhisperContext
+    /// This eliminates duplicate model loading when multiple controllers need the same model
+    pub fn new_with_shared_context(model_path_str: &str, shared_context: Arc<WhisperContext>) -> Result<Self> {
+        info!("[VoiceController] Creating controller with shared Whisper context (no model reload)");
+
+        Ok(Self {
+            ctx: Some(shared_context),
+            model_path: model_path_str.to_string(),
+            is_dictating: false,
+            audio_thread: None,
+            last_processed_audio_buffer: Arc::new(Mutex::new(None)),
+            actual_recording_sample_rate: Arc::new(Mutex::new(None)),
+            is_initialized: true,
+            initialization_error: None,
+        })
+    }
+
     /// Create an uninitialized controller that can be managed by Tauri but will return errors for operations
     pub fn new_uninitialized(model_path_str: &str, error_message: String) -> Self {
         Self {

@@ -194,15 +194,45 @@ pub async fn set_model_path<R: tauri::Runtime>(
     config.model_path = resolved_model_path.clone();
     // Note: Configuration is now managed through centralized settings
 
-    // Reinitialize the voice controller with the new model
-    match VoiceController::new(&resolved_model_path) {
+    // Reinitialize the shared Whisper context with the new model
+    use crate::shared_whisper::SharedWhisperManager;
+
+    info!("[Plugin] Reinitializing shared Whisper context with new model path: {}", resolved_model_path);
+    let shared_context = match SharedWhisperManager::initialize(&resolved_model_path) {
+        Ok(context) => {
+            info!("[Plugin] ✅ Shared Whisper context reinitialized successfully");
+            context
+        }
+        Err(e) => {
+            error!("[Plugin] ❌ Failed to reinitialize shared Whisper context: {}", e);
+            return Err(Error::ModelError(format!("Failed to load model: {}", e)));
+        }
+    };
+
+    // Reinitialize voice controller with shared context (no duplicate model loading)
+    match VoiceController::new_with_shared_context(&resolved_model_path, shared_context.clone()) {
         Ok(controller) => {
             app.manage(Arc::new(Mutex::new(controller)));
-            info!("[Plugin] Voice controller reinitialized with new model: {}", resolved_model_path);
+            info!("[Plugin] ✅ Voice controller reinitialized with shared context");
+
+            // Also reinitialize AlwaysListeningController if it exists
+            if let Some(always_listening_state) = app.try_state::<Arc<Mutex<crate::always_listening::AlwaysListeningController>>>() {
+                match crate::always_listening::AlwaysListeningController::new_with_shared_context(&resolved_model_path, shared_context) {
+                    Ok(new_controller) => {
+                        app.manage(Arc::new(Mutex::new(new_controller)));
+                        info!("[Plugin] ✅ AlwaysListeningController also reinitialized with shared context");
+                    }
+                    Err(e) => {
+                        error!("[Plugin] ⚠️  Failed to reinitialize AlwaysListeningController: {}", e);
+                        // Don't fail the whole operation, voice controller still works
+                    }
+                }
+            }
+
             Ok(())
         }
         Err(e) => {
-            error!("[Plugin] Failed to reinitialize voice controller: {}", e);
+            error!("[Plugin] Failed to reinitialize voice controller with shared context: {}", e);
             Err(Error::ModelError(format!("Failed to load model: {}", e)))
         }
     }

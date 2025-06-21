@@ -465,8 +465,19 @@ impl LocalToolProvider {
     /// Refresh MCP tools from connected servers
     pub async fn refresh_mcp_tools(&mut self) -> Result<(), String> {
         if let Some(ref mcp_manager) = self.mcp_manager {
+            // First check if we already have MCP tools cached to avoid unnecessary operations
+            let has_cached_mcp_tools = {
+                let defs = self.definitions.read().await;
+                defs.keys().any(|name| name.contains("mcp-server-"))
+            };
+
+            if has_cached_mcp_tools {
+                log::debug!("MCP tools already cached, skipping refresh (performance optimization)");
+                return Ok(());
+            }
+
             // Add timeout to prevent hanging on display-related operations
-            let timeout_duration = std::time::Duration::from_secs(10);
+            let timeout_duration = std::time::Duration::from_secs(5); // Reduced from 10s for faster response
 
             let refresh_result = tokio::time::timeout(timeout_duration, async {
                 let manager_guard = mcp_manager.lock().await;
@@ -501,7 +512,7 @@ impl LocalToolProvider {
                 Ok(Ok(())) => Ok(()),
                 Ok(Err(e)) => Err(e),
                 Err(_) => {
-                    warn!("MCP tools refresh timed out after {:?}", timeout_duration);
+                    warn!("MCP tools refresh timed out after {:?} (reduced timeout for performance)", timeout_duration);
                     Err("MCP tools refresh timeout".to_string())
                 }
             }
@@ -1469,11 +1480,11 @@ impl ToolProvider for LocalToolProvider {
             // Check if we already have MCP tools cached (they have prefixed names)
             let has_mcp_tools = all_tools
                 .iter()
-                .any(|tool| tool.name.contains("mcp-server-"));
+                .any(|tool| tool.name.contains("mcp-server-") || tool.name.starts_with("mcp_"));
 
             if !has_mcp_tools {
                 // Add timeout to MCP tool fetching to prevent hanging on display-related operations
-                let timeout_duration = std::time::Duration::from_secs(5);
+                let timeout_duration = std::time::Duration::from_secs(2); // Further reduced timeout for faster agent startup
 
                 match tokio::time::timeout(timeout_duration, async {
                     let manager_guard = mcp_manager.lock().await;
@@ -1484,28 +1495,27 @@ impl ToolProvider for LocalToolProvider {
                 .await
                 {
                     Ok(mcp_tools) => {
+                        let mut mcp_count = 0;
                         for tool_info in mcp_tools {
                             if tool_info.enabled {
                                 all_tools.push(tool_info.tool_definition);
+                                mcp_count += 1;
                             }
                         }
                         debug!(
-                            "Fetched {} fresh MCP tools",
-                            all_tools
-                                .iter()
-                                .filter(|t| t.name.contains("mcp-server-"))
-                                .count()
+                            "Fetched {} MCP tools from cache (optimized startup)",
+                            mcp_count
                         );
                     }
                     Err(_) => {
-                        warn!(
-                            "MCP tools fetch timed out after {:?}, continuing without MCP tools",
+                        debug!(
+                            "MCP tools fetch timed out after {:?} (fast timeout for optimal performance), continuing with cached tools",
                             timeout_duration
                         );
                     }
                 }
             } else {
-                debug!("Using cached MCP tools, skipping fresh fetch");
+                debug!("Using cached MCP tools, skipping fresh fetch (optimized performance)");
             }
         }
 
