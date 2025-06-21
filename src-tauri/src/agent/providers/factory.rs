@@ -642,52 +642,45 @@ impl BrainFactory {
 
         // Use a static Once to ensure core tools are registered exactly once across all threads
         use std::sync::Once;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
         static CORE_TOOLS_REGISTERED: Once = Once::new();
+        static REGISTRATION_SUCCESSFUL: AtomicBool = AtomicBool::new(false);
 
-        // Check if this is the first time registration is happening
-        let is_first_time = !CORE_TOOLS_REGISTERED.is_completed();
+        // Perform core tool registration exactly once
+        CORE_TOOLS_REGISTERED.call_once(|| {
+            info!("🔧 Performing one-time core tool registration...");
+            // Set the success flag - this will be checked by all threads after call_once completes
+            REGISTRATION_SUCCESSFUL.store(true, Ordering::Relaxed);
+        });
 
-        if is_first_time {
-            info!("🔧 First-time tool registration, proceeding with full setup...");
+        // At this point, call_once has completed and all threads can proceed
+        // Check if core registration was successful
+        if REGISTRATION_SUCCESSFUL.load(Ordering::Relaxed) {
+            info!("🔧 Core tools registered, setting up provider-specific tools...");
 
-            // Use a channel to pass the result back from the closure since it's not async
-            let (tx, rx) = std::sync::mpsc::channel();
-
-            CORE_TOOLS_REGISTERED.call_once(|| {
-                // This closure runs exactly once, preventing race conditions
-                tx.send(true).ok(); // Signal that initialization should proceed
-            });
-
-            // Only proceed if we were the thread that triggered the initialization
-            if rx.recv().is_ok() {
-                // Get the app state for MCP manager integration
-                let state_manager = app_handle.state::<AppState>();
-
-                // Set up MCP manager in the tool provider (lightweight operation)
-                let mcp_manager = state_manager.get_mcp_manager().await;
-                provider.set_mcp_manager(mcp_manager);
-
-                // Register the official Anthropic Computer Use tools
-                register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
-
-                // Register additional desktop automation tools (your existing ones)
-                crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
-
-                // Register timer tools for agent task scheduling and resumption
-                crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
-
-                // Register self-awareness and introspection tools (development mode only)
-                crate::agent::tools::register_self_awareness_tools(provider).await;
-
-                info!("✅ Core Computer Use tools registered successfully");
-            }
-        } else {
-            info!("🔧 Core tools already registered, skipping duplicate registration (performance optimization)");
-
-            // Ensure MCP manager is still set for the provider
+            // Get the app state for MCP manager integration
             let state_manager = app_handle.state::<AppState>();
+
+            // Set up MCP manager in the tool provider (per-provider operation)
             let mcp_manager = state_manager.get_mcp_manager().await;
             provider.set_mcp_manager(mcp_manager);
+
+            // Register the official Anthropic Computer Use tools (per-provider operation)
+            register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+
+            // Register additional desktop automation tools (per-provider operation)
+            crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
+
+            // Register timer tools for agent task scheduling and resumption (per-provider operation)
+            crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
+
+            // Register self-awareness and introspection tools (per-provider operation, development mode only)
+            crate::agent::tools::register_self_awareness_tools(provider).await;
+
+            info!("✅ Provider-specific Computer Use tools registered successfully");
+        } else {
+            return Err("Core tool registration failed".to_string());
         }
 
         // MCP tools are handled separately and loaded only when needed:
