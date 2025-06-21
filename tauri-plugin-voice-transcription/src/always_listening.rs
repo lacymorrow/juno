@@ -1052,6 +1052,33 @@ impl AlwaysListeningController {
         self.wake_words.clone()
     }
 
+    /// Update the shared Whisper context and model path for this controller
+    /// This allows updating the model without recreating the entire controller
+    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<WhisperContext>) -> Result<()> {
+        info!("[AlwaysListeningController] Updating shared Whisper context with new model: {}", model_path);
+
+        // Stop the controller if it's currently active
+        let was_active = self.is_active;
+        if was_active {
+            info!("[AlwaysListeningController] Stopping controller before model update");
+            self.stop_always_listening()?;
+        }
+
+        // Update the model path and shared context
+        self.model_path = model_path.to_string();
+        self.shared_whisper_context = Some(shared_context);
+
+        info!("[AlwaysListeningController] Successfully updated shared Whisper context (no model reload needed)");
+
+        // If it was active before, we'll let the caller decide whether to restart it
+        // This gives more control over the restart timing
+        if was_active {
+            info!("[AlwaysListeningController] Controller was active before update - caller should restart if needed");
+        }
+
+        Ok(())
+    }
+
     // Enhanced Debugging Methods
 
     pub fn set_transcription_debugging<R: Runtime>(&mut self, enabled: bool, app_handle: &AppHandle<R>) -> Result<()> {
