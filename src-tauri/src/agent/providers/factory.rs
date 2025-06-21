@@ -640,41 +640,47 @@ impl BrainFactory {
     ) -> Result<(), String> {
         info!("🔧 Registering Computer Use tools (optimized)...");
 
-        // Use a static flag to prevent duplicate core tool registrations
+        // Use a static Once to ensure core tools are registered exactly once across all threads
         use std::sync::Once;
         static CORE_TOOLS_REGISTERED: Once = Once::new();
 
-        // Check if core tools have already been registered
-        static mut TOOLS_INITIALIZED: bool = false;
-        let is_first_time = unsafe { !TOOLS_INITIALIZED };
+        // Check if this is the first time registration is happening
+        let is_first_time = !CORE_TOOLS_REGISTERED.is_completed();
 
         if is_first_time {
             info!("🔧 First-time tool registration, proceeding with full setup...");
 
+            // Use a channel to pass the result back from the closure since it's not async
+            let (tx, rx) = std::sync::mpsc::channel();
+
             CORE_TOOLS_REGISTERED.call_once(|| {
-                unsafe { TOOLS_INITIALIZED = true; }
+                // This closure runs exactly once, preventing race conditions
+                tx.send(true).ok(); // Signal that initialization should proceed
             });
 
-            // Get the app state for MCP manager integration
-            let state_manager = app_handle.state::<AppState>();
+            // Only proceed if we were the thread that triggered the initialization
+            if rx.recv().is_ok() {
+                // Get the app state for MCP manager integration
+                let state_manager = app_handle.state::<AppState>();
 
-            // Set up MCP manager in the tool provider (lightweight operation)
-            let mcp_manager = state_manager.get_mcp_manager().await;
-            provider.set_mcp_manager(mcp_manager);
+                // Set up MCP manager in the tool provider (lightweight operation)
+                let mcp_manager = state_manager.get_mcp_manager().await;
+                provider.set_mcp_manager(mcp_manager);
 
-            // Register the official Anthropic Computer Use tools
-            register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+                // Register the official Anthropic Computer Use tools
+                register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
 
-            // Register additional desktop automation tools (your existing ones)
-            crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
+                // Register additional desktop automation tools (your existing ones)
+                crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
 
-            // Register timer tools for agent task scheduling and resumption
-            crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
+                // Register timer tools for agent task scheduling and resumption
+                crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
-            // Register self-awareness and introspection tools (development mode only)
-            crate::agent::tools::register_self_awareness_tools(provider).await;
+                // Register self-awareness and introspection tools (development mode only)
+                crate::agent::tools::register_self_awareness_tools(provider).await;
 
-            info!("✅ Core Computer Use tools registered successfully");
+                info!("✅ Core Computer Use tools registered successfully");
+            }
         } else {
             info!("🔧 Core tools already registered, skipping duplicate registration (performance optimization)");
 
