@@ -198,8 +198,7 @@ pub struct AppState {
     pub agent_max_steps: Arc<StdMutex<Option<u32>>>,    // Track the maximum iterations/steps allowed
 
 
-    // Dual content communication - store spoken content separately for TTS
-    pub last_spoken_content: Arc<StdMutex<Option<String>>>, // Store spoken content separate from displayed text
+    // TTS content is now handled via XML tags during streaming, no separate storage needed
     // Debug mode tracking
     pub debug_mode: Arc<StdMutex<bool>>, // Track if debug mode is enabled
     // Tool approval setting
@@ -284,8 +283,7 @@ impl AppState {
             agent_current_step: Arc::new(StdMutex::new(None)),
             agent_max_steps: Arc::new(StdMutex::new(None)),
 
-            // Dual content communication - store spoken content separately for TTS
-            last_spoken_content: Arc::new(StdMutex::new(None)),
+                    // TTS content now handled via XML tags during streaming
             // Initialize debug mode tracking
             debug_mode: Arc::new(StdMutex::new(false)),
             // Initialize tool approval setting as disabled by default
@@ -1164,33 +1162,7 @@ impl AppState {
         }
     }
 
-    // Dual content communication methods
-
-    /// Set the last spoken content for TTS
-    pub fn set_last_spoken_content(&self, content: Option<String>) -> Result<(), String> {
-        let mut spoken_guard = self.last_spoken_content.lock()
-            .map_err(|e| format!("Failed to acquire last_spoken_content lock: {}", e))?;
-        *spoken_guard = content;
-        Ok(())
-    }
-
-    /// Get the last spoken content for TTS
-    pub fn get_last_spoken_content(&self) -> Option<String> {
-        self.last_spoken_content.lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_else(|e| {
-                error!("Failed to get last spoken content: {}", e);
-                None // Safe fallback
-            })
-    }
-
-    /// Clear the last spoken content
-    pub fn clear_last_spoken_content(&self) -> Result<(), String> {
-        let mut spoken_guard = self.last_spoken_content.lock()
-            .map_err(|e| format!("Failed to acquire last_spoken_content lock: {}", e))?;
-        *spoken_guard = None;
-        Ok(())
-    }
+    // TTS content is now handled via XML tags during streaming, no separate methods needed
 
     // Debug mode methods
     pub fn set_debug_mode(&self, enabled: bool) -> Result<(), String> {

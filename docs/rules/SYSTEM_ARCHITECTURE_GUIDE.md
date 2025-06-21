@@ -1,11 +1,11 @@
 # Juno AI Computer Use Agent - System Architecture Guide
 
-**Status**: ✅ **PRODUCTION READY** - Complete Multi-Agent Architecture  
+**Status**: ✅ **PRODUCTION READY** - Complete Multi-Agent Architecture + XML-Based TTS Separation  
 **Last Updated**: January 2025  
 
 ## 🎯 Architecture Overview
 
-This guide consolidates the complete system architecture for Juno AI Computer Use Agent, including the hierarchical agent system, tools framework, security layers, and integration patterns.
+This guide consolidates the complete system architecture for Juno AI Computer Use Agent, including the hierarchical agent system, tools framework, security layers, integration patterns, and advanced XML-based TTS content separation for optimal streaming performance.
 
 ## 🏗️ Core Architecture Principles
 
@@ -24,6 +24,51 @@ This guide consolidates the complete system architecture for Juno AI Computer Us
 - **Async/Await**: Non-blocking operations with parallel tool execution
 - **Event-Driven**: Tauri event system for frontend-backend communication
 
+## 🎤 XML-Based TTS Separation Architecture
+
+### Streaming Response Processing
+
+**Location**: `src-tauri/src/agent/providers/anthropic.rs`
+
+#### Real-Time XML Parsing System
+
+The system implements a sophisticated character-by-character XML parser that operates during response streaming to extract TTS content immediately without interrupting the flow.
+
+```rust
+// XML Parsing State Machine in handle_streaming_response
+pub struct TtsParsingState {
+    tts_buffer: String,           // Buffer for potential TTS tags
+    in_tts_tag: bool,            // Currently inside TTS content
+    tts_content: String,         // Accumulated TTS content
+    tag_stack: Vec<String>,      // Track nested tags
+}
+
+impl TtsParsingState {
+    fn process_character(&mut self, char: char, app_handle: &AppHandle) {
+        match char {
+            '<' => self.handle_tag_start(char),
+            '>' => self.handle_tag_end(char, app_handle),
+            _ => self.handle_content_character(char),
+        }
+    }
+}
+```
+
+#### Immediate TTS Processing Pipeline
+
+1. **Character Stream** → XML Parser detects `<TTS>` tags
+2. **Content Extraction** → TTS content immediately extracted
+3. **Event Emission** → `emit_tts_content_ready()` sends content to backend
+4. **TTS Generation** → `handle_immediate_tts()` processes audio generation
+5. **Audio Playback** → Frontend receives and plays audio in parallel
+
+#### Performance Optimization
+
+- **Zero-Copy Parsing**: Efficient character processing without memory allocation overhead
+- **Parallel Processing**: TTS generation doesn't block response streaming
+- **Smart Buffering**: Minimal memory usage with strategic buffer management
+- **Error Recovery**: Graceful handling of malformed XML without breaking stream
+
 ## 🧠 Agent System Architecture
 
 ### Central Orchestrator
@@ -37,6 +82,7 @@ This guide consolidates the complete system architecture for Juno AI Computer Us
 - Task delegation to specialist agents
 - Workflow orchestration and template management
 - MCP integration coordination
+- **XML-Based TTS Coordination**: Manages immediate TTS processing pipeline
 
 ```rust
 // Orchestrator Core Structure

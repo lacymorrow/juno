@@ -259,7 +259,7 @@ pub async fn submit_query(
         // Emit offline message as agent response
         let message_id = uuid::Uuid::new_v4().to_string();
         crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
-        crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, offline_message.clone(), Some(message_id.clone()));
+        crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, offline_message.clone(), Some(message_id.clone()), None);
         crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, offline_message.clone());
 
         // Force system TTS for offline response
@@ -426,7 +426,7 @@ async fn execute_agent_internal(
                     // Emit error via streaming events instead of backend-response
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
-                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
+                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()), None);
                     crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
@@ -470,7 +470,7 @@ async fn execute_agent_internal(
                     // Emit error via streaming events instead of backend-response
                     let error_message_id = uuid::Uuid::new_v4().to_string();
                     crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
-                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()));
+                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()), None);
                     crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
                     return Err(err_msg);
                 }
@@ -529,12 +529,9 @@ async fn execute_agent_internal(
         Ok(message) => {
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 
-            // Check if there's stored spoken content from a dual content finish
-            let spoken_content = state.get_last_spoken_content();
-
-            SubmitQueryResult {
-                text: message.clone(),
-                spoken_text: spoken_content, // Use stored spoken content if available
+                    SubmitQueryResult {
+            text: message.clone(),
+            spoken_text: None, // TTS content is now handled during streaming via XML tags
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: "Finished".to_string(),
                 screenshot_base64: None, // Capture screenshot if needed
@@ -623,55 +620,16 @@ async fn execute_agent_internal(
     };
 
     // --- Generate TTS Audio ---
-    // Use spoken_text if available, otherwise fall back to text
-    let tts_content = final_response.spoken_text.as_ref().unwrap_or(&final_response.text).clone();
+    // With XML-based TTS extraction in streaming mode, TTS is already processed immediately
+    // Disable fallback TTS processing to prevent duplicates
+    let _should_process_final_tts = false; // Always skip final TTS - immediate TTS handles it
 
-    // Clear spoken content from app state now that we've used it
-    let _ = state.clear_last_spoken_content();
+    let _tts_enabled = false; // TTS is now handled entirely via immediate processing during streaming
 
-    let tts_enabled = match crate::tts::invoke_tts(tts_content, state.clone(), app_handle.clone()).await {
-        Ok(audio_result) => {
-            if audio_result != "TTS_DISABLED_BY_SETTING" {
-                final_response.audio_base64 = Some(audio_result.clone());
-                info!("TTS audio generated successfully for response");
-
-                // Emit TTS audio event for frontend to play, regardless of streaming status
-                let tts_app_handle = app_handle.clone();
-                let tts_audio_data = audio_result.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = tts_app_handle.emit("tts-audio-ready", serde_json::json!({
-                        "audio_base64": tts_audio_data
-                    })) {
-                        warn!("Failed to emit TTS audio event: {}", e);
-                    }
-                });
-
-                // Update floating bar manager for TTS start
-                let app_handle_for_tts = app_handle.clone();
-                let tts_text = final_response.text.clone();
-                tauri::async_runtime::spawn(async move {
-                    crate::commands::floating_bar::handle_tts_started(&app_handle_for_tts, tts_text).await;
-                    // Note: TTS finish event and success sound are now handled by handle_tts_completion
-                    // when the frontend notifies us that audio playback has completed
-                });
-                true // TTS is enabled and audio was generated
-            } else {
-                info!("TTS is disabled, skipping audio generation");
-                false // TTS is disabled
-            }
-        }
-        Err(e) => {
-            warn!("Failed to generate TTS audio: {}. Continuing without audio.", e);
-            // Don't fail the whole response, just continue without audio
-            false // TTS failed, treat as disabled
-        }
-    };
-
-    // Play agent success sound immediately if TTS is disabled, otherwise it will be played when TTS finishes
-    if !tts_enabled && final_response.agent_state == "Finished" {
-        if let Err(e) = crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await {
-            warn!("Failed to play success sound: {}", e);
-        }
+    // Success sound will be played after TTS completion via handle_tts_completion()
+    // Skip immediate sound to prevent double-playing
+    if final_response.agent_state == "Finished" {
+        info!("Agent completed successfully. Success sound will play after TTS completion.");
     }
 
     info!("Agent run complete. Final state: {}", final_response.agent_state);

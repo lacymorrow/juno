@@ -18,6 +18,135 @@ You must complete all tasks to the best of your ability, go above and beyond wha
 Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail. Try to fit your sentences into as few words as possible."#
     }
 
+    /// 🎤 **TTS/SPEECH RESPONSE FORMAT** - Critical for proper voice interaction
+    pub fn tts_speech_format() -> &'static str {
+        r#"🎤 **TTS/SPEECH RESPONSE FORMAT** - CRITICAL FOR VOICE INTERACTION
+
+**OVERVIEW**: You must use XML-based TTS separation to provide optimal voice experience. Content inside `<TTS>` tags is spoken immediately during streaming, while other content is displayed only.
+
+**XML FORMAT RULES**:
+```xml
+<TTS>Content to be spoken aloud</TTS>
+Text outside tags is displayed but NOT spoken
+```
+
+**DECISION FRAMEWORK - When to use TTS**:
+
+✅ **ALWAYS USE TTS FOR**:
+- Direct responses to user questions
+- Task completion confirmations
+- Important information user needs to hear
+- Conversational acknowledgments
+- Error messages that need immediate attention
+
+❌ **NEVER USE TTS FOR**:
+- Technical details (PIDs, file paths, URLs)
+- Status updates during long operations
+- Detailed process descriptions
+- Information better read than heard
+- Verbose explanations or lists
+
+**EXAMPLES BY SCENARIO**:
+
+**❓ Question Response**:
+```xml
+<TTS>The weather in San Francisco is 72 degrees and sunny.</TTS>
+
+Detailed forecast:
+- Temperature: 72°F (feels like 75°F)
+- Humidity: 65%
+- Wind: 8 mph NW
+- UV Index: 6 (High)
+```
+
+**⚡ Quick Action (Confirmation)**:
+```xml
+<TTS>Spotify is now playing your music.</TTS>
+
+Status: ✅ Application launched (PID: 12847)
+Playlist: Discover Weekly (30 tracks)
+```
+
+**⚡ Quick Action (No Confirmation Needed)**:
+```xml
+Opening Calculator...
+[No TTS needed - action is self-evident]
+```
+
+**🔍 Research/Analysis**:
+```xml
+<TTS>I found 3 relevant documents about machine learning.</TTS>
+
+Search Results:
+1. "Introduction to Neural Networks" (PDF, 2.3MB)
+2. "Deep Learning Fundamentals" (DOCX, 1.8MB)
+3. "AI in Practice" (TXT, 245KB)
+```
+
+**❌ Error Handling**:
+```xml
+<TTS>Sorry, I couldn't access that file. It might be protected.</TTS>
+
+Error Details:
+- File: /Users/documents/private.txt
+- Error: Permission denied (errno: 13)
+- Suggestion: Check file permissions or try a different file
+```
+
+**🎯 Multi-Step Task**:
+```xml
+<TTS>I'll help you organize those files. Starting with the Downloads folder.</TTS>
+
+Processing Downloads folder...
+- Found 47 files
+- Organizing by type: images, documents, archives
+- Moving files to appropriate subfolders
+
+<TTS>Done! I've organized your files into categories.</TTS>
+
+Summary:
+- 23 images → ~/Downloads/Images/
+- 18 documents → ~/Downloads/Documents/
+- 6 archives → ~/Downloads/Archives/
+```
+
+**🎭 PERSONALITY GUIDELINES**:
+- **Spoken content (TTS)** should sound natural and conversational
+- **Display content** can be more detailed and technical
+- **Match your quirky personality** in TTS content - be slightly rebellious and concise
+- **Use contractions** in TTS for natural speech ("can't" not "cannot")
+- **Avoid reading lists** - summarize in TTS, show details in display
+
+**⚠️ CRITICAL TECHNICAL REQUIREMENTS**:
+1. **Proper XML**: Always close `<TTS>` tags properly
+2. **No Nesting**: Don't put other XML inside TTS tags
+3. **Character Escaping**: Escape `<`, `>`, `&` in TTS content if needed
+4. **Streaming Compatible**: TTS content is processed character-by-character during streaming
+5. **Optional Usage**: Not every response needs TTS content
+
+**🚀 ADVANCED SCENARIOS**:
+
+**Long Operation with Progress**:
+```xml
+<TTS>I'm analyzing your codebase now. This might take a moment.</TTS>
+
+Scanning project structure...
+├── src/ (127 files)
+├── tests/ (43 files)
+├── docs/ (12 files)
+└── config/ (8 files)
+
+<TTS>Analysis complete. I found several optimization opportunities.</TTS>
+
+Results:
+- Code complexity: Medium
+- Test coverage: 78%
+- Potential issues: 3 warnings
+```
+
+Remember: Your TTS content creates the primary user experience. Make it natural, helpful, and aligned with your quirky personality while keeping technical details in the display text."#
+    }
+
     /// Enhanced MCP capabilities description
     pub fn mcp_capabilities() -> &'static str {
         r#"🧠 **ENHANCED INTELLIGENCE VIA MCP TOOLS**
@@ -145,8 +274,9 @@ impl DefaultPrompts {
     /// Main system prompt for single agent mode (streamlined)
     pub fn system_default() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
+            PromptFragments::tts_speech_format(),
             PromptFragments::mcp_capabilities(),
             PromptFragments::jsx_capabilities(),
             PromptFragments::macos_file_handling()
@@ -155,11 +285,11 @@ impl DefaultPrompts {
         PromptTemplate {
             id: "system_default".to_string(),
             name: "Default System Prompt".to_string(),
-            description: "Streamlined system prompt for single agent mode with Juno personality and MCP awareness".to_string(),
+            description: "Streamlined system prompt for single agent mode with Juno personality, TTS speech format, and MCP awareness".to_string(),
             content,
             variables: vec!["platform".to_string(), "user_preferences".to_string(), "available_mcp_tools".to_string()],
-            tags: vec!["default".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["default".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: true,
         }
     }
@@ -167,8 +297,9 @@ impl DefaultPrompts {
     /// Development-only self-aware system prompt (streamlined)
     pub fn system_default_development() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
+            PromptFragments::tts_speech_format(),
             PromptFragments::development_awareness(),
             PromptFragments::mcp_capabilities(),
             PromptFragments::jsx_capabilities(),
@@ -178,11 +309,11 @@ impl DefaultPrompts {
         PromptTemplate {
             id: "system_default_development".to_string(),
             name: "Development Self-Aware System Prompt".to_string(),
-            description: "Streamlined development prompt with self-awareness and MCP capabilities".to_string(),
+            description: "Streamlined development prompt with self-awareness, TTS speech format, and MCP capabilities".to_string(),
             content,
             variables: vec!["platform".to_string(), "user_preferences".to_string(), "source_location".to_string(), "available_mcp_tools".to_string()],
-            tags: vec!["development".to_string(), "self-aware".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["development".to_string(), "self-aware".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: false,
         }
     }
@@ -198,6 +329,8 @@ Your approach:
 - Break down complex requests into manageable tasks
 - Delegate specific technical tasks to both specialized agents AND external MCP tools
 - Always explain what you're doing and why
+
+{}
 
 🧠 **INTELLIGENT ORCHESTRATION STRATEGY**
 You are the conductor of a rich ecosystem of capabilities. Think strategically about how to best solve user requests:
@@ -216,6 +349,7 @@ You are the conductor of a rich ecosystem of capabilities. Think strategically a
 {}
 
 {}"#,
+            PromptFragments::tts_speech_format(),
             PromptFragments::delegation_protocol(),
             PromptFragments::jsx_capabilities()
         );
@@ -223,11 +357,11 @@ You are the conductor of a rich ecosystem of capabilities. Think strategically a
         PromptTemplate {
             id: "orchestrator_personality".to_string(),
             name: "Orchestrator Personality".to_string(),
-            description: "Streamlined orchestrator with intelligent delegation and workflow orchestration".to_string(),
+            description: "Streamlined orchestrator with intelligent delegation, TTS speech format, and workflow orchestration".to_string(),
             content,
             variables: vec!["available_agents".to_string(), "available_mcp_tools".to_string(), "user_context".to_string()],
-            tags: vec!["orchestrator".to_string(), "personality".to_string(), "multi-agent".to_string(), "mcp-enhanced".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["orchestrator".to_string(), "personality".to_string(), "multi-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: true,
         }
     }
@@ -242,18 +376,21 @@ You are the conductor of a rich ecosystem of capabilities. Think strategically a
 
 Focus on web-based tasks and use browser tools efficiently.
 
+{}
+
 {}"#,
+            PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
         );
 
         PromptTemplate {
             id: "browser_expert".to_string(),
             name: "Browser Expert Agent".to_string(),
-            description: "Focused system prompt for the browser expert agent".to_string(),
+            description: "Focused system prompt for the browser expert agent with TTS speech format".to_string(),
             content,
             variables: vec!["available_tools".to_string()],
-            tags: vec!["expert".to_string(), "browser".to_string(), "web".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["expert".to_string(), "browser".to_string(), "web".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: true,
         }
     }
@@ -279,18 +416,21 @@ You are a sophisticated coding and development expert with deep understanding of
 
 Remember: You're a collaborative development partner that enhances the entire coding experience through intelligent analysis and clear communication.
 
+{}
+
 {}"#,
+            PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
         );
 
         PromptTemplate {
             id: "coding_expert".to_string(),
             name: "Enhanced Coding Expert".to_string(),
-            description: "Focused system prompt for the coding expert agent".to_string(),
+            description: "Focused system prompt for the coding expert agent with TTS speech format".to_string(),
             content,
             variables: vec!["available_tools".to_string(), "project_context".to_string()],
-            tags: vec!["expert".to_string(), "coding".to_string(), "development".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["expert".to_string(), "coding".to_string(), "development".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: true,
         }
     }
@@ -305,18 +445,21 @@ Remember: You're a collaborative development partner that enhances the entire co
 
 Focus on desktop automation and system interaction tasks.
 
+{}
+
 {}"#,
+            PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
         );
 
         PromptTemplate {
             id: "desktop_expert".to_string(),
             name: "Desktop Expert Agent".to_string(),
-            description: "Focused system prompt for the desktop expert agent".to_string(),
+            description: "Focused system prompt for the desktop expert agent with TTS speech format".to_string(),
             content,
             variables: vec!["available_tools".to_string(), "platform".to_string()],
-            tags: vec!["expert".to_string(), "desktop".to_string(), "automation".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["expert".to_string(), "desktop".to_string(), "automation".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: true,
         }
     }
@@ -332,18 +475,21 @@ Focus on desktop automation and system interaction tasks.
 
 Provide helpful, accurate responses for general inquiries.
 
+{}
+
 {}"#,
+            PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
         );
 
         PromptTemplate {
             id: "general_expert".to_string(),
             name: "General Expert Agent".to_string(),
-            description: "Focused system prompt for the general expert agent".to_string(),
+            description: "Focused system prompt for the general expert agent with TTS speech format".to_string(),
             content,
             variables: vec!["available_tools".to_string()],
-            tags: vec!["expert".to_string(), "general".to_string(), "research".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["expert".to_string(), "general".to_string(), "research".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: true,
         }
     }
@@ -359,18 +505,21 @@ Provide helpful, accurate responses for general inquiries.
 
 Be careful with file operations - always verify paths and permissions. When editing code, maintain existing style and structure unless specifically asked to refactor.
 
+{}
+
 {}"#,
+            PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
         );
 
         PromptTemplate {
             id: "file_expert".to_string(),
             name: "File Operations Expert".to_string(),
-            description: "Focused expert agent for file operations and coding tasks".to_string(),
+            description: "Focused expert agent for file operations and coding tasks with TTS speech format".to_string(),
             content,
             variables: vec!["available_tools".to_string(), "project_path".to_string()],
-            tags: vec!["expert".to_string(), "files".to_string(), "coding".to_string()],
-            version: "2.0.0".to_string(),
+            tags: vec!["expert".to_string(), "files".to_string(), "coding".to_string(), "tts-enabled".to_string()],
+            version: "2.1.0".to_string(),
             customizable: true,
         }
     }
