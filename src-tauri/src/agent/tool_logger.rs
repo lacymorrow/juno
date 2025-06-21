@@ -1068,7 +1068,7 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
     }
 }
 
-pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>) {
+pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>, tts_content: Option<String>) {
     let event_data = serde_json::json!({
         "chunk": text,
         "message_id": message_id
@@ -1077,6 +1077,88 @@ pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_i
     if let Err(e) = app_handle.emit(crate::constants::events::streaming::TEXT_STREAM, event_data) {
         warn!("Failed to emit agent-text-stream event: {}", e);
     }
+
+    // If TTS content is provided, emit it for immediate processing
+    if let Some(tts_text) = tts_content {
+        process_tts_content_immediately(app_handle.clone(), tts_text);
+    }
+}
+
+/// Process TTS content immediately instead of emitting an event
+pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: String) {
+    info!("Processing TTS content immediately: '{}'", tts_content);
+
+    // CRITICAL FIX: Trim whitespace and validate content before processing
+    let trimmed_content = tts_content.trim();
+    if trimmed_content.is_empty() {
+        info!("TTS content is empty after trimming, skipping immediate processing");
+        return;
+    }
+
+    // Clone everything needed before the async task
+    let content_clone = trimmed_content.to_string();
+
+    // Get TTS provider from app state
+    let tts_provider = {
+        let app_state = app_handle.state::<crate::state::AppState>();
+        app_state.tts_provider.lock()
+            .map(|provider| provider.clone())
+            .unwrap_or_else(|_| "system".to_string())
+    };
+
+    tauri::async_runtime::spawn(async move {
+        // Clone app handle for emit call
+        let app_handle_for_emit = app_handle.clone();
+
+        // Check if TTS is disabled
+        if tts_provider.is_empty() || tts_provider.to_lowercase() == "off" {
+            info!("TTS is disabled (provider: {}), skipping immediate TTS", tts_provider);
+            return;
+        }
+
+        // Filter TTS content to prevent code/unwanted content from being spoken
+        let filtered_text = crate::tts::filter_tts_content(&content_clone);
+        if filtered_text.is_empty() {
+            info!("TTS content was filtered out (appears to be code/unwanted content), skipping TTS");
+            return;
+        }
+
+        // Register escape key for TTS cancellation
+        crate::tts::register_tts_escape_key(&app_handle).await;
+
+        // Call TTS with fallback directly instead of going through the command interface
+        match crate::tts::invoke_tts_with_fallback(filtered_text, &tts_provider).await {
+            Ok(audio_result) => {
+                if audio_result != "TTS_DISABLED_BY_SETTING" && audio_result != "TTS_CONTENT_FILTERED" {
+                    info!("Immediate TTS audio generated successfully");
+
+                    // Emit TTS audio event for frontend to play
+                    if let Err(e) = app_handle_for_emit.emit("tts-audio-ready", serde_json::json!({
+                        "audio_base64": audio_result
+                    })) {
+                        warn!("Failed to emit immediate TTS audio event: {}", e);
+                    }
+                } else {
+                    info!("TTS processing completed: {}", audio_result);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to generate immediate TTS audio: {}. Continuing without audio.", e);
+            }
+        }
+
+        // Unregister escape key after TTS completion
+        crate::tts::unregister_tts_escape_key(&app_handle).await;
+    });
+}
+
+/// Emit TTS content for immediate processing (deprecated - use process_tts_content_immediately)
+pub fn emit_tts_content_ready(_app_handle: AppHandle, tts_content: String) {
+    info!("emit_tts_content_ready is deprecated - TTS should be processed directly");
+
+    // For now, just log the content but don't emit the event to prevent loops
+    info!("TTS content extracted but not processed: '{}'", tts_content);
+    warn!("Use process_tts_content_immediately instead of emit_tts_content_ready");
 }
 
 pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text: String) {

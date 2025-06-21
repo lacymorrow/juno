@@ -7,6 +7,7 @@ use futures_util::StreamExt;
 use tokio::io::AsyncBufReadExt;
 use tokio_stream::wrappers::LinesStream;
 use tokio_util::io::StreamReader;
+use regex::Regex;
 
 use crate::agent::structs::{
     AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
@@ -208,76 +209,23 @@ impl AnthropicBrain {
         self.streaming_enabled = enabled;
     }
 
-    /// Generate dual content: keep original for typing, create concise version for speaking
-    fn generate_dual_content(original_text: &str) -> (String, String) {
-        let typed_content = original_text.to_string();
-
-        // If the text is already short and concise, use it as-is
-        if original_text.len() <= 100 {
-            return (typed_content.clone(), typed_content);
-        }
-
-        // Extract key information for speech
-        let spoken_content = Self::create_concise_speech_version(original_text);
-
-        (typed_content, spoken_content)
-    }
-
-    /// Create a concise version optimized for speech synthesis
-    fn create_concise_speech_version(text: &str) -> String {
-        // Remove markdown formatting for speech
-        let text = text.replace("**", "").replace("*", "").replace("#", "");
-
-        // Split into sentences and prioritize key information
-        let sentences: Vec<&str> = text.split(['.', '!', '?'])
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        if sentences.is_empty() {
-            return text.clone();
-        }
-
-        // For longer responses, summarize key points
-        if sentences.len() > 3 {
-            // Take first sentence (usually the main result) and key action sentences
-            let mut key_sentences = vec![sentences[0]];
-
-            // Add sentences that contain action words or results
-            for sentence in sentences.iter().skip(1).take(2) {
-                let lower = sentence.to_lowercase();
-                if lower.contains("completed") || lower.contains("found") ||
-                   lower.contains("created") || lower.contains("updated") ||
-                   lower.contains("success") || lower.contains("done") ||
-                   lower.contains("result") || lower.contains("finished") {
-                    key_sentences.push(sentence);
-                }
-            }
-
-            // If we only have the first sentence, add one more for context
-            if key_sentences.len() == 1 && sentences.len() > 1 {
-                key_sentences.push(sentences[1]);
-            }
-
-            key_sentences.join(". ") + if !key_sentences.last().unwrap_or(&"").ends_with('.') { "." } else { "" }
-        } else {
-            // For shorter responses, keep as-is but clean up
-            sentences.join(". ") + if !text.ends_with(['.', '!', '?']) { "." } else { "" }
-        }
-    }
-
-    /// Handle streaming response from Anthropic API
+    /// Handle streaming response from Anthropic API with XML-based TTS extraction
     async fn handle_streaming_response<F>(
         &self,
         response: reqwest::Response,
         mut on_text_chunk: F,
     ) -> Result<(String, Vec<ToolCall>, String), AgentError>
     where
-        F: FnMut(String) + Send,
+        F: FnMut(String, Option<String>) + Send, // Updated to accept optional TTS content
     {
         let mut accumulated_text = String::new();
         let mut tool_calls = Vec::new();
         let mut stop_reason = String::new();
+
+        // TTS XML parsing state
+        let mut tts_buffer = String::new();
+        let mut in_tts_tag = false;
+        let mut tts_content = String::new();
 
         // Track content blocks and partial data
         let mut current_tool_call: Option<(String, String, String)> = None; // (id, name, partial_json)
@@ -335,10 +283,10 @@ impl AnthropicBrain {
                                 if let Some(block_type) = content_block.get("type").and_then(|t| t.as_str()) {
                                     if block_type == "tool_use" {
                                         // Start tracking a new tool call
-                                                                    let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            log::debug!("Stream: started tool call {} ({})", name, id);
-                            current_tool_call = Some((id, name, String::new()));
+                                        let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        log::debug!("Stream: started tool call {} ({})", name, id);
+                                        current_tool_call = Some((id, name, String::new()));
                                     }
                                 }
                             }
@@ -349,9 +297,19 @@ impl AnthropicBrain {
                                     match delta_type {
                                         "text_delta" => {
                                             if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                                                // Accumulate text and emit chunk
-                                                accumulated_text.push_str(text);
-                                                on_text_chunk(text.to_string());
+                                                // Process text for TTS XML tags
+                                                let (display_text, extracted_tts) = self.process_text_with_tts_extraction(
+                                                    text,
+                                                    &mut tts_buffer,
+                                                    &mut in_tts_tag,
+                                                    &mut tts_content
+                                                );
+
+                                                // Accumulate only display text (without TTS tags) for final response
+                                                accumulated_text.push_str(&display_text);
+
+                                                // Emit chunk with separated TTS content
+                                                on_text_chunk(display_text, extracted_tts);
                                             }
                                         }
                                         "input_json_delta" => {
@@ -424,6 +382,78 @@ impl AnthropicBrain {
         }
 
         Ok((accumulated_text, tool_calls, stop_reason))
+    }
+
+    /// Process text chunk to extract TTS XML tags and return display text + extracted TTS content
+    fn process_text_with_tts_extraction(
+        &self,
+        text_chunk: &str,
+        tts_buffer: &mut String,
+        in_tts_tag: &mut bool,
+        tts_content: &mut String,
+    ) -> (String, Option<String>) {
+        let mut display_text = String::new();
+        let mut extracted_tts: Option<String> = None;
+
+        // Add new text to buffer for processing
+        tts_buffer.push_str(text_chunk);
+
+        // Process the buffer character by character to detect TTS tags
+        let mut processed_chars = 0;
+        let chars: Vec<char> = tts_buffer.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            let remaining: String = chars[i..].iter().collect();
+
+            if !*in_tts_tag {
+                // Look for opening <TTS> tag
+                if remaining.starts_with("<TTS>") {
+                    *in_tts_tag = true;
+                    i += 5; // Skip "<TTS>" - CRITICAL: Don't add tags to display_text
+                    processed_chars = i;
+                    continue;
+                } else {
+                    // Regular text outside TTS tags - add to display
+                    display_text.push(chars[i]);
+                }
+            } else {
+                // Inside TTS tag - look for closing </TTS> tag
+                if remaining.starts_with("</TTS>") {
+                    // Found complete TTS block
+                    if !tts_content.trim().is_empty() {
+                        extracted_tts = Some(tts_content.clone());
+                        log::info!("Extracted TTS content: '{}'", tts_content);
+                    }
+
+                    // Reset TTS state
+                    *in_tts_tag = false;
+                    tts_content.clear();
+                    i += 6; // Skip "</TTS>" - CRITICAL: Don't add closing tags to display_text
+                    processed_chars = i;
+                    continue;
+                } else {
+                    // CRITICAL FIX: Content inside TTS tag - add to TTS content but NOT to display_text
+                    tts_content.push(chars[i]);
+                }
+            }
+
+            i += 1;
+            processed_chars = i;
+        }
+
+        // Keep unprocessed characters in buffer for next chunk
+        *tts_buffer = chars[processed_chars..].iter().collect();
+
+        (display_text, extracted_tts)
+    }
+
+    /// Strip TTS XML tags from text, removing them completely (content was already processed for TTS)
+    fn strip_tts_tags(&self, text: &str) -> String {
+        // CRITICAL FIX: Remove TTS tags completely - content was already processed for immediate TTS
+        // We don't want TTS content appearing in the final display text
+        let tts_regex = Regex::new(r"<TTS>.*?</TTS>").unwrap();
+        tts_regex.replace_all(text, "").to_string().trim().to_string()
     }
 
     // Helper function to convert our internal Message format to Anthropic's API format
@@ -683,18 +713,50 @@ impl AgentBrain for AnthropicBrain {
 
             let (accumulated_text, tool_calls, stop_reason) = self.handle_streaming_response(
                 response,
-                |chunk| {
+                |chunk, tts_content| {
                     // Emit text chunk event
                     crate::agent::tool_logger::emit_streaming_text_chunk(
                         &app_handle,
                         chunk,
                         Some(message_id.clone()),
+                        tts_content,
                     );
                 },
             ).await?;
 
-            // Emit stream end event (we'll update this with agent state from the final response processing)
-            crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, accumulated_text.clone());
+            // CRITICAL FIX: Strip any remaining TTS tags from final accumulated text as safety net
+            let final_clean_text = self.strip_tts_tags(&accumulated_text);
+
+            // Log if any tags were found and stripped
+            if final_clean_text != accumulated_text {
+                log::warn!("Found TTS tags in final accumulated text - stripped them as safety net");
+                log::debug!("Original: '{}' -> Cleaned: '{}'", accumulated_text, final_clean_text);
+            }
+
+            // CRITICAL FIX: If final text is empty after stripping TTS tags, provide a fallback
+            let final_display_text = if final_clean_text.trim().is_empty() {
+                // Extract TTS content as fallback for display only if there's no other content
+                let tts_fallback_regex = Regex::new(r"<TTS>(.*?)</TTS>").unwrap();
+                let tts_content_fallback: Vec<&str> = tts_fallback_regex
+                    .captures_iter(&accumulated_text)
+                    .map(|cap| cap.get(1).unwrap().as_str())
+                    .collect();
+
+                if !tts_content_fallback.is_empty() {
+                    let fallback_text = tts_content_fallback.join(" ");
+                    log::info!("Response contained only TTS content, using it as fallback display text: '{}'", fallback_text);
+                    fallback_text
+                } else {
+                    // Truly empty response
+                    log::warn!("Response is completely empty after TTS processing");
+                    final_clean_text
+                }
+            } else {
+                final_clean_text
+            };
+
+            // Emit stream end event with final display text
+            crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, final_display_text.clone());
 
             // Process stop reason and return appropriate action
             match stop_reason.as_str() {
@@ -702,8 +764,8 @@ impl AgentBrain for AnthropicBrain {
                     if tool_calls.is_empty() {
                         Err(AgentError::LlmError("Stop reason is tool_use, but no valid tool calls found in response".to_string()))
                     } else {
-                        if !accumulated_text.is_empty() {
-                            log::info!("Anthropic response included text before tool use: {}", accumulated_text);
+                        if !final_display_text.is_empty() {
+                            log::info!("Anthropic response included text before tool use: {}", final_display_text);
                         }
                         Ok(AgentAction::ExecuteTool(tool_calls))
                     }
@@ -713,15 +775,9 @@ impl AgentBrain for AnthropicBrain {
                         log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", stop_reason);
                     }
 
-                    // Generate dual content for better TTS experience
-                    let (typed_content, spoken_content) = Self::generate_dual_content(&accumulated_text);
-
-                    if typed_content != spoken_content {
-                        log::info!("Generated dual content - typed: {} chars, spoken: {} chars", typed_content.len(), spoken_content.len());
-                        Ok(AgentAction::FinishWithDualContent { typed_content, spoken_content })
-                    } else {
-                        Ok(AgentAction::Finish(accumulated_text))
-                    }
+                    // CRITICAL FIX: Return final display text (either clean content or TTS fallback)
+                    // TTS content was already extracted and processed during streaming
+                    Ok(AgentAction::Finish(final_display_text))
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",
@@ -788,15 +844,9 @@ impl AgentBrain for AnthropicBrain {
                         log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", response_body.stop_reason);
                     }
 
-                    // Generate dual content for better TTS experience
-                    let (typed_content, spoken_content) = Self::generate_dual_content(&response_text);
-
-                    if typed_content != spoken_content {
-                        log::info!("Generated dual content - typed: {} chars, spoken: {} chars", typed_content.len(), spoken_content.len());
-                        Ok(AgentAction::FinishWithDualContent { typed_content, spoken_content })
-                    } else {
-                        Ok(AgentAction::Finish(response_text))
-                    }
+                    // Non-streaming mode: return the response text as-is
+                    // TTS XML processing only works in streaming mode
+                    Ok(AgentAction::Finish(response_text))
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",

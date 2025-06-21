@@ -12,44 +12,69 @@ use regex::Regex;
 static TTS_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Filter content to prevent code, emojis, and unwanted content from being spoken
-fn filter_tts_content(text: &str) -> String {
+pub fn filter_tts_content(text: &str) -> String {
     debug!("[TTS Filter] Original text length: {} chars", text.len());
 
     let mut filtered_text = text.to_string();
 
-    // 1. Remove code blocks (```...```)
+    // 0. Extract TTS XML content first (this is for fallback cases where immediate TTS didn't work)
+    let tts_regex = Regex::new(r"<TTS>(.*?)</TTS>").unwrap();
+    if tts_regex.is_match(&filtered_text) {
+        // CRITICAL FIX: If we have TTS tags, this means immediate TTS processing failed
+        // In most cases, immediate TTS should have already processed this content
+        warn!("[TTS Filter] Found TTS tags in final processing - this suggests immediate TTS didn't work properly");
+
+        // Extract only the content inside them as fallback
+        let extracted_content: Vec<&str> = tts_regex
+            .captures_iter(&filtered_text)
+            .map(|cap| cap.get(1).unwrap().as_str())
+            .collect();
+
+        if !extracted_content.is_empty() {
+            // Return only the TTS content, joined together
+            filtered_text = extracted_content.join(" ");
+            debug!("[TTS Filter] Extracted TTS content from XML tags (FALLBACK): '{}'", filtered_text);
+            return filtered_text;
+        }
+    }
+
+    // 1. Remove any remaining TTS XML tags that weren't processed (safety net)
+    let remaining_tts_regex = Regex::new(r"</?TTS>").unwrap();
+    filtered_text = remaining_tts_regex.replace_all(&filtered_text, "").to_string();
+
+    // 2. Remove code blocks (```...```)
     let code_block_regex = Regex::new(r"```[\s\S]*?```").unwrap();
     filtered_text = code_block_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 2. Remove inline code (`...`)
+    // 3. Remove inline code (`...`)
     let inline_code_regex = Regex::new(r"`[^`]+`").unwrap();
     filtered_text = inline_code_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 3. Remove HTML/JSX tags
+    // 4. Remove HTML/JSX tags (excluding TTS tags which were handled above)
     let html_tag_regex = Regex::new(r"<[^>]*>").unwrap();
     filtered_text = html_tag_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 4. Remove JSX/React component syntax
+    // 5. Remove JSX/React component syntax
     let jsx_component_regex = Regex::new(r"</?[A-Z][a-zA-Z0-9]*[^>]*>").unwrap();
     filtered_text = jsx_component_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 5. Remove code-like patterns (function calls, method chaining, etc.)
+    // 6. Remove code-like patterns (function calls, method chaining, etc.)
     let function_call_regex = Regex::new(r"\w+\(\s*[^)]*\s*\)").unwrap();
     filtered_text = function_call_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 6. Remove method chaining (e.g., object.method().anotherMethod())
+    // 7. Remove method chaining (e.g., object.method().anotherMethod())
     let method_chain_regex = Regex::new(r"\w+(\.\w+)+\([^)]*\)").unwrap();
     filtered_text = method_chain_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 7. Remove property access chains (e.g., object.property.subProperty)
+    // 8. Remove property access chains (e.g., object.property.subProperty)
     let property_chain_regex = Regex::new(r"\w+(\.\w+){2,}").unwrap();
     filtered_text = property_chain_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 8. Remove file paths and URLs
+    // 9. Remove file paths and URLs
     let path_url_regex = Regex::new(r"(?:https?://|/|~/|\.\./)[\w\-_\./?=&%#]+").unwrap();
     filtered_text = path_url_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 9. Remove common programming keywords and patterns
+    // 10. Remove common programming keywords and patterns
     let programming_keywords = [
         r"\bconst\s+\w+\s*=", r"\blet\s+\w+\s*=", r"\bvar\s+\w+\s*=",
         r"\bfunction\s+\w+", r"\bclass\s+\w+", r"\binterface\s+\w+",
@@ -64,27 +89,27 @@ fn filter_tts_content(text: &str) -> String {
         filtered_text = keyword_regex.replace_all(&filtered_text, " ").to_string();
     }
 
-    // 10. Remove emojis (Unicode ranges for various emoji blocks)
+    // 11. Remove emojis (Unicode ranges for various emoji blocks)
     let emoji_regex = Regex::new(r"[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F018}-\u{1F270}]|[\u{238C}-\u{2454}]|[\u{20D0}-\u{20FF}]").unwrap();
     filtered_text = emoji_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 11. Remove mathematical expressions and formulas
+    // 12. Remove mathematical expressions and formulas
     let math_regex = Regex::new(r"\$[^$]+\$|\\[a-zA-Z]+\{[^}]*\}").unwrap();
     filtered_text = math_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 12. Remove JSON-like structures
+    // 13. Remove JSON-like structures
     let json_regex = Regex::new(r"\{[^{}]*:[^{}]*\}|\[[^\[\]]*\]").unwrap();
     filtered_text = json_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 13. Remove variable assignments and declarations
+    // 14. Remove variable assignments and declarations
     let assignment_regex = Regex::new(r"\w+\s*[:=]\s*[^,;\n]+").unwrap();
     filtered_text = assignment_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 14. Remove CSS selectors and properties
+    // 15. Remove CSS selectors and properties
     let css_regex = Regex::new(r"[.#][\w-]+\s*\{[^}]*\}|[\w-]+\s*:\s*[^;]+;").unwrap();
     filtered_text = css_regex.replace_all(&filtered_text, " ").to_string();
 
-    // 15. Clean up whitespace and normalize
+    // 16. Clean up whitespace and normalize
     let whitespace_regex = Regex::new(r"\s+").unwrap();
     filtered_text = whitespace_regex.replace_all(&filtered_text, " ").to_string();
     filtered_text = filtered_text.trim().to_string();
