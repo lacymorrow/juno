@@ -103,6 +103,9 @@ pub struct VisualToken {
     /// Connected graph information
     pub connected_tokens: Vec<u32>, // Indices of connected tokens
     pub redundancy_group: Option<u32>, // Group ID for redundant tokens
+
+    /// Universal Block Parsing (UBP) coordinates
+    pub ubp_coordinates: Option<UBPCoordinates>,
 }
 
 /// RGB color representation
@@ -135,6 +138,93 @@ pub struct DisplayBounds {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+/// Universal Block Parsing coordinates for resolving positional ambiguity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UBPCoordinates {
+    /// Block index in the flattened sequence
+    pub block_index: u32,
+    /// X coordinate within the block (0-448)
+    pub block_x: u32,
+    /// Y coordinate within the block (0-448)
+    pub block_y: u32,
+    /// Block row in 2D grid
+    pub block_row: u32,
+    /// Block column in 2D grid
+    pub block_col: u32,
+    /// Total grid dimensions
+    pub grid_width: u32,
+    pub grid_height: u32,
+}
+
+impl UBPCoordinates {
+    /// Converts UBP coordinates back to global coordinates
+    pub fn to_global_coordinates(&self, block_size: u32) -> (u32, u32) {
+        let global_x = self.block_x + (self.block_col * block_size);
+        let global_y = self.block_y + (self.block_row * block_size);
+        (global_x, global_y)
+    }
+
+    /// Creates UBP coordinates from global coordinates
+    pub fn from_global_coordinates(
+        global_x: u32,
+        global_y: u32,
+        block_size: u32,
+        grid_width: u32,
+        grid_height: u32,
+    ) -> Self {
+        let block_col = global_x / block_size;
+        let block_row = global_y / block_size;
+        let block_index = block_row * grid_width + block_col;
+        let block_x = global_x % block_size;
+        let block_y = global_y % block_size;
+
+        Self {
+            block_index,
+            block_x,
+            block_y,
+            block_row,
+            block_col,
+            grid_width,
+            grid_height,
+        }
+    }
+}
+
+/// 2D Block-wise Position Embedding for spatial relationship preservation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockPositionEmbedding {
+    /// Row embedding vector
+    pub row_embedding: Vec<f32>,
+    /// Column embedding vector
+    pub col_embedding: Vec<f32>,
+    /// Combined 2D embedding
+    pub combined_embedding: Vec<f32>,
+}
+
+impl BlockPositionEmbedding {
+    /// Creates 2D position embedding for a block
+    pub fn new(row: u32, col: u32, embedding_dim: usize) -> Self {
+        // Simple sinusoidal position encoding
+        let mut row_embedding = Vec::with_capacity(embedding_dim / 2);
+        let mut col_embedding = Vec::with_capacity(embedding_dim / 2);
+
+        for i in 0..(embedding_dim / 2) {
+            let div_term = (i as f32 * 2.0 / embedding_dim as f32).exp() * 10000.0_f32.ln();
+            row_embedding.push((row as f32 / div_term).sin());
+            col_embedding.push((col as f32 / div_term).cos());
+        }
+
+        let mut combined_embedding = row_embedding.clone();
+        combined_embedding.extend(col_embedding.clone());
+
+        Self {
+            row_embedding,
+            col_embedding,
+            combined_embedding,
+        }
+    }
 }
 
 /// Main UI Token Selector that orchestrates the token selection process
@@ -254,6 +344,131 @@ impl UITokenSelector {
         );
 
         Ok(tokenized_screenshot)
+    }
+
+    /// Processes a screenshot with Universal Block Parsing for improved grounding
+    pub async fn process_screenshot_with_ubp(
+        &self,
+        image_data: &[u8],
+        display_info: Option<DisplayInfo>,
+        block_size: u32,
+    ) -> Result<TokenizedScreenshot, TokenSelectionError> {
+        debug!("Processing screenshot with Universal Block Parsing (block_size: {})", block_size);
+
+        let start_time = std::time::Instant::now();
+
+        // Parse and validate image
+        let image = self.parse_image(image_data)?;
+        let (width, height) = image.dimensions();
+
+        // Calculate grid dimensions
+        let grid_width = (width + block_size - 1) / block_size;
+        let grid_height = (height + block_size - 1) / block_size;
+
+        debug!("Image dimensions: {}x{}, Grid: {}x{} blocks", width, height, grid_width, grid_height);
+
+        // Step 1: RGB Connected Graph Analysis with block awareness
+        let rgb_start = std::time::Instant::now();
+        let mut rgb_graph = self.rgb_analyzer
+            .analyze_with_blocks(&image, block_size, grid_width, grid_height)
+            .await
+            .map_err(|e| TokenSelectionError::RGBAnalysis(e))?;
+        let rgb_time = rgb_start.elapsed();
+
+        // Step 2: Convert to visual tokens with UBP coordinates
+        let mut tokens = self.rgb_graph_to_ubp_tokens(&rgb_graph, block_size, grid_width, grid_height)?;
+
+        // Step 3: Token reduction with UBP awareness
+        let reduction_start = std::time::Instant::now();
+        let original_count = tokens.len() as u32;
+
+        tokens = self.token_reducer
+            .reduce_tokens_with_ubp(tokens, &rgb_graph.connections, &rgb_graph.redundancy_groups)
+            .await
+            .map_err(|e| TokenSelectionError::TokenReduction(e))?;
+
+        let reduced_count = tokens.len() as u32;
+        let reduction_time = reduction_start.elapsed();
+
+        // Step 4: Display optimization
+        if let Some(display) = display_info.as_ref() {
+            tokens = self.display_optimizer
+                .optimize_tokens_with_ubp(tokens, display)
+                .await
+                .map_err(|e| TokenSelectionError::DisplayOptimization(e))?;
+        }
+
+        let total_time = start_time.elapsed();
+        let reduction_percentage = if original_count > 0 {
+            ((original_count - reduced_count) as f32 / original_count as f32) * 100.0
+        } else {
+            0.0
+        };
+
+        // Track performance
+        self.performance_tracker.record_processing_time(total_time).await;
+
+        info!(
+            "UBP processing complete: {} -> {} tokens ({:.1}% reduction) in {}ms",
+            original_count,
+            reduced_count,
+            reduction_percentage,
+            total_time.as_millis()
+        );
+
+        Ok(TokenizedScreenshot {
+            original_width: width,
+            original_height: height,
+            tokens,
+            original_token_count: original_count,
+            reduced_token_count: reduced_count,
+            reduction_percentage,
+            display_id: display_info.as_ref().map(|d| d.id),
+            display_bounds: display_info.as_ref().map(|d| d.bounds.clone()),
+            processing_time_ms: total_time.as_millis() as u64,
+            rgb_analysis_time_ms: rgb_time.as_millis() as u64,
+            token_reduction_time_ms: reduction_time.as_millis() as u64,
+        })
+    }
+
+    /// Converts RGB graph to visual tokens with UBP coordinates
+    fn rgb_graph_to_ubp_tokens(
+        &self,
+        rgb_graph: &crate::agent::tools::ui_token_selector::rgb_analyzer::RGBConnectedGraph,
+        block_size: u32,
+        grid_width: u32,
+        grid_height: u32,
+    ) -> Result<Vec<VisualToken>, TokenSelectionError> {
+        let mut tokens = Vec::new();
+
+        for node in &rgb_graph.nodes {
+            let ubp_coords = UBPCoordinates::from_global_coordinates(
+                node.x,
+                node.y,
+                block_size,
+                grid_width,
+                grid_height,
+            );
+
+            let token = VisualToken {
+                x: node.x,
+                y: node.y,
+                width: node.width.max(1),
+                height: node.height.max(1),
+                dominant_color: node.color.clone(),
+                color_variance: node.variance,
+                importance_score: node.importance,
+                token_type: node.token_type.clone(),
+                connected_tokens: node.connected_nodes.clone(),
+                redundancy_group: node.redundancy_group,
+                ubp_coordinates: Some(ubp_coords),
+            };
+
+            tokens.push(token);
+        }
+
+        debug!("Converted {} RGB nodes to UBP tokens", tokens.len());
+        Ok(tokens)
     }
 
     /// Gets current performance metrics
