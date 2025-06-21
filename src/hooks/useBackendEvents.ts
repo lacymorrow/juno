@@ -23,6 +23,11 @@ type BackendResponsePayload = {
 type StreamingTextEvent = {
     chunk: string;
     message_id?: string;
+    tts_content?: string;
+    metadata?: {
+        has_spoken_content?: boolean;
+        spoken_text?: string;
+    };
 };
 
 type StreamStartEvent = {
@@ -324,14 +329,23 @@ export function useBackendEvents({
             "agent-text-stream",
             (event) => {
                 console.log("Stream text chunk:", event.payload);
-                const { chunk, message_id } = event.payload;
+                const { chunk, message_id, tts_content } = event.payload;
 
                 setConversationWithPruning((prev) =>
                     prev.map((msg) => {
                         if (msg.messageId === message_id && msg.isStreaming) {
+                            // Collect TTS content for decorative display
+                            const existingTtsContent = msg.tts_metadata?.tts_parts || [];
+                            const newTtsContent = tts_content ? [...existingTtsContent, tts_content] : existingTtsContent;
+                            
                             return {
                                 ...msg,
                                 content: msg.content + chunk,
+                                tts_metadata: {
+                                    has_spoken_content: (msg.tts_metadata?.has_spoken_content || false) || !!tts_content,
+                                    tts_parts: newTtsContent,
+                                    total_spoken_text: newTtsContent.join(' ')
+                                }
                             };
                         }
                         return msg;

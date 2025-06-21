@@ -1071,7 +1071,12 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
 pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>, tts_content: Option<String>) {
     let event_data = serde_json::json!({
         "chunk": text,
-        "message_id": message_id
+        "message_id": message_id,
+        "tts_content": tts_content, // Include TTS content for decorative display
+        "metadata": {
+            "has_spoken_content": tts_content.is_some(),
+            "spoken_text": tts_content.clone()
+        }
     });
 
     if let Err(e) = app_handle.emit(crate::constants::events::streaming::TEXT_STREAM, event_data) {
