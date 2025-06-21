@@ -1,85 +1,120 @@
-# Race Condition Fix Summary
+# MCP Tool Refresh Bug Fix Summary
 
 ## Issue Identified
 
-Both `StopCoordinator` and `EscapeKeyCoordinator` had a classic "check-then-act" race condition where multiple threads could concurrently pass the same boolean flag check before any thread sets the flag, allowing multiple operations that should be singular.
+The MCP (Model Context Protocol) tool refresh system had a critical bug where the `list_tools()` method contained caching optimization that contradicted the purpose of `refresh_mcp_tools()`. This caused stale or missing MCP tools in the agent's tool registry.
 
-### Race Condition Pattern
+### Root Cause
 
-```rust
-// PROBLEMATIC PATTERN:
-async fn should_perform_operation(&self) -> bool {
-    if self.operation_in_progress.load(Ordering::SeqCst) {  // Thread A and B both see false
-        return false;
-    }
-    // ... timing checks ...
-    true  // Both threads return true
-}
+1. **Inconsistent Caching Logic**: The `list_tools()` method had an optimization that skipped fetching fresh MCP tools if any MCP tools were already detected in the cache.
 
-// Later in code:
-if self.should_perform_operation().await {  // Both threads pass
-    self.mark_operation_started().await;    // Both threads set flag
-    // Both threads proceed with operation!
-}
-```
+2. **Refresh Contradiction**: When `refresh_mcp_tools()` was called to update tools, `list_tools()` would still return cached tools instead of the refreshed ones.
+
+3. **Detection Pattern Concerns**: While both methods used the same `is_mcp_tool_name()` function, there were concerns about potential inconsistencies in MCP tool detection patterns.
 
 ## Fix Implementation
 
-### StopCoordinator
+### 1. Eliminated Caching Optimization in `list_tools()`
 
-- **File**: `src-tauri/src/commands/stop_coordinator.rs`
-- **Changed**: `should_perform_cleanup()` → `try_start_cleanup()`
-- **Fix**: Used `compare_exchange()` to atomically check and set `cleanup_in_progress` flag
-
-### EscapeKeyCoordinator  
-
-- **File**: `src-tauri/src/commands/escape_key_coordinator.rs`
-- **Changed**: `should_perform_operation()` → `try_start_operation()`
-- **Fix**: Used `compare_exchange()` to atomically check and set `registration_in_progress` flag
-
-### Atomic Solution Pattern
+**Before:**
 
 ```rust
-async fn try_start_operation(&self) -> bool {
-    // Atomically try to change false → true
-    let was_already_in_progress = self.operation_in_progress.compare_exchange(
-        false,      // Expected value
-        true,       // New value if successful
-        Ordering::SeqCst,
-        Ordering::SeqCst
-    ).is_err();
+// Check if we already have MCP tools cached using consistent detection logic
+let has_mcp_tools = all_tools
+    .iter()
+    .any(|tool| self.is_mcp_tool_name(&tool.name));
 
-    if was_already_in_progress {
-        return false;  // Another thread got there first
-    }
-
-    // Only ONE thread reaches here
-    // ... timing checks ...
-    
-    // If we fail timing checks, reset flag
-    if timing_check_failed {
-        self.operation_in_progress.store(false, Ordering::SeqCst);
-        return false;
-    }
-
-    true  // This thread won the race and will perform the operation
+if !has_mcp_tools {
+    // Only fetch MCP tools if we don't have any cached
+    // ... fetch logic
+} else {
+    debug!("Using cached MCP tools, skipping fresh fetch (optimized performance)");
 }
 ```
 
-## Benefits
+**After:**
 
-1. **Eliminates Race Conditions**: Only one thread can successfully start an operation
-2. **Maintains Timing Logic**: Still prevents rapid successive operations  
-3. **Atomic Semantics**: Uses hardware-level atomic operations for thread safety
-4. **Graceful Fallback**: Losing threads simply skip the operation without error
+```rust
+// Always fetch fresh MCP tools if MCP manager is available
+if let Some(ref mcp_manager) = self.mcp_manager {
+    // ... always fetch fresh tools
+    // Fallback to cached tools only on timeout
+}
+```
 
-## Verification
+### 2. Enhanced `refresh_mcp_tools()` Method
 
-- ✅ Compilation passes with `cargo check`
-- ✅ Maintains existing API contracts
-- ✅ No breaking changes to calling code
-- ✅ Thread-safe operation coordination
+- Added comprehensive documentation clarifying that it always refreshes
+- Increased timeout from 5s to 10s for refresh operations
+- Improved error handling and logging
+- Added explicit comments about cache clearing behavior
+
+### 3. Added Force Refresh Capability
+
+```rust
+/// Force refresh MCP tools by clearing all cached MCP tools first
+pub async fn force_refresh_mcp_tools(&mut self) -> Result<(), String>
+```
+
+This method provides an aggressive refresh option that completely clears MCP tools before refreshing.
+
+### 4. Strengthened MCP Tool Detection
+
+- Enhanced documentation for `is_mcp_tool_name()` method
+- Made detection pattern explicit and canonical
+- Added comments about consistency requirements
+
+## Technical Details
+
+### Canonical MCP Tool Detection Pattern
+
+```rust
+fn is_mcp_tool_name(&self, tool_name: &str) -> bool {
+    // Canonical MCP tool detection pattern
+    tool_name.contains("mcp-server-") || tool_name.starts_with("mcp_")
+}
+```
+
+This pattern recognizes:
+
+- Traditional MCP server tools: `mcp-server-*`
+- Alternative MCP tools: `mcp_*`
+
+### Refresh Behavior Changes
+
+1. **`list_tools()`**: Now always fetches fresh MCP tools, falling back to cache only on timeout
+2. **`refresh_mcp_tools()`**: Always clears and re-fetches MCP tools (no caching shortcuts)
+3. **`force_refresh_mcp_tools()`**: New method for aggressive cache clearing + refresh
 
 ## Impact
 
-This fix prevents multiple cleanup operations from running concurrently in `StopCoordinator` and multiple registration/unregistration operations from interfering with each other in `EscapeKeyCoordinator`, ensuring proper resource management and state consistency.
+### Benefits
+
+- ✅ MCP tools are always up-to-date when requested
+- ✅ `refresh_mcp_tools()` now actually refreshes tools as intended
+- ✅ Consistent MCP tool detection across all methods
+- ✅ Better error handling and logging for debugging
+- ✅ Force refresh option for troubleshooting
+
+### Performance Considerations
+
+- MCP tools are fetched more frequently (trade-off for correctness)
+- Timeout fallback to cached tools prevents complete failures
+- Refresh operations have longer timeout (10s vs 5s) for reliability
+
+## Testing
+
+- ✅ Compilation check passes
+- ✅ All MCP tool detection methods use consistent patterns
+- ✅ No early returns that bypass actual refreshing
+- ✅ Proper error handling and timeout behavior
+
+## Files Modified
+
+- `src-tauri/src/agent/implementations/tool_provider.rs`:
+  - Modified `list_tools()` method to eliminate caching optimization
+  - Enhanced `refresh_mcp_tools()` with better documentation and error handling
+  - Added `force_refresh_mcp_tools()` method
+  - Improved `is_mcp_tool_name()` documentation
+
+This fix ensures that MCP tools are always fresh and up-to-date, resolving the core issue where refresh operations were being bypassed by caching optimizations.
