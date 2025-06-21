@@ -416,16 +416,6 @@ pub async fn register_desktop_tools(
     _state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) {
-    use crate::agent::tools::tool_registration_cache::get_tool_registration_cache;
-
-    let cache = get_tool_registration_cache();
-
-    // Check if desktop tools are already registered
-    if cache.are_desktop_tools_registered() {
-        debug!("Desktop tools already registered, skipping registration");
-        return;
-    }
-
     info!("Registering desktop tools...");
 
     // --- Element Tools ---
@@ -1556,9 +1546,6 @@ pub async fn register_desktop_tools(
     info!("Registered compound tool: copy_to_clipboard_and_paste");
 
     info!("All compound tools registered successfully.");
-
-    // Mark desktop tools as registered in cache
-    cache.mark_desktop_tools_registered();
 
     info!("Desktop tool registration completed.");
 }
