@@ -262,6 +262,47 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 **Total**: 51 production-ready commands with comprehensive documentation
 
+## 🎤 Voice System Architecture
+
+### Complete Three-Mode Voice System
+
+- **Agent Mode**: Option+D (Alt+D) - Voice → AI Agent Processing → Computer Actions
+- **Dictation Mode**: Configurable key - Voice → Direct Text Insertion
+- **Always Listening**: Background wake word detection and intent monitoring
+- **XML-Based TTS Separation**: Advanced streaming TTS content extraction for optimal voice experience
+
+#### XML-Based TTS Separation (Advanced)
+
+**Real-Time Content Processing**: The system uses sophisticated XML parsing during response streaming to extract spoken content immediately:
+
+```xml
+<TTS>Content to be spoken aloud</TTS>
+Text outside tags is displayed but NOT spoken
+```
+
+**Key Benefits**:
+
+- **Zero Latency**: TTS processing begins immediately when tags are detected
+- **Parallel Processing**: Audio generation doesn't block response streaming  
+- **Optimal UX**: Users hear responses while text continues displaying
+- **Flexible Content**: Mix spoken and display-only content seamlessly
+
+**Technical Implementation**: Character-by-character XML parser in streaming responses (`src-tauri/src/agent/providers/anthropic.rs`) with immediate TTS event emission for parallel audio processing.
+
+### Voice Integration
+
+- **Frontend**: Event-driven voice state management via VoiceContext
+- **Backend**: Three separate controllers with unified state management
+- **Audio**: Whisper.cpp for transcription, multiple TTS providers
+- **Security**: Local processing, no cloud transmission for Always Listening
+
+### Performance Optimizations
+
+- **Streaming Voice Responses**: XML-based TTS separation for immediate audio feedback
+- **Smart Cancellation**: Intelligent dictation commitment vs passthrough
+- **Resource Management**: Efficient model loading and memory management
+- **State Synchronization**: Arc-based sharing with comprehensive error handling
+
 ---
 
 **This documentation index provides complete access to all critical information for the Juno AI Computer Use Agent, organized for maximum efficiency and clarity.**
