@@ -36,6 +36,8 @@ pub mod memory;
 pub mod always_listening;
 pub mod notifications;
 pub mod stop_operations;
+pub mod stop_coordinator;
+pub mod escape_key_coordinator;
 pub mod onboarding;
 pub mod settings;
 pub mod tray_commands;

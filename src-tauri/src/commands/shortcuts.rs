@@ -377,78 +377,21 @@ fn get_shortcut_display_name_for_validation(shortcut_name: &str) -> &str {
 }
 
 /// Register the escape key for cancellation (only when something can be cancelled)
+/// This function now delegates to the centralized escape key coordinator
 pub async fn register_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
+    info!("[EscapeKey] Register escape key handler requested - delegating to coordinator");
 
-    // Increment the user count atomically
-    let user_count = ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst) + 1;
-    info!("[EscapeKey] Registering escape key handler, user count: {}", user_count);
-
-    // Only register if not already registered
-    if !ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
-        let escape_shortcut = Shortcut::new(None, Code::Escape);
-        match app_handle.global_shortcut().register(escape_shortcut) {
-            Ok(()) => {
-                ESCAPE_KEY_REGISTERED.store(true, Ordering::SeqCst);
-                info!("[EscapeKey] Successfully registered escape key for cancellation (users: {})", user_count);
-            },
-            Err(e) => {
-                // Rollback user count on failure
-                ESCAPE_KEY_USERS.fetch_sub(1, Ordering::SeqCst);
-                error!("[EscapeKey] Failed to register escape key shortcut: {} - This may be due to missing Input Monitoring permissions", e);
-                return Err(format!("Failed to register escape key: {}", e));
-            }
-        }
-    } else {
-        info!("[EscapeKey] Escape key already registered, increased user count to: {}", user_count);
-    }
-
-    Ok(())
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    coordinator.register_escape_user(&app_handle, "legacy_shortcut_handler").await
 }
 
 /// Unregister the escape key (when nothing needs to be cancelled)
+/// This function now delegates to the centralized escape key coordinator
 pub async fn unregister_escape_key_handler(app_handle: AppHandle) -> Result<(), String> {
-    use std::sync::atomic::Ordering;
+    info!("[EscapeKey] Unregister escape key handler requested - delegating to coordinator");
 
-    // Atomically decrement the user count, preventing underflow
-    let user_count = ESCAPE_KEY_USERS.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-        if current > 0 {
-            Some(current - 1)
-        } else {
-            None
-        }
-    });
-
-    match user_count {
-        Ok(previous_count) => {
-            let new_count = previous_count - 1;
-            info!("[EscapeKey] Unregistering escape key handler, user count: {} -> {}", previous_count, new_count);
-
-            // Only unregister if no more users and currently registered
-            if new_count == 0 && ESCAPE_KEY_REGISTERED.load(Ordering::SeqCst) {
-                let escape_shortcut = Shortcut::new(None, Code::Escape);
-                match app_handle.global_shortcut().unregister(escape_shortcut) {
-                    Ok(()) => {
-                        ESCAPE_KEY_REGISTERED.store(false, Ordering::SeqCst);
-                        info!("[EscapeKey] Successfully unregistered escape key - no more active users");
-                    },
-                    Err(e) => {
-                        // Rollback user count on failure
-                        ESCAPE_KEY_USERS.fetch_add(1, Ordering::SeqCst);
-                        warn!("[EscapeKey] Failed to unregister escape key shortcut: {} - rolling back user count", e);
-                        // Don't return error for unregistration failures as it's not critical
-                    }
-                }
-            } else {
-                info!("[EscapeKey] Escape key still has {} users, keeping registered", new_count);
-            }
-        },
-        Err(_) => {
-            warn!("[EscapeKey] Attempted to unregister escape key with zero users");
-        }
-    }
-
-    Ok(())
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    coordinator.unregister_escape_user(&app_handle, "legacy_shortcut_handler").await
 }
 
 /// Get current escape key registration status (for debugging)
@@ -461,30 +404,13 @@ fn get_escape_key_status_internal() -> (bool, u32) {
 }
 
 /// Get current escape key registration status (for debugging) - Tauri command
+/// This function now delegates to the centralized escape key coordinator
 #[tauri::command]
 pub async fn get_escape_key_status() -> Result<serde_json::Value, String> {
-    let (is_registered, user_count) = get_escape_key_status_internal();
-    let description = if user_count == 0 {
-        "Escape key is not registered - passes through to other apps".to_string()
-    } else if user_count == 1 {
-        if is_registered {
-            "Escape key is registered for 1 user (agent or dictation)".to_string()
-        } else {
-            "ERROR: 1 user but not registered".to_string()
-        }
-    } else {
-        if is_registered {
-            format!("Escape key is registered for {} users (agent and dictation)", user_count)
-        } else {
-            format!("ERROR: {} users but not registered", user_count)
-        }
-    };
+    info!("[EscapeKey] Get escape key status requested - delegating to coordinator");
 
-    Ok(serde_json::json!({
-        "escape_key_registered": is_registered,
-        "user_count": user_count,
-        "description": description
-    }))
+    let coordinator = crate::commands::escape_key_coordinator::get_escape_key_coordinator();
+    Ok(coordinator.get_status().await)
 }
 
 /// Register global shortcuts with proper error handling for missing permissions
