@@ -1154,7 +1154,6 @@ impl Orchestrator {
     /// NEW: Analyze and split complex tasks with safe UTF-8 handling
     async fn analyze_and_split_task(&self, task: &Task) -> Result<Vec<Task>, AgentError> {
         let description = &task.description;
-        let description_lower = description.to_lowercase();
 
         // Keywords that indicate splittable tasks
         let split_indicators = [
@@ -1166,15 +1165,26 @@ impl Orchestrator {
             "furthermore",
         ];
 
-        // Find split points using character positions (UTF-8 safe)
+        // Find split points using case-insensitive matching directly on original string
         let mut split_info = Vec::new();
+        let chars: Vec<char> = description.chars().collect();
 
         for indicator in &split_indicators {
-            if let Some(byte_pos) = description_lower.find(indicator) {
-                // Convert byte position to character position (UTF-8 safe)
-                let char_pos = description_lower[..byte_pos].chars().count();
-                let keyword_char_len = indicator.chars().count();
-                split_info.push((char_pos, keyword_char_len));
+            let indicator_chars: Vec<char> = indicator.chars().collect();
+
+            // Case-insensitive search in original string
+            for i in 0..=chars.len().saturating_sub(indicator_chars.len()) {
+                let window = &chars[i..i + indicator_chars.len()];
+
+                // Compare case-insensitively
+                let matches = window.iter()
+                    .zip(indicator_chars.iter())
+                    .all(|(c1, c2)| c1.to_lowercase().eq(c2.to_lowercase()));
+
+                if matches {
+                    split_info.push((i, indicator_chars.len()));
+                    break; // Only find first occurrence of each indicator
+                }
             }
         }
 
@@ -1187,7 +1197,6 @@ impl Orchestrator {
         split_info.sort_by_key(|(pos, _)| *pos);
 
         let mut subtasks = Vec::new();
-        let chars: Vec<char> = description.chars().collect(); // UTF-8 safe character collection
         let mut current_start = 0;
 
         // Process each segment
