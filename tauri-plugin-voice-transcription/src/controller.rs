@@ -53,6 +53,23 @@ impl VoiceController {
         })
     }
 
+    /// Create a VoiceController using a pre-loaded shared WhisperContext
+    /// This eliminates duplicate model loading when multiple controllers need the same model
+    pub fn new_with_shared_context(model_path_str: &str, shared_context: Arc<WhisperContext>) -> Result<Self> {
+        info!("[VoiceController] Creating controller with shared Whisper context (no model reload)");
+
+        Ok(Self {
+            ctx: Some(shared_context),
+            model_path: model_path_str.to_string(),
+            is_dictating: false,
+            audio_thread: None,
+            last_processed_audio_buffer: Arc::new(Mutex::new(None)),
+            actual_recording_sample_rate: Arc::new(Mutex::new(None)),
+            is_initialized: true,
+            initialization_error: None,
+        })
+    }
+
     /// Create an uninitialized controller that can be managed by Tauri but will return errors for operations
     pub fn new_uninitialized(model_path_str: &str, error_message: String) -> Self {
         Self {
@@ -75,6 +92,34 @@ impl VoiceController {
     /// Get the initialization error if any
     pub fn get_initialization_error(&self) -> Option<&String> {
         self.initialization_error.as_ref()
+    }
+
+    /// Update the shared Whisper context and model path for this controller
+    /// This allows updating the model without recreating the entire controller
+    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<WhisperContext>) -> Result<()> {
+        info!("[VoiceController] Updating shared Whisper context with new model: {}", model_path);
+
+        // Stop dictation if it's currently active
+        let was_dictating = self.is_dictating;
+        if was_dictating {
+            info!("[VoiceController] Stopping dictation before model update");
+            self.stop_dictation()?;
+        }
+
+        // Update the model path and shared context
+        self.model_path = model_path.to_string();
+        self.ctx = Some(shared_context);
+        self.is_initialized = true;
+        self.initialization_error = None;
+
+        info!("[VoiceController] Successfully updated shared Whisper context (no model reload needed)");
+
+        // If it was dictating before, we'll let the caller decide whether to restart
+        if was_dictating {
+            info!("[VoiceController] Controller was dictating before update - caller should restart if needed");
+        }
+
+        Ok(())
     }
 
     /// Helper method to check initialization before performing operations

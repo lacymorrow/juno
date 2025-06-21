@@ -109,6 +109,26 @@ impl AlwaysListeningController {
         })
     }
 
+    /// Create an AlwaysListeningController using a pre-loaded shared WhisperContext
+    /// This eliminates duplicate model loading when multiple controllers need the same model
+    pub fn new_with_shared_context(model_path_str: &str, shared_context: Arc<WhisperContext>) -> Result<Self> {
+        info!("[AlwaysListeningController] Creating controller with shared Whisper context (no model reload)");
+
+        Ok(Self {
+            shared_whisper_context: Some(shared_context),
+            model_path: model_path_str.to_string(),
+            is_active: false,
+            state: AlwaysListeningState::Monitoring,
+            audio_thread: None,
+            sensitivity: 0.5,
+            wake_words: vec!["hey juno".to_string(), "juno".to_string(), "joono".to_string(), "computer".to_string(), "hey computer".to_string()],
+            last_activity: Arc::new(Mutex::new(None)),
+            agent_call_timestamps: Arc::new(Mutex::new(Vec::new())),
+            last_meaningful_command: Arc::new(Mutex::new(None)),
+            command_processing_count: Arc::new(Mutex::new(0)),
+        })
+    }
+
     pub fn start_always_listening<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
         if self.is_active {
             return Ok(()); // Already active
@@ -1030,6 +1050,33 @@ impl AlwaysListeningController {
 
     pub fn get_wake_words(&self) -> Vec<String> {
         self.wake_words.clone()
+    }
+
+    /// Update the shared Whisper context and model path for this controller
+    /// This allows updating the model without recreating the entire controller
+    pub fn update_shared_context(&mut self, model_path: &str, shared_context: Arc<WhisperContext>) -> Result<()> {
+        info!("[AlwaysListeningController] Updating shared Whisper context with new model: {}", model_path);
+
+        // Stop the controller if it's currently active
+        let was_active = self.is_active;
+        if was_active {
+            info!("[AlwaysListeningController] Stopping controller before model update");
+            self.stop_always_listening()?;
+        }
+
+        // Update the model path and shared context
+        self.model_path = model_path.to_string();
+        self.shared_whisper_context = Some(shared_context);
+
+        info!("[AlwaysListeningController] Successfully updated shared Whisper context (no model reload needed)");
+
+        // If it was active before, we'll let the caller decide whether to restart it
+        // This gives more control over the restart timing
+        if was_active {
+            info!("[AlwaysListeningController] Controller was active before update - caller should restart if needed");
+        }
+
+        Ok(())
     }
 
     // Enhanced Debugging Methods

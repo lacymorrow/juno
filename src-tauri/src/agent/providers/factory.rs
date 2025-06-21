@@ -633,68 +633,61 @@ impl BrainFactory {
         }
     }
 
-    /// Register all available computer use tools for the agent
+        /// Register all available computer use tools for the agent
     pub async fn register_computer_use_tools(
         provider: &mut LocalToolProvider,
         app_handle: tauri::AppHandle,
     ) -> Result<(), String> {
-        info!("🔧 Registering Computer Use tools (checking for duplicates)...");
+        info!("🔧 Registering Computer Use tools (race-condition safe)...");
 
-        // Use a static flag to prevent duplicate registrations
-        use std::sync::Once;
-        static TOOLS_REGISTERED: Once = Once::new();
+        // Use a global mutex to ensure that only one thread can register tools at a time
+        // This prevents race conditions where multiple threads try to register the same tools simultaneously
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
 
-        let mut already_registered = false;
-        TOOLS_REGISTERED.call_once(|| {
-            already_registered = false; // First time registration
-        });
-
-        if already_registered {
-            info!("🔧 Tools already registered, skipping duplicate registration");
-            return Ok(());
+        lazy_static::lazy_static! {
+            static ref TOOL_REGISTRATION_MUTEX: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
         }
 
-        info!("🔧 No existing tools found, proceeding with registration...");
+        // Acquire the lock to ensure exclusive access to tool registration
+        let _lock = TOOL_REGISTRATION_MUTEX.lock().await;
+
+        info!("🔧 Acquired tool registration lock, proceeding with registration...");
 
         // Get the app state for MCP manager integration
         let state_manager = app_handle.state::<AppState>();
 
-        // Set up MCP manager in the tool provider
+        // Set up MCP manager in the tool provider (per-provider instance)
         let mcp_manager = state_manager.get_mcp_manager().await;
         provider.set_mcp_manager(mcp_manager);
 
-        // Register the official Anthropic Computer Use tools
+        // Register the official Anthropic Computer Use tools (per-provider instance)
         register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
 
-        // Register additional desktop automation tools (your existing ones)
+        // Register additional desktop automation tools (per-provider instance)
         crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
 
-        // Register timer tools for agent task scheduling and resumption
+        // Register timer tools for agent task scheduling and resumption (per-provider instance)
         crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
-        // Register self-awareness and introspection tools (development mode only)
+        // Register self-awareness and introspection tools (per-provider instance, development mode only)
         crate::agent::tools::register_self_awareness_tools(provider).await;
 
-        // Use singleton initialization for MCP servers to prevent accumulation
-        if let Err(e) = state_manager.initialize_mcp_servers_once().await {
-            warn!("Failed to initialize MCP servers: {}", e);
-        } else {
-            info!("MCP servers initialized successfully");
-        }
+        // MCP tools are handled separately and loaded only when needed:
+        // 1. At app startup (state_management.rs)
+        // 2. When MCP configuration changes (via commands/mcp.rs)
+        // 3. When explicitly refreshed by user action
 
-        // Refresh MCP tools to include them in the provider
+        // Simply refresh MCP tools from cache (fast operation if already loaded)
         if let Err(e) = provider.refresh_mcp_tools().await {
-            warn!("Failed to refresh MCP tools: {}", e);
+            warn!("Failed to refresh MCP tools from cache: {}", e);
         } else {
-            info!("MCP tools refreshed and available");
+            info!("MCP tools refreshed from cache (no network calls)");
         }
 
-        // Sync MCP tools with configuration
-        if let Err(e) = state_manager.sync_mcp_tools().await {
-            warn!("Failed to sync MCP tools with configuration: {}", e);
-        }
+        info!("✅ Computer Use tools registered successfully for provider instance");
 
-        info!("✅ All Computer Use tools registered successfully (including MCP tools) - total: {}", "[tools registered]");
+        // Lock is automatically released when _lock goes out of scope
         Ok(())
     }
 }

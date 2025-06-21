@@ -381,8 +381,25 @@ pub async fn handle_agent_execution_state_transition(
 }
 
 /// Handle state cleanup for emergency stop situations
+/// Now integrates with the stop coordinator to prevent redundant cleanup operations
 pub async fn handle_emergency_state_cleanup(app_handle: &AppHandle) -> Result<(), String> {
-    info!("[State] Performing emergency state cleanup...");
+    // Check with stop coordinator to see if cleanup is already in progress
+    let stop_coordinator = crate::commands::stop_coordinator::get_stop_coordinator();
+
+    // Use the stop coordinator to handle the emergency cleanup
+    if let Err(e) = stop_coordinator.stop_all_operations(app_handle, "emergency_state_cleanup").await {
+        warn!("[State] Stop coordinator failed emergency cleanup: {}", e);
+        // Fall back to direct cleanup if coordinator fails
+        perform_direct_emergency_cleanup(app_handle).await
+    } else {
+        info!("[State] Emergency state cleanup delegated to stop coordinator");
+        Ok(())
+    }
+}
+
+/// Direct emergency cleanup (fallback when coordinator fails)
+async fn perform_direct_emergency_cleanup(app_handle: &AppHandle) -> Result<(), String> {
+    info!("[State] Performing direct emergency state cleanup...");
 
     let app_state = app_handle.state::<AppState>();
 
@@ -425,7 +442,7 @@ pub async fn handle_emergency_state_cleanup(app_handle: &AppHandle) -> Result<()
         Some("All operations stopped.".to_string())
     ).await;
 
-    info!("[State] Emergency state cleanup completed");
+    info!("[State] Direct emergency state cleanup completed");
     Ok(())
 }
 
