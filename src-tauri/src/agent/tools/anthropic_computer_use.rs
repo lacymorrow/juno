@@ -5,12 +5,50 @@
 use crate::agent::structs::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::tools::ui_token_selector::{UITokenSelector, TokenSelectionConfig};
+use crate::agent::tools::universal_block_parser::{UniversalBlockParser, UBPConfig, UBPResult, BlockCoordinates};
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use serde_json::{json, Value};
 use tauri::Manager;
 use tracing::{info, warn, debug};
 use base64::{Engine as _, engine::general_purpose};
+use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use once_cell::sync::Lazy;
+
+// Global cache for UBP results to enable coordinate conversion
+static UBP_CACHE: Lazy<Arc<RwLock<HashMap<String, UBPResult>>>> =
+    Lazy::new(|| Arc::new(RwLock::new(HashMap::new())));
+
+/// Stores UBP result in cache for coordinate conversion
+fn cache_ubp_result(key: String, result: UBPResult) {
+    if let Ok(mut cache) = UBP_CACHE.write() {
+        cache.insert(key, result);
+        debug!("Cached UBP result for key: {}", key);
+    }
+}
+
+/// Retrieves UBP result from cache
+fn get_cached_ubp_result(key: &str) -> Option<UBPResult> {
+    if let Ok(cache) = UBP_CACHE.read() {
+        cache.get(key).cloned()
+    } else {
+        None
+    }
+}
+
+/// Converts block coordinates to global coordinates using cached UBP result
+fn convert_block_to_global_coordinates(
+    block_coordinates: &BlockCoordinates,
+    ubp_cache_key: &str
+) -> Result<(f64, f64), String> {
+    let ubp_result = get_cached_ubp_result(ubp_cache_key)
+        .ok_or_else(|| "UBP result not found in cache".to_string())?;
+
+    let parser = UniversalBlockParser::new();
+    parser.block_to_global_coordinates(&ubp_result, block_coordinates)
+        .map_err(|e| e.to_string())
+}
 
 // Computer Use Tool for Anthropic Claude
 // Based on official specification: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
@@ -130,11 +168,12 @@ fn verify_ready_for_text_input(state_manager: &AppState) -> Result<bool, String>
 
 /// Enhanced screenshot capture with UI-Guided Visual Token Selection
 /// Reduces computational costs by 33% while maintaining accuracy
-async fn capture_screenshot_with_token_selection(
+async fn capture_screenshot_with_advanced_processing(
     app_handle: &tauri::AppHandle,
     window_id: Option<&str>,
     use_focused_window: bool,
     enable_token_selection: bool,
+    enable_ubp: bool,
 ) -> Result<Value, String> {
     // Capture screenshot using existing methods
     let screenshot_result = if use_focused_window {
@@ -204,7 +243,67 @@ async fn capture_screenshot_with_token_selection(
                                     processed_result.reduction_percentage
                                 );
 
-                                // Return original image with token selection metadata
+                                // Apply Universal Block Parsing if enabled
+                                let ubp_result = if enable_ubp {
+                                    debug!("Applying Universal Block Parsing (UBP) to screenshot");
+
+                                    let ubp_config = UBPConfig::default();
+                                    let ubp_parser = UniversalBlockParser::new_with_config(ubp_config);
+
+                                    match ubp_parser {
+                                        Ok(parser) => {
+                                            match parser.parse_screenshot(&image_bytes).await {
+                                                                                                Ok(ubp_result) => {
+                                                    info!(
+                                                        "UBP applied: {}x{} image parsed into {} blocks with {} UI elements in {}ms",
+                                                        ubp_result.original_size.0,
+                                                        ubp_result.original_size.1,
+                                                        ubp_result.stats.total_blocks,
+                                                        ubp_result.stats.total_elements,
+                                                        ubp_result.stats.processing_time_ms
+                                                    );
+
+                                                    // Cache UBP result for coordinate conversion
+                                                    let cache_key = format!("screenshot_{}x{}", ubp_result.original_size.0, ubp_result.original_size.1);
+                                                    cache_ubp_result(cache_key.clone(), ubp_result.clone());
+
+                                                    Some(json!({
+                                                        "enabled": true,
+                                                        "cache_key": cache_key,
+                                                        "grid_size": {
+                                                            "rows": ubp_result.grid_size.0,
+                                                            "cols": ubp_result.grid_size.1
+                                                        },
+                                                        "total_blocks": ubp_result.stats.total_blocks,
+                                                        "total_elements": ubp_result.stats.total_elements,
+                                                        "avg_elements_per_block": ubp_result.stats.avg_elements_per_block,
+                                                        "processing_time_ms": ubp_result.stats.processing_time_ms,
+                                                        "memory_usage_bytes": ubp_result.stats.memory_usage_bytes,
+                                                        "coordinate_mappings": ubp_result.coordinate_mapping.len()
+                                                    }))
+                                                }
+                                                Err(e) => {
+                                                    warn!("UBP failed, continuing without block parsing: {}", e);
+                                                    Some(json!({
+                                                        "enabled": false,
+                                                        "error": e.to_string()
+                                                    }))
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!("Failed to create UBP parser: {}", e);
+                                            Some(json!({
+                                                "enabled": false,
+                                                "error": e.to_string()
+                                            }))
+                                        }
+                                    }
+                                } else {
+                                    Some(json!({"enabled": false}))
+                                };
+
+                                // Return original image with both token selection and UBP metadata
                                 Ok(json!({
                                     "type": "image",
                                     "data": base64_image, // Use original base64 image
@@ -226,7 +325,8 @@ async fn capture_screenshot_with_token_selection(
                                             "bounds": processed_result.display_bounds
                                         },
                                         "token_count": processed_result.tokens.len()
-                                    }
+                                    },
+                                    "universal_block_parsing": ubp_result
                                 }))
                             }
                             Err(e) => {
@@ -239,7 +339,8 @@ async fn capture_screenshot_with_token_selection(
                                     "token_selection": {
                                         "enabled": false,
                                         "error": e.to_string()
-                                    }
+                                    },
+                                    "universal_block_parsing": {"enabled": false}
                                 }))
                             }
                         }
@@ -254,19 +355,111 @@ async fn capture_screenshot_with_token_selection(
                             "token_selection": {
                                 "enabled": false,
                                 "error": e.to_string()
+                            },
+                            "universal_block_parsing": {"enabled": false}
+                        }))
+                    }
+                }
+            } else if enable_ubp {
+                // Apply only Universal Block Parsing without token selection
+                debug!("Applying Universal Block Parsing (UBP) to screenshot without token selection");
+
+                // Decode base64 to bytes for UBP processing
+                let image_bytes = match general_purpose::STANDARD.decode(&base64_image) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        warn!("Failed to decode base64 image for UBP: {}", e);
+                        return Ok(json!({
+                            "type": "image",
+                            "data": base64_image,
+                            "format": "png",
+                            "token_selection": {"enabled": false},
+                            "universal_block_parsing": {
+                                "enabled": false,
+                                "error": format!("Base64 decode error: {}", e)
+                            }
+                        }));
+                    }
+                };
+
+                let ubp_config = UBPConfig::default();
+                let ubp_parser = UniversalBlockParser::new_with_config(ubp_config);
+
+                match ubp_parser {
+                    Ok(parser) => {
+                        match parser.parse_screenshot(&image_bytes).await {
+                            Ok(ubp_result) => {
+                                info!(
+                                    "UBP applied: {}x{} image parsed into {} blocks with {} UI elements in {}ms",
+                                    ubp_result.original_size.0,
+                                    ubp_result.original_size.1,
+                                    ubp_result.stats.total_blocks,
+                                    ubp_result.stats.total_elements,
+                                    ubp_result.stats.processing_time_ms
+                                );
+
+                                // Cache UBP result for coordinate conversion
+                                let cache_key = format!("screenshot_{}x{}", ubp_result.original_size.0, ubp_result.original_size.1);
+                                cache_ubp_result(cache_key.clone(), ubp_result.clone());
+
+                                Ok(json!({
+                                    "type": "image",
+                                    "data": base64_image,
+                                    "format": "png",
+                                    "token_selection": {"enabled": false},
+                                    "universal_block_parsing": {
+                                        "enabled": true,
+                                        "cache_key": cache_key,
+                                        "grid_size": {
+                                            "rows": ubp_result.grid_size.0,
+                                            "cols": ubp_result.grid_size.1
+                                        },
+                                        "total_blocks": ubp_result.stats.total_blocks,
+                                        "total_elements": ubp_result.stats.total_elements,
+                                        "avg_elements_per_block": ubp_result.stats.avg_elements_per_block,
+                                        "processing_time_ms": ubp_result.stats.processing_time_ms,
+                                        "memory_usage_bytes": ubp_result.stats.memory_usage_bytes,
+                                        "coordinate_mappings": ubp_result.coordinate_mapping.len()
+                                    }
+                                }))
+                            }
+                            Err(e) => {
+                                warn!("UBP failed, falling back to original screenshot: {}", e);
+                                Ok(json!({
+                                    "type": "image",
+                                    "data": base64_image,
+                                    "format": "png",
+                                    "token_selection": {"enabled": false},
+                                    "universal_block_parsing": {
+                                        "enabled": false,
+                                        "error": e.to_string()
+                                    }
+                                }))
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to create UBP parser: {}", e);
+                        Ok(json!({
+                            "type": "image",
+                            "data": base64_image,
+                            "format": "png",
+                            "token_selection": {"enabled": false},
+                            "universal_block_parsing": {
+                                "enabled": false,
+                                "error": e.to_string()
                             }
                         }))
                     }
                 }
             } else {
-                // Return original screenshot without token selection
+                // Return original screenshot without any processing
                 Ok(json!({
                     "type": "image",
                     "data": base64_image,
                     "format": "png",
-                    "token_selection": {
-                        "enabled": false
-                    }
+                    "token_selection": {"enabled": false},
+                    "universal_block_parsing": {"enabled": false}
                 }))
             }
         }
@@ -352,6 +545,11 @@ pub async fn register_anthropic_computer_use_tools(
                     "type": "boolean",
                     "description": "When true, applies UI-Guided Visual Token Selection to reduce computational costs by 33% while maintaining accuracy. Only affects screenshot actions.",
                     "default": false
+                },
+                "enable_ubp": {
+                    "type": "boolean",
+                    "description": "When true, applies Universal Block Parsing (UBP) to resolve GUI element grounding ambiguity by replacing global coordinates with block-specific coordinates. Based on SpiritSight Agent research.",
+                    "default": false
                 }
             },
             "required": ["action"]
@@ -403,8 +601,9 @@ pub async fn register_anthropic_computer_use_tools(
                     let window_id = input["window_id"].as_str();
                     let use_focused_window = input["use_focused_window"].as_bool().unwrap_or(false);
                     let enable_token_selection = input["enable_token_selection"].as_bool().unwrap_or(false);
+                    let enable_ubp = input["enable_ubp"].as_bool().unwrap_or(false);
 
-                    let screenshot_result = capture_screenshot_with_token_selection(&app, window_id, use_focused_window, enable_token_selection).await?;
+                    let screenshot_result = capture_screenshot_with_advanced_processing(&app, window_id, use_focused_window, enable_token_selection, enable_ubp).await?;
 
                     Ok(screenshot_result)
                 },

@@ -34,6 +34,7 @@ pub mod mcp_integration;
 pub mod self_awareness_tools; // Self-building and introspection capabilities
 pub mod tool_mapping; // Add tool mapping service
 pub mod ui_token_selector; // UI-Guided Visual Token Selection system
+pub mod universal_block_parser; // Universal Block Parsing (UBP) system from SpiritSight Agent research
 
 pub use browser_tools::get_browser_tool_definitions;
 pub use browser_controller::BrowserController;
