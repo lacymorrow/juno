@@ -109,6 +109,26 @@ impl AlwaysListeningController {
         })
     }
 
+    /// Create an AlwaysListeningController using a pre-loaded shared WhisperContext
+    /// This eliminates duplicate model loading when multiple controllers need the same model
+    pub fn new_with_shared_context(model_path_str: &str, shared_context: Arc<WhisperContext>) -> Result<Self> {
+        info!("[AlwaysListeningController] Creating controller with shared Whisper context (no model reload)");
+
+        Ok(Self {
+            shared_whisper_context: Some(shared_context),
+            model_path: model_path_str.to_string(),
+            is_active: false,
+            state: AlwaysListeningState::Monitoring,
+            audio_thread: None,
+            sensitivity: 0.5,
+            wake_words: vec!["hey juno".to_string(), "juno".to_string(), "joono".to_string(), "computer".to_string(), "hey computer".to_string()],
+            last_activity: Arc::new(Mutex::new(None)),
+            agent_call_timestamps: Arc::new(Mutex::new(Vec::new())),
+            last_meaningful_command: Arc::new(Mutex::new(None)),
+            command_processing_count: Arc::new(Mutex::new(0)),
+        })
+    }
+
     pub fn start_always_listening<R: Runtime + 'static>(&mut self, app_handle: &AppHandle<R>) -> Result<()> {
         if self.is_active {
             return Ok(()); // Already active

@@ -638,63 +638,65 @@ impl BrainFactory {
         provider: &mut LocalToolProvider,
         app_handle: tauri::AppHandle,
     ) -> Result<(), String> {
-        info!("🔧 Registering Computer Use tools (checking for duplicates)...");
+        info!("🔧 Registering Computer Use tools (optimized)...");
 
-        // Use a static flag to prevent duplicate registrations
+        // Use a static flag to prevent duplicate core tool registrations
         use std::sync::Once;
-        static TOOLS_REGISTERED: Once = Once::new();
+        static CORE_TOOLS_REGISTERED: Once = Once::new();
 
-        let mut already_registered = false;
-        TOOLS_REGISTERED.call_once(|| {
-            already_registered = false; // First time registration
-        });
+        // Check if core tools have already been registered
+        static mut TOOLS_INITIALIZED: bool = false;
+        let is_first_time = unsafe { !TOOLS_INITIALIZED };
 
-        if already_registered {
-            info!("🔧 Tools already registered, skipping duplicate registration");
-            return Ok(());
-        }
+        if is_first_time {
+            info!("🔧 First-time tool registration, proceeding with full setup...");
 
-        info!("🔧 No existing tools found, proceeding with registration...");
+            CORE_TOOLS_REGISTERED.call_once(|| {
+                unsafe { TOOLS_INITIALIZED = true; }
+            });
 
-        // Get the app state for MCP manager integration
-        let state_manager = app_handle.state::<AppState>();
+            // Get the app state for MCP manager integration
+            let state_manager = app_handle.state::<AppState>();
 
-        // Set up MCP manager in the tool provider
-        let mcp_manager = state_manager.get_mcp_manager().await;
-        provider.set_mcp_manager(mcp_manager);
+            // Set up MCP manager in the tool provider (lightweight operation)
+            let mcp_manager = state_manager.get_mcp_manager().await;
+            provider.set_mcp_manager(mcp_manager);
 
-        // Register the official Anthropic Computer Use tools
-        register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
+            // Register the official Anthropic Computer Use tools
+            register_anthropic_computer_use_tools(provider, app_handle.clone()).await?;
 
-        // Register additional desktop automation tools (your existing ones)
-        crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
+            // Register additional desktop automation tools (your existing ones)
+            crate::agent::tools::desktop_tools::register_desktop_tools(provider, state_manager.clone(), app_handle.clone()).await;
 
-        // Register timer tools for agent task scheduling and resumption
-        crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
+            // Register timer tools for agent task scheduling and resumption
+            crate::agent::tools::timer_tools::register_timer_tools(provider, app_handle.clone()).await;
 
-        // Register self-awareness and introspection tools (development mode only)
-        crate::agent::tools::register_self_awareness_tools(provider).await;
+            // Register self-awareness and introspection tools (development mode only)
+            crate::agent::tools::register_self_awareness_tools(provider).await;
 
-        // Use singleton initialization for MCP servers to prevent accumulation
-        if let Err(e) = state_manager.initialize_mcp_servers_once().await {
-            warn!("Failed to initialize MCP servers: {}", e);
+            info!("✅ Core Computer Use tools registered successfully");
         } else {
-            info!("MCP servers initialized successfully");
+            info!("🔧 Core tools already registered, skipping duplicate registration (performance optimization)");
+
+            // Ensure MCP manager is still set for the provider
+            let state_manager = app_handle.state::<AppState>();
+            let mcp_manager = state_manager.get_mcp_manager().await;
+            provider.set_mcp_manager(mcp_manager);
         }
 
-        // Refresh MCP tools to include them in the provider
+        // MCP tools are handled separately and loaded only when needed:
+        // 1. At app startup (state_management.rs)
+        // 2. When MCP configuration changes (via commands/mcp.rs)
+        // 3. When explicitly refreshed by user action
+
+        // Simply refresh MCP tools from cache (fast operation if already loaded)
         if let Err(e) = provider.refresh_mcp_tools().await {
-            warn!("Failed to refresh MCP tools: {}", e);
+            warn!("Failed to refresh MCP tools from cache: {}", e);
         } else {
-            info!("MCP tools refreshed and available");
+            info!("MCP tools refreshed from cache (no network calls)");
         }
 
-        // Sync MCP tools with configuration
-        if let Err(e) = state_manager.sync_mcp_tools().await {
-            warn!("Failed to sync MCP tools with configuration: {}", e);
-        }
-
-        info!("✅ All Computer Use tools registered successfully (including MCP tools) - total: {}", "[tools registered]");
+        info!("✅ All Computer Use tools registered successfully (optimized) - MCP tools loaded from cache");
         Ok(())
     }
 }
