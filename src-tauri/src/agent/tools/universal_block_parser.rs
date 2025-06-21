@@ -109,7 +109,7 @@ pub struct UBPResult {
 
 /// Error type for UBP operations
 #[derive(Debug, thiserror::Error)]
-pub enum TokenSelectionError {
+pub enum UBPError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
     #[error("Processing error: {0}")]
@@ -138,7 +138,7 @@ impl UniversalBlockParser {
     pub async fn parse_screenshot(
         &self,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ) -> Result<UBPResult, TokenSelectionError> {
+    ) -> Result<UBPResult, UBPError> {
         let start_time = std::time::Instant::now();
 
         info!("Starting UBP parsing for {}x{} image", image_buffer.width(), image_buffer.height());
@@ -187,10 +187,10 @@ impl UniversalBlockParser {
     pub async fn parse_screenshot_from_bytes(
         &self,
         image_bytes: &[u8],
-    ) -> Result<UBPResult, TokenSelectionError> {
+    ) -> Result<UBPResult, UBPError> {
         // Decode image bytes to ImageBuffer
         let image_buffer = image::load_from_memory(image_bytes)
-            .map_err(|e| TokenSelectionError::ProcessingError(format!("Failed to decode image: {}", e)))?
+            .map_err(|e| UBPError::ProcessingError(format!("Failed to decode image: {}", e)))?
             .to_rgba8();
 
         // Use the existing parse_screenshot method
@@ -203,7 +203,7 @@ impl UniversalBlockParser {
         ubp_result: &UBPResult,
         global_x: f64,
         global_y: f64,
-    ) -> Result<BlockCoordinates, TokenSelectionError> {
+    ) -> Result<BlockCoordinates, UBPError> {
         let (blocks_x, _blocks_y) = ubp_result.grid_dimensions;
 
         // Find the block containing these coordinates
@@ -227,7 +227,7 @@ impl UniversalBlockParser {
                 confidence: 0.95, // High confidence for direct coordinate conversion
             })
         } else {
-            Err(TokenSelectionError::InvalidInput(format!(
+            Err(UBPError::InvalidInput(format!(
                 "No block found for coordinates ({}, {})", global_x, global_y
             )))
         }
@@ -238,14 +238,14 @@ impl UniversalBlockParser {
         &self,
         ubp_result: &UBPResult,
         block_coords: &BlockCoordinates,
-    ) -> Result<(f64, f64), TokenSelectionError> {
+    ) -> Result<(f64, f64), UBPError> {
         if let Some(block) = ubp_result.blocks.get(block_coords.block_index as usize) {
             let global_x = block.global_x as f64 + (block_coords.relative_x as f64 * block.width as f64);
             let global_y = block.global_y as f64 + (block_coords.relative_y as f64 * block.height as f64);
 
             Ok((global_x, global_y))
         } else {
-            Err(TokenSelectionError::InvalidInput(format!(
+            Err(UBPError::InvalidInput(format!(
                 "Invalid block index: {}", block_coords.block_index
             )))
         }
@@ -278,7 +278,7 @@ impl UniversalBlockParser {
         col: u32,
         row: u32,
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
-    ) -> Result<UBPBlock, TokenSelectionError> {
+    ) -> Result<UBPBlock, UBPError> {
         let block_size = self.config.block_size;
         let global_x = col * block_size;
         let global_y = row * block_size;
@@ -348,7 +348,7 @@ impl UniversalBlockParser {
         block_y: u32,
         block_width: u32,
         block_height: u32,
-    ) -> Result<Vec<BlockElement>, TokenSelectionError> {
+    ) -> Result<Vec<BlockElement>, UBPError> {
         let mut elements = Vec::new();
 
         // Extract block region for analysis
@@ -370,7 +370,7 @@ impl UniversalBlockParser {
         block_y: u32,
         block_width: u32,
         block_height: u32,
-    ) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, TokenSelectionError> {
+    ) -> Result<ImageBuffer<Rgba<u8>, Vec<u8>>, UBPError> {
         let mut block_buffer = ImageBuffer::new(block_width, block_height);
 
         for y in 0..block_height {
@@ -389,7 +389,7 @@ impl UniversalBlockParser {
     }
 
     /// Detects button-like elements within a block
-    async fn detect_buttons(&self, block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Vec<BlockElement>, TokenSelectionError> {
+    async fn detect_buttons(&self, block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Vec<BlockElement>, UBPError> {
         let mut buttons = Vec::new();
 
         // Simple button detection using edge detection and color analysis
@@ -409,7 +409,7 @@ impl UniversalBlockParser {
     }
 
     /// Detects text field elements within a block
-    async fn detect_text_fields(&self, block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Vec<BlockElement>, TokenSelectionError> {
+    async fn detect_text_fields(&self, block_region: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Result<Vec<BlockElement>, UBPError> {
         let mut text_fields = Vec::new();
 
         // Simple text field detection using horizontal line patterns
