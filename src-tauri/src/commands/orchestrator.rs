@@ -772,3 +772,93 @@ pub async fn initialize_orchestrator_system() -> Result<(), String> {
     tracing::info!("Enhanced multi-agent orchestrator system initialized successfully (minimal mode)");
     Ok(())
 }
+
+/// Execute task with advanced parallel orchestration
+#[tauri::command]
+pub async fn execute_parallel_orchestration(
+    query: String,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    info!("Executing parallel orchestration for query: {}", query);
+
+    let orchestrator = get_orchestrator().await?;
+    match orchestrator.lock().await.analyze_and_create_task_graph(&query).await {
+        Ok(result) => {
+            info!("Parallel orchestration completed successfully");
+            Ok(result)
+        }
+        Err(e) => {
+            let error_msg = format!("Parallel orchestration failed: {}", e);
+            warn!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+/// Get orchestrator performance metrics
+#[tauri::command]
+pub async fn get_orchestrator_performance_metrics(
+    app_state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    match orchestrator_guard.get_execution_statistics().await {
+        Ok(stats) => {
+            Ok(serde_json::json!({
+                "execution_statistics": {
+                    "total_tasks_executed": stats.total_tasks_executed,
+                    "parallel_tasks_executed": stats.parallel_tasks_executed,
+                    "average_parallel_speedup": stats.average_parallel_speedup,
+                    "performance_improvement": stats.performance_improvement
+                },
+                "agent_performance": stats.agent_efficiency_scores,
+                "current_improvement": format!("{:.1}%", stats.performance_improvement)
+            }))
+        }
+        Err(e) => Err(format!("Failed to get performance metrics: {}", e))
+    }
+}
+
+/// Get agent performance metrics
+#[tauri::command]
+pub async fn get_agent_performance_metrics(
+    app_state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    let agent_metrics = orchestrator_guard.get_agent_performance_metrics().await;
+    Ok(serde_json::json!(agent_metrics))
+}
+
+/// Analyze task for parallelization opportunities
+#[tauri::command]
+pub async fn analyze_task_parallelization(
+    query: String,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    match orchestrator_guard.analyze_task_parallelization(&query).await {
+        Ok(analysis) => Ok(serde_json::json!(analysis)),
+        Err(e) => Err(format!("Failed to analyze task: {}", e))
+    }
+}
+
+/// Execute workflow template
+#[tauri::command]
+pub async fn execute_workflow_template(
+    template_id: String,
+    variables: HashMap<String, String>,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let orchestrator = get_orchestrator().await?;
+    let orchestrator_guard = orchestrator.lock().await;
+
+    match orchestrator_guard.execute_workflow_template(&template_id, variables).await {
+        Ok(result) => Ok(result),
+        Err(e) => Err(format!("Failed to execute workflow template: {}", e))
+    }
+}

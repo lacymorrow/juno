@@ -33,6 +33,8 @@ pub enum AgentError {
     Terminated,
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
+    #[error("Task execution failed: {0}")]
+    TaskExecutionFailed(String),
     #[error("Unknown error: {0}")]
     Unknown(String),
     #[error("General error: {0}")]
