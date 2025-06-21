@@ -514,12 +514,26 @@ pub async fn force_stop_dictation(app_handle: &AppHandle) -> Result<(), String> 
         *dictation_active = false;
     }
 
-    // Reset floating bar
-    crate::commands::floating_bar::handle_backend_response(
-        app_handle,
-        "Stopped",
-        Some("Dictation stopped".to_string())
-    ).await;
+    // Reset floating bar with proper dictation mode change
+    crate::commands::floating_bar::handle_dictation_mode_change(app_handle, false).await;
+
+    // Reset manager's internal component states
+    *manager.component_states.write().await = ComponentStates {
+        app_state_active: false,
+        voice_controller_active: false,
+        monitor_state_active: false,
+        floating_bar_state: "default".to_string(),
+        last_updated: DictationStateManager::current_timestamp(),
+    };
+
+    // Emit comprehensive reset events
+    if let Err(e) = app_handle.emit("dictation-active", false) {
+        error!("[DictationStateManager] Failed to emit dictation-active event: {}", e);
+    }
+
+    if let Err(e) = app_handle.emit("dictation-state-force-reset", "Force stop dictation") {
+        error!("[DictationStateManager] Failed to emit force reset event: {}", e);
+    }
 
     // Transition to idle state
     manager.transition_to_state(
