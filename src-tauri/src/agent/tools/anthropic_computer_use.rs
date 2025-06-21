@@ -6,6 +6,7 @@ use crate::agent::structs::ToolDefinition;
 use crate::agent::implementations::tool_provider::LocalToolProvider;
 use crate::agent::tools::ui_token_selector::{UITokenSelector, TokenSelectionConfig};
 use crate::agent::tools::universal_block_parser::{UniversalBlockParser, UBPConfig, UBPResult, BlockCoordinates};
+use crate::agent::tools::exploration_reasoning::{ExplorationEngine, ExplorationConfig, ExplorationResult, AppContext};
 use crate::state::AppState;
 use crate::utils::permission_validator::{validate_permission, RequiredPermission};
 use serde_json::{json, Value};
@@ -174,6 +175,7 @@ async fn capture_screenshot_with_advanced_processing(
     use_focused_window: bool,
     enable_token_selection: bool,
     enable_ubp: bool,
+    enable_exploration: bool,
 ) -> Result<Value, String> {
     // Capture screenshot using existing methods
     let screenshot_result = if use_focused_window {
@@ -326,7 +328,56 @@ async fn capture_screenshot_with_advanced_processing(
                                         },
                                         "token_count": processed_result.tokens.len()
                                     },
-                                    "universal_block_parsing": ubp_result
+                                    "universal_block_parsing": ubp_result,
+                                    "exploration_reasoning": if enable_exploration {
+                                        debug!("Applying Exploration-Then-Reasoning to screenshot");
+
+                                        // Create exploration configuration
+                                        let exploration_config = ExplorationConfig::default();
+                                        let mut exploration_engine = ExplorationEngine::new_with_config(exploration_config);
+
+                                        // Create app context from current screenshot
+                                        let app_context = AppContext {
+                                            app_name: "Unknown".to_string(),
+                                            window_title: None,
+                                            category: None,
+                                            version: None,
+                                        };
+
+                                        match exploration_engine.explore_application(&base64_image, app_context).await {
+                                            Ok(exploration_result) => {
+                                                info!(
+                                                    "Exploration-Then-Reasoning applied: {} states explored, {:.1}% completeness",
+                                                    exploration_result.states_explored,
+                                                    exploration_result.completeness_score * 100.0
+                                                );
+
+                                                Some(json!({
+                                                    "enabled": true,
+                                                    "states_explored": exploration_result.states_explored,
+                                                    "completeness_score": exploration_result.completeness_score,
+                                                    "exploration_time_ms": exploration_result.exploration_time_ms,
+                                                    "interaction_patterns": exploration_result.interaction_patterns.len(),
+                                                    "gui_states": exploration_result.gui_transition_graph.states.len(),
+                                                    "transitions": exploration_result.gui_transition_graph.transitions.len(),
+                                                    "layout_patterns": exploration_result.gui_transition_graph.layout_patterns.len(),
+                                                    "navigation_areas": exploration_result.app_structure.navigation_areas.len(),
+                                                    "content_areas": exploration_result.app_structure.content_areas.len(),
+                                                    "toolbar_areas": exploration_result.app_structure.toolbar_areas.len(),
+                                                    "workflow_patterns": exploration_result.app_structure.workflow_patterns.len()
+                                                }))
+                                            }
+                                            Err(e) => {
+                                                warn!("Exploration-Then-Reasoning failed: {}", e);
+                                                Some(json!({
+                                                    "enabled": false,
+                                                    "error": e.to_string()
+                                                }))
+                                            }
+                                        }
+                                    } else {
+                                        None
+                                    }
                                 }))
                             }
                             Err(e) => {
@@ -340,7 +391,8 @@ async fn capture_screenshot_with_advanced_processing(
                                         "enabled": false,
                                         "error": e.to_string()
                                     },
-                                    "universal_block_parsing": {"enabled": false}
+                                    "universal_block_parsing": {"enabled": false},
+                                    "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                                 }))
                             }
                         }
@@ -356,7 +408,8 @@ async fn capture_screenshot_with_advanced_processing(
                                 "enabled": false,
                                 "error": e.to_string()
                             },
-                            "universal_block_parsing": {"enabled": false}
+                            "universal_block_parsing": {"enabled": false},
+                            "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                         }))
                     }
                 }
@@ -377,7 +430,8 @@ async fn capture_screenshot_with_advanced_processing(
                             "universal_block_parsing": {
                                 "enabled": false,
                                 "error": format!("Base64 decode error: {}", e)
-                            }
+                            },
+                            "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                         }));
                     }
                 };
@@ -420,7 +474,8 @@ async fn capture_screenshot_with_advanced_processing(
                                         "processing_time_ms": ubp_result.stats.processing_time_ms,
                                         "memory_usage_bytes": ubp_result.stats.memory_usage_bytes,
                                         "coordinate_mappings": ubp_result.coordinate_mapping.len()
-                                    }
+                                    },
+                                    "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                                 }))
                             }
                             Err(e) => {
@@ -433,7 +488,8 @@ async fn capture_screenshot_with_advanced_processing(
                                     "universal_block_parsing": {
                                         "enabled": false,
                                         "error": e.to_string()
-                                    }
+                                    },
+                                    "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                                 }))
                             }
                         }
@@ -448,7 +504,8 @@ async fn capture_screenshot_with_advanced_processing(
                             "universal_block_parsing": {
                                 "enabled": false,
                                 "error": e.to_string()
-                            }
+                            },
+                            "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                         }))
                     }
                 }
@@ -459,7 +516,8 @@ async fn capture_screenshot_with_advanced_processing(
                     "data": base64_image,
                     "format": "png",
                     "token_selection": {"enabled": false},
-                    "universal_block_parsing": {"enabled": false}
+                    "universal_block_parsing": {"enabled": false},
+                    "exploration_reasoning": if enable_exploration { Some(json!({"enabled": false})) } else { None }
                 }))
             }
         }
@@ -550,6 +608,11 @@ pub async fn register_anthropic_computer_use_tools(
                     "type": "boolean",
                     "description": "When true, applies Universal Block Parsing (UBP) to resolve GUI element grounding ambiguity by replacing global coordinates with block-specific coordinates. Based on SpiritSight Agent research.",
                     "default": false
+                },
+                "enable_exploration": {
+                    "type": "boolean",
+                    "description": "When true, applies Exploration-Then-Reasoning Paradigm to pre-explore interface before task execution, improving performance in unfamiliar environments by 10%. Based on GUI-Xplore research.",
+                    "default": false
                 }
             },
             "required": ["action"]
@@ -603,7 +666,8 @@ pub async fn register_anthropic_computer_use_tools(
                     let enable_token_selection = input["enable_token_selection"].as_bool().unwrap_or(false);
                     let enable_ubp = input["enable_ubp"].as_bool().unwrap_or(false);
 
-                    let screenshot_result = capture_screenshot_with_advanced_processing(&app, window_id, use_focused_window, enable_token_selection, enable_ubp).await?;
+                    let enable_exploration = input["enable_exploration"].as_bool().unwrap_or(false);
+                let screenshot_result = capture_screenshot_with_advanced_processing(&app, window_id, use_focused_window, enable_token_selection, enable_ubp, enable_exploration).await?;
 
                     Ok(screenshot_result)
                 },
