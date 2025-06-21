@@ -217,7 +217,7 @@ pub fn parse_shortcut_string(shortcut_str: &str) -> Option<Shortcut> {
 }
 
 // Re-export key items for discoverability by main.rs and tauri::generate_handler
-use commands::{autostart::*, app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*, ui_token_selection::*};
+use commands::{autostart::*, app_url::*, core::*, dictation::*, element::*, filesystem::*, floating_bar::*, floating_panel::*, keyboard::*, mouse::*, permissions::*, providers::*, shell::*, text_editor::*, window::*, orchestrator::*, sound::*, memory::*, always_listening::*, ui_token_selection::*, error_recovery::*};
 
 // Import specific sound commands from sound.rs
 use crate::commands::sound::{
@@ -435,6 +435,19 @@ pub fn run() {
             clean_orphaned_tool_calls,
             get_conversation_messages,
             get_last_n_messages,
+            // Error Recovery Commands
+            initialize_error_recovery,
+            create_checkpoint,
+            rollback_to_checkpoint,
+            rollback_to_last_known_good,
+            get_recovery_statistics,
+            update_recovery_config,
+            get_recovery_config,
+            list_checkpoints,
+            reset_recovery_state,
+            test_error_recovery,
+            update_agent_state,
+            get_execution_history,
             anthropic::cleanup_browser, // Add browser cleanup function
             tts::invoke_tts, // Use the main invoke_tts command for Tauri
             tts::set_tts_provider_command, // Added for TTS provider selection
