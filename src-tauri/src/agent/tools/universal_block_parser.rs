@@ -101,6 +101,8 @@ pub struct UBPResult {
     pub blocks: Vec<UBPBlock>,
     /// Grid dimensions (blocks_x, blocks_y)
     pub grid_dimensions: (u32, u32),
+    /// Actual block size used (may differ from config due to adaptive sizing)
+    pub actual_block_size: u32,
     /// Total processing time in milliseconds
     pub processing_time_ms: u64,
     /// Number of UI elements detected across all blocks
@@ -143,13 +145,13 @@ impl UniversalBlockParser {
 
         info!("Starting UBP parsing for {}x{} image", image_buffer.width(), image_buffer.height());
 
-        // Step 1: Create grid layout
-        let (blocks_x, blocks_y) = self.calculate_grid_dimensions(
+        // Step 1: Create grid layout and get actual block size
+        let (blocks_x, blocks_y, actual_block_size) = self.calculate_grid_dimensions_with_size(
             image_buffer.width(),
             image_buffer.height(),
         );
 
-        debug!("UBP grid dimensions: {}x{} blocks", blocks_x, blocks_y);
+        debug!("UBP grid dimensions: {}x{} blocks with actual block size: {}", blocks_x, blocks_y, actual_block_size);
 
         // Step 2: Generate blocks with position embeddings
         let mut blocks = Vec::new();
@@ -158,10 +160,11 @@ impl UniversalBlockParser {
         for row in 0..blocks_y {
             for col in 0..blocks_x {
                 let block_id = row * blocks_x + col;
-                let block = self.create_block(
+                let block = self.create_block_with_size(
                     block_id,
                     col,
                     row,
+                    actual_block_size,
                     image_buffer,
                 ).await?;
 
@@ -178,6 +181,7 @@ impl UniversalBlockParser {
             grid_config: self.config.clone(),
             blocks,
             grid_dimensions: (blocks_x, blocks_y),
+            actual_block_size,
             processing_time_ms: processing_time,
             total_elements_detected: total_elements,
         })
@@ -206,10 +210,18 @@ impl UniversalBlockParser {
     ) -> Result<BlockCoordinates, UBPError> {
         let (blocks_x, _blocks_y) = ubp_result.grid_dimensions;
 
-        // Find the block containing these coordinates
-        let block_col = (global_x as u32) / self.config.block_size;
-        let block_row = (global_y as u32) / self.config.block_size;
+        // Find the block containing these coordinates using the actual block size used
+        let block_col = (global_x as u32) / ubp_result.actual_block_size;
+        let block_row = (global_y as u32) / ubp_result.actual_block_size;
         let block_index = block_row * blocks_x + block_col;
+
+        // Ensure block_index is within bounds
+        if block_index >= ubp_result.blocks.len() as u32 {
+            return Err(UBPError::InvalidInput(format!(
+                "Block index {} out of bounds for coordinates ({}, {}). Grid has {} blocks.",
+                block_index, global_x, global_y, ubp_result.blocks.len()
+            )));
+        }
 
         if let Some(block) = ubp_result.blocks.get(block_index as usize) {
             // Calculate relative coordinates within the block
@@ -253,6 +265,12 @@ impl UniversalBlockParser {
 
     /// Calculate optimal grid dimensions based on image size and configuration
     fn calculate_grid_dimensions(&self, width: u32, height: u32) -> (u32, u32) {
+        let (blocks_x, blocks_y, _) = self.calculate_grid_dimensions_with_size(width, height);
+        (blocks_x, blocks_y)
+    }
+
+    /// Calculate optimal grid dimensions and actual block size based on image size and configuration
+    fn calculate_grid_dimensions_with_size(&self, width: u32, height: u32) -> (u32, u32, u32) {
         let block_size = if self.config.adaptive_sizing {
             // Use adaptive sizing based on image resolution
             let base_size = self.config.block_size;
@@ -268,7 +286,7 @@ impl UniversalBlockParser {
         let blocks_x = (width + block_size - 1) / block_size; // Ceiling division
         let blocks_y = (height + block_size - 1) / block_size;
 
-        (blocks_x, blocks_y)
+        (blocks_x, blocks_y, block_size)
     }
 
     /// Creates a single block with position embedding and element detection
@@ -280,6 +298,18 @@ impl UniversalBlockParser {
         image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
     ) -> Result<UBPBlock, UBPError> {
         let block_size = self.config.block_size;
+        self.create_block_with_size(block_id, col, row, block_size, image_buffer).await
+    }
+
+    /// Creates a single block with position embedding and element detection using specified block size
+    async fn create_block_with_size(
+        &self,
+        block_id: u32,
+        col: u32,
+        row: u32,
+        block_size: u32,
+        image_buffer: &ImageBuffer<Rgba<u8>, Vec<u8>>,
+    ) -> Result<UBPBlock, UBPError> {
         let global_x = col * block_size;
         let global_y = row * block_size;
 
