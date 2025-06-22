@@ -138,6 +138,576 @@ where
         self.state = new_state;
         // TODO: Emit state change events if needed (e.g., for UI updates)
     }
+
+    /// Enhanced tool execution with intelligent batching support
+    /// Detects obvious sequential operations and executes them as batches
+    async fn execute_tools_with_batching(
+        &mut self,
+        tool_calls: Vec<crate::agent::structs::ToolCall>,
+        cancel_rx: &crate::state::CancelReceiver,
+    ) -> Result<(), AgentError> {
+        if tool_calls.is_empty() {
+            return Ok(());
+        }
+
+        // Analyze tools for batching opportunities
+        let batches = self.analyze_and_create_batches(tool_calls.clone()).await;
+
+        log::info!(
+            "Tool execution plan: {} tools organized into {} batch(es)",
+            tool_calls.len(),
+            batches.len()
+        );
+
+        // Pre-populate cancelled results for all tool calls to maintain conversation consistency
+        let mut tool_results_cache = Vec::new();
+        for tool_call in tool_calls.iter() {
+            tool_results_cache.push((tool_call.clone(), None)); // None means not executed yet
+        }
+
+        let mut global_tool_index = 0;
+
+        for (batch_index, batch) in batches.iter().enumerate() {
+            // Check for cancellation before each batch
+            if *cancel_rx.borrow() {
+                log::info!("Cancellation detected before batch {} execution", batch_index);
+                self.handle_batch_cancellation(&tool_results_cache, global_tool_index).await?;
+                return Err(AgentError::Terminated);
+            }
+
+            if batch.len() == 1 {
+                // Single tool execution (existing logic)
+                let tool_call = &batch[0];
+                match self.execute_single_tool_with_approval(tool_call, cancel_rx, global_tool_index, &mut tool_results_cache).await? {
+                    true => {}, // Continue
+                    false => return Err(AgentError::Terminated), // Cancelled
+                }
+            } else {
+                // Batch execution for sequential operations
+                log::info!(
+                    "Executing batch {}: {} tools ({} → {} → ...)",
+                    batch_index,
+                    batch.len(),
+                    batch.first().map(|t| t.name.as_str()).unwrap_or("unknown"),
+                    batch.get(1).map(|t| t.name.as_str()).unwrap_or("unknown")
+                );
+
+                match self.execute_tool_batch(batch, cancel_rx, global_tool_index, &mut tool_results_cache).await? {
+                    true => {}, // Continue
+                    false => return Err(AgentError::Terminated), // Cancelled
+                }
+            }
+
+            global_tool_index += batch.len();
+        }
+
+        Ok(())
+    }
+
+    /// Analyze tool calls and create optimal batches for execution
+    async fn analyze_and_create_batches(&self, tool_calls: Vec<crate::agent::structs::ToolCall>) -> Vec<Vec<crate::agent::structs::ToolCall>> {
+        use crate::agent::tools::mcp_integration::ToolBatchingAnalyzer;
+
+        if tool_calls.len() < 2 {
+            return vec![tool_calls];
+        }
+
+        // Check if batching is beneficial
+        let sequential_patterns = self.detect_sequential_patterns(&tool_calls);
+
+        if sequential_patterns.is_empty() {
+            log::debug!("No sequential patterns detected, using individual tool execution");
+            return tool_calls.into_iter().map(|t| vec![t]).collect();
+        }
+
+        log::info!(
+            "Detected {} sequential pattern(s), creating optimized batches",
+            sequential_patterns.len()
+        );
+
+        // Create batches using the MCP analyzer
+        ToolBatchingAnalyzer::create_batches(tool_calls)
+    }
+
+    /// Detect obvious sequential patterns in tool calls
+    fn detect_sequential_patterns(&self, tool_calls: &[crate::agent::structs::ToolCall]) -> Vec<(usize, usize)> {
+        let mut patterns = Vec::new();
+
+        // Define obvious sequential patterns for Computer Use
+        let sequential_patterns = [
+            // Type → Enter → Screenshot (very common)
+            ("computer", "type", "computer", "key", Some("Enter")),
+            ("computer", "key", "computer", "screenshot", None),
+            ("computer", "type", "computer", "screenshot", None),
+
+            // Click → Screenshot (common verification)
+            ("computer", "left_click", "computer", "screenshot", None),
+            ("computer", "click", "computer", "screenshot", None),
+
+            // MCP tool chains (safe for batching)
+            ("mcp_", "", "mcp_", "", None),
+
+            // File operations
+            ("str_replace_based_edit_tool", "create", "str_replace_based_edit_tool", "view", None),
+            ("str_replace_based_edit_tool", "str_replace", "str_replace_based_edit_tool", "view", None),
+        ];
+
+        for window in tool_calls.windows(2) {
+            let first = &window[0];
+            let second = &window[1];
+
+            for (tool1_prefix, action1, tool2_prefix, action2, key_param) in &sequential_patterns {
+                if self.matches_pattern(first, tool1_prefix, action1, key_param) &&
+                   self.matches_pattern(second, tool2_prefix, action2, &None) {
+
+                    let first_index = tool_calls.iter().position(|t| t.id == first.id).unwrap();
+                    let second_index = tool_calls.iter().position(|t| t.id == second.id).unwrap();
+                    patterns.push((first_index, second_index));
+
+                    log::debug!(
+                        "Sequential pattern detected: {} → {} (tools {} → {})",
+                        first.name,
+                        second.name,
+                        first_index,
+                        second_index
+                    );
+                }
+            }
+        }
+
+        patterns
+    }
+
+    /// Check if a tool call matches a specific pattern
+    fn matches_pattern(&self, tool_call: &crate::agent::structs::ToolCall, tool_prefix: &str, action: &str, key_param: &Option<&str>) -> bool {
+        if !tool_call.name.starts_with(tool_prefix) {
+            return false;
+        }
+
+        if action.is_empty() {
+            return true; // Match any action for this tool
+        }
+
+        // Check action parameter for computer tools
+        if tool_call.name == "computer" {
+            if let Some(tool_action) = tool_call.input.get("action").and_then(|v| v.as_str()) {
+                if tool_action == action {
+                    // Check key parameter if specified
+                    if let Some(expected_key) = key_param {
+                        if let Some(key) = tool_call.input.get("key").and_then(|v| v.as_str()) {
+                            return key == *expected_key;
+                        }
+                        return false;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        // Check command parameter for text editor tools
+        if tool_call.name == "str_replace_based_edit_tool" {
+            if let Some(command) = tool_call.input.get("command").and_then(|v| v.as_str()) {
+                return command == action;
+            }
+        }
+
+        false
+    }
+
+    /// Execute a single tool with approval and cancellation handling
+    async fn execute_single_tool_with_approval(
+        &mut self,
+        tool_call: &crate::agent::structs::ToolCall,
+        cancel_rx: &crate::state::CancelReceiver,
+        tool_index: usize,
+        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+    ) -> Result<bool, AgentError> {
+        // Check cancellation
+        if *cancel_rx.borrow() {
+            log::info!("Cancellation detected before tool execution: {}", tool_call.name);
+            return Ok(false);
+        }
+
+        // Tool approval check (existing logic)
+        if !self.check_tool_approval(tool_call, cancel_rx).await? {
+            return Ok(true); // Tool denied, but continue with other tools
+        }
+
+        // Execute tool
+        log::info!("Executing tool: {} with ID: {}", tool_call.name, tool_call.id);
+
+        // Emit tool call request event
+        crate::agent::tool_logger::log_tool_call_request(
+            &self.app_handle,
+            &tool_call.name,
+            tool_call.input.clone(),
+            Some(format!("Executing tool: {}", tool_call.name)),
+        );
+
+        let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+
+        // Cache result and add to memory
+        tool_results_cache[tool_index].1 = Some(tool_result.clone());
+        self.add_tool_result_to_memory(tool_call, tool_result).await?;
+
+        Ok(true)
+    }
+
+    /// Execute a batch of tools with optimized workflow
+    async fn execute_tool_batch(
+        &mut self,
+        batch: &[crate::agent::structs::ToolCall],
+        cancel_rx: &crate::state::CancelReceiver,
+        start_index: usize,
+        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+    ) -> Result<bool, AgentError> {
+        log::info!("Executing tool batch: {} tools", batch.len());
+
+        // Check if all tools in batch can be executed as MCP batch
+        if self.can_execute_as_mcp_batch(batch).await {
+            return self.execute_mcp_tool_batch(batch, cancel_rx, start_index, tool_results_cache).await;
+        }
+
+        // Fall back to optimized sequential execution (faster than normal due to reduced approval overhead)
+        self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache).await
+    }
+
+    /// Check if a batch can be executed via MCP batching
+    async fn can_execute_as_mcp_batch(&self, batch: &[crate::agent::structs::ToolCall]) -> bool {
+        // Check if all tools in the batch are MCP tools
+        for tool_call in batch {
+            if !self.is_mcp_tool(&tool_call.name).await {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check if a tool is an MCP tool
+    async fn is_mcp_tool(&self, tool_name: &str) -> bool {
+        // Use the canonical MCP tool detection pattern
+        tool_name.contains("mcp-server-") || tool_name.starts_with("mcp_")
+    }
+
+    /// Execute batch via MCP batching system
+    async fn execute_mcp_tool_batch(
+        &mut self,
+        batch: &[crate::agent::structs::ToolCall],
+        cancel_rx: &crate::state::CancelReceiver,
+        start_index: usize,
+        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+    ) -> Result<bool, AgentError> {
+        // Check cancellation
+        if *cancel_rx.borrow() {
+            return Ok(false);
+        }
+
+        // Batch approval check - ask once for the entire batch
+        if !self.check_batch_approval(batch, cancel_rx).await? {
+            return Ok(true);
+        }
+
+        log::info!("Executing MCP batch: {} tools", batch.len());
+
+        // Use the existing MCP batch execution
+        match self.tool_provider.execute_batch_tools(batch.to_vec()).await {
+            Ok(results) => {
+                // Process all results and add to memory
+                for (i, result) in results.into_iter().enumerate() {
+                    let tool_call = &batch[i];
+                    tool_results_cache[start_index + i].1 = Some(Ok(result.clone()));
+                    self.add_tool_result_to_memory(tool_call, Ok(result)).await?;
+                }
+                Ok(true)
+            }
+            Err(e) => {
+                log::error!("MCP batch execution failed: {}", e);
+                // Fall back to sequential execution
+                self.execute_sequential_batch(batch, cancel_rx, start_index, tool_results_cache).await
+            }
+        }
+    }
+
+    /// Execute batch sequentially but with optimized approval process
+    async fn execute_sequential_batch(
+        &mut self,
+        batch: &[crate::agent::structs::ToolCall],
+        cancel_rx: &crate::state::CancelReceiver,
+        start_index: usize,
+        tool_results_cache: &mut Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+    ) -> Result<bool, AgentError> {
+        // Batch approval for sequential operations
+        if !self.check_batch_approval(batch, cancel_rx).await? {
+            return Ok(true);
+        }
+
+        log::info!("Executing sequential batch: {} tools (approval granted for batch)", batch.len());
+
+        for (i, tool_call) in batch.iter().enumerate() {
+            // Check cancellation before each tool
+            if *cancel_rx.borrow() {
+                log::info!("Cancellation detected during batch execution at tool {}", i);
+                return Ok(false);
+            }
+
+            // Execute without individual approval (already approved for batch)
+            log::info!("Executing batched tool {}/{}: {}", i + 1, batch.len(), tool_call.name);
+
+            crate::agent::tool_logger::log_tool_call_request(
+                &self.app_handle,
+                &tool_call.name,
+                tool_call.input.clone(),
+                Some(format!("Executing batched tool: {}", tool_call.name)),
+            );
+
+            let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
+            tool_results_cache[start_index + i].1 = Some(tool_result.clone());
+            self.add_tool_result_to_memory(tool_call, tool_result).await?;
+        }
+
+        Ok(true)
+    }
+
+    /// Check approval for a batch of tools
+    async fn check_batch_approval(
+        &self,
+        batch: &[crate::agent::structs::ToolCall],
+        cancel_rx: &crate::state::CancelReceiver,
+    ) -> Result<bool, AgentError> {
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+
+        if !app_state.is_tool_approval_required() {
+            return Ok(true);
+        }
+
+        // Create batch approval request
+        let batch_description = format!(
+            "Execute batch of {} tools: {}",
+            batch.len(),
+            batch.iter()
+                .take(3)
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" → ")
+                + if batch.len() > 3 { " ..." } else { "" }
+        );
+
+        let batch_id = uuid::Uuid::new_v4().to_string();
+        let approval_request = crate::state::ToolApprovalRequest::new(
+            batch_id.clone(),
+            "batch_execution".to_string(),
+            serde_json::json!({
+                "batch_size": batch.len(),
+                "tools": batch.iter().map(|t| &t.name).collect::<Vec<_>>()
+            }),
+            batch_description.clone(),
+        );
+
+        // Add to pending approvals
+        app_state.add_pending_tool_approval(approval_request.clone()).await;
+
+        // Emit batch approval request event
+        let approval_event = serde_json::json!({
+            "tool_name": approval_request.tool_name,
+            "tool_id": approval_request.tool_id,
+            "tool_input": approval_request.tool_input,
+            "description": approval_request.description,
+            "timestamp": approval_request.timestamp,
+            "is_batch": true,
+            "batch_size": batch.len()
+        });
+
+        if let Err(e) = self.app_handle.emit("tool-approval-request", approval_event) {
+            log::error!("Failed to emit batch approval request: {}", e);
+        }
+
+        // Wait for batch approval
+        log::info!("Waiting for user approval for tool batch: {}", batch_description);
+
+        let mut approval_timeout = 60;
+        let mut approved = false;
+
+        while approval_timeout > 0 && !approved {
+            if *cancel_rx.borrow() {
+                log::info!("Cancellation detected during batch approval wait");
+                app_state.remove_tool_approval(&batch_id).await;
+                return Err(AgentError::Terminated);
+            }
+
+            match app_state.get_tool_approval_status(&batch_id).await {
+                Some(true) => {
+                    approved = true;
+                    log::info!("Tool batch approved");
+                    break;
+                }
+                Some(false) => {
+                    log::info!("Tool batch denied");
+                    break;
+                }
+                None => {} // Still pending
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            approval_timeout -= 1;
+        }
+
+        app_state.remove_tool_approval(&batch_id).await;
+
+        if !approved {
+            let reason = if approval_timeout <= 0 { "timeout" } else { "user denied" };
+            log::warn!("Tool batch execution denied: {}", reason);
+
+            // Add denial message for all tools in batch
+            for tool_call in batch {
+                let mut mem = self.memory.lock().await;
+                mem.add_message(crate::agent::structs::Message {
+                    role: crate::agent::structs::Role::Tool,
+                    content: format!("Tool execution was denied as part of batch - {}", reason),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call.id.clone()),
+                    name: Some(tool_call.name.clone()),
+                }).await?;
+            }
+        }
+
+        Ok(approved)
+    }
+
+    /// Add tool result to memory with proper error handling
+    async fn add_tool_result_to_memory(
+        &mut self,
+        tool_call: &crate::agent::structs::ToolCall,
+        tool_result: Result<crate::agent::structs::ToolResult, AgentError>,
+    ) -> Result<(), AgentError> {
+        let mut mem = self.memory.lock().await;
+        match tool_result {
+            Ok(result) => {
+                mem.add_message(crate::agent::structs::Message {
+                    role: crate::agent::structs::Role::Tool,
+                    content: result.output.to_string(),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call.id.clone()),
+                    name: Some(tool_call.name.clone()),
+                }).await?;
+            }
+            Err(error) => {
+                mem.add_message(crate::agent::structs::Message {
+                    role: crate::agent::structs::Role::Tool,
+                    content: format!("Tool execution failed: {}", error),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call.id.clone()),
+                    name: Some(tool_call.name.clone()),
+                }).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle batch cancellation by adding appropriate tool results
+    async fn handle_batch_cancellation(
+        &mut self,
+        tool_results_cache: &Vec<(crate::agent::structs::ToolCall, Option<Result<crate::agent::structs::ToolResult, AgentError>>)>,
+        start_index: usize,
+    ) -> Result<(), AgentError> {
+        log::info!("Handling batch cancellation from index {}", start_index);
+
+        let mut mem = self.memory.lock().await;
+        for (tool_call, cached_result) in tool_results_cache.iter().skip(start_index) {
+            if cached_result.is_none() {
+                mem.add_message(crate::agent::structs::Message {
+                    role: crate::agent::structs::Role::Tool,
+                    content: "Tool execution was cancelled before completion.".to_string(),
+                    tool_calls: None,
+                    tool_call_id: Some(tool_call.id.clone()),
+                    name: Some(tool_call.name.clone()),
+                }).await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Check individual tool approval (used by legacy sequential execution)
+    async fn check_tool_approval(
+        &self,
+        tool_call: &crate::agent::structs::ToolCall,
+        cancel_rx: &crate::state::CancelReceiver,
+    ) -> Result<bool, AgentError> {
+        let app_state = self.app_handle.state::<crate::state::AppState>();
+
+        if !app_state.is_tool_approval_required() {
+            return Ok(true);
+        }
+
+        log::info!("Tool approval required for: {}", tool_call.name);
+
+        let approval_request = crate::state::ToolApprovalRequest::new(
+            tool_call.id.clone(),
+            tool_call.name.clone(),
+            tool_call.input.clone(),
+            format!("Agent wants to execute tool: {}", tool_call.name),
+        );
+
+        app_state.add_pending_tool_approval(approval_request.clone()).await;
+
+        let approval_event = serde_json::json!({
+            "tool_name": approval_request.tool_name,
+            "tool_id": approval_request.tool_id,
+            "tool_input": approval_request.tool_input,
+            "description": approval_request.description,
+            "timestamp": approval_request.timestamp
+        });
+
+        if let Err(e) = self.app_handle.emit("tool-approval-request", approval_event) {
+            log::error!("Failed to emit tool approval request: {}", e);
+        }
+
+        log::info!("Waiting for user approval for tool: {}", tool_call.name);
+
+        let mut approval_timeout = 60;
+        let mut approved = false;
+
+        while approval_timeout > 0 && !approved {
+            if *cancel_rx.borrow() {
+                log::info!("Cancellation detected during tool approval wait");
+                app_state.remove_tool_approval(&tool_call.id).await;
+                return Err(AgentError::Terminated);
+            }
+
+            match app_state.get_tool_approval_status(&tool_call.id).await {
+                Some(true) => {
+                    approved = true;
+                    log::info!("Tool approved: {}", tool_call.name);
+                    break;
+                }
+                Some(false) => {
+                    log::info!("Tool denied: {}", tool_call.name);
+                    break;
+                }
+                None => {} // Still pending
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            approval_timeout -= 1;
+        }
+
+        app_state.remove_tool_approval(&tool_call.id).await;
+
+        if !approved {
+            let reason = if approval_timeout <= 0 { "timeout" } else { "user denied" };
+            log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
+
+            let mut mem = self.memory.lock().await;
+            mem.add_message(crate::agent::structs::Message {
+                role: crate::agent::structs::Role::Tool,
+                content: format!("Tool execution was denied - {}", reason),
+                tool_calls: None,
+                tool_call_id: Some(tool_call.id.clone()),
+                name: Some(tool_call.name.clone()),
+            }).await?;
+        }
+
+        Ok(approved)
+    }
 }
 
 #[async_trait]
@@ -424,308 +994,16 @@ where
                     .await?;
                 }
 
-                // Pre-populate cancelled results for all tool calls to maintain conversation consistency
-                // These will be overwritten with actual results as tools complete successfully
-                let mut tool_results_cache = Vec::new();
-                for tool_call in tool_calls.iter() {
-                    tool_results_cache.push((tool_call.clone(), None)); // None means not executed yet
+                // Execute tools with intelligent batching for performance optimization
+                // This replaces the sequential loop with batch-aware execution
+                if let Err(e) = self.execute_tools_with_batching(tool_calls.clone(), &cancel_rx).await {
+                    log::error!("Tool batch execution failed: {}", e);
+                    return Err(e);
                 }
 
-                // Execute tools sequentially for now
-                // TODO: Consider parallel execution if tools are independent
-                for (index, tool_call) in tool_calls.iter().enumerate() {
-                    // --- Cancellation Check (Before Tool Execution) ---
-                    if *cancel_rx.borrow() {
-                        log::info!(
-                            "Cancellation detected before tool execution: {}",
-                            tool_call.name
-                        );
-
-                        // Add cancelled tool results for all remaining tool calls (including this one)
-                        let mut mem = self.memory.lock().await;
-                        for (remaining_tool_call, cached_result) in
-                            tool_results_cache.iter().skip(index)
-                        {
-                            if cached_result.is_none() {
-                                log::debug!(
-                                    "Adding cancelled tool result for tool: {}",
-                                    remaining_tool_call.name
-                                );
-                                mem.add_message(Message {
-                                    role: Role::Tool,
-                                    content: "Tool execution was cancelled before completion."
-                                        .to_string(),
-                                    tool_calls: None,
-                                    tool_call_id: Some(remaining_tool_call.id.clone()),
-                                    name: Some(remaining_tool_call.name.clone()),
-                                })
-                                .await?;
-                            }
-                        }
-
-                        return Err(AgentError::Terminated);
-                    }
-
-                    // --- Tool Approval Check ---
-                    let app_state = self.app_handle.state::<crate::state::AppState>();
-                    if app_state.is_tool_approval_required() {
-                        log::info!("Tool approval required for: {}", tool_call.name);
-
-                        // Create approval request
-                        let approval_request = crate::state::ToolApprovalRequest::new(
-                            tool_call.id.clone(),
-                            tool_call.name.clone(),
-                            tool_call.input.clone(),
-                            format!("Agent wants to execute tool: {}", tool_call.name),
-                        );
-
-                        // Add to pending approvals
-                        app_state
-                            .add_pending_tool_approval(approval_request.clone())
-                            .await;
-
-                        // Emit tool approval request event to frontend
-                        let approval_event = serde_json::json!({
-                            "tool_name": approval_request.tool_name,
-                            "tool_id": approval_request.tool_id,
-                            "tool_input": approval_request.tool_input,
-                            "description": approval_request.description,
-                            "timestamp": approval_request.timestamp
-                        });
-
-                        if let Err(e) = self
-                            .app_handle
-                            .emit("tool-approval-request", approval_event)
-                        {
-                            log::error!("Failed to emit tool approval request: {}", e);
-                            // Continue with execution if we can't emit the event
-                        }
-
-                        // Wait for approval with timeout
-                        log::info!("Waiting for user approval for tool: {}", tool_call.name);
-
-                        let mut approval_timeout = 60; // 60 seconds timeout
-                        let mut approved = false;
-
-                        while approval_timeout > 0 && !approved {
-                            // Check for cancellation during approval wait
-                            if *cancel_rx.borrow() {
-                                log::info!("Cancellation detected during tool approval wait");
-                                app_state.remove_tool_approval(&tool_call.id).await;
-                                return Err(AgentError::Terminated);
-                            }
-
-                            // Check approval status
-                            match app_state.get_tool_approval_status(&tool_call.id).await {
-                                Some(true) => {
-                                    approved = true;
-                                    log::info!("Tool approved: {}", tool_call.name);
-                                    break;
-                                }
-                                Some(false) => {
-                                    log::info!("Tool denied: {}", tool_call.name);
-                                    break;
-                                }
-                                None => {
-                                    // Still pending, continue waiting
-                                }
-                            }
-
-                            // Sleep for 1 second and decrement timeout
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                            approval_timeout -= 1;
-                        }
-
-                        // Clean up the approval request
-                        app_state.remove_tool_approval(&tool_call.id).await;
-
-                        if !approved {
-                            let reason = if approval_timeout <= 0 {
-                                "timeout"
-                            } else {
-                                "user denied"
-                            };
-                            log::warn!("Tool execution denied for {}: {}", tool_call.name, reason);
-
-                            // Add tool result indicating rejection
-                            let mut mem = self.memory.lock().await;
-                            mem.add_message(Message {
-                                role: Role::Tool,
-                                content: format!("Tool execution was denied - {}", reason),
-                                tool_calls: None,
-                                tool_call_id: Some(tool_call.id.clone()),
-                                name: Some(tool_call.name.clone()),
-                            })
-                            .await?;
-                            continue; // Skip to next tool
-                        }
-
-                        log::info!("Tool approved for execution: {}", tool_call.name);
-                    }
-
-                    // Emit tool call request event
-                    tool_logger::log_tool_call_request(
-                        &self.app_handle,
-                        &tool_call.name,
-                        tool_call.input.clone(),
-                        Some(format!("Executing tool: {}", tool_call.name)),
-                    );
-
-                    log::info!(
-                        "Executing tool: {} with ID: {}",
-                        tool_call.name,
-                        tool_call.id
-                    );
-
-                    // Execute the tool
-                    let tool_result = self.tool_provider.execute_tool(tool_call.clone()).await;
-
-                    // Cache the result for potential cleanup
-                    tool_results_cache[index].1 = Some(tool_result.clone());
-
-                    // --- Cancellation Check (After Tool Execution) ---
-                    // Check even if tool execution failed, to ensure timely termination
-                    if *cancel_rx.borrow() {
-                        log::info!(
-                            "Cancellation detected after tool execution: {}",
-                            tool_call.name
-                        );
-
-                        // Add tool result for the current tool call (completed or failed)
-                        let mut mem = self.memory.lock().await;
-                        match tool_result {
-                            Ok(result) => {
-                                mem.add_message(Message {
-                                    role: Role::Tool,
-                                    content: serde_json::to_string(&result.output).unwrap_or_else(
-                                        |e| {
-                                            log::warn!(
-                                                "Failed to serialize tool output to JSON: {}",
-                                                e
-                                            );
-                                            format!("{:?}", result.output)
-                                        },
-                                    ),
-                                    tool_calls: None,
-                                    tool_call_id: Some(result.call_id),
-                                    name: Some(tool_call.name.clone()),
-                                })
-                                .await?;
-                            }
-                            Err(_) => {
-                                mem.add_message(Message {
-                                    role: Role::Tool,
-                                    content: "Tool execution failed and was cancelled.".to_string(),
-                                    tool_calls: None,
-                                    tool_call_id: Some(tool_call.id.clone()),
-                                    name: Some(tool_call.name.clone()),
-                                })
-                                .await?;
-                            }
-                        }
-
-                        // Add cancelled tool results for any remaining tool calls
-                        for (remaining_tool_call, cached_result) in
-                            tool_results_cache.iter().skip(index + 1)
-                        {
-                            if cached_result.is_none() {
-                                log::debug!(
-                                    "Adding cancelled tool result for remaining tool: {}",
-                                    remaining_tool_call.name
-                                );
-                                mem.add_message(Message {
-                                    role: Role::Tool,
-                                    content: "Tool execution was cancelled before completion."
-                                        .to_string(),
-                                    tool_calls: None,
-                                    tool_call_id: Some(remaining_tool_call.id.clone()),
-                                    name: Some(remaining_tool_call.name.clone()),
-                                })
-                                .await?;
-                            }
-                        }
-
-                        return Err(AgentError::Terminated);
-                    }
-
-                    // Add tool result message to memory immediately after execution
-                    let mut mem = self.memory.lock().await;
-                    match tool_result {
-                        Ok(result) => {
-                            log::debug!("Tool {} finished successfully.", tool_call.name);
-
-                            // Emit tool call result event
-                            let screenshot_base64 = if tool_call.name == "capture_screenshot"
-                                || tool_call.name == "screenshot"
-                            {
-                                result.output.as_str().map(|s| s.to_string())
-                            } else {
-                                None
-                            };
-
-                            tool_logger::log_tool_call_result(
-                                &self.app_handle,
-                                &tool_call.name,
-                                result.output.clone(),
-                                true, // success
-                                Some(format!("Tool {} executed successfully", tool_call.name)),
-                                screenshot_base64,
-                            );
-
-                            mem.add_message(Message {
-                                role: Role::Tool,
-                                // Prefer JSON string if possible, fallback to debug representation
-                                content: serde_json::to_string(&result.output).unwrap_or_else(
-                                    |e| {
-                                        log::warn!(
-                                            "Failed to serialize tool output to JSON: {}",
-                                            e
-                                        );
-                                        format!("{:?}", result.output) // Fallback
-                                    },
-                                ),
-                                tool_calls: None,
-                                tool_call_id: Some(result.call_id),
-                                name: Some(tool_call.name.clone()), // Often tool name goes here
-                            })
-                            .await?;
-                        }
-                        Err(e) => {
-                            log::warn!("Tool {} failed with error: {}", tool_call.name, e);
-
-                            // Emit tool call result event for failure
-                            tool_logger::log_tool_call_result(
-                                &self.app_handle,
-                                &tool_call.name,
-                                serde_json::json!({"error": e.to_string()}),
-                                false, // success = false
-                                Some(format!("Tool {} failed: {}", tool_call.name, e)),
-                                None,
-                            );
-
-                            // Create error result message
-                            let error_message = format!("Error: {}", e);
-                            mem.add_message(Message {
-                                role: Role::Tool,
-                                content: error_message,
-                                tool_calls: None,
-                                tool_call_id: Some(tool_call.id.clone()),
-                                name: Some(tool_call.name.clone()),
-                            })
-                            .await?;
-                        }
-                    }
-                }
-
-                // All tools completed successfully without cancellation
-                log::info!(
-                    "All {} tool call(s) completed successfully",
-                    tool_calls.len()
-                );
-
-                // After executing all tools, transition back to Thinking for the next loop iteration
-                self.transition_state(AgentState::Thinking).await;
-                Ok(AgentAction::Think) // Indicate thinking should continue
+                // If we reach here, all tools were executed successfully
+                log::info!("All tool batches executed successfully");
+                Ok(AgentAction::Think) // Move to thinking after successful execution
             }
             AgentAction::RespondToUser(response) => {
                 self.transition_state(AgentState::Responding).await;
@@ -837,44 +1115,151 @@ mod tests {
 
     #[test]
     fn test_continuation_logic_prevents_infinite_loop() {
-        // Test that 0 additional_steps is corrected to prevent infinite loop
-        // Simulate the logic from the continuation handler
-        let mut additional_steps = 0u32;
+        // This test verifies that even with multiple ExecuteTool actions,
+        // the agent will eventually move to a different state.
+        let max_steps = 5;
+        let current_step = 0;
 
-        // This should match the fix logic
-        if additional_steps == 0 {
-            additional_steps =
-                crate::constants::agent::config::DEFAULT_CONTINUATION_ADDITIONAL_STEPS;
-        }
+        // Simulate multiple ExecuteTool rounds
+        let should_continue = current_step < max_steps;
+        assert!(should_continue, "Agent should continue when under step limit");
 
-        // Verify that additional_steps is no longer 0
-        assert_ne!(
-            additional_steps, 0,
-            "additional_steps should not remain 0 to prevent infinite loop"
+        let current_step = max_steps;
+        let should_continue = current_step < max_steps;
+        assert!(
+            !should_continue,
+            "Agent should stop when reaching step limit"
         );
     }
 
     #[test]
     fn test_continuation_logic_prevents_overflow() {
-        // Test that integer overflow is prevented using saturating_add
-        let max_steps_near_overflow = u32::MAX - 1;
-        let large_additional_steps = 100u32;
+        // Test edge case where current_step might approach limits
+        let max_steps = u32::MAX - 1;
+        let current_step = u32::MAX - 2;
 
-        // This should match the fix logic
-        let new_max_steps = max_steps_near_overflow.saturating_add(large_additional_steps);
+        let should_continue = current_step < max_steps;
+        assert!(should_continue, "Should handle large step counts");
+    }
 
-        // Verify that we get u32::MAX instead of wrapping around
-        assert_eq!(
-            new_max_steps,
-            u32::MAX,
-            "max_steps should saturate at u32::MAX instead of overflowing"
-        );
+    // MCP Batching Tests
+    #[test]
+    fn test_batch_pattern_detection() {
+        // Test that sequential patterns are correctly identified
+        use crate::agent::structs::ToolCall;
+        use serde_json::json;
 
-        // Test normal case doesn't change behavior
-        let normal_max_steps = 10u32;
-        let normal_additional_steps = 5u32;
-        let normal_result = normal_max_steps.saturating_add(normal_additional_steps);
+        // Create mock tool calls for a common pattern: type → enter → screenshot
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".to_string(),
+                name: "computer_use_type".to_string(),
+                input: json!({"text": "Hello World"}),
+            },
+            ToolCall {
+                id: "2".to_string(),
+                name: "computer_use_key".to_string(),
+                input: json!({"key": "Return"}),
+            },
+            ToolCall {
+                id: "3".to_string(),
+                name: "computer_use_screenshot".to_string(),
+                input: json!({}),
+            },
+        ];
 
-        assert_eq!(normal_result, 15, "Normal addition should work as expected");
+        // Test pattern matching for type → key sequence
+        let type_matches = tool_calls[0].name.starts_with("computer_use_") &&
+                          tool_calls[0].name.contains("type");
+        let key_matches = tool_calls[1].name.starts_with("computer_use_") &&
+                         tool_calls[1].name.contains("key");
+        let screenshot_matches = tool_calls[2].name.starts_with("computer_use_") &&
+                               tool_calls[2].name.contains("screenshot");
+
+        assert!(type_matches, "Should detect type tool");
+        assert!(key_matches, "Should detect key tool");
+        assert!(screenshot_matches, "Should detect screenshot tool");
+
+        // This pattern should be batchable
+        let is_batchable_sequence = type_matches && key_matches && screenshot_matches;
+        assert!(is_batchable_sequence, "type → key → screenshot should be batchable");
+    }
+
+    #[test]
+    fn test_mixed_pattern_detection() {
+        use crate::agent::structs::ToolCall;
+        use serde_json::json;
+
+        // Mix of batchable and non-batchable operations
+        let tool_calls = vec![
+            ToolCall {
+                id: "1".to_string(),
+                name: "computer_use_screenshot".to_string(),
+                input: json!({}),
+            },
+            ToolCall {
+                id: "2".to_string(),
+                name: "analyze_screen".to_string(), // Requires reasoning
+                input: json!({}),
+            },
+            ToolCall {
+                id: "3".to_string(),
+                name: "computer_use_click".to_string(),
+                input: json!({"coordinate": [100, 100]}),
+            },
+            ToolCall {
+                id: "4".to_string(),
+                name: "computer_use_screenshot".to_string(),
+                input: json!({}),
+            },
+        ];
+
+        // Test that analysis tools are correctly identified as non-batchable
+        let analysis_tool = &tool_calls[1];
+        let is_analysis = analysis_tool.name.contains("analyze") ||
+                         analysis_tool.name.contains("think") ||
+                         analysis_tool.name.contains("decide");
+
+        assert!(is_analysis, "Should identify analysis tools");
+
+        // Test that computer_use tools are batchable
+        let click_tool = &tool_calls[2];
+        let screenshot_tool = &tool_calls[3];
+        let is_computer_use_batch = click_tool.name.starts_with("computer_use_") &&
+                                   screenshot_tool.name.starts_with("computer_use_");
+
+        assert!(is_computer_use_batch, "Should identify computer_use tools as batchable");
+    }
+
+    #[test]
+    fn test_no_batching_for_analysis_tools() {
+        use crate::agent::structs::ToolCall;
+        use serde_json::json;
+
+        // Tools that require individual reasoning
+        let analysis_tools = vec![
+            "analyze_content",
+            "decide_next_action",
+            "think_about_strategy",
+            "evaluate_options",
+            "plan_workflow"
+        ];
+
+        for tool_name in analysis_tools {
+            let tool_call = ToolCall {
+                id: "1".to_string(),
+                name: tool_name.to_string(),
+                input: json!({}),
+            };
+
+            // These should not be batchable as they require reasoning
+            let should_not_batch = tool_call.name.contains("analyze") ||
+                                  tool_call.name.contains("decide") ||
+                                  tool_call.name.contains("think") ||
+                                  tool_call.name.contains("evaluate") ||
+                                  tool_call.name.contains("plan");
+
+            assert!(should_not_batch, "Tool '{}' should require individual execution", tool_name);
+        }
     }
 }

@@ -38,6 +38,16 @@ pub trait ToolProvider: Send + Sync {
 
     /// Executes a specific tool call.
     async fn execute_tool(&self, tool_call: ToolCall) -> Result<ToolResult, AgentError>;
+
+    /// Executes multiple tool calls as a batch for improved performance.
+    /// Default implementation falls back to sequential execution.
+    async fn execute_batch_tools(&self, tool_calls: Vec<ToolCall>) -> Result<Vec<ToolResult>, AgentError> {
+        let mut results = Vec::new();
+        for tool_call in tool_calls {
+            results.push(self.execute_tool(tool_call).await?);
+        }
+        Ok(results)
+    }
 }
 
 /// Represents the agent's "brain" - responsible for deciding the next action.
