@@ -40,8 +40,12 @@ pub mod tool_names {
 
 // Agent configuration
 pub mod config {
-    pub const MAX_ITERATIONS: u32 = 40;
-    pub const MAX_ITERATIONS_REDUCED: u32 = 20;
+    pub const MAX_ITERATIONS: u32 = 15;
+    pub const MAX_ITERATIONS_REDUCED: u32 = 10;
+
+    // Continuation settings - independent timeout for agent continuation requests
+    pub const DEFAULT_CONTINUATION_ADDITIONAL_STEPS: u32 = 20;
+    pub const CONTINUATION_REQUEST_TIMEOUT_SECONDS: u64 = 300; // 5 minutes - appropriate for user continuation
 
     // Token limits
     pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
@@ -57,6 +61,10 @@ pub mod config {
     // Tool call limits
     pub const MAX_TOOL_CALLS_PER_ITERATION: usize = 20;
     pub const MAX_MEMORY_ENTRIES: usize = 1000;
+
+    // Independent timeout settings optimized for agent operations
+    pub const DEFAULT_TASK_TIMEOUT_SECONDS: u64 = 300; // 5 minutes - appropriate for general agent tasks
+    pub const DEFAULT_COMMAND_TIMEOUT_SECONDS: u64 = 180; // 3 minutes - appropriate for basic commands like terminal operations
 }
 
 // Monitor session settings
@@ -65,16 +73,14 @@ pub mod monitor_sessions {
     pub const IMMEDIATE_START_MS: u64 = 0;
 
     // Max durations
-    pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000;  // 30 seconds
-    pub const MAX_AGENT_DURATION_MS: u64 = 180_000;         // 2 minutes
+    pub const MAX_TRANSCRIPTION_DURATION_MS: u64 = 30_000; // 30 seconds
+    pub const MAX_AGENT_DURATION_MS: u64 = 180_000; // 2 minutes
 
     // Cleanup timeouts
-    pub const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000;       // 5 seconds
-    pub const COOLDOWN_AFTER_CANCEL_MS: u64 = 150;         // 150ms
+    pub const FORCE_CLEANUP_TIMEOUT_MS: u64 = 5_000; // 5 seconds
+    pub const COOLDOWN_AFTER_CANCEL_MS: u64 = 150; // 150ms
 
     // Monitor intervals
     pub const AGENT_MONITOR_INTERVAL_MS: u64 = 100;
     pub const DICTATION_MONITOR_INTERVAL_MS: u64 = 50;
 }
-
-

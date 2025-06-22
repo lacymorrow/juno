@@ -1,30 +1,28 @@
-use tracing::{info, error, warn};
-use uuid;
-use std::sync::Arc;
 use std::collections::VecDeque;
-use tokio::sync::{Semaphore, Mutex};
+use std::sync::Arc;
+use tokio::sync::{Mutex, Semaphore};
+use tracing::{error, info, warn};
+use uuid;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{State, Manager, Emitter};
+use tauri::{Emitter, Manager, State};
 
 use crate::agent::implementations::{
-    agent_runner::DefaultAgentRunner,
-    tool_provider::LocalToolProvider,
+    agent_runner::DefaultAgentRunner, tool_provider::LocalToolProvider,
 };
-use crate::agent::tools::{
-    basic_tools::register_basic_tools,
-    desktop_tools::setup_tools,
-    browser_tools::get_browser_tool_definitions,
-};
-use crate::agent::structs::AgentError;
-use crate::agent::traits::{AgentRunnable, MemoryManager};
-use crate::agent::providers::factory::BrainFactory;
-use crate::agent::providers::config::AgentMode;
 use crate::agent::prompts::PromptManager;
-use crate::state::AppState;
-use crate::utils::{gather_system_context, format_system_context_for_agent};
+use crate::agent::providers::config::AgentMode;
+use crate::agent::providers::factory::BrainFactory;
+use crate::agent::structs::AgentError;
+use crate::agent::tools::{
+    basic_tools::register_basic_tools, browser_tools::get_browser_tool_definitions,
+    desktop_tools::setup_tools,
+};
+use crate::agent::traits::{AgentRunnable, MemoryManager};
 use crate::constants::{agent, timeouts};
+use crate::state::AppState;
+use crate::utils::{format_system_context_for_agent, gather_system_context};
 
 /// Agent execution queue system to prevent concurrent execution
 #[derive(Debug)]
@@ -55,7 +53,12 @@ impl AgentExecutionQueue {
     }
 
     /// Queue a new query for execution, cancelling any existing execution
-    async fn queue_query(&self, query: String, app_handle: tauri::AppHandle, state: tauri::State<'_, AppState>) -> String {
+    async fn queue_query(
+        &self,
+        query: String,
+        app_handle: tauri::AppHandle,
+        state: tauri::State<'_, AppState>,
+    ) -> String {
         let query_id = uuid::Uuid::new_v4().to_string();
         let queued_query = QueuedQuery {
             id: query_id.clone(),
@@ -96,7 +99,7 @@ impl AgentExecutionQueue {
         }
     }
 
-        /// Execute the next queued query atomically
+    /// Execute the next queued query atomically
     async fn execute_next_query(&self, state: tauri::State<'_, AppState>) -> Option<QueuedQuery> {
         // Try to acquire execution semaphore (non-blocking check)
         if let Ok(permit) = self.execution_semaphore.try_acquire() {
@@ -116,7 +119,9 @@ impl AgentExecutionQueue {
                 info!("Starting atomic agent execution for query ID: {}", query.id);
 
                 // Execute the actual agent logic here
-                let result = execute_agent_internal(query.query.clone(), state, query.app_handle.clone()).await;
+                let result =
+                    execute_agent_internal(query.query.clone(), state, query.app_handle.clone())
+                        .await;
 
                 // Clear current execution
                 {
@@ -172,21 +177,19 @@ pub(crate) struct AnthropicContentBlock {
     // Fields related to tool_result (we create these, don't expect from API)
 }
 
-
 // Keep this for payload structure, ensure Clone is derived
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SubmitQueryResult {
     pub text: String,
     pub spoken_text: Option<String>, // Optional separate content for TTS
     pub audio_base64: Option<String>,
-    pub agent_state: String, // Send final state to frontend
+    pub agent_state: String,               // Send final state to frontend
     pub screenshot_base64: Option<String>, // Optional screenshot data from the session
 }
 
 // Note: BackendResponsePayload removed as we now use streaming events only
 
 // Removed AnthropicThinkingBudget as it was commented out
-
 
 #[derive(Deserialize, Debug)]
 struct AnthropicUsage {
@@ -214,21 +217,21 @@ struct AnthropicResponse {
 /// Simple JSX content detection
 fn is_jsx_content(content: &str) -> bool {
     // Check for common JSX patterns
-    content.contains("<") && content.contains(">") && (
-        content.contains("Card") ||
-        content.contains("Alert") ||
-        content.contains("Button") ||
-        content.contains("Badge") ||
-        content.contains("Circle") ||
-        content.contains("Rectangle") ||
-        content.contains("Triangle") ||
-        content.contains("StatusCard") ||
-        content.contains("ColorShowcase") ||
-        content.contains("VisualDemo") ||
-        content.contains("className=") ||
-        content.contains("jsx") ||
-        content.contains("React")
-    )
+    content.contains("<")
+        && content.contains(">")
+        && (content.contains("Card")
+            || content.contains("Alert")
+            || content.contains("Button")
+            || content.contains("Badge")
+            || content.contains("Circle")
+            || content.contains("Rectangle")
+            || content.contains("Triangle")
+            || content.contains("StatusCard")
+            || content.contains("ColorShowcase")
+            || content.contains("VisualDemo")
+            || content.contains("className=")
+            || content.contains("jsx")
+            || content.contains("React"))
 }
 
 // --- Submit Query Function (Refactored with Orchestrator-Based Architecture) ---
@@ -259,26 +262,47 @@ pub async fn submit_query(
         // Emit offline message as agent response
         let message_id = uuid::Uuid::new_v4().to_string();
         crate::agent::tool_logger::emit_stream_start(&app_handle, message_id.clone());
-        crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, offline_message.clone(), Some(message_id.clone()), None);
-        crate::agent::tool_logger::emit_stream_end(&app_handle, message_id, offline_message.clone());
+        crate::agent::tool_logger::emit_streaming_text_chunk(
+            &app_handle,
+            offline_message.clone(),
+            Some(message_id.clone()),
+            None,
+        );
+        crate::agent::tool_logger::emit_stream_end(
+            &app_handle,
+            message_id,
+            offline_message.clone(),
+        );
 
         // Force system TTS for offline response
-        let current_provider = state.tts_provider.lock().map_err(|e| format!("Failed to access TTS provider: {}", e))?.clone();
+        let current_provider = state
+            .tts_provider
+            .lock()
+            .map_err(|e| format!("Failed to access TTS provider: {}", e))?
+            .clone();
 
         // Temporarily switch to system TTS for offline message
         {
-            let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to lock TTS provider: {}", e))?;
+            let mut tts_provider = state
+                .tts_provider
+                .lock()
+                .map_err(|e| format!("Failed to lock TTS provider: {}", e))?;
             *tts_provider = "system".to_string();
         }
 
         // Play offline message using system TTS
-        if let Err(e) = crate::tts::invoke_tts(offline_message, state.clone(), app_handle.clone()).await {
+        if let Err(e) =
+            crate::tts::invoke_tts(offline_message, state.clone(), app_handle.clone()).await
+        {
             warn!("Failed to play offline message via TTS: {}", e);
         }
 
         // Restore original TTS provider
         {
-            let mut tts_provider = state.tts_provider.lock().map_err(|e| format!("Failed to restore TTS provider: {}", e))?;
+            let mut tts_provider = state
+                .tts_provider
+                .lock()
+                .map_err(|e| format!("Failed to restore TTS provider: {}", e))?;
             *tts_provider = current_provider;
         }
 
@@ -289,7 +313,9 @@ pub async fn submit_query(
 
     // --- Use Atomic Agent Execution Queue ---
     let queue = get_agent_execution_queue();
-    let query_id = queue.queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone()).await;
+    let query_id = queue
+        .queue_query(trimmed_query.to_string(), app_handle.clone(), state.clone())
+        .await;
     info!("Queued agent query with ID: {}", query_id);
 
     // Execute the queued query atomically
@@ -310,11 +336,20 @@ async fn execute_agent_internal(
     let execution_id = uuid::Uuid::new_v4().to_string();
 
     // Mark agent execution as started with max iterations (both modes use 15)
-    let _ = state.mark_agent_execution_started_with_steps(execution_id.clone(), agent::config::MAX_ITERATIONS);
-    info!("Starting new agent execution with ID: {} (max steps: {})", execution_id, agent::config::MAX_ITERATIONS);
+    let _ = state.mark_agent_execution_started_with_steps(
+        execution_id.clone(),
+        agent::config::MAX_ITERATIONS,
+    );
+    info!(
+        "Starting new agent execution with ID: {} (max steps: {})",
+        execution_id,
+        agent::config::MAX_ITERATIONS
+    );
 
     // Register escape key for cancellation during agent execution
-    if let Err(e) = crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await {
+    if let Err(e) =
+        crate::commands::shortcuts::register_escape_key_handler(app_handle.clone()).await
+    {
         warn!("Failed to register escape key for agent execution: {} - continuing without escape key cancellation", e);
     }
 
@@ -358,7 +393,8 @@ async fn execute_agent_internal(
     info!("Registered basic tools for specialized agents.");
 
     // Setup desktop tools for specialized agents and get the shared provider
-    let shared_tool_provider = setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
+    let shared_tool_provider =
+        setup_tools(&mut tool_provider, state.clone(), app_handle.clone()).await;
 
     // Extract the tool provider from Arc<Mutex<>> for agent creation
     let agent_tool_provider = {
@@ -378,20 +414,28 @@ async fn execute_agent_internal(
             async move {
                 let state_from_handle = app_handle_captured.state::<AppState>();
 
-                let browser_controller_instance = match state_from_handle.get_or_init_browser_controller().await {
-                    Ok(controller) => controller,
-                    Err(e) => {
-                        let err_msg = format!("Failed to initialize BrowserController for tool {}: {}", current_tool_name_captured, e);
-                        error!("{}", err_msg);
-                        return Err(err_msg);
-                    }
-                };
+                let browser_controller_instance =
+                    match state_from_handle.get_or_init_browser_controller().await {
+                        Ok(controller) => controller,
+                        Err(e) => {
+                            let err_msg = format!(
+                                "Failed to initialize BrowserController for tool {}: {}",
+                                current_tool_name_captured, e
+                            );
+                            error!("{}", err_msg);
+                            return Err(err_msg);
+                        }
+                    };
 
                 let result = match current_tool_name_captured.as_str() {
                     "browser_navigate" => browser_controller_instance.navigate(&input).await,
-                    "browser_extract_content" => browser_controller_instance.extract_content(&input).await,
+                    "browser_extract_content" => {
+                        browser_controller_instance.extract_content(&input).await
+                    }
                     "browser_interact" => browser_controller_instance.interact(&input).await,
-                    "browser_get_current_url" => browser_controller_instance.get_current_url(&input).await,
+                    "browser_get_current_url" => {
+                        browser_controller_instance.get_current_url(&input).await
+                    }
                     "browser_screenshot" => browser_controller_instance.screenshot(&input).await,
                     _ => Err(AgentError::ToolNotFound(current_tool_name_captured)),
                 };
@@ -405,9 +449,14 @@ async fn execute_agent_internal(
         // Register browser tools on the shared provider instance
         {
             let guard = shared_tool_provider.lock().await;
-            guard.register_async_tool(definition.clone(), executor).await;
+            guard
+                .register_async_tool(definition.clone(), executor)
+                .await;
         }
-        info!("Registered browser tool for specialized agents: {}", definition.name);
+        info!(
+            "Registered browser tool for specialized agents: {}",
+            definition.name
+        );
     }
 
     // --- Determine Agent Mode and Create Runtime ---
@@ -425,9 +474,21 @@ async fn execute_agent_internal(
 
                     // Emit error via streaming events instead of backend-response
                     let error_message_id = uuid::Uuid::new_v4().to_string();
-                    crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
-                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()), None);
-                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
+                    crate::agent::tool_logger::emit_stream_start(
+                        &app_handle,
+                        error_message_id.clone(),
+                    );
+                    crate::agent::tool_logger::emit_streaming_text_chunk(
+                        &app_handle,
+                        err_msg.clone(),
+                        Some(error_message_id.clone()),
+                        None,
+                    );
+                    crate::agent::tool_logger::emit_stream_end(
+                        &app_handle,
+                        error_message_id,
+                        err_msg.clone(),
+                    );
                     return Err(err_msg);
                 }
             };
@@ -450,7 +511,11 @@ async fn execute_agent_internal(
 
             // Prepare the query with system context
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
+                format!(
+                    "{}\n\nUser Query: {}",
+                    format_system_context_for_agent(context),
+                    trimmed_query
+                )
             } else {
                 trimmed_query.to_string()
             };
@@ -458,10 +523,12 @@ async fn execute_agent_internal(
             let result = single_agent_runner.run(contextual_query, cancel_rx).await;
 
             result
-        },
+        }
         AgentMode::Multi => {
             // Multi-agent mode - use orchestrator with specialized agents
-            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(get_orchestrator_personality_prompt(&app_handle).await) {
+            let orchestrator_brain = match BrainFactory::create_brain_with_system_prompt(
+                get_orchestrator_personality_prompt(&app_handle).await,
+            ) {
                 Ok(brain) => brain,
                 Err(e) => {
                     let err_msg = format!("Failed to initialize orchestrator brain: {}", e);
@@ -469,19 +536,37 @@ async fn execute_agent_internal(
 
                     // Emit error via streaming events instead of backend-response
                     let error_message_id = uuid::Uuid::new_v4().to_string();
-                    crate::agent::tool_logger::emit_stream_start(&app_handle, error_message_id.clone());
-                    crate::agent::tool_logger::emit_streaming_text_chunk(&app_handle, err_msg.clone(), Some(error_message_id.clone()), None);
-                    crate::agent::tool_logger::emit_stream_end(&app_handle, error_message_id, err_msg.clone());
+                    crate::agent::tool_logger::emit_stream_start(
+                        &app_handle,
+                        error_message_id.clone(),
+                    );
+                    crate::agent::tool_logger::emit_streaming_text_chunk(
+                        &app_handle,
+                        err_msg.clone(),
+                        Some(error_message_id.clone()),
+                        None,
+                    );
+                    crate::agent::tool_logger::emit_stream_end(
+                        &app_handle,
+                        error_message_id,
+                        err_msg.clone(),
+                    );
                     return Err(err_msg);
                 }
             };
             info!("Orchestrator brain initialized.");
 
             // Create orchestrator with delegation tools
-            let mut orchestrator_tool_provider = LocalToolProvider::with_app_handle(app_handle.clone());
+            let mut orchestrator_tool_provider =
+                LocalToolProvider::with_app_handle(app_handle.clone());
 
             // Register delegation tools for the orchestrator
-            register_orchestrator_delegation_tools(&mut orchestrator_tool_provider, agent_tool_provider, app_handle.clone()).await;
+            register_orchestrator_delegation_tools(
+                &mut orchestrator_tool_provider,
+                agent_tool_provider,
+                app_handle.clone(),
+            )
+            .await;
             info!("Registered delegation tools for orchestrator.");
 
             // Create the orchestrator agent runner with personality-focused system prompt
@@ -495,13 +580,19 @@ async fn execute_agent_internal(
                 agent::config::MAX_ITERATIONS,
                 app_handle.clone(),
             );
-            info!("Orchestrator agent runner created with personality and delegation capabilities.");
+            info!(
+                "Orchestrator agent runner created with personality and delegation capabilities."
+            );
 
             info!("Starting orchestrator run...");
 
             // Prepare the query with system context for orchestrator
             let contextual_query = if let Some(ref context) = system_context {
-                format!("{}\n\nUser Query: {}", format_system_context_for_agent(context), trimmed_query)
+                format!(
+                    "{}\n\nUser Query: {}",
+                    format_system_context_for_agent(context),
+                    trimmed_query
+                )
             } else {
                 trimmed_query.to_string()
             };
@@ -517,11 +608,19 @@ async fn execute_agent_internal(
 
     // Mark agent execution as finished
     state.mark_agent_execution_finished();
-    info!("Agent execution marked as finished for ID: {}", execution_id);
+    info!(
+        "Agent execution marked as finished for ID: {}",
+        execution_id
+    );
 
     // Unregister escape key as agent execution is complete
-    if let Err(e) = crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await {
-        warn!("Failed to unregister escape key after agent execution: {} - continuing anyway", e);
+    if let Err(e) =
+        crate::commands::shortcuts::unregister_escape_key_handler(app_handle.clone()).await
+    {
+        warn!(
+            "Failed to unregister escape key after agent execution: {} - continuing anyway",
+            e
+        );
     }
 
     // --- Process Agent Result ---
@@ -529,14 +628,14 @@ async fn execute_agent_internal(
         Ok(message) => {
             // Note: Success sound will be played after TTS completes (or immediately if TTS is disabled)
 
-                    SubmitQueryResult {
-            text: message.clone(),
-            spoken_text: None, // TTS content is now handled during streaming via XML tags
+            SubmitQueryResult {
+                text: message.clone(),
+                spoken_text: None, // TTS content is now handled during streaming via XML tags
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: "Finished".to_string(),
                 screenshot_base64: None, // Capture screenshot if needed
             }
-        },
+        }
         Err(e) => {
             error!("Agent run failed: {}", e);
 
@@ -547,42 +646,75 @@ async fn execute_agent_internal(
             let (state_str, msg) = match e {
                 AgentError::Terminated => {
                     // Play agent attention sound for cancellation (less intrusive than error)
-                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(app_handle.clone(), state.clone()).await {
+                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(
+                        app_handle.clone(),
+                        state.clone(),
+                    )
+                    .await
+                    {
                         warn!("Failed to play cancellation sound: {}", e);
                     }
-                    ("Cancelled".to_string(), "Agent execution was cancelled.".to_string())
-                },
+                    (
+                        "Cancelled".to_string(),
+                        "Agent execution was cancelled.".to_string(),
+                    )
+                }
                 AgentError::MaxStepsReached => {
                     // Play agent error sound for failure
-                    if let Err(e) = crate::commands::sound::play_agent_error_sound(app_handle.clone(), state.clone()).await {
+                    if let Err(e) = crate::commands::sound::play_agent_error_sound(
+                        app_handle.clone(),
+                        state.clone(),
+                    )
+                    .await
+                    {
                         warn!("Failed to play error sound: {}", e);
                     }
-                    ("Failed".to_string(), "Agent reached maximum steps.".to_string())
-                },
+                    (
+                        "Failed".to_string(),
+                        "Agent reached maximum steps.".to_string(),
+                    )
+                }
                 AgentError::LlmError(_) if is_network_error => {
                     // Handle network errors gracefully - use friendly message instead of raw error
                     warn!("LLM error appears to be network-related: {}", error_message);
 
                     // Play different sound for network issues (less alarming)
-                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(app_handle.clone(), state.clone()).await {
+                    if let Err(e) = crate::commands::sound::play_agent_attention_sound(
+                        app_handle.clone(),
+                        state.clone(),
+                    )
+                    .await
+                    {
                         warn!("Failed to play network error sound: {}", e);
                     }
 
-                    ("Offline".to_string(), crate::utils::network::get_offline_message())
-                },
+                    (
+                        "Offline".to_string(),
+                        crate::utils::network::get_offline_message(),
+                    )
+                }
                 _ => {
                     // Play agent error sound for other failures
-                    if let Err(e) = crate::commands::sound::play_agent_error_sound(app_handle.clone(), state.clone()).await {
+                    if let Err(e) = crate::commands::sound::play_agent_error_sound(
+                        app_handle.clone(),
+                        state.clone(),
+                    )
+                    .await
+                    {
                         warn!("Failed to play error sound: {}", e);
                     }
                     ("Failed".to_string(), format!("Agent error: {}", e))
-                },
+                }
             };
 
             // For network errors, temporarily switch to system TTS to ensure the message is heard
             let should_force_system_tts = is_network_error || state_str == "Offline";
             let original_tts_provider = if should_force_system_tts {
-                let current_provider = state.tts_provider.lock().map(|p| p.clone()).unwrap_or_default();
+                let current_provider = state
+                    .tts_provider
+                    .lock()
+                    .map(|p| p.clone())
+                    .unwrap_or_default();
                 // Switch to system TTS for network errors
                 if let Ok(mut tts_provider) = state.tts_provider.lock() {
                     *tts_provider = "system".to_string();
@@ -595,7 +727,7 @@ async fn execute_agent_internal(
 
             let result = SubmitQueryResult {
                 text: msg.clone(),
-                spoken_text: None, // Error messages use same content for speech
+                spoken_text: None,  // Error messages use same content for speech
                 audio_base64: None, // Will be set below if TTS is enabled
                 agent_state: state_str,
                 screenshot_base64: None,
@@ -632,7 +764,10 @@ async fn execute_agent_internal(
         info!("Agent completed successfully. Success sound will play after TTS completion.");
     }
 
-    info!("Agent run complete. Final state: {}", final_response.agent_state);
+    info!(
+        "Agent run complete. Final state: {}",
+        final_response.agent_state
+    );
 
     // --- Update Floating Bar Manager ---
     let app_handle_for_bar = app_handle.clone();
@@ -642,8 +777,9 @@ async fn execute_agent_internal(
         crate::commands::floating_bar::handle_backend_response(
             &app_handle_for_bar,
             &agent_state_for_bar,
-            Some(text_for_bar)
-        ).await;
+            Some(text_for_bar),
+        )
+        .await;
     });
 
     // --- Emit agent error event for main chat interface ---
@@ -676,7 +812,7 @@ async fn execute_agent_internal(
             &final_stream_handle,
             final_message_id,
             final_text,
-            final_agent_state
+            final_agent_state,
         );
     });
 
@@ -699,7 +835,9 @@ pub async fn handle_tts_completion(
     crate::commands::floating_bar::handle_tts_finished(&app_handle).await;
 
     // Play agent success sound now that TTS has finished
-    if let Err(e) = crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await {
+    if let Err(e) =
+        crate::commands::sound::play_agent_success_sound(app_handle.clone(), state.clone()).await
+    {
         warn!("Failed to play success sound after TTS completion: {}", e);
     }
 
@@ -709,11 +847,13 @@ pub async fn handle_tts_completion(
 /// Get the personality-focused system prompt for the orchestrator
 async fn get_orchestrator_personality_prompt(app_handle: &tauri::AppHandle) -> String {
     // Create settings manager from app handle
-    let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+    let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone())
+    {
         Ok(manager) => manager,
         Err(e) => {
             warn!("Failed to create settings manager: {}. Using defaults.", e);
-            return crate::agent::prompts::PromptManager::new().get_orchestrator_personality_prompt();
+            return crate::agent::prompts::PromptManager::new()
+                .get_orchestrator_personality_prompt();
         }
     };
 
@@ -767,7 +907,9 @@ async fn register_orchestrator_delegation_tools(
             let cancel_rx = app_state.cancel_rx.clone();
 
             // Execute the specialist agent task with proper error handling
-            match execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx).await {
+            match execute_specialized_agent_task(provider, "browser", input, handle, cancel_rx)
+                .await
+            {
                 Ok(result) => Ok(result),
                 Err(error_msg) => {
                     // Convert any specialist agent error into a proper error response
@@ -783,7 +925,9 @@ async fn register_orchestrator_delegation_tools(
             }
         }
     };
-    orchestrator_provider.register_async_tool(browser_delegation_def, browser_executor).await;
+    orchestrator_provider
+        .register_async_tool(browser_delegation_def, browser_executor)
+        .await;
 
     // Delegate to Desktop Agent
     let desktop_delegation_def = crate::agent::structs::ToolDefinition {
@@ -816,7 +960,9 @@ async fn register_orchestrator_delegation_tools(
             let cancel_rx = app_state.cancel_rx.clone();
 
             // Execute the specialist agent task with proper error handling
-            match execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx).await {
+            match execute_specialized_agent_task(provider, "desktop", input, handle, cancel_rx)
+                .await
+            {
                 Ok(result) => Ok(result),
                 Err(error_msg) => {
                     // Convert any specialist agent error into a proper error response
@@ -832,7 +978,9 @@ async fn register_orchestrator_delegation_tools(
             }
         }
     };
-    orchestrator_provider.register_async_tool(desktop_delegation_def, desktop_executor).await;
+    orchestrator_provider
+        .register_async_tool(desktop_delegation_def, desktop_executor)
+        .await;
 
     // Delegate to File Agent
     let file_delegation_def = crate::agent::structs::ToolDefinition {
@@ -881,7 +1029,9 @@ async fn register_orchestrator_delegation_tools(
             }
         }
     };
-    orchestrator_provider.register_async_tool(file_delegation_def, file_executor).await;
+    orchestrator_provider
+        .register_async_tool(file_delegation_def, file_executor)
+        .await;
 
     info!("Registered all delegation tools for orchestrator");
 }
@@ -894,19 +1044,24 @@ async fn execute_specialized_agent_task(
     app_handle: tauri::AppHandle,
     cancel_rx: crate::state::CancelReceiver,
 ) -> Result<serde_json::Value, String> {
-    let task = input["task"].as_str()
+    let task = input["task"]
+        .as_str()
         .ok_or_else(|| "Missing required 'task' parameter".to_string())?;
     let context = input["context"].as_str().unwrap_or("");
 
     info!("Executing {} agent task: {}", agent_type, task);
 
     // Create a simple memory manager for the specialized agent
-    let mut specialist_memory = crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
+    let mut specialist_memory =
+        crate::agent::implementations::memory_manager::SimpleMemoryManager::new();
 
     // Clean up any orphaned tool calls that might exist from previous failed executions
     // This provides additional safety against conversation state issues
     if let Err(e) = specialist_memory.clean_orphaned_tool_calls().await {
-        warn!("Failed to clean orphaned tool calls for {} agent: {}", agent_type, e);
+        warn!(
+            "Failed to clean orphaned tool calls for {} agent: {}",
+            agent_type, e
+        );
     }
 
     // Create appropriate brain for the specialist agent with focused system prompt
@@ -921,7 +1076,7 @@ async fn execute_specialized_agent_task(
         specialist_memory,
         (*tool_provider).clone(), // Clone the LocalToolProvider from the Arc
         specialist_brain,
-        10, // Reduced iterations for focused tasks
+        agent::config::MAX_ITERATIONS, // Use same max iterations as orchestrator
         app_handle,
     );
 
@@ -942,7 +1097,10 @@ async fn execute_specialized_agent_task(
 
             if is_jsx {
                 // If the result contains JSX, return it directly to preserve JSX rendering
-                info!("Specialist {} agent returned JSX content, preserving for rendering", agent_type);
+                info!(
+                    "Specialist {} agent returned JSX content, preserving for rendering",
+                    agent_type
+                );
                 Ok(serde_json::json!({
                     "success": true,
                     "agent_type": agent_type,
@@ -974,7 +1132,10 @@ async fn execute_specialized_agent_task(
                     format!("{} agent failed due to timeout - some tool operations did not complete within the time limit", agent_type)
                 }
                 AgentError::LlmError(msg) if msg.contains("timed out") => {
-                    format!("{} agent failed due to timeout - operation exceeded time limit", agent_type)
+                    format!(
+                        "{} agent failed due to timeout - operation exceeded time limit",
+                        agent_type
+                    )
                 }
                 AgentError::ToolError(msg) if msg.contains("timed out") => {
                     format!("{} agent failed due to tool timeout: {}", agent_type, msg)
@@ -993,7 +1154,8 @@ async fn execute_specialized_agent_task(
 /// Get specialist system prompt for delegation task execution
 async fn get_specialist_system_prompt(agent_type: &str, app_handle: &tauri::AppHandle) -> String {
     // Create settings manager from app handle
-    let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone()) {
+    let settings_manager = match crate::settings::manager::SettingsManager::new(app_handle.clone())
+    {
         Ok(manager) => manager,
         Err(e) => {
             warn!("Failed to create settings manager: {}. Using defaults.", e);
@@ -1039,7 +1201,11 @@ pub async fn cleanup_browser(app_handle: tauri::AppHandle) -> Result<(), String>
 // --- TTS Function ---
 
 #[tauri::command]
-pub async fn get_tts_audio(text: String, state: State<'_, AppState>, app_handle: tauri::AppHandle) -> Result<String, String> {
+pub async fn get_tts_audio(
+    text: String,
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
     // Call the invoke_tts function with the text and state
     crate::tts::invoke_tts(text, state, app_handle).await
 }

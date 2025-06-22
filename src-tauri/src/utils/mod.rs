@@ -1,9 +1,9 @@
 // Add coordinates module
-pub mod coordinates;
+pub mod async_runtime;
 pub mod command_macros;
+pub mod coordinates;
 pub mod key_parsing;
 pub mod network;
-pub mod async_runtime;
 
 use computer_use_ai_sdk::Desktop;
 
@@ -26,7 +26,7 @@ pub(crate) fn run_test_focused_element(desktop: &Desktop) -> Result<(), String> 
             for (key, value) in attrs.properties {
                 println!("    {}: {:?}", key, value);
             }
-             if let Ok((x, y, w, h)) = element.bounds() {
+            if let Ok((x, y, w, h)) = element.bounds() {
                 println!("  Bounds: x={}, y={}, width={}, height={}", x, y, w, h);
             } else {
                 println!("  Bounds: Failed to retrieve");
@@ -59,7 +59,7 @@ pub(crate) fn run_test_focused_element_ns() -> Result<(), String> {
             for (key, value) in attrs.properties {
                 println!("    {}: {:?}", key, value);
             }
-             if let Ok((x, y, w, h)) = element.bounds() {
+            if let Ok((x, y, w, h)) = element.bounds() {
                 println!("  Bounds: x={}, y={}, width={}, height={}", x, y, w, h);
             } else {
                 println!("  Bounds: Failed to retrieve");
@@ -137,10 +137,10 @@ pub fn format_elapsed_time(start_ms: u64, end_ms: u64) -> String {
 /// Permission validation utilities for graceful error handling
 pub mod permission_validator {
     use crate::agent::core::AgentError;
-    use crate::state::AppState;
     use crate::commands::permissions::check_permissions_status_native;
+    use crate::state::AppState;
     use tauri::{AppHandle, Manager};
-    use tracing::{warn, info, debug};
+    use tracing::{debug, info, warn};
 
     /// Required permissions for different tool categories
     #[derive(Debug, Clone)]
@@ -156,11 +156,17 @@ pub mod permission_validator {
         /// Get user-friendly description of the permission
         pub fn description(&self) -> &'static str {
             match self {
-                RequiredPermission::Accessibility => "accessibility permissions for desktop automation",
-                RequiredPermission::ScreenRecording => "screen recording permissions for screenshots",
+                RequiredPermission::Accessibility => {
+                    "accessibility permissions for desktop automation"
+                }
+                RequiredPermission::ScreenRecording => {
+                    "screen recording permissions for screenshots"
+                }
                 RequiredPermission::Microphone => "microphone access for voice features",
                 RequiredPermission::InputMonitoring => "input monitoring for global shortcuts",
-                RequiredPermission::AccessibilityAndScreenRecording => "accessibility and screen recording permissions",
+                RequiredPermission::AccessibilityAndScreenRecording => {
+                    "accessibility and screen recording permissions"
+                }
             }
         }
 
@@ -185,13 +191,20 @@ pub mod permission_validator {
         // First check if desktop is available (basic accessibility check)
         let app_state = app_handle.state::<AppState>();
 
-        debug!("Validating {} for tool '{}'", required.description(), tool_name);
+        debug!(
+            "Validating {} for tool '{}'",
+            required.description(),
+            tool_name
+        );
 
         // Check the specific permissions based on requirement
         match required {
             RequiredPermission::Accessibility => {
                 if !app_state.is_desktop_available() {
-                    warn!("Tool '{}' requires accessibility permissions but desktop is not available", tool_name);
+                    warn!(
+                        "Tool '{}' requires accessibility permissions but desktop is not available",
+                        tool_name
+                    );
                     return Err(AgentError::PermissionDenied(format!(
                         "Tool '{}' requires {} but they are not granted. {}",
                         tool_name,
@@ -215,7 +228,10 @@ pub mod permission_validator {
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to check screen recording permissions for tool '{}': {}", tool_name, e);
+                        warn!(
+                            "Failed to check screen recording permissions for tool '{}': {}",
+                            tool_name, e
+                        );
                         return Err(AgentError::PermissionDenied(format!(
                             "Tool '{}' requires {} but permission status could not be verified. {}",
                             tool_name,
@@ -241,9 +257,15 @@ pub mod permission_validator {
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to check microphone permissions for tool '{}': {}", tool_name, e);
+                        warn!(
+                            "Failed to check microphone permissions for tool '{}': {}",
+                            tool_name, e
+                        );
                         // Microphone permission check failures are often not critical
-                        info!("Proceeding with tool '{}' despite microphone permission check failure", tool_name);
+                        info!(
+                            "Proceeding with tool '{}' despite microphone permission check failure",
+                            tool_name
+                        );
                     }
                 }
             }
@@ -258,14 +280,20 @@ pub mod permission_validator {
                     }
                     Err(_) => {
                         // Input monitoring check failures are usually not critical
-                        debug!("Input monitoring permission check failed for tool '{}' - continuing", tool_name);
+                        debug!(
+                            "Input monitoring permission check failed for tool '{}' - continuing",
+                            tool_name
+                        );
                     }
                 }
             }
             RequiredPermission::AccessibilityAndScreenRecording => {
                 // Check both permissions
                 if !app_state.is_desktop_available() {
-                    warn!("Tool '{}' requires accessibility permissions but desktop is not available", tool_name);
+                    warn!(
+                        "Tool '{}' requires accessibility permissions but desktop is not available",
+                        tool_name
+                    );
                     return Err(AgentError::PermissionDenied(format!(
                         "Tool '{}' requires {} but accessibility permissions are not granted. {}",
                         tool_name,
@@ -287,7 +315,10 @@ pub mod permission_validator {
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to check screen recording permissions for tool '{}': {}", tool_name, e);
+                        warn!(
+                            "Failed to check screen recording permissions for tool '{}': {}",
+                            tool_name, e
+                        );
                         return Err(AgentError::PermissionDenied(format!(
                             "Tool '{}' requires {} but permission status could not be verified. {}",
                             tool_name,
@@ -299,7 +330,11 @@ pub mod permission_validator {
             }
         }
 
-        info!("Permission validation passed for tool '{}' - {} are available", tool_name, required.description());
+        info!(
+            "Permission validation passed for tool '{}' - {} are available",
+            tool_name,
+            required.description()
+        );
         Ok(())
     }
 
@@ -348,24 +383,42 @@ pub mod permission_validator {
     pub fn get_tools_requiring_permission(permission: &RequiredPermission) -> Vec<&'static str> {
         match permission {
             RequiredPermission::Accessibility => vec![
-                "desktop_click", "left_click", "right_click", "double_click", "triple_click",
-                "type_text", "press_key", "key", "hold_key", "mouse_move", "left_click_drag",
-                "scroll", "get_focused_element_info", "open_application", "focus_application",
-                "get_running_applications", "list_windows", "focus_window", "element_interaction"
+                "desktop_click",
+                "left_click",
+                "right_click",
+                "double_click",
+                "triple_click",
+                "type_text",
+                "press_key",
+                "key",
+                "hold_key",
+                "mouse_move",
+                "left_click_drag",
+                "scroll",
+                "get_focused_element_info",
+                "open_application",
+                "focus_application",
+                "get_running_applications",
+                "list_windows",
+                "focus_window",
+                "element_interaction",
             ],
             RequiredPermission::ScreenRecording => vec![
-                "capture_screenshot", "screenshot", "capture_element_screenshot",
-                "browser_screenshot", "computer"
+                "capture_screenshot",
+                "screenshot",
+                "capture_element_screenshot",
+                "browser_screenshot",
+                "computer",
             ],
             RequiredPermission::Microphone => vec![
-                "voice_transcription", "microphone_input", "always_listening"
+                "voice_transcription",
+                "microphone_input",
+                "always_listening",
             ],
-            RequiredPermission::InputMonitoring => vec![
-                "global_shortcuts", "hotkey_registration"
-            ],
-            RequiredPermission::AccessibilityAndScreenRecording => vec![
-                "computer", "desktop_automation_with_visual_feedback"
-            ],
+            RequiredPermission::InputMonitoring => vec!["global_shortcuts", "hotkey_registration"],
+            RequiredPermission::AccessibilityAndScreenRecording => {
+                vec!["computer", "desktop_automation_with_visual_feedback"]
+            }
         }
     }
 }
@@ -464,7 +517,9 @@ pub struct VoiceAudioState {
 }
 
 /// Gather comprehensive system context for agent initialization
-pub async fn gather_system_context(app_state: Option<&crate::state::AppState>) -> Result<SystemContext, String> {
+pub async fn gather_system_context(
+    app_state: Option<&crate::state::AppState>,
+) -> Result<SystemContext, String> {
     // Get current time
     let now = chrono::Local::now();
     let current_time = now.format("%A, %B %d, %Y at %I:%M %p").to_string();
@@ -486,7 +541,8 @@ pub async fn gather_system_context(app_state: Option<&crate::state::AppState>) -
     let installed_applications = get_installed_applications_info(&running_applications).await;
 
     // Get user preferences based on application usage patterns
-    let user_preferences = get_user_preferences(&running_applications, &installed_applications).await;
+    let user_preferences =
+        get_user_preferences(&running_applications, &installed_applications).await;
 
     // Enhanced context gathering
     let clipboard_content = get_clipboard_content_safe(app_state).await;
@@ -514,7 +570,9 @@ pub async fn gather_system_context(app_state: Option<&crate::state::AppState>) -
 }
 
 /// Get information about the currently focused window
-async fn get_focused_window_info(_app_state: Option<&crate::state::AppState>) -> Option<FocusedWindowInfo> {
+async fn get_focused_window_info(
+    _app_state: Option<&crate::state::AppState>,
+) -> Option<FocusedWindowInfo> {
     // Try to get focused element information
     #[cfg(target_os = "macos")]
     {
@@ -528,7 +586,9 @@ async fn get_focused_window_info(_app_state: Option<&crate::state::AppState>) ->
                 let has_text_input = is_text_input_element(&attrs);
 
                 // Extract window/application information
-                let title = attrs.label.clone()
+                let title = attrs
+                    .label
+                    .clone()
                     .or_else(|| attrs.value.clone())
                     .unwrap_or_else(|| "Unknown".to_string());
 
@@ -559,11 +619,11 @@ async fn get_focused_window_info(_app_state: Option<&crate::state::AppState>) ->
 #[cfg(target_os = "macos")]
 fn is_text_input_element(attrs: &computer_use_ai_sdk::UIElementAttributes) -> bool {
     let role = &attrs.role;
-    role.contains("TextField") ||
-    role.contains("TextArea") ||
-    role.contains("ComboBox") ||
-    role.contains("SearchField") ||
-    attrs.properties.contains_key("AXValue")
+    role.contains("TextField")
+        || role.contains("TextArea")
+        || role.contains("ComboBox")
+        || role.contains("SearchField")
+        || attrs.properties.contains_key("AXValue")
 }
 
 /// Try to get application name from element using NSWorkspace
@@ -592,14 +652,17 @@ fn get_application_name_from_element(element: &computer_use_ai_sdk::UIElement) -
                         let pid: i32 = msg_send![app, processIdentifier];
 
                         if pid == app_pid {
-                            let app_name_obj: *mut objc::runtime::Object = msg_send![app, localizedName];
+                            let app_name_obj: *mut objc::runtime::Object =
+                                msg_send![app, localizedName];
                             if !app_name_obj.is_null() {
                                 let app_name_str: &str = {
                                     let nsstring = app_name_obj as *const objc::runtime::Object;
                                     let bytes: *const std::os::raw::c_char =
                                         msg_send![nsstring, UTF8String];
-                                    let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
-                                    let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
+                                    let len: usize =
+                                        msg_send![nsstring, lengthOfBytesUsingEncoding:4];
+                                    let bytes_slice =
+                                        std::slice::from_raw_parts(bytes as *const u8, len);
                                     std::str::from_utf8_unchecked(bytes_slice)
                                 };
                                 return Some(app_name_str.to_string());
@@ -624,8 +687,7 @@ fn get_application_name_from_element(element: &computer_use_ai_sdk::UIElement) -
             if !app_name_obj.is_null() {
                 let app_name_str: &str = {
                     let nsstring = app_name_obj as *const objc::runtime::Object;
-                    let bytes: *const std::os::raw::c_char =
-                        msg_send![nsstring, UTF8String];
+                    let bytes: *const std::os::raw::c_char = msg_send![nsstring, UTF8String];
                     let len: usize = msg_send![nsstring, lengthOfBytesUsingEncoding:4];
                     let bytes_slice = std::slice::from_raw_parts(bytes as *const u8, len);
                     std::str::from_utf8_unchecked(bytes_slice)
@@ -643,8 +705,8 @@ fn get_screen_resolution() -> Option<(u32, u32)> {
     #[cfg(target_os = "macos")]
     {
         // Use the existing screenshot functionality to get screen dimensions
-        use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
         use base64::Engine;
+        use computer_use_ai_sdk::platforms::macos::utils::capture_and_encode_screenshot;
 
         match capture_and_encode_screenshot() {
             Ok(screenshot_data) => {
@@ -654,7 +716,11 @@ fn get_screen_resolution() -> Option<(u32, u32)> {
                     if let Ok(img) = image::load_from_memory(&image_data) {
                         let width = img.width();
                         let height = img.height();
-                        log::debug!("Got screen resolution from screenshot: {}x{}", width, height);
+                        log::debug!(
+                            "Got screen resolution from screenshot: {}x{}",
+                            width,
+                            height
+                        );
                         return Some((width, height));
                     }
                 }
@@ -691,7 +757,8 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
             let count: usize = msg_send![apps, count];
 
             // Get the frontmost application for comparison
-            let frontmost_app: *mut objc::runtime::Object = msg_send![shared_workspace, frontmostApplication];
+            let frontmost_app: *mut objc::runtime::Object =
+                msg_send![shared_workspace, frontmostApplication];
             let frontmost_pid: i32 = if !frontmost_app.is_null() {
                 msg_send![frontmost_app, processIdentifier]
             } else {
@@ -737,11 +804,12 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
 
                 // Skip system background processes unless they're user-relevant
                 if let Some(ref bundle_id_str) = bundle_id {
-                    if bundle_id_str.contains(".worker") ||
-                       bundle_id_str.contains("com.apple.WebKit") ||
-                       bundle_id_str.contains("com.apple.CoreServices") ||
-                       (bundle_id_str.contains(".helper") && activation_policy == 2) ||
-                       (bundle_id_str.contains(".agent") && activation_policy == 2) {
+                    if bundle_id_str.contains(".worker")
+                        || bundle_id_str.contains("com.apple.WebKit")
+                        || bundle_id_str.contains("com.apple.CoreServices")
+                        || (bundle_id_str.contains(".helper") && activation_policy == 2)
+                        || (bundle_id_str.contains(".agent") && activation_policy == 2)
+                    {
                         continue;
                     }
                 }
@@ -767,7 +835,9 @@ async fn get_running_applications_info() -> Vec<RunningApplicationInfo> {
 }
 
 /// Get information about installed applications (performance-optimized scan)
-async fn get_installed_applications_info(_running_apps: &[RunningApplicationInfo]) -> Vec<InstalledApplicationInfo> {
+async fn get_installed_applications_info(
+    _running_apps: &[RunningApplicationInfo],
+) -> Vec<InstalledApplicationInfo> {
     #[cfg(target_os = "macos")]
     {
         let mut installed_apps = Vec::new();
@@ -777,7 +847,10 @@ async fn get_installed_applications_info(_running_apps: &[RunningApplicationInfo
             .collect();
 
         // Common application directories to scan
-        let home_applications = format!("{}Applications", std::env::var("HOME").unwrap_or_default() + "/");
+        let home_applications = format!(
+            "{}Applications",
+            std::env::var("HOME").unwrap_or_default() + "/"
+        );
         let app_dirs = vec![
             "/Applications",
             "/System/Applications",
@@ -798,7 +871,8 @@ async fn get_installed_applications_info(_running_apps: &[RunningApplicationInfo
 
                                     // Try to get bundle ID from Info.plist
                                     let bundle_id = get_bundle_id_from_app_path(&path_str);
-                                    let is_running = bundle_id.as_ref()
+                                    let is_running = bundle_id
+                                        .as_ref()
                                         .map(|id| running_bundle_ids.contains(id))
                                         .unwrap_or(false);
 
@@ -819,12 +893,20 @@ async fn get_installed_applications_info(_running_apps: &[RunningApplicationInfo
         // Remove duplicates by bundle ID or name, preferring /Applications over other locations
         installed_apps.sort_by(|a, b| {
             // Prefer /Applications over other locations
-            let a_priority = if a.path.starts_with("/Applications/") { 0 }
-                           else if a.path.starts_with("/Applications") { 1 }
-                           else { 2 };
-            let b_priority = if b.path.starts_with("/Applications/") { 0 }
-                           else if b.path.starts_with("/Applications") { 1 }
-                           else { 2 };
+            let a_priority = if a.path.starts_with("/Applications/") {
+                0
+            } else if a.path.starts_with("/Applications") {
+                1
+            } else {
+                2
+            };
+            let b_priority = if b.path.starts_with("/Applications/") {
+                0
+            } else if b.path.starts_with("/Applications") {
+                1
+            } else {
+                2
+            };
             a_priority.cmp(&b_priority)
         });
 
@@ -869,7 +951,8 @@ fn get_bundle_id_from_app_path(app_path: &str) -> Option<String> {
             if let Some(string_start) = contents[start..].find("<string>") {
                 let string_content_start = start + string_start + 8; // "<string>".len()
                 if let Some(string_end) = contents[string_content_start..].find("</string>") {
-                    let bundle_id = contents[string_content_start..string_content_start + string_end].trim();
+                    let bundle_id =
+                        contents[string_content_start..string_content_start + string_end].trim();
                     return Some(bundle_id.to_string());
                 }
             }
@@ -890,7 +973,14 @@ async fn get_user_preferences(
     let mut productivity_suite = None;
 
     // Browser detection based on running and installed apps
-    let browsers = ["Safari", "Google Chrome", "Firefox", "Microsoft Edge", "Arc", "Brave Browser"];
+    let browsers = [
+        "Safari",
+        "Google Chrome",
+        "Firefox",
+        "Microsoft Edge",
+        "Arc",
+        "Brave Browser",
+    ];
     for browser in browsers {
         if running_apps.iter().any(|app| app.name.contains(browser)) {
             browser_preference = Some(browser.to_string());
@@ -913,7 +1003,18 @@ async fn get_user_preferences(
     }
 
     // Editor detection
-    let editors = ["Visual Studio Code", "Xcode", "Sublime Text", "Atom", "IntelliJ IDEA", "WebStorm", "PyCharm", "TextEdit", "Vim", "Neovim"];
+    let editors = [
+        "Visual Studio Code",
+        "Xcode",
+        "Sublime Text",
+        "Atom",
+        "IntelliJ IDEA",
+        "WebStorm",
+        "PyCharm",
+        "TextEdit",
+        "Vim",
+        "Neovim",
+    ];
     for editor in editors {
         if running_apps.iter().any(|app| app.name.contains(editor)) {
             editor_preference = Some(editor.to_string());
@@ -959,14 +1060,27 @@ async fn get_user_preferences(
     }
 
     // Productivity suite detection
-    let productivity_suites = ["Microsoft Office", "Microsoft Word", "Microsoft Excel", "Microsoft PowerPoint", "Pages", "Numbers", "Keynote", "Google Chrome"]; // Chrome for Google Workspace
+    let productivity_suites = [
+        "Microsoft Office",
+        "Microsoft Word",
+        "Microsoft Excel",
+        "Microsoft PowerPoint",
+        "Pages",
+        "Numbers",
+        "Keynote",
+        "Google Chrome",
+    ]; // Chrome for Google Workspace
     for suite in productivity_suites {
         if running_apps.iter().any(|app| app.name.contains(suite)) {
             if suite.contains("Microsoft") {
                 productivity_suite = Some("Microsoft Office".to_string());
             } else if ["Pages", "Numbers", "Keynote"].contains(&suite) {
                 productivity_suite = Some("Apple iWork".to_string());
-            } else if suite == "Google Chrome" && browser_preference.as_ref().map_or(false, |b| b.contains("Chrome")) {
+            } else if suite == "Google Chrome"
+                && browser_preference
+                    .as_ref()
+                    .map_or(false, |b| b.contains("Chrome"))
+            {
                 productivity_suite = Some("Google Workspace".to_string());
             }
             break;
@@ -990,8 +1104,11 @@ async fn get_clipboard_content_safe(app_state: Option<&crate::state::AppState>) 
                 // Limit clipboard content length to avoid overwhelming context
                 const MAX_CLIPBOARD_LENGTH: usize = 500;
                 if content.len() > MAX_CLIPBOARD_LENGTH {
-                    Some(format!("{}... (truncated from {} chars)",
-                        &content[..MAX_CLIPBOARD_LENGTH], content.len()))
+                    Some(format!(
+                        "{}... (truncated from {} chars)",
+                        &content[..MAX_CLIPBOARD_LENGTH],
+                        content.len()
+                    ))
                 } else if content.trim().is_empty() {
                     Some("[Empty clipboard]".to_string())
                 } else {
@@ -1045,8 +1162,11 @@ async fn get_selected_text_via_accessibility(app_state: &crate::state::AppState)
                             if !selected_str.trim().is_empty() {
                                 const MAX_SELECTED_TEXT_LENGTH: usize = 300;
                                 let text = if selected_str.len() > MAX_SELECTED_TEXT_LENGTH {
-                                    format!("{}... (truncated from {} chars)",
-                                        &selected_str[..MAX_SELECTED_TEXT_LENGTH], selected_str.len())
+                                    format!(
+                                        "{}... (truncated from {} chars)",
+                                        &selected_str[..MAX_SELECTED_TEXT_LENGTH],
+                                        selected_str.len()
+                                    )
                                 } else {
                                     selected_str.to_string()
                                 };
@@ -1059,19 +1179,29 @@ async fn get_selected_text_via_accessibility(app_state: &crate::state::AppState)
                     // Check for AXSelectedTextRange and AXValue combination
                     if let (Some(Some(range_value)), Some(Some(value))) = (
                         attrs.properties.get("AXSelectedTextRange"),
-                        attrs.properties.get("AXValue")
+                        attrs.properties.get("AXValue"),
                     ) {
-                        if let (Some(range_str), Some(value_str)) = (range_value.as_str(), value.as_str()) {
-                            if let Some(selected_text) = extract_text_from_range(range_str, value_str) {
+                        if let (Some(range_str), Some(value_str)) =
+                            (range_value.as_str(), value.as_str())
+                        {
+                            if let Some(selected_text) =
+                                extract_text_from_range(range_str, value_str)
+                            {
                                 if !selected_text.trim().is_empty() {
                                     const MAX_SELECTED_TEXT_LENGTH: usize = 300;
                                     let text = if selected_text.len() > MAX_SELECTED_TEXT_LENGTH {
-                                        format!("{}... (truncated from {} chars)",
-                                            &selected_text[..MAX_SELECTED_TEXT_LENGTH], selected_text.len())
+                                        format!(
+                                            "{}... (truncated from {} chars)",
+                                            &selected_text[..MAX_SELECTED_TEXT_LENGTH],
+                                            selected_text.len()
+                                        )
                                     } else {
                                         selected_text
                                     };
-                                    log::debug!("Found selected text via AXSelectedTextRange: {}", text);
+                                    log::debug!(
+                                        "Found selected text via AXSelectedTextRange: {}",
+                                        text
+                                    );
                                     return Some(text);
                                 }
                             }
@@ -1095,7 +1225,9 @@ async fn get_selected_text_via_accessibility(app_state: &crate::state::AppState)
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn get_selected_text_via_accessibility(_app_state: &crate::state::AppState) -> Option<String> {
+async fn get_selected_text_via_accessibility(
+    _app_state: &crate::state::AppState,
+) -> Option<String> {
     None
 }
 
@@ -1103,20 +1235,35 @@ async fn get_selected_text_via_accessibility(_app_state: &crate::state::AppState
 #[cfg(target_os = "macos")]
 fn extract_text_from_range(range_str: &str, full_text: &str) -> Option<String> {
     // Parse range format like "{location=5, length=10}"
-    if let (Some(location_start), Some(length_start)) = (
-        range_str.find("location="),
-        range_str.find("length=")
-    ) {
-        let location_end = range_str[location_start + 9..].find(',').map(|i| i + location_start + 9)
-            .or_else(|| range_str[location_start + 9..].find('}').map(|i| i + location_start + 9))
+    if let (Some(location_start), Some(length_start)) =
+        (range_str.find("location="), range_str.find("length="))
+    {
+        let location_end = range_str[location_start + 9..]
+            .find(',')
+            .map(|i| i + location_start + 9)
+            .or_else(|| {
+                range_str[location_start + 9..]
+                    .find('}')
+                    .map(|i| i + location_start + 9)
+            })
             .unwrap_or(range_str.len());
-        let length_end = range_str[length_start + 7..].find(',').map(|i| i + length_start + 7)
-            .or_else(|| range_str[length_start + 7..].find('}').map(|i| i + length_start + 7))
+        let length_end = range_str[length_start + 7..]
+            .find(',')
+            .map(|i| i + length_start + 7)
+            .or_else(|| {
+                range_str[length_start + 7..]
+                    .find('}')
+                    .map(|i| i + length_start + 7)
+            })
             .unwrap_or(range_str.len());
 
         if let (Ok(location), Ok(length)) = (
-            range_str[location_start + 9..location_end].trim().parse::<usize>(),
-            range_str[length_start + 7..length_end].trim().parse::<usize>()
+            range_str[location_start + 9..location_end]
+                .trim()
+                .parse::<usize>(),
+            range_str[length_start + 7..length_end]
+                .trim()
+                .parse::<usize>(),
         ) {
             if location + length <= full_text.len() && length > 0 {
                 return Some(full_text[location..location + length].to_string());
@@ -1127,7 +1274,9 @@ fn extract_text_from_range(range_str: &str, full_text: &str) -> Option<String> {
 }
 
 /// Fall back to clipboard trick approach (as mentioned in web search results)
-async fn get_selected_text_via_clipboard_trick(app_state: &crate::state::AppState) -> Option<String> {
+async fn get_selected_text_via_clipboard_trick(
+    app_state: &crate::state::AppState,
+) -> Option<String> {
     // Save current clipboard content
     let original_clipboard = match app_state.desktop.get_clipboard_content() {
         Ok(content) => Some(content),
@@ -1172,8 +1321,11 @@ async fn get_selected_text_via_clipboard_trick(app_state: &crate::state::AppStat
             if let Some(text) = copied_text {
                 const MAX_SELECTED_TEXT_LENGTH: usize = 300;
                 let result = if text.len() > MAX_SELECTED_TEXT_LENGTH {
-                    format!("{}... (truncated from {} chars)",
-                        &text[..MAX_SELECTED_TEXT_LENGTH], text.len())
+                    format!(
+                        "{}... (truncated from {} chars)",
+                        &text[..MAX_SELECTED_TEXT_LENGTH],
+                        text.len()
+                    )
                 } else {
                     text
                 };
@@ -1334,11 +1486,7 @@ async fn get_disk_usage_direct() -> Option<f32> {
     {
         use tokio::process::Command;
 
-        match Command::new("df")
-            .args(&["-h", "/"])
-            .output()
-            .await
-        {
+        match Command::new("df").args(&["-h", "/"]).output().await {
             Ok(output) => {
                 let output_str = String::from_utf8_lossy(&output.stdout);
                 parse_disk_usage_direct(&output_str)
@@ -1358,7 +1506,8 @@ async fn get_disk_usage_direct() -> Option<f32> {
 
 /// Parse disk usage from df output
 fn parse_disk_usage_direct(output: &str) -> Option<f32> {
-    for line in output.lines().skip(1) { // Skip header
+    for line in output.lines().skip(1) {
+        // Skip header
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 5 {
             // Extract percentage from format like "85%"
@@ -1374,7 +1523,9 @@ fn parse_disk_usage_direct(output: &str) -> Option<f32> {
 }
 
 /// Safely get voice/audio state for context
-async fn get_voice_audio_state_safe(app_state: Option<&crate::state::AppState>) -> Option<VoiceAudioState> {
+async fn get_voice_audio_state_safe(
+    app_state: Option<&crate::state::AppState>,
+) -> Option<VoiceAudioState> {
     if let Some(state) = app_state {
         // Get voice controller state if available
         let is_dictation_active = if let Ok(dictation_guard) = state.dictation_active.lock() {
@@ -1407,8 +1558,8 @@ async fn get_voice_audio_state_safe(app_state: Option<&crate::state::AppState>) 
             is_transcribing: false, // TODO: Get actual transcription state
             is_speaking,
             current_transcription: None, // TODO: Get current transcription if available
-            audio_level: 0.0, // TODO: Get actual audio level
-            has_error: false, // TODO: Check for voice errors
+            audio_level: 0.0,            // TODO: Get actual audio level
+            has_error: false,            // TODO: Check for voice errors
             error_message: None,
         })
     } else {
@@ -1428,7 +1579,10 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         context_parts.push(format!(
             "Currently focused: {} ({})",
             focused.title,
-            focused.element_type.as_ref().unwrap_or(&"Unknown".to_string())
+            focused
+                .element_type
+                .as_ref()
+                .unwrap_or(&"Unknown".to_string())
         ));
 
         if focused.has_text_input {
@@ -1449,12 +1603,17 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         context_parts.push("\n--- Running Applications ---".to_string());
 
         // Show frontmost app first
-        if let Some(frontmost) = context.running_applications.iter().find(|app| app.is_frontmost) {
+        if let Some(frontmost) = context
+            .running_applications
+            .iter()
+            .find(|app| app.is_frontmost)
+        {
             context_parts.push(format!("Frontmost app: {}", frontmost.name));
         }
 
         // Show other running apps (limit to most relevant ones)
-        let mut other_apps: Vec<_> = context.running_applications
+        let mut other_apps: Vec<_> = context
+            .running_applications
             .iter()
             .filter(|app| !app.is_frontmost && app.activation_policy == "Regular")
             .collect();
@@ -1469,17 +1628,20 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
             context_parts.push(format!("Other running apps: {}", app_names.join(", ")));
 
             if other_apps.len() > 10 {
-                context_parts.push(format!("... and {} more running applications", other_apps.len() - 10));
+                context_parts.push(format!(
+                    "... and {} more running applications",
+                    other_apps.len() - 10
+                ));
             }
         }
     }
 
     // Add user preferences information
-    if !context.user_preferences.preferred_applications.is_empty() ||
-       context.user_preferences.browser_preference.is_some() ||
-       context.user_preferences.editor_preference.is_some() ||
-       context.user_preferences.terminal_preference.is_some() {
-
+    if !context.user_preferences.preferred_applications.is_empty()
+        || context.user_preferences.browser_preference.is_some()
+        || context.user_preferences.editor_preference.is_some()
+        || context.user_preferences.terminal_preference.is_some()
+    {
         context_parts.push("\n--- User Preferences ---".to_string());
 
         if let Some(browser) = &context.user_preferences.browser_preference {
@@ -1502,18 +1664,40 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
     // Add installed applications summary (just count and categories)
     if !context.installed_applications.is_empty() {
         context_parts.push(format!("\n--- Installed Applications ---"));
-        context_parts.push(format!("Total installed apps: {}", context.installed_applications.len()));
+        context_parts.push(format!(
+            "Total installed apps: {}",
+            context.installed_applications.len()
+        ));
 
         // Categorize some popular applications
-        let browsers = context.installed_applications.iter()
-            .filter(|app| ["Safari", "Chrome", "Firefox", "Edge", "Arc", "Brave"].iter()
-                .any(|browser| app.name.contains(browser)))
+        let browsers = context
+            .installed_applications
+            .iter()
+            .filter(|app| {
+                ["Safari", "Chrome", "Firefox", "Edge", "Arc", "Brave"]
+                    .iter()
+                    .any(|browser| app.name.contains(browser))
+            })
             .map(|app| app.name.clone())
             .collect::<Vec<_>>();
 
-        let editors = context.installed_applications.iter()
-            .filter(|app| ["Visual Studio Code", "Xcode", "Sublime", "Atom", "IntelliJ", "WebStorm", "PyCharm", "TextEdit"].iter()
-                .any(|editor| app.name.contains(editor)))
+        let editors = context
+            .installed_applications
+            .iter()
+            .filter(|app| {
+                [
+                    "Visual Studio Code",
+                    "Xcode",
+                    "Sublime",
+                    "Atom",
+                    "IntelliJ",
+                    "WebStorm",
+                    "PyCharm",
+                    "TextEdit",
+                ]
+                .iter()
+                .any(|editor| app.name.contains(editor))
+            })
             .map(|app| app.name.clone())
             .collect::<Vec<_>>();
 
@@ -1575,7 +1759,10 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
         }
 
         if !performance_notes.is_empty() {
-            context_parts.push(format!("Performance alerts: {}", performance_notes.join(", ")));
+            context_parts.push(format!(
+                "Performance alerts: {}",
+                performance_notes.join(", ")
+            ));
         }
     }
 
