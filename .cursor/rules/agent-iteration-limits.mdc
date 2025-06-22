@@ -3,3 +3,236 @@ description:
 globs:
 alwaysApply: false
 ---
+# Agent Iteration Limits and Continuation System
+
+## Overview
+
+The Juno AI agent has built-in iteration limits to prevent infinite execution loops and provide user control over long-running tasks. This system balances automation with user oversight.
+
+## Configuration Constants
+
+### Location: [src-tauri/src/constants/agent.rs](mdc:src-tauri/src/constants/agent.rs)
+
+```rust
+pub mod config {
+    pub const MAX_ITERATIONS: u32 = 15;        // Standard max iterations
+    pub const MAX_ITERATIONS_REDUCED: u32 = 10; // Reduced for simpler tasks
+
+    // Duration limits
+    pub const MAX_AGENT_DURATION_MS: u64 = 180_000; // 3 minutes total
+}
+```
+
+**CRITICAL RULES:**
+- **Never set MAX_ITERATIONS above 50** - causes token overflow and poor UX
+- **Always test iteration limits** after changes to ensure they work
+- **Use REDUCED for simple tasks** like single file operations
+- **Duration limits are secondary** - iteration limits are primary control
+
+## Iteration Counting Logic
+
+### Location: [src-tauri/src/agent/implementations/agent_runner.rs](mdc:src-tauri/src/agent/implementations/agent_runner.rs)
+
+The agent tracks iterations in the main execution loop:
+
+```rust
+// Current step tracking
+let mut current_step = 0;
+let max_steps = determine_max_steps(&query_type);
+
+while current_step < max_steps {
+    // Execute agent step
+    current_step += 1;
+
+    // Check if max reached
+    if current_step >= max_steps {
+        // Request continuation from user
+        let continuation = request_agent_continuation().await?;
+        if let Some(response) = continuation {
+            if response.approved {
+                max_steps += response.additional_steps.unwrap_or(20);
+            } else {
+                break; // User denied - stop execution
+            }
+        } else {
+            break; // Timeout - stop execution
+        }
+    }
+}
+```
+
+**KEY PATTERNS:**
+- **Always increment current_step** before checking limits
+- **Use >= for comparison** not just == to handle edge cases
+- **Handle continuation responses properly** - None means timeout/stop
+- **Add steps to max_steps** when user approves continuation
+
+## Continuation System Architecture
+
+### Backend: [src-tauri/src/commands/agent_continuation.rs](mdc:src-tauri/src/commands/agent_continuation.rs)
+
+The continuation system uses async channels for user interaction:
+
+```rust
+pub async fn request_continuation(
+    execution_id: String,
+    current_step: u32,
+    max_steps: u32,
+    app_handle: &AppHandle,
+) -> Result<Option<ContinuationResponse>, AgentError>
+```
+
+**CRITICAL COMPONENTS:**
+- **5-minute timeout** for user response
+- **Oneshot channels** for async communication
+- **Event emission** to frontend via `agent-continuation-request`
+- **Cleanup on timeout/error** to prevent memory leaks
+
+### Frontend: [src/hooks/useBackendEvents.ts](mdc:src/hooks/useBackendEvents.ts)
+
+The frontend shows dual toast notifications with clear UX hierarchy:
+
+```typescript
+// Primary action - STOP (recommended)
+toast.error(`⏹️ ${message}`, {
+    action: {
+        label: "🛑 Stop Agent",
+        onClick: () => respondToContinuation(false)
+    }
+});
+
+// Secondary action - CONTINUE (warning)
+toast.warning("⚠️ Or click here to continue (not recommended)", {
+    action: {
+        label: "▶️ Continue (+20 steps)",
+        onClick: () => respondToContinuation(true, 20)
+    }
+});
+```
+
+## UX Design Principles
+
+### Toast Notification Hierarchy
+
+1. **RED/ERROR Toast**: Stop action (prominent, recommended)
+2. **YELLOW/WARNING Toast**: Continue action (secondary, discouraged)
+3. **No dismiss buttons**: Forces explicit user choice
+4. **Clear consequences**: Shows "+20 steps" and "may continue indefinitely"
+
+### Visual Indicators
+
+- **🛑 Stop Agent**: Clear stop signal with red coloring
+- **⚠️ Continue Warning**: Warning icon with cautionary text
+- **Step counter**: "Step 15/15 - Agent has reached iteration limit"
+- **Consequence text**: "This will add 20 more steps and may continue indefinitely"
+
+## Common Issues and Solutions
+
+### Issue: Agent Running Indefinitely
+
+**Symptoms:**
+- Agent continues past expected iteration limit
+- No continuation prompts appear
+- Frontend shows processing state indefinitely
+
+**Debugging Steps:**
+1. Check constants in [agent.rs](mdc:src-tauri/src/constants/agent.rs)
+2. Verify iteration counting in agent runner
+3. Test continuation event emission
+4. Check frontend event listeners
+
+**Common Fixes:**
+- Ensure MAX_ITERATIONS is reasonable (10-20 range)
+- Verify current_step increments correctly
+- Check continuation timeout handling
+- Test toast notification display
+
+### Issue: Continuation Prompts Not Showing
+
+**Root Causes:**
+- Frontend event listener not registered
+- Toast library conflicts
+- Event emission failures
+- Channel communication errors
+
+**Solutions:**
+- Verify `agent-continuation-request` listener in useBackendEvents
+- Check browser console for toast errors
+- Test event emission with debug logging
+- Ensure oneshot channels are properly handled
+
+### Issue: User Accidentally Continues
+
+**Prevention:**
+- Make STOP the primary/prominent action
+- Use warning colors for continue action
+- Show clear consequence text
+- Remove dismiss/close options
+
+## Testing Guidelines
+
+### Manual Testing Checklist
+
+1. **Start agent with simple task**
+2. **Wait for iteration limit** (15 steps)
+3. **Verify dual toast notifications appear**
+4. **Test STOP action** - should terminate cleanly
+5. **Test CONTINUE action** - should add 20 steps
+6. **Test timeout** - should stop after 5 minutes
+
+### Automated Testing
+
+```bash
+# Test iteration limits
+cargo test agent_iteration_limits
+
+# Test continuation system
+cargo test agent_continuation_flow
+
+# Frontend testing
+npm test -- continuation-system
+```
+
+## Best Practices
+
+### For Developers
+
+1. **Always test iteration limits** when modifying agent execution
+2. **Use appropriate constants** - REDUCED for simple tasks
+3. **Handle timeouts gracefully** - user may not respond
+4. **Provide clear UX** - make stopping easy and prominent
+5. **Log continuation events** for debugging
+
+### For Users
+
+1. **Default to STOP** unless you specifically need more iterations
+2. **Monitor agent progress** - don't leave unattended
+3. **Use escape key** as emergency stop if needed
+4. **Understand consequences** - continuation adds significant steps
+
+### For Configuration
+
+1. **Start conservative** with iteration limits
+2. **Increase gradually** if needed for complex tasks
+3. **Never exceed 50 iterations** - causes performance issues
+4. **Test changes thoroughly** in development mode
+
+## Integration Points
+
+### Related Systems
+
+- **[Escape Key Coordinator](mdc:src-tauri/src/commands/escape_key_coordinator.rs)**: Emergency stop
+- **[Agent State Management](mdc:src-tauri/src/state.rs)**: Execution tracking
+- **[Toast Notifications](mdc:src/hooks/useBackendEvents.ts)**: User interface
+- **[Voice System](mdc:tauri-plugin-voice-transcription)**: Voice-triggered agents
+
+### Event Flow
+
+1. Agent execution starts
+2. Iteration counter increments
+3. Limit reached → Backend requests continuation
+4. Frontend shows toast prompts
+5. User responds → Backend receives response
+6. Agent continues or stops based on response
+
+This system ensures controlled, user-supervised agent execution while preventing infinite loops and providing clear escape mechanisms.
