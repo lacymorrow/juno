@@ -1,4 +1,7 @@
 use crate::agent::structs::AgentError;
+use crate::constants::agent::config::{
+    CONTINUATION_REQUEST_TIMEOUT_SECONDS, DEFAULT_CONTINUATION_ADDITIONAL_STEPS,
+};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -108,7 +111,7 @@ impl ContinuationManager {
         );
 
         // Wait for user response (with timeout)
-        let timeout_duration = std::time::Duration::from_secs(300); // 5 minutes timeout
+        let timeout_duration = std::time::Duration::from_secs(CONTINUATION_REQUEST_TIMEOUT_SECONDS);
         match tokio::time::timeout(timeout_duration, rx).await {
             Ok(Ok(response)) => {
                 // Clean up the request

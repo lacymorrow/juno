@@ -1,16 +1,16 @@
 use computer_use_ai_sdk::Desktop;
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::{info, error, warn, debug};
-use tauri::Emitter;
-use std::sync::Mutex as StdMutex;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::sync::{watch, Mutex as TokioMutex};
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::sync::Weak;
-use serde::{Serialize, Deserialize};
-use serde_json::Value;
+use std::time::Duration;
+use tauri::Emitter;
+use tokio::sync::{watch, Mutex as TokioMutex};
+use tracing::{debug, error, info, warn};
 
 pub mod desktop_wrapper;
 use crate::commands::shell::ShellSessions;
@@ -168,7 +168,7 @@ pub struct AppState {
     // Cloud connectivity
     pub cloud_client: Arc<TokioMutex<Option<CloudClient>>>, // Cloud client for remote control
     pub cloud_config: Arc<TokioMutex<CloudConfig>>,         // Cloud configuration
-    pub cloud_enabled: Arc<StdMutex<bool>>,                    // Track if cloud is enabled
+    pub cloud_enabled: Arc<StdMutex<bool>>,                 // Track if cloud is enabled
     // Production cloud connector
     pub production_cloud_connector: Arc<TokioMutex<Option<ProductionCloudConnector>>>, // Production connector for remote control
     // Keyboard shortcuts configuration
@@ -195,8 +195,7 @@ pub struct AppState {
     pub agent_execution_id: Arc<StdMutex<Option<String>>>, // Track the current agent execution ID
     // Agent iteration tracking
     pub agent_current_step: Arc<StdMutex<Option<u32>>>, // Track the current iteration/step number
-    pub agent_max_steps: Arc<StdMutex<Option<u32>>>,    // Track the maximum iterations/steps allowed
-
+    pub agent_max_steps: Arc<StdMutex<Option<u32>>>, // Track the maximum iterations/steps allowed
 
     // TTS content is now handled via XML tags during streaming, no separate storage needed
     // Debug mode tracking
@@ -283,7 +282,7 @@ impl AppState {
             agent_current_step: Arc::new(StdMutex::new(None)),
             agent_max_steps: Arc::new(StdMutex::new(None)),
 
-                    // TTS content now handled via XML tags during streaming
+            // TTS content now handled via XML tags during streaming
             // Initialize debug mode tracking
             debug_mode: Arc::new(StdMutex::new(false)),
             // Initialize tool approval setting as disabled by default
@@ -323,12 +322,16 @@ impl AppState {
     // Method to mark agent execution started
     pub fn mark_agent_execution_started(&self, execution_id: String) -> Result<(), String> {
         {
-            let mut active_guard = self.agent_execution_active.lock()
+            let mut active_guard = self
+                .agent_execution_active
+                .lock()
                 .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
             *active_guard = true;
         }
         {
-            let mut id_guard = self.agent_execution_id.lock()
+            let mut id_guard = self
+                .agent_execution_id
+                .lock()
                 .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
             *id_guard = Some(execution_id.clone());
         }
@@ -340,31 +343,42 @@ impl AppState {
     }
 
     // Method to mark agent execution started with iteration info
-    pub fn mark_agent_execution_started_with_steps(&self, execution_id: String, max_steps: u32) -> Result<(), String> {
+    pub fn mark_agent_execution_started_with_steps(
+        &self,
+        execution_id: String,
+        max_steps: u32,
+    ) -> Result<(), String> {
         {
-            let mut active_guard = self.agent_execution_active.lock()
+            let mut active_guard = self
+                .agent_execution_active
+                .lock()
                 .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
             *active_guard = true;
         }
         {
-            let mut id_guard = self.agent_execution_id.lock()
+            let mut id_guard = self
+                .agent_execution_id
+                .lock()
                 .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
             *id_guard = Some(execution_id.clone());
         }
         {
-            let mut max_steps_guard = self.agent_max_steps.lock()
+            let mut max_steps_guard = self
+                .agent_max_steps
+                .lock()
                 .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
             *max_steps_guard = Some(max_steps);
         }
         {
-            let mut current_step_guard = self.agent_current_step.lock()
+            let mut current_step_guard = self
+                .agent_current_step
+                .lock()
                 .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
             *current_step_guard = Some(0); // Start at step 0
         }
         info!(
             "[AppState] Agent execution started with ID: {} (max steps: {})",
-            execution_id,
-            max_steps
+            execution_id, max_steps
         );
         Ok(())
     }
@@ -373,12 +387,16 @@ impl AppState {
     pub fn mark_agent_execution_finished(&self) {
         let result = (|| -> Result<(), String> {
             {
-                let mut active_guard = self.agent_execution_active.lock()
+                let mut active_guard = self
+                    .agent_execution_active
+                    .lock()
                     .map_err(|e| format!("Failed to acquire agent_execution_active lock: {}", e))?;
                 *active_guard = false;
             }
             {
-                let mut id_guard = self.agent_execution_id.lock()
+                let mut id_guard = self
+                    .agent_execution_id
+                    .lock()
                     .map_err(|e| format!("Failed to acquire agent_execution_id lock: {}", e))?;
                 let execution_id = id_guard.take();
                 info!(
@@ -387,12 +405,16 @@ impl AppState {
                 );
             }
             {
-                let mut current_step_guard = self.agent_current_step.lock()
+                let mut current_step_guard = self
+                    .agent_current_step
+                    .lock()
                     .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
                 *current_step_guard = None;
             }
             {
-                let mut max_steps_guard = self.agent_max_steps.lock()
+                let mut max_steps_guard = self
+                    .agent_max_steps
+                    .lock()
                     .map_err(|e| format!("Failed to acquire agent_max_steps lock: {}", e))?;
                 *max_steps_guard = None;
             }
@@ -406,7 +428,8 @@ impl AppState {
 
     // Method to check if an agent is currently executing
     pub fn is_agent_executing(&self) -> bool {
-        self.agent_execution_active.lock()
+        self.agent_execution_active
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to check agent execution status: {}", e);
@@ -416,7 +439,8 @@ impl AppState {
 
     // Method to get the current agent execution ID
     pub fn get_current_agent_execution_id(&self) -> Option<String> {
-        self.agent_execution_id.lock()
+        self.agent_execution_id
+            .lock()
             .map(|guard| guard.clone())
             .unwrap_or_else(|e| {
                 error!("Failed to get current agent execution ID: {}", e);
@@ -426,7 +450,9 @@ impl AppState {
 
     // Method to update the current agent step
     pub fn update_agent_current_step(&self, step: u32) -> Result<(), String> {
-        let mut current_step_guard = self.agent_current_step.lock()
+        let mut current_step_guard = self
+            .agent_current_step
+            .lock()
             .map_err(|e| format!("Failed to acquire agent_current_step lock: {}", e))?;
         *current_step_guard = Some(step);
         debug!("[AppState] Agent current step updated to: {}", step);
@@ -435,7 +461,8 @@ impl AppState {
 
     // Method to get the current agent step
     pub fn get_agent_current_step(&self) -> Option<u32> {
-        self.agent_current_step.lock()
+        self.agent_current_step
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to get current agent step: {}", e);
@@ -445,7 +472,8 @@ impl AppState {
 
     // Method to get the agent max steps
     pub fn get_agent_max_steps(&self) -> Option<u32> {
-        self.agent_max_steps.lock()
+        self.agent_max_steps
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to get agent max steps: {}", e);
@@ -462,7 +490,8 @@ impl AppState {
 
     /// Check if agent mode is currently active
     pub fn is_agent_mode_active(&self) -> bool {
-        self.agent_execution_active.lock()
+        self.agent_execution_active
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to check agent mode status: {}", e);
@@ -472,7 +501,8 @@ impl AppState {
 
     /// Check if dictation mode is currently active
     pub fn is_dictation_active(&self) -> bool {
-        self.dictation_active.lock()
+        self.dictation_active
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to check dictation status: {}", e);
@@ -505,7 +535,8 @@ impl AppState {
             }
         } else {
             debug!("Reusing existing Playwright driver instance from AppState.");
-            driver_guard.as_ref()
+            driver_guard
+                .as_ref()
                 .ok_or_else(|| "Playwright driver is None despite check".to_string())
                 .map(|driver| driver.clone())
         }
@@ -539,7 +570,8 @@ impl AppState {
             }
         } else {
             debug!("Reusing existing browser controller from AppState.");
-            controller_guard.as_ref()
+            controller_guard
+                .as_ref()
                 .ok_or_else(|| "Browser controller is None despite check".to_string())
                 .map(|controller| controller.clone())
         }
@@ -553,7 +585,9 @@ impl AppState {
     // Insert a component into the state
     pub fn insert<T: 'static + Send + Sync>(&self, component: T) -> Result<(), String> {
         let type_id = TypeId::of::<T>();
-        let mut components_lock = self.state_components.lock()
+        let mut components_lock = self
+            .state_components
+            .lock()
             .map_err(|e| format!("Failed to acquire state_components lock: {}", e))?;
         components_lock.insert(type_id, Box::new(component));
         Ok(())
@@ -562,7 +596,9 @@ impl AppState {
     // Get a reference to a component from the state
     pub fn get<T: 'static + Send + Sync + Clone>(&self) -> Option<Arc<T>> {
         let type_id = TypeId::of::<T>();
-        let components_lock = self.state_components.lock()
+        let components_lock = self
+            .state_components
+            .lock()
             .map_err(|e| {
                 error!("Failed to acquire state_components lock: {}", e);
             })
@@ -590,7 +626,9 @@ impl AppState {
 
     // Method to mark permissions as checked
     pub fn mark_permissions_checked(&self) -> Result<(), String> {
-        let mut checked_guard = self.permissions_checked.lock()
+        let mut checked_guard = self
+            .permissions_checked
+            .lock()
             .map_err(|e| format!("Failed to acquire permissions_checked lock: {}", e))?;
         *checked_guard = true;
         Ok(())
@@ -598,7 +636,8 @@ impl AppState {
 
     // Method to check if permissions have been checked
     pub fn are_permissions_checked(&self) -> bool {
-        self.permissions_checked.lock()
+        self.permissions_checked
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to check permissions status: {}", e);
@@ -630,14 +669,22 @@ impl AppState {
     pub async fn load_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-        crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(&settings_manager, self).await
+        crate::agent::tools::tool_config::load_tool_config_from_centralized_settings(
+            &settings_manager,
+            self,
+        )
+        .await
     }
 
     // Method to save tool configuration to centralized settings
     pub async fn save_tool_config(&self, app_handle: &tauri::AppHandle) -> Result<(), String> {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-        crate::agent::tools::tool_config::save_tool_config_to_centralized_settings(&settings_manager, self).await
+        crate::agent::tools::tool_config::save_tool_config_to_centralized_settings(
+            &settings_manager,
+            self,
+        )
+        .await
     }
 
     // Cloud connectivity methods
@@ -647,7 +694,8 @@ impl AppState {
         // Load cloud configuration
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
-        let config = CloudConfig::load_from_centralized_settings(&settings_manager).await
+        let config = CloudConfig::load_from_centralized_settings(&settings_manager)
+            .await
             .map_err(|e| format!("Failed to load cloud config: {}", e))?;
 
         // Update stored config
@@ -726,7 +774,8 @@ impl AppState {
         let settings_manager = crate::settings::manager::SettingsManager::new(app_handle.clone())
             .map_err(|e| format!("Failed to create settings manager: {}", e))?;
         config
-            .save_to_centralized_settings(&settings_manager).await
+            .save_to_centralized_settings(&settings_manager)
+            .await
             .map_err(|e| format!("Failed to save cloud config: {}", e))?;
 
         // Update stored config
@@ -774,8 +823,12 @@ impl AppState {
 
     /// Set performance monitoring enabled state
     pub fn set_performance_monitoring_enabled(&self, enabled: bool) -> Result<(), String> {
-        let mut monitoring_guard = self.performance_monitoring_enabled.lock()
-            .map_err(|e| format!("Failed to acquire performance_monitoring_enabled lock: {}", e))?;
+        let mut monitoring_guard = self.performance_monitoring_enabled.lock().map_err(|e| {
+            format!(
+                "Failed to acquire performance_monitoring_enabled lock: {}",
+                e
+            )
+        })?;
         *monitoring_guard = enabled;
         info!(
             "Performance monitoring {}",
@@ -868,12 +921,16 @@ impl AppState {
         }
 
         // Start enabled servers concurrently with timeout
-        let enabled_servers: Vec<_> = added_servers.into_iter()
+        let enabled_servers: Vec<_> = added_servers
+            .into_iter()
             .filter(|config| config.enabled && config.auto_start)
             .collect();
 
         if !enabled_servers.is_empty() {
-            info!("Starting {} MCP servers with staggered startup to prevent race conditions", enabled_servers.len());
+            info!(
+                "Starting {} MCP servers with staggered startup to prevent race conditions",
+                enabled_servers.len()
+            );
 
             let manager = self.get_mcp_manager().await;
             let mut successful_servers = Vec::new();
@@ -886,13 +943,21 @@ impl AppState {
                     tokio::time::sleep(Duration::from_millis(2000)).await;
                 }
 
-                info!("Starting MCP server {} of {}: '{}'", index + 1, enabled_servers.len(), config.name);
+                info!(
+                    "Starting MCP server {} of {}: '{}'",
+                    index + 1,
+                    enabled_servers.len(),
+                    config.name
+                );
 
                 let manager_guard = manager.lock().await;
                 let start_result = tokio::time::timeout(
-                    Duration::from_secs(45), // Increased timeout for individual servers
-                    manager_guard.start_server(&config.id)
-                ).await;
+                    Duration::from_secs(
+                        crate::constants::timeouts::MCP_SERVER_STARTUP_TIMEOUT_SECONDS,
+                    ), // Increased timeout for individual servers
+                    manager_guard.start_server(&config.id),
+                )
+                .await;
                 drop(manager_guard);
 
                 match start_result {
@@ -908,13 +973,20 @@ impl AppState {
                         failed_servers.push(format!("{}: {}", config.name, e));
                     }
                     Err(_) => {
-                        warn!("⏰ MCP server '{}' startup timed out after 45s", config.name);
+                        warn!(
+                            "⏰ MCP server '{}' startup timed out after 45s",
+                            config.name
+                        );
                         failed_servers.push(format!("{}: timeout", config.name));
                     }
                 }
             }
 
-            info!("MCP initialization complete: {} succeeded, {} failed", successful_servers.len(), failed_servers.len());
+            info!(
+                "MCP initialization complete: {} succeeded, {} failed",
+                successful_servers.len(),
+                failed_servers.len()
+            );
 
             if !failed_servers.is_empty() {
                 warn!("Failed MCP servers: {}", failed_servers.join(", "));
@@ -937,12 +1009,11 @@ impl AppState {
         let manager_guard = mcp_manager.lock().await;
 
         let statuses = manager_guard.get_server_statuses().await;
-        let failed_servers: Vec<String> = statuses.iter()
-            .filter_map(|(id, status)| {
-                match status {
-                    MCPServerStatus::Error(_) | MCPServerStatus::Timeout => Some(id.clone()),
-                    _ => None
-                }
+        let failed_servers: Vec<String> = statuses
+            .iter()
+            .filter_map(|(id, status)| match status {
+                MCPServerStatus::Error(_) | MCPServerStatus::Timeout => Some(id.clone()),
+                _ => None,
             })
             .collect();
 
@@ -951,7 +1022,10 @@ impl AppState {
             return Ok(());
         }
 
-        info!("Attempting to retry {} failed MCP servers", failed_servers.len());
+        info!(
+            "Attempting to retry {} failed MCP servers",
+            failed_servers.len()
+        );
 
         let mut retry_count = 0;
         for server_id in failed_servers {
@@ -1050,7 +1124,10 @@ impl AppState {
     }
 
     /// Register a tool provider for MCP tool refresh notifications
-    pub async fn register_tool_provider(&self, provider: Arc<TokioMutex<LocalToolProvider>>) -> Result<(), String> {
+    pub async fn register_tool_provider(
+        &self,
+        provider: Arc<TokioMutex<LocalToolProvider>>,
+    ) -> Result<(), String> {
         let mut registry = self.tool_provider_registry.lock().await;
         registry.push(Arc::downgrade(&provider));
         debug!("Registered tool provider for MCP refresh notifications");
@@ -1120,19 +1197,24 @@ impl AppState {
         use tokio::sync::Mutex as AsyncMutex;
 
         static INIT_FLAG: AtomicBool = AtomicBool::new(false);
-        static INIT_RESULT: std::sync::OnceLock<AsyncMutex<Option<Result<(), String>>>> = std::sync::OnceLock::new();
+        static INIT_RESULT: std::sync::OnceLock<AsyncMutex<Option<Result<(), String>>>> =
+            std::sync::OnceLock::new();
 
         // Fast path: if already initialized, return immediately
         if INIT_FLAG.load(Ordering::Acquire) {
             let result_mutex = INIT_RESULT.get_or_init(|| AsyncMutex::new(None));
             let guard = result_mutex.lock().await;
-            return guard.as_ref()
+            return guard
+                .as_ref()
                 .ok_or_else(|| "MCP initialization result is None".to_string())?
                 .clone();
         }
 
         // Try to claim initialization responsibility
-        if INIT_FLAG.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        if INIT_FLAG
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
             // We're responsible for initialization
             info!("Starting MCP servers initialization (first time)");
             let init_result = self.initialize_mcp_servers().await;
@@ -1166,14 +1248,17 @@ impl AppState {
 
     // Debug mode methods
     pub fn set_debug_mode(&self, enabled: bool) -> Result<(), String> {
-        let mut debug_guard = self.debug_mode.lock()
+        let mut debug_guard = self
+            .debug_mode
+            .lock()
             .map_err(|e| format!("Failed to acquire debug_mode lock: {}", e))?;
         *debug_guard = enabled;
         Ok(())
     }
 
     pub fn is_debug_mode(&self) -> bool {
-        self.debug_mode.lock()
+        self.debug_mode
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to check debug mode status: {}", e);
@@ -1183,14 +1268,17 @@ impl AppState {
 
     // Methods for tool approval setting
     pub fn set_tool_approval_required(&self, required: bool) -> Result<(), String> {
-        let mut approval_guard = self.tool_approval_required.lock()
+        let mut approval_guard = self
+            .tool_approval_required
+            .lock()
             .map_err(|e| format!("Failed to acquire tool_approval_required lock: {}", e))?;
         *approval_guard = required;
         Ok(())
     }
 
     pub fn is_tool_approval_required(&self) -> bool {
-        self.tool_approval_required.lock()
+        self.tool_approval_required
+            .lock()
             .map(|guard| *guard)
             .unwrap_or_else(|e| {
                 error!("Failed to check tool approval requirement: {}", e);
@@ -1226,7 +1314,9 @@ impl AppState {
 
     pub async fn get_tool_approval_status(&self, tool_id: &str) -> Option<bool> {
         let pending_guard = self.pending_tool_approvals.lock().await;
-        pending_guard.get(tool_id).and_then(|request| request.approved)
+        pending_guard
+            .get(tool_id)
+            .and_then(|request| request.approved)
     }
 
     pub async fn remove_tool_approval(&self, tool_id: &str) -> Option<ToolApprovalRequest> {
@@ -1253,12 +1343,16 @@ pub(crate) fn update_undo_state(
     previous_content: Option<String>,
 ) -> Result<(), String> {
     // Safely handle potential lock poisoning with proper error handling
-    let mut last_edited = state.last_edited_file.lock()
+    let mut last_edited = state
+        .last_edited_file
+        .lock()
         .map_err(|e| format!("Failed to acquire last_edited_file lock: {}", e))?;
     *last_edited = Some(file_path);
     drop(last_edited);
 
-    let mut previous = state.previous_content.lock()
+    let mut previous = state
+        .previous_content
+        .lock()
         .map_err(|e| format!("Failed to acquire previous_content lock: {}", e))?;
     *previous = Some(previous_content);
 
@@ -1379,7 +1473,9 @@ mod tests {
         assert!(state.get_current_agent_execution_id().is_none());
 
         // Mark as started
-        state.mark_agent_execution_started(execution_id.clone()).unwrap();
+        state
+            .mark_agent_execution_started(execution_id.clone())
+            .unwrap();
         assert!(state.is_agent_executing());
         assert_eq!(state.get_current_agent_execution_id(), Some(execution_id));
 
@@ -1680,7 +1776,9 @@ mod tests {
         let state2 = state1.clone();
 
         // Both should track the same agent execution state
-        state1.mark_agent_execution_started("test-123".to_string()).unwrap();
+        state1
+            .mark_agent_execution_started("test-123".to_string())
+            .unwrap();
         assert!(state2.is_agent_executing());
         assert_eq!(
             state2.get_current_agent_execution_id(),

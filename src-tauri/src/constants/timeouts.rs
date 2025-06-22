@@ -15,7 +15,65 @@ pub const VERY_LONG_DELAY_MS: u64 = 1000;
 pub const EXTENDED_DELAY_MS: u64 = 2000;
 pub const MAX_DELAY_MS: u64 = 3000;
 
-// Standard timeouts
+// Standard timeouts (in seconds)
+pub const STANDARD_TIMEOUT_SECONDS: u64 = 10;
+pub const BROWSER_TIMEOUT_SECONDS: u64 = 30;
+pub const NETWORK_TIMEOUT_SECONDS: u64 = 30;
+pub const HEARTBEAT_INTERVAL_SECONDS: u64 = 30;
+pub const STATUS_UPDATE_INTERVAL_SECONDS: u64 = 30;
+
+// Error recovery timeouts
+pub const ERROR_RECOVERY_MAX_RETRY_DELAY_SECONDS: u64 = 10;
+pub const ERROR_RECOVERY_TIMEOUT_THRESHOLD_SECONDS: u64 = 30;
+pub const ERROR_RECOVERY_WAIT_SHORT_SECONDS: u64 = 3;
+pub const ERROR_RECOVERY_WAIT_LONG_SECONDS: u64 = 10;
+
+// Testing timeouts
+pub const TESTING_HUMAN_AVERAGE_SECONDS: u64 = 480; // 8 minutes
+pub const TESTING_AGENT_AVERAGE_SECONDS: u64 = 120; // 2 minutes
+pub const TESTING_RESPONSE_TIME_LIMIT_SECONDS: u64 = 30;
+pub const TESTING_QA_TIMEOUT_SECONDS: u64 = 60;
+
+// Voice and audio timeouts
+pub const VOICE_CACHE_VALIDITY_SECONDS: u64 = 30;
+pub const VOICE_STATE_CHECK_SECONDS: u64 = 2;
+pub const VOICE_WAKE_DETECTION_SECONDS: u64 = 60;
+
+// Cloud and network intervals
+pub const CLOUD_HEARTBEAT_INTERVAL_SECONDS: u64 = 30;
+pub const CLOUD_STATUS_INTERVAL_SECONDS: u64 = 30;
+pub const CLOUD_WATCHDOG_INTERVAL_SECONDS: u64 = 60;
+pub const CLOUD_MAX_RETRY_DELAY_SECONDS: u64 = 300; // 5 minutes max
+
+// MCP and tool timeouts
+pub const MCP_OPERATION_TIMEOUT_SECONDS: u64 = 5;
+pub const MCP_GRACEFUL_SHUTDOWN_SECONDS: u64 = 3;
+pub const MCP_MAX_BACKOFF_DELAY_SECONDS: u64 = 30;
+pub const MCP_SERVER_STARTUP_TIMEOUT_SECONDS: u64 = 45;
+
+// Orchestrator and agent timeouts
+pub const ORCHESTRATOR_PARALLEL_EXECUTION_TIMEOUT_SECONDS: u64 = 5;
+pub const ORCHESTRATOR_MIN_TIMEOUT_SECONDS: u64 = 30;
+pub const ORCHESTRATOR_MAX_TIMEOUT_SECONDS: u64 = 600; // 10 minutes
+pub const AGENT_STEP_DELAY_SECONDS: u64 = 1;
+
+// Browser automation timeouts
+pub const BROWSER_CONNECTION_TIMEOUT_SECONDS: u64 = 8;
+pub const BROWSER_PAGE_OPERATION_TIMEOUT_SECONDS: u64 = 2;
+pub const BROWSER_CLICK_TIMEOUT_SECONDS: u64 = 1;
+
+// Desktop automation timeouts
+pub const DESKTOP_TYPING_TIMEOUT_SECONDS: u64 = 30;
+
+// Visual reasoning timeouts
+pub const VISUAL_PROCESSING_TIMEOUT_SECONDS: u64 = 10;
+pub const VISUAL_TEMPORAL_CONTEXT_SECONDS: u64 = 30;
+
+// Collaborative AI timeouts
+pub const COLLABORATIVE_AI_KNOWLEDGE_RETRIEVAL_SECONDS: u64 = 30;
+pub const COLLABORATIVE_AI_COORDINATION_SECONDS: u64 = 60;
+
+// Legacy millisecond timeouts (for backward compatibility)
 pub const STANDARD_TIMEOUT_MS: u64 = 10000;
 pub const BROWSER_TIMEOUT_MS: u64 = 30000;
 

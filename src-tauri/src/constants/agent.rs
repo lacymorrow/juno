@@ -43,6 +43,11 @@ pub mod config {
     pub const MAX_ITERATIONS: u32 = 15;
     pub const MAX_ITERATIONS_REDUCED: u32 = 10;
 
+    // Continuation settings
+    pub const DEFAULT_CONTINUATION_ADDITIONAL_STEPS: u32 = 20;
+    pub const CONTINUATION_REQUEST_TIMEOUT_SECONDS: u64 =
+        crate::constants::timeouts::CLOUD_MAX_RETRY_DELAY_SECONDS; // 5 minutes
+
     // Token limits
     pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
     pub const DEFAULT_MAX_TOKENS_COMPACT: i32 = 1024;
@@ -57,6 +62,12 @@ pub mod config {
     // Tool call limits
     pub const MAX_TOOL_CALLS_PER_ITERATION: usize = 20;
     pub const MAX_MEMORY_ENTRIES: usize = 1000;
+
+    // General timeout settings (5 minutes for tasks)
+    pub const DEFAULT_TASK_TIMEOUT_SECONDS: u64 =
+        crate::constants::timeouts::CLOUD_MAX_RETRY_DELAY_SECONDS;
+    pub const DEFAULT_COMMAND_TIMEOUT_SECONDS: u64 =
+        crate::constants::timeouts::ORCHESTRATOR_MAX_TIMEOUT_SECONDS;
 }
 
 // Monitor session settings
