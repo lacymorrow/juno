@@ -64,9 +64,9 @@ interface ImprovementIteration {
 
 interface SystemHealth {
   overall_score: number;
-  components: { [key: string]: string };
-  vital_signs: { [key: string]: string };
-  recommendations: string[];
+  components?: { [key: string]: string } | null;
+  vital_signs?: { [key: string]: string } | null;
+  recommendations?: string[] | null;
 }
 
 interface BenchmarkResult {
@@ -660,47 +660,57 @@ const SelfImprovementPanel: React.FC = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      {Object.entries(systemHealth.components).map(
-                        ([component, status]) => (
-                          <div
-                            key={component}
-                            className="flex items-center justify-between"
-                          >
-                            <span>{component}</span>
-                            <Badge
-                              variant={
-                                status === "healthy" ? "default" : "destructive"
-                              }
+                      {systemHealth.components &&
+                      Object.keys(systemHealth.components).length > 0 ? (
+                        Object.entries(systemHealth.components).map(
+                          ([component, status]) => (
+                            <div
+                              key={component}
+                              className="flex items-center justify-between"
                             >
-                              {status}
-                            </Badge>
-                          </div>
+                              <span>{component}</span>
+                              <Badge
+                                variant={
+                                  status === "healthy"
+                                    ? "default"
+                                    : "destructive"
+                                }
+                              >
+                                {status}
+                              </Badge>
+                            </div>
+                          )
                         )
+                      ) : (
+                        <div className="text-sm text-muted-foreground">
+                          No component data available
+                        </div>
                       )}
                     </div>
                   </CardContent>
                 </Card>
 
-                {systemHealth.recommendations.length > 0 && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Recommendations</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ul className="space-y-1">
-                        {systemHealth.recommendations.map((rec, index) => (
-                          <li
-                            key={index}
-                            className="text-sm flex items-start gap-2"
-                          >
-                            <Info className="h-4 w-4 mt-0.5 text-blue-500" />
-                            {rec}
-                          </li>
-                        ))}
-                      </ul>
-                    </CardContent>
-                  </Card>
-                )}
+                {systemHealth.recommendations &&
+                  systemHealth.recommendations.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Recommendations</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ul className="space-y-1">
+                          {systemHealth.recommendations.map((rec, index) => (
+                            <li
+                              key={index}
+                              className="text-sm flex items-start gap-2"
+                            >
+                              <Info className="h-4 w-4 mt-0.5 text-blue-500" />
+                              {rec}
+                            </li>
+                          ))}
+                        </ul>
+                      </CardContent>
+                    </Card>
+                  )}
               </div>
             )}
           </TabsContent>
