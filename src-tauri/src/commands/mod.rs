@@ -46,6 +46,7 @@ pub mod ui_token_selection;
 pub mod error_recovery;
 pub mod collaborative_ai_commands;
 pub mod enhanced_visual_reasoning_commands;
+pub mod agent_continuation;
 
 // Re-export commands for easy access in lib.rs
 pub use self::autostart::*;

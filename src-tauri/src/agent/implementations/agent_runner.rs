@@ -184,10 +184,55 @@ where
             }
 
             if self.current_step >= self.max_steps {
-                log::warn!("Reached maximum steps ({}), terminating agent loop", self.max_steps);
-                self.transition_state(AgentState::Failed("Max steps reached".to_string()))
-                    .await;
-                return Err(AgentError::MaxStepsReached);
+                log::warn!("Reached maximum steps ({}), requesting continuation from user", self.max_steps);
+
+                // Get current execution ID from AppState
+                let app_state = self.app_handle.state::<crate::state::AppState>();
+                let execution_id = app_state.get_current_agent_execution_id()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+                // Request continuation from user
+                match crate::commands::agent_continuation::request_agent_continuation(
+                    execution_id.clone(),
+                    self.current_step,
+                    self.max_steps,
+                    &self.app_handle
+                ).await {
+                    Ok(Some(response)) => {
+                        if response.approved {
+                            // User approved continuation - extend max_steps
+                            let additional_steps = response.additional_steps.unwrap_or(20); // Default 20 more steps
+                            self.max_steps += additional_steps;
+                            log::info!("User approved continuation. Extended max steps to {} (+{} steps)",
+                                      self.max_steps, additional_steps);
+
+                            // Update AppState with new max steps
+                            if let Ok(mut max_steps_guard) = app_state.agent_max_steps.lock() {
+                                *max_steps_guard = Some(self.max_steps);
+                            }
+
+                            // Continue execution - don't return error
+                        } else {
+                            log::info!("User denied continuation. Terminating agent.");
+                            self.transition_state(AgentState::Failed("Continuation denied by user".to_string()))
+                                .await;
+                            return Err(AgentError::MaxStepsReached);
+                        }
+                    }
+                    Ok(None) => {
+                        // Timeout or no response - terminate
+                        log::warn!("No response to continuation request (timeout). Terminating agent.");
+                        self.transition_state(AgentState::Failed("Max steps reached (no continuation response)".to_string()))
+                            .await;
+                        return Err(AgentError::MaxStepsReached);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to request continuation: {}. Terminating agent.", e);
+                        self.transition_state(AgentState::Failed("Max steps reached (continuation error)".to_string()))
+                            .await;
+                        return Err(AgentError::MaxStepsReached);
+                    }
+                }
             }
 
             log::info!("Agent step {} of {}", self.current_step + 1, self.max_steps);
