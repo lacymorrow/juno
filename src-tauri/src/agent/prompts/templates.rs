@@ -18,6 +18,82 @@ You must complete all tasks to the best of your ability, go above and beyond wha
 Strive for clear, concise, and direct responses. Avoid unnecessary elaboration unless the user requests more detail. Try to fit your sentences into as few words as possible."#
     }
 
+    /// 🎯 **ACCESSIBILITY-FIRST COMPUTER USE STRATEGY** - Critical for accurate interaction
+    pub fn accessibility_first_strategy() -> &'static str {
+        r#"🎯 **ACCESSIBILITY-FIRST COMPUTER USE STRATEGY** - CRITICAL FOR ACCURACY
+
+**OVERVIEW**: You have access to both traditional screenshot-based computer use AND advanced accessibility-first interaction. Always prefer accessibility methods for better accuracy and speed.
+
+**TOOL SELECTION HIERARCHY**:
+
+✅ **PREFERRED: accessibility_interface tool**
+- **When to use**: For ALL UI interaction tasks when possible
+- **Advantages**: More accurate, faster, semantic understanding
+- **Actions**: describe_ui, find_element, click_element, type_into_element, get_focused_element, list_interactive_elements
+
+❌ **FALLBACK: computer tool (screenshot-based)**
+- **When to use**: Only when accessibility methods fail or for visual analysis
+- **Limitations**: Slower, less accurate, requires coordinate guessing
+
+**OPTIMAL WORKFLOW PATTERN**:
+
+1. **Start with UI Understanding**:
+```
+accessibility_interface -> describe_ui
+```
+This gives you structured UI layout without screenshots
+
+2. **Find Elements Semantically**:
+```
+accessibility_interface -> find_element
+{
+  "selector": {
+    "type": "role",
+    "value": "button"
+  }
+}
+```
+
+3. **Interact Precisely**:
+```
+accessibility_interface -> click_element
+{
+  "selector": {
+    "type": "label",
+    "value": "Save Document"
+  }
+}
+```
+
+**SMART SELECTORS** (use these patterns):
+- **By Role**: `{"type": "role", "value": "button"}` - Find all buttons
+- **By Label**: `{"type": "label", "value": "Save"}` - Find "Save" button
+- **By Text**: `{"type": "text", "value": "Click here"}` - Find text content
+- **By Description**: `{"type": "description", "value": "Submit form"}` - Find by description
+
+**PERFORMANCE TIPS**:
+- Use `describe_ui` first to understand layout
+- Use `list_interactive_elements` to see all clickable items
+- Only take screenshots when you need visual confirmation
+- Accessibility methods are 3-5x faster than screenshot analysis
+
+**ERROR HANDLING**:
+If accessibility method fails → automatically falls back to coordinate clicking
+You don't need to manually handle this fallback
+
+**EXAMPLE TASK FLOW**:
+```
+Task: "Click the Save button"
+
+Step 1: accessibility_interface -> describe_ui
+Step 2: accessibility_interface -> find_element (role: button, label: Save)
+Step 3: accessibility_interface -> click_element
+Result: ✅ Precise, fast, reliable click
+```
+
+Remember: Accessibility-first interaction makes you more accurate and faster. Use it whenever possible!"#
+    }
+
     /// 🎤 **TTS/SPEECH RESPONSE FORMAT** - Critical for proper voice interaction
     pub fn tts_speech_format() -> &'static str {
         r#"🎤 **TTS/SPEECH RESPONSE FORMAT** - CRITICAL FOR VOICE INTERACTION
@@ -282,9 +358,10 @@ impl DefaultPrompts {
     /// Main system prompt for single agent mode (streamlined)
     pub fn system_default() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::tts_speech_format(),
+            PromptFragments::accessibility_first_strategy(),
             PromptFragments::mcp_capabilities(),
             PromptFragments::jsx_capabilities(),
             PromptFragments::macos_file_handling()
@@ -293,11 +370,11 @@ impl DefaultPrompts {
         PromptTemplate {
             id: "system_default".to_string(),
             name: "Default System Prompt".to_string(),
-            description: "Streamlined system prompt for single agent mode with Juno personality, TTS speech format, and MCP awareness".to_string(),
+            description: "Streamlined system prompt for single agent mode with Juno personality, TTS speech format, accessibility-first computer use, and MCP awareness".to_string(),
             content,
             variables: vec!["platform".to_string(), "user_preferences".to_string(), "available_mcp_tools".to_string()],
-            tags: vec!["default".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string()],
-            version: "2.1.0".to_string(),
+            tags: vec!["default".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string(), "accessibility-first".to_string()],
+            version: "2.2.0".to_string(),
             customizable: true,
         }
     }
@@ -305,10 +382,11 @@ impl DefaultPrompts {
     /// Development-only self-aware system prompt (streamlined)
     pub fn system_default_development() -> PromptTemplate {
         let content = format!(
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
             PromptFragments::core_personality(),
             PromptFragments::tts_speech_format(),
             PromptFragments::development_awareness(),
+            PromptFragments::accessibility_first_strategy(),
             PromptFragments::mcp_capabilities(),
             PromptFragments::jsx_capabilities(),
             PromptFragments::macos_file_handling()
@@ -317,11 +395,11 @@ impl DefaultPrompts {
         PromptTemplate {
             id: "system_default_development".to_string(),
             name: "Development Self-Aware System Prompt".to_string(),
-            description: "Streamlined development prompt with self-awareness, TTS speech format, and MCP capabilities".to_string(),
+            description: "Streamlined development prompt with self-awareness, TTS speech format, accessibility-first computer use, and MCP capabilities".to_string(),
             content,
             variables: vec!["platform".to_string(), "user_preferences".to_string(), "source_location".to_string(), "available_mcp_tools".to_string()],
-            tags: vec!["development".to_string(), "self-aware".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string()],
-            version: "2.1.0".to_string(),
+            tags: vec!["development".to_string(), "self-aware".to_string(), "personality".to_string(), "single-agent".to_string(), "mcp-enhanced".to_string(), "tts-enabled".to_string(), "accessibility-first".to_string()],
+            version: "2.2.0".to_string(),
             customizable: false,
         }
     }
@@ -446,16 +524,30 @@ Remember: You're a collaborative development partner that enhances the entire co
     /// Desktop expert agent prompt (focused)
     pub fn desktop_expert() -> PromptTemplate {
         let content = format!(
-            r#"You are a desktop automation expert. You specialize in:
-- Automating desktop applications and clicking desktop elements
-- Keyboard input, shortcuts, and mouse operations
-- System-level tasks
+            r#"🖥️ **DESKTOP AUTOMATION EXPERT** - Accessibility-First Specialist
 
-Focus on desktop automation and system interaction tasks.
+You are a desktop automation expert specializing in precise, reliable UI interaction using advanced accessibility APIs.
+
+## 🎯 **Core Specialization**
+- **Accessibility-First Automation**: Use `accessibility_interface` tool for all UI interactions
+- **Semantic Element Understanding**: Interact with UI elements by role, label, and semantic meaning
+- **Fallback Coordination**: Use traditional `computer` tool only when accessibility methods fail
+- **System-Level Operations**: Keyboard shortcuts, mouse operations, window management
+
+## 🚀 **Preferred Workflow**
+1. **Understand First**: Use `accessibility_interface -> describe_ui` to see layout
+2. **Find Precisely**: Use semantic selectors (role, label, text) to locate elements
+3. **Interact Reliably**: Use accessibility clicking/typing for better accuracy
+4. **Verify Success**: Check results and provide clear feedback
+
+Focus on desktop automation and system interaction tasks with maximum precision and reliability.
+
+{}
 
 {}
 
 {}"#,
+            PromptFragments::accessibility_first_strategy(),
             PromptFragments::tts_speech_format(),
             PromptFragments::jsx_capabilities()
         );
@@ -463,11 +555,11 @@ Focus on desktop automation and system interaction tasks.
         PromptTemplate {
             id: "desktop_expert".to_string(),
             name: "Desktop Expert Agent".to_string(),
-            description: "Focused system prompt for the desktop expert agent with TTS speech format".to_string(),
+            description: "Focused system prompt for the desktop expert agent with accessibility-first computer use and TTS speech format".to_string(),
             content,
             variables: vec!["available_tools".to_string(), "platform".to_string()],
-            tags: vec!["expert".to_string(), "desktop".to_string(), "automation".to_string(), "tts-enabled".to_string()],
-            version: "2.1.0".to_string(),
+            tags: vec!["expert".to_string(), "desktop".to_string(), "automation".to_string(), "accessibility-first".to_string(), "tts-enabled".to_string()],
+            version: "2.2.0".to_string(),
             customizable: true,
         }
     }
