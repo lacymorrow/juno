@@ -5,11 +5,9 @@ use serde_json::Value;
 use std::env;
 use tracing;
 
-use crate::agent::structs::{
-    AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition,
-};
-use crate::agent::traits::AgentBrain;
 use crate::agent::providers::factory::model_ids;
+use crate::agent::structs::{AgentAction, AgentError, Message, Role, ToolCall, ToolDefinition};
+use crate::agent::traits::AgentBrain;
 
 #[derive(Serialize, Debug)]
 struct GeminiRequest {
@@ -148,10 +146,11 @@ impl GeminiBrain {
     }
 
     pub fn from_env() -> Result<Self, AgentError> {
-        let api_key = env::var("GEMINI_API_KEY")
-            .map_err(|_| AgentError::ConfigurationError(
-                "GEMINI_API_KEY environment variable not set".to_string()
-            ))?;
+        let api_key = env::var("GEMINI_API_KEY").map_err(|_| {
+            AgentError::ConfigurationError(
+                "GEMINI_API_KEY environment variable not set".to_string(),
+            )
+        })?;
 
         let model = env::var("GEMINI_MODEL").ok();
         let max_tokens = env::var("GEMINI_MAX_TOKENS")
@@ -169,9 +168,11 @@ impl GeminiBrain {
         let role = match message.role {
             Role::User => "user",
             Role::Assistant => "model",
-            Role::System => return Err(AgentError::LlmError(
-                "System messages should be passed via system_instruction parameter".to_string()
-            )),
+            Role::System => {
+                return Err(AgentError::LlmError(
+                    "System messages should be passed via system_instruction parameter".to_string(),
+                ))
+            }
             Role::Tool => "model", // Tool responses are handled as model responses with function_response
         };
 
@@ -198,18 +199,18 @@ impl GeminiBrain {
 
         // Handle tool results
         if message.role == Role::Tool {
-            let tool_name = message.name.as_ref()
-                .ok_or_else(|| AgentError::LlmError(
-                    "Tool result message missing tool name".to_string()
-                ))?;
+            let tool_name = message.name.as_ref().ok_or_else(|| {
+                AgentError::LlmError("Tool result message missing tool name".to_string())
+            })?;
 
-            let response_content = if message.content.starts_with('{') || message.content.starts_with('[') {
-                // Try to parse as JSON
-                serde_json::from_str::<Value>(&message.content)
-                    .unwrap_or_else(|_| Value::String(message.content.clone()))
-            } else {
-                Value::String(message.content.clone())
-            };
+            let response_content =
+                if message.content.starts_with('{') || message.content.starts_with('[') {
+                    // Try to parse as JSON
+                    serde_json::from_str::<Value>(&message.content)
+                        .unwrap_or_else(|_| Value::String(message.content.clone()))
+                } else {
+                    Value::String(message.content.clone())
+                };
 
             parts.push(GeminiPart::FunctionResponse(GeminiFunctionResponse {
                 function_response: GeminiFunctionResponseData {
@@ -307,13 +308,11 @@ impl AgentBrain for GeminiBrain {
         };
 
         // Prepare system instruction if available
-        let system_instruction = self.system_prompt.as_ref().map(|prompt| {
-            GeminiContent {
-                role: "user".to_string(),
-                parts: vec![GeminiPart::Text(GeminiTextPart {
-                    text: prompt.clone(),
-                })],
-            }
+        let system_instruction = self.system_prompt.as_ref().map(|prompt| GeminiContent {
+            role: "user".to_string(),
+            parts: vec![GeminiPart::Text(GeminiTextPart {
+                text: prompt.clone(),
+            })],
         });
 
         let request = GeminiRequest {
@@ -329,10 +328,13 @@ impl AgentBrain for GeminiBrain {
             },
         };
 
-        let url = format!("{}/{}:generateContent?key={}",
-                         GEMINI_API_BASE, self.model, self.api_key);
+        let url = format!(
+            "{}/{}:generateContent?key={}",
+            GEMINI_API_BASE, self.model, self.api_key
+        );
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .json(&request)
             .send()
@@ -340,14 +342,22 @@ impl AgentBrain for GeminiBrain {
             .map_err(|e| AgentError::LlmError(format!("HTTP request failed: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(AgentError::LlmError(format!("API error: {}", error_text)));
         }
 
-        let gemini_response: GeminiResponse = response.json().await
+        let gemini_response: GeminiResponse = response
+            .json()
+            .await
             .map_err(|e| AgentError::LlmError(format!("Failed to parse response: {}", e)))?;
 
-        let candidate = gemini_response.candidates.into_iter().next()
+        let candidate = gemini_response
+            .candidates
+            .into_iter()
+            .next()
             .ok_or_else(|| AgentError::LlmError("No candidates in response".to_string()))?;
 
         // Process the response parts
@@ -378,26 +388,23 @@ impl AgentBrain for GeminiBrain {
             Ok(AgentAction::ExecuteTool(tool_calls))
         } else if !text_content.trim().is_empty() {
             // Check if this should finish or continue thinking
-            if text_content.to_lowercase().contains("final answer") ||
-               text_content.to_lowercase().contains("complete") {
+            if text_content.to_lowercase().contains("final answer")
+                || text_content.to_lowercase().contains("complete")
+            {
                 Ok(AgentAction::Finish(text_content))
             } else {
                 Ok(AgentAction::RespondToUser(text_content))
             }
         } else {
-            Err(AgentError::LlmError("Empty response from model".to_string()))
+            Err(AgentError::LlmError(
+                "Empty response from model".to_string(),
+            ))
         }
     }
 }
 
 impl Default for GeminiBrain {
     fn default() -> Self {
-        Self::new(
-            String::new(),
-            None,
-            None,
-            None,
-            None,
-        ).unwrap()
+        Self::new(String::new(), None, None, None, None).unwrap()
     }
 }
