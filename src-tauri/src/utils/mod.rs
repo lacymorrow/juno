@@ -1012,37 +1012,200 @@ async fn get_clipboard_content_safe(app_state: Option<&crate::state::AppState>) 
 /// Safely get selected text for context (with length limits)
 async fn get_selected_text_safe(app_state: Option<&crate::state::AppState>) -> Option<String> {
     if let Some(state) = app_state {
-        // Use the same pattern as dev_get_selected_text command
-        match state.desktop.get_desktop() {
-            Ok(desktop) => {
-                match desktop.focused_element() {
-                    Ok(element) => {
-                        let attrs = element.attributes();
-                        let text = attrs.value.unwrap_or_else(|| "".to_string());
-                        const MAX_SELECTED_TEXT_LENGTH: usize = 300;
-                        if text.trim().is_empty() {
-                            Some("[No text selected]".to_string())
-                        } else if text.len() > MAX_SELECTED_TEXT_LENGTH {
-                            Some(format!("{}... (truncated from {} chars)",
-                                &text[..MAX_SELECTED_TEXT_LENGTH], text.len()))
-                        } else {
-                            Some(text)
+        // Try accessibility API approach first
+        if let Some(selected_text) = get_selected_text_via_accessibility(state).await {
+            return Some(selected_text);
+        }
+
+        // Fall back to clipboard trick approach as mentioned in web search results
+        if let Some(selected_text) = get_selected_text_via_clipboard_trick(state).await {
+            return Some(selected_text);
+        }
+
+        log::debug!("No selected text found via any method");
+        Some("".to_string()) // Return empty string as fallback
+    } else {
+        log::debug!("No app state available for selected text access");
+        Some("".to_string()) // Return empty string as fallback
+    }
+}
+
+/// Try to get selected text using macOS accessibility APIs
+#[cfg(target_os = "macos")]
+async fn get_selected_text_via_accessibility(app_state: &crate::state::AppState) -> Option<String> {
+    match app_state.desktop.get_desktop() {
+        Ok(desktop) => {
+            match desktop.focused_element() {
+                Ok(element) => {
+                    let attrs = element.attributes();
+
+                    // Check for AXSelectedText attribute which contains actual selected text
+                    if let Some(Some(selected_text)) = attrs.properties.get("AXSelectedText") {
+                        if let Some(selected_str) = selected_text.as_str() {
+                            if !selected_str.trim().is_empty() {
+                                const MAX_SELECTED_TEXT_LENGTH: usize = 300;
+                                let text = if selected_str.len() > MAX_SELECTED_TEXT_LENGTH {
+                                    format!("{}... (truncated from {} chars)",
+                                        &selected_str[..MAX_SELECTED_TEXT_LENGTH], selected_str.len())
+                                } else {
+                                    selected_str.to_string()
+                                };
+                                log::debug!("Found selected text via AXSelectedText: {}", text);
+                                return Some(text);
+                            }
                         }
                     }
-                    Err(e) => {
-                        log::debug!("Could not get selected text: {}", e);
+
+                    // Check for AXSelectedTextRange and AXValue combination
+                    if let (Some(Some(range_value)), Some(Some(value))) = (
+                        attrs.properties.get("AXSelectedTextRange"),
+                        attrs.properties.get("AXValue")
+                    ) {
+                        if let (Some(range_str), Some(value_str)) = (range_value.as_str(), value.as_str()) {
+                            if let Some(selected_text) = extract_text_from_range(range_str, value_str) {
+                                if !selected_text.trim().is_empty() {
+                                    const MAX_SELECTED_TEXT_LENGTH: usize = 300;
+                                    let text = if selected_text.len() > MAX_SELECTED_TEXT_LENGTH {
+                                        format!("{}... (truncated from {} chars)",
+                                            &selected_text[..MAX_SELECTED_TEXT_LENGTH], selected_text.len())
+                                    } else {
+                                        selected_text
+                                    };
+                                    log::debug!("Found selected text via AXSelectedTextRange: {}", text);
+                                    return Some(text);
+                                }
+                            }
+                        }
+                    }
+
+                    log::debug!("No selected text found in accessibility attributes");
+                    None
+                }
+                Err(e) => {
+                    log::debug!("Could not get focused element: {}", e);
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            log::debug!("Desktop not available: {}", e);
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn get_selected_text_via_accessibility(_app_state: &crate::state::AppState) -> Option<String> {
+    None
+}
+
+/// Extract text from AXSelectedTextRange format (e.g., "{location=5, length=10}")
+#[cfg(target_os = "macos")]
+fn extract_text_from_range(range_str: &str, full_text: &str) -> Option<String> {
+    // Parse range format like "{location=5, length=10}"
+    if let (Some(location_start), Some(length_start)) = (
+        range_str.find("location="),
+        range_str.find("length=")
+    ) {
+        let location_end = range_str[location_start + 9..].find(',').map(|i| i + location_start + 9)
+            .or_else(|| range_str[location_start + 9..].find('}').map(|i| i + location_start + 9))
+            .unwrap_or(range_str.len());
+        let length_end = range_str[length_start + 7..].find(',').map(|i| i + length_start + 7)
+            .or_else(|| range_str[length_start + 7..].find('}').map(|i| i + length_start + 7))
+            .unwrap_or(range_str.len());
+
+        if let (Ok(location), Ok(length)) = (
+            range_str[location_start + 9..location_end].trim().parse::<usize>(),
+            range_str[length_start + 7..length_end].trim().parse::<usize>()
+        ) {
+            if location + length <= full_text.len() && length > 0 {
+                return Some(full_text[location..location + length].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Fall back to clipboard trick approach (as mentioned in web search results)
+async fn get_selected_text_via_clipboard_trick(app_state: &crate::state::AppState) -> Option<String> {
+    // Save current clipboard content
+    let original_clipboard = match app_state.desktop.get_clipboard_content() {
+        Ok(content) => Some(content),
+        Err(_) => None,
+    };
+
+    // Try to copy selected text using Cmd+C
+    match app_state.desktop.get_desktop() {
+        Ok(desktop) => {
+            // Send Cmd+C to copy selected text
+            use computer_use_ai_sdk::Key;
+            if let Err(e) = desktop.key_down(Key::Cmd) {
+                log::debug!("Failed to press Cmd key: {}", e);
+                return None;
+            }
+
+            if let Err(e) = desktop.key_down(Key::C) {
+                log::debug!("Failed to press C key: {}", e);
+                let _ = desktop.key_up(Key::Cmd); // Clean up
+                return None;
+            }
+
+            if let Err(e) = desktop.key_up(Key::C) {
+                log::debug!("Failed to release C key: {}", e);
+                let _ = desktop.key_up(Key::Cmd); // Clean up
+                return None;
+            }
+
+            if let Err(e) = desktop.key_up(Key::Cmd) {
+                log::debug!("Failed to release Cmd key: {}", e);
+                return None;
+            }
+
+            // Small delay to allow copy operation to complete
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+            // Get clipboard content
+            let copied_text = match app_state.desktop.get_clipboard_content() {
+                Ok(content) => {
+                    // Check if clipboard content changed (indicating something was copied)
+                    if original_clipboard.as_ref() != Some(&content) && !content.trim().is_empty() {
+                        Some(content)
+                    } else {
                         None
                     }
                 }
+                Err(e) => {
+                    log::debug!("Failed to get clipboard content: {}", e);
+                    None
+                }
+            };
+
+            // Restore original clipboard content if we have it
+            if let Some(original) = original_clipboard {
+                if let Err(e) = app_state.desktop.set_clipboard_content(&original) {
+                    log::debug!("Failed to restore clipboard content: {}", e);
+                }
             }
-            Err(e) => {
-                log::debug!("Desktop not available for selected text access: {}", e);
+
+            if let Some(text) = copied_text {
+                const MAX_SELECTED_TEXT_LENGTH: usize = 300;
+                let result = if text.len() > MAX_SELECTED_TEXT_LENGTH {
+                    format!("{}... (truncated from {} chars)",
+                        &text[..MAX_SELECTED_TEXT_LENGTH], text.len())
+                } else {
+                    text
+                };
+                log::debug!("Found selected text via clipboard trick: {}", result);
+                Some(result)
+            } else {
+                log::debug!("No selected text found via clipboard trick");
                 None
             }
         }
-    } else {
-        log::debug!("No app state available for selected text access");
-        None
+        Err(e) => {
+            log::debug!("Desktop not available for clipboard trick: {}", e);
+            None
+        }
     }
 }
 
