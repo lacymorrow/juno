@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -77,6 +77,11 @@ interface BenchmarkResult {
   details?: string;
 }
 
+interface InitializeSelfImprovementRequest {
+  config: any | null; // Configuration for the self-improvement system
+  load_existing_archive: boolean; // Whether to load existing archive
+}
+
 const DEVELOPMENT_MODE_ONLY =
   !process.env.NODE_ENV || process.env.NODE_ENV === "development";
 
@@ -92,7 +97,7 @@ const SelfImprovementPanel: React.FC = () => {
     []
   );
   const [configJson, setConfigJson] = useState("");
-  const [selectedBenchmark, setSelectedBenchmark] = useState<string>("all");
+  const [selectedBenchmark, setSelectedBenchmark] = useState<string>("quick");
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Clear messages after timeout
@@ -121,7 +126,11 @@ const SelfImprovementPanel: React.FC = () => {
     setError(null);
 
     try {
-      await invoke("initialize_self_improvement");
+      const request: InitializeSelfImprovementRequest = {
+        config: null, // Use default configuration
+        load_existing_archive: true,
+      };
+      await invoke("initialize_self_improvement", { request });
       setIsInitialized(true);
       setSuccess("Self-improvement system initialized successfully");
       await refreshStatus();
@@ -234,10 +243,22 @@ const SelfImprovementPanel: React.FC = () => {
 
     try {
       const results = await invoke("run_performance_benchmarks", {
-        benchmarkType: selectedBenchmark,
+        benchmark_type: selectedBenchmark,
       });
-      setBenchmarkResults(results as BenchmarkResult[]);
-      setSuccess(`Benchmark '${selectedBenchmark}' completed successfully`);
+
+      // Convert the backend results to our BenchmarkResult interface
+      const convertedResults = (results as any[]).map((result: any) => ({
+        benchmark_type: result.benchmark_type,
+        score: result.score,
+        target: result.target,
+        status: result.status,
+        details: result.details,
+      }));
+
+      setBenchmarkResults(convertedResults as BenchmarkResult[]);
+      setSuccess(
+        `Benchmark '${selectedBenchmark}' completed successfully (${convertedResults.length} tests)`
+      );
     } catch (err) {
       setError(`Failed to run benchmark: ${err}`);
     } finally {
@@ -696,6 +717,9 @@ const SelfImprovementPanel: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Benchmarks</SelectItem>
+                  <SelectItem value="quick">Quick Suite (4s)</SelectItem>
+                  <SelectItem value="core">Core Suite (6s)</SelectItem>
+                  <SelectItem value="advanced">Advanced Suite (10s)</SelectItem>
                   <SelectItem value="accuracy">Accuracy</SelectItem>
                   <SelectItem value="performance">Performance</SelectItem>
                   <SelectItem value="reliability">Reliability</SelectItem>
