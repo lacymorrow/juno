@@ -15,7 +15,7 @@ Successfully centralized all hard-coded constants and values throughout the Juno
 - `DEFAULT_CONTINUATION_ADDITIONAL_STEPS = 20` - Default steps when user approves continuation
 - `CONTINUATION_REQUEST_TIMEOUT_SECONDS = 300` - 5-minute timeout for continuation requests
 - `DEFAULT_TASK_TIMEOUT_SECONDS = 300` - General task timeout
-- `DEFAULT_COMMAND_TIMEOUT_SECONDS = 300` - Command execution timeout
+- `DEFAULT_COMMAND_TIMEOUT_SECONDS = 180` - Command execution timeout (3 minutes, appropriate for basic commands)
 
 **Files Updated**:
 
