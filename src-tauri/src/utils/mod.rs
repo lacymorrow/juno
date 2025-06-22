@@ -1138,26 +1138,8 @@ async fn get_selected_text_via_clipboard_trick(app_state: &crate::state::AppStat
     match app_state.desktop.get_desktop() {
         Ok(desktop) => {
             // Send Cmd+C to copy selected text
-            use computer_use_ai_sdk::Key;
-            if let Err(e) = desktop.key_down(Key::Cmd) {
-                log::debug!("Failed to press Cmd key: {}", e);
-                return None;
-            }
-
-            if let Err(e) = desktop.key_down(Key::C) {
-                log::debug!("Failed to press C key: {}", e);
-                let _ = desktop.key_up(Key::Cmd); // Clean up
-                return None;
-            }
-
-            if let Err(e) = desktop.key_up(Key::C) {
-                log::debug!("Failed to release C key: {}", e);
-                let _ = desktop.key_up(Key::Cmd); // Clean up
-                return None;
-            }
-
-            if let Err(e) = desktop.key_up(Key::Cmd) {
-                log::debug!("Failed to release Cmd key: {}", e);
+            if let Err(e) = desktop.press_key("c", Some("cmd")) {
+                log::debug!("Failed to press Cmd+C: {}", e);
                 return None;
             }
 
