@@ -27,7 +27,7 @@ import type {
   AssistantState,
   ContentType,
   ResponseContent,
-} from "../../types/voice-ai";
+} from "@/types/voice-ai";
 
 export function VoiceAIBar({
   onStateChange,
