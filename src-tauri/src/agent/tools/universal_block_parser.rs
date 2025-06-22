@@ -7,7 +7,6 @@
 //! Used by: Anthropic Computer Use tools for enhanced GUI element grounding
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use tracing::{debug, info};
 use image::{ImageBuffer, Rgba};
 
@@ -717,16 +716,16 @@ mod tests {
             total_elements_detected: 0,
         };
 
-        // Test with out-of-bounds coordinates (should be clamped)
+                // Test with out-of-bounds coordinates (should be clamped)
         let result = parser.global_to_block_coordinates(&ubp_result, 100.0, 100.0);
         assert!(result.is_ok());
 
         let coords = result.unwrap();
         // Should have lower confidence due to clamping
         assert_eq!(coords.confidence, 0.7);
-        // Relative coordinates should be 1.0, 1.0 (at the edge of the block)
-        assert_eq!(coords.relative_x, 1.0);
-        assert_eq!(coords.relative_y, 1.0);
+        // Relative coordinates should be 63/64 = 0.984375 since coordinates are clamped to (63, 63)
+        assert!((coords.relative_x - 0.984375).abs() < 0.001);
+        assert!((coords.relative_y - 0.984375).abs() < 0.001);
     }
 
     #[test]
