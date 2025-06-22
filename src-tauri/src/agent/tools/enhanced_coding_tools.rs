@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::fs;
-use tracing::info;
+use tracing::{info, warn};
 use chrono;
 
 use crate::agent::structs::{ToolCall, ToolResult, ToolDefinition};
@@ -284,7 +284,7 @@ impl EnhancedCodingToolProvider {
     /// Applies best practices and common patterns automatically.
     /// Used by: Main agent when creating new files or scaffolding project structure.
     async fn smart_create_file(&self, tool_call: &ToolCall) -> Result<ToolResult, AgentError> {
-        let file_path = tool_call.input.get("file_path")
+        let file_path_input = tool_call.input.get("file_path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentError::InputError("Missing 'file_path' parameter".to_string()))?;
 
@@ -296,14 +296,29 @@ impl EnhancedCodingToolProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
+        // Determine the actual file path - use Juno directory if path is just a filename
+        let file_path = if std::path::Path::new(file_path_input).is_absolute() || file_path_input.contains('/') || file_path_input.contains('\\') {
+            // User provided a specific path, use it as-is
+            file_path_input.to_string()
+        } else {
+            // Just a filename, use the agent's preferred directory
+            match crate::utils::get_agent_preferred_file_path(file_path_input) {
+                Ok(path) => path.to_string_lossy().to_string(),
+                Err(e) => {
+                    warn!("Failed to get agent preferred directory, using current directory: {}", e);
+                    file_path_input.to_string()
+                }
+            }
+        };
+
         info!("📝 [CODING EXPERT] Smart creating file: {} (type: {}, purpose: {})", file_path, content_type, purpose);
 
         // Detect language and generate appropriate template
-        let language = self.detect_language_from_path(file_path);
+        let language = self.detect_language_from_path(&file_path);
         let template = self.generate_file_template(&language, content_type, purpose).await?;
 
         // Create the file with template content
-        let result = self.create_file_with_content(file_path, &template).await?;
+        let result = self.create_file_with_content(&file_path, &template).await?;
 
         // Generate IDE intent
         let ide_intent = format!(
