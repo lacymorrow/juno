@@ -1,7 +1,9 @@
 use core_graphics::display::{
     CGDirectDisplayID, CGDisplayBounds, CGGetActiveDisplayList, CGMainDisplayID, CGRect,
 };
-use core_graphics::geometry::{CGPoint, CGSize};
+use core_graphics::geometry::CGPoint;
+#[cfg(test)]
+use core_graphics::geometry::CGSize;
 use tracing::{debug, trace};
 use crate::AutomationError;
 use std::collections::HashMap;
