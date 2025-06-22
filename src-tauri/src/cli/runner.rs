@@ -12,8 +12,8 @@ use tauri::{AppHandle, Manager};
 use tempfile::Builder as TempFileBuilder;
 use tracing::{error, info, warn}; // Import tracing macros // Add the TTS import
 
-// Self-improvement CLI command handling
-use crate::commands::self_improvement::*;
+// Self-improvement CLI command handling (used in handle_self_improvement_cli_commands)
+// use crate::commands::self_improvement::*; // Note: not directly used in this file
 
 /// Handles the execution of commands specified via CLI arguments.
 /// Returns `Ok(true)` if a CLI command was handled (and the app should exit),
@@ -392,12 +392,20 @@ pub async fn initialize_cli_settings(app: &AppHandle) -> Result<(), String> {
             Ok(())
         }
         Err(e) => {
-            warn!("Failed to load CLI settings, using defaults: {}", e);
-            // Only save default settings if loading failed (settings don't exist)
-            let default_settings = CLISettings::default();
-            save_cli_settings_to_centralized_settings(app, &default_settings).await?;
-            info!("Initialized CLI settings with defaults");
-            Ok(())
+            // Check if this is a store access error (settings file doesn't exist) vs other errors
+            if e.contains("Failed to access settings store") {
+                info!("CLI settings don't exist yet, initializing with defaults");
+                let default_settings = CLISettings::default();
+                save_cli_settings_to_centralized_settings(app, &default_settings).await?;
+                info!("Initialized CLI settings with defaults");
+                Ok(())
+            } else {
+                // For other errors (corruption, deserialization), log but don't overwrite
+                error!("Failed to load CLI settings: {}", e);
+                error!("Using defaults for this session, but not overwriting stored settings");
+                error!("Please check your settings file or reset manually if needed");
+                Ok(()) // Continue with defaults but don't save them
+            }
         }
     }
 }
@@ -436,16 +444,21 @@ pub async fn initialize_voice_transcription_settings(app: &AppHandle) -> Result<
             Ok(())
         }
         Err(e) => {
-            warn!(
-                "Failed to load voice transcription settings, using defaults: {}",
-                e
-            );
-            // Only save default settings if loading failed (settings don't exist)
-            let default_settings = crate::settings::VoiceTranscriptionSettings::default();
-            save_voice_transcription_settings_to_centralized_settings(app, &default_settings)
-                .await?;
-            info!("Initialized voice transcription settings with defaults");
-            Ok(())
+            // Check if this is a store access error (settings file doesn't exist) vs other errors
+            if e.contains("Failed to access settings store") {
+                info!("Voice transcription settings don't exist yet, initializing with defaults");
+                let default_settings = crate::settings::VoiceTranscriptionSettings::default();
+                save_voice_transcription_settings_to_centralized_settings(app, &default_settings)
+                    .await?;
+                info!("Initialized voice transcription settings with defaults");
+                Ok(())
+            } else {
+                // For other errors (corruption, deserialization), log but don't overwrite
+                error!("Failed to load voice transcription settings: {}", e);
+                error!("Using defaults for this session, but not overwriting stored settings");
+                error!("Please check your settings file or reset manually if needed");
+                Ok(()) // Continue with defaults but don't save them
+            }
         }
     }
 }
