@@ -838,9 +838,16 @@ impl AgentBrain for AnthropicBrain {
                         log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", stop_reason);
                     }
 
-                    // CRITICAL FIX: Return final display text (either clean content or TTS fallback)
-                    // TTS content was already extracted and processed during streaming
-                    Ok(AgentAction::Finish(final_display_text))
+                    // CRITICAL FIX: Handle empty responses appropriately
+                    // If the LLM returns no meaningful content, continue thinking instead of finishing
+                    let trimmed_text = final_display_text.trim();
+                    if trimmed_text.is_empty() {
+                        log::debug!("LLM returned empty response, continuing to think...");
+                        Ok(AgentAction::Think)
+                    } else {
+                        // TTS content was already extracted and processed during streaming
+                        Ok(AgentAction::Finish(final_display_text))
+                    }
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",
@@ -907,9 +914,17 @@ impl AgentBrain for AnthropicBrain {
                         log::warn!("Stop reason is {}, but tool calls were also found. Ignoring tool calls.", response_body.stop_reason);
                     }
 
-                    // Non-streaming mode: return the response text as-is
-                    // TTS XML processing only works in streaming mode
-                    Ok(AgentAction::Finish(response_text))
+                    // CRITICAL FIX: Handle empty responses appropriately in non-streaming mode
+                    // If the LLM returns no meaningful content, continue thinking instead of finishing
+                    let trimmed_text = response_text.trim();
+                    if trimmed_text.is_empty() {
+                        log::debug!("LLM returned empty response in non-streaming mode, continuing to think...");
+                        Ok(AgentAction::Think)
+                    } else {
+                        // Non-streaming mode: return the response text as-is
+                        // TTS XML processing only works in streaming mode
+                        Ok(AgentAction::Finish(response_text))
+                    }
                 }
                 other => Err(AgentError::LlmError(format!(
                     "Received unexpected stop reason: {}",
