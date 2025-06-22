@@ -42,90 +42,86 @@ export default function AdvancedSettings({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Advanced</h3>
-
-        {/* Developer Options */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Developer Options</CardTitle>
-            <CardDescription>
-              Advanced settings for developers and power users
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Debug Mode</div>
-                <div className="text-sm text-gray-500">
-                  Enable verbose logging and debug features
-                </div>
+      {/* Developer Options */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Developer Options</CardTitle>
+          <CardDescription>
+            Advanced settings for developers and power users
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <div className="font-medium">Debug Mode</div>
+              <div className="text-sm text-gray-500">
+                Enable verbose logging and debug features
               </div>
-              <Switch
-                checked={debugMode}
-                onCheckedChange={async (enabled) => {
-                  try {
-                    await invoke("set_debug_mode", { enabled });
-                    setDebugMode(enabled);
-                    toast.success(
-                      `Debug mode ${enabled ? "enabled" : "disabled"}`
-                    );
-                  } catch (error) {
-                    toast.error("Failed to toggle debug mode");
-                  }
-                }}
-              />
             </div>
-
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <div className="font-medium">Performance Monitoring</div>
-                <div className="text-sm text-gray-500">
-                  Monitor system resource usage
-                </div>
-              </div>
-              <Switch
-                checked={settings.performanceMonitoringEnabled}
-                onCheckedChange={settings.handlePerformanceMonitoringChange}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Reset Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Reset Settings</CardTitle>
-            <CardDescription>
-              Reset all settings to their default values
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button
-              variant="destructive"
-              onClick={async () => {
-                if (
-                  confirm(
-                    "Are you sure you want to reset all settings? This action cannot be undone."
-                  )
-                ) {
-                  try {
-                    await invoke("reset_all_settings");
-                    await settings.loadAllSettings();
-                    toast.success("All settings have been reset to defaults");
-                  } catch (error) {
-                    toast.error("Failed to reset settings");
-                  }
+            <Switch
+              checked={debugMode}
+              onCheckedChange={async (enabled) => {
+                try {
+                  await invoke("set_debug_mode", { enabled });
+                  setDebugMode(enabled);
+                  toast.success(
+                    `Debug mode ${enabled ? "enabled" : "disabled"}`
+                  );
+                } catch (error) {
+                  toast.error("Failed to toggle debug mode");
                 }
               }}
-              className="w-full"
-            >
-              <RotateCcw className="w-4 h-4 mr-2" />
-              Reset All Settings
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 border rounded-lg">
+            <div>
+              <div className="font-medium">Performance Monitoring</div>
+              <div className="text-sm text-gray-500">
+                Monitor system resource usage
+              </div>
+            </div>
+            <Switch
+              checked={settings.performanceMonitoringEnabled}
+              onCheckedChange={settings.handlePerformanceMonitoringChange}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Reset Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Reset Settings</CardTitle>
+          <CardDescription>
+            Reset all settings to their default values
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (
+                confirm(
+                  "Are you sure you want to reset all settings? This action cannot be undone."
+                )
+              ) {
+                try {
+                  await invoke("reset_all_settings");
+                  await settings.loadAllSettings();
+                  toast.success("All settings have been reset to defaults");
+                } catch (error) {
+                  toast.error("Failed to reset settings");
+                }
+              }
+            }}
+            className="w-full"
+          >
+            <RotateCcw className="w-4 h-4 mr-2" />
+            Reset All Settings
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }
