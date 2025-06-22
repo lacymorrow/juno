@@ -18,12 +18,12 @@
 //! Registration: Called via `register_basic_tools()` during agent initialization
 
 use crate::agent::implementations::tool_provider::LocalToolProvider;
+use crate::agent::structs::ToolDefinition;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use crate::agent::structs::ToolDefinition;
 
 /// Security configuration for basic tools - now with minimal restrictions
 #[derive(Clone)]
@@ -94,7 +94,9 @@ impl SecurityConfig {
             max_file_size: 100 * 1024 * 1024, // 100MB - generous limit
             blocked_extensions,
             blocked_commands,
-            command_timeout: Duration::from_secs(300), // 5 minutes
+            command_timeout: Duration::from_secs(
+                crate::constants::agent::config::DEFAULT_COMMAND_TIMEOUT_SECONDS,
+            ),
             debug_mode: cfg!(debug_assertions),
         }
     }
@@ -129,7 +131,7 @@ mod basic_tools_impl {
             return Err("Empty path not allowed".to_string());
         }
 
-		// TODO: Add more path traversal patterns to the blacklist
+        // TODO: Add more path traversal patterns to the blacklist
         // Only prevent the most dangerous path traversal patterns
         // if path_str.contains("../../../") || path_str == "../../../" {
         //     return Err("Excessive path traversal (../../../) not allowed".to_string());
@@ -141,8 +143,10 @@ mod basic_tools_impl {
         if let Some(extension) = path.extension() {
             let ext_str = extension.to_string_lossy().to_lowercase();
             if config.blocked_extensions.contains(&ext_str) && !config.debug_mode {
-                return Err(format!("File extension '{}' is blocked for security. Blocked extensions: {:?}",
-                    ext_str, config.blocked_extensions));
+                return Err(format!(
+                    "File extension '{}' is blocked for security. Blocked extensions: {:?}",
+                    ext_str, config.blocked_extensions
+                ));
             }
         }
 
@@ -161,8 +165,11 @@ mod basic_tools_impl {
                 .map_err(|e| format!("Failed to read file metadata: {}", e))?;
 
             if metadata.len() > config.max_file_size {
-                return Err(format!("File size ({} bytes) exceeds maximum allowed size ({} bytes)",
-                    metadata.len(), config.max_file_size));
+                return Err(format!(
+                    "File size ({} bytes) exceeds maximum allowed size ({} bytes)",
+                    metadata.len(),
+                    config.max_file_size
+                ));
             }
         }
 
@@ -182,20 +189,34 @@ mod basic_tools_impl {
         // Check against blacklist of truly destructive commands
         for blocked_cmd in &config.blocked_commands {
             if command_str.contains(blocked_cmd) {
-                return Err(format!("Command contains blocked pattern: '{}'", blocked_cmd));
+                return Err(format!(
+                    "Command contains blocked pattern: '{}'",
+                    blocked_cmd
+                ));
             }
         }
 
         // Only check for the most dangerous patterns
         let extremely_dangerous_patterns = [
-            "rm -rf /", "sudo rm -rf /", "chmod 777 /", "chown root /",
-            ":(){", ":(){ :|:& };:", "dd if=/dev/zero of=/dev/sda",
-            "mkfs.", "format c:", "> /etc/passwd", "> /etc/shadow",
+            "rm -rf /",
+            "sudo rm -rf /",
+            "chmod 777 /",
+            "chown root /",
+            ":(){",
+            ":(){ :|:& };:",
+            "dd if=/dev/zero of=/dev/sda",
+            "mkfs.",
+            "format c:",
+            "> /etc/passwd",
+            "> /etc/shadow",
         ];
 
         for pattern in &extremely_dangerous_patterns {
             if command_str.contains(pattern) && !config.debug_mode {
-                return Err(format!("Command contains extremely dangerous pattern: '{}'", pattern));
+                return Err(format!(
+                    "Command contains extremely dangerous pattern: '{}'",
+                    pattern
+                ));
             }
         }
 
@@ -284,7 +305,7 @@ mod basic_tools_impl {
                     "path": path_str,
                     "size": content.len()
                 }))
-            },
+            }
             Err(e) => {
                 log::error!("❌ Failed to read file {:?}: {}", validated_path, e);
                 Err(format!("Failed to read file '{}': {}", path_str, e))
@@ -376,18 +397,25 @@ mod basic_tools_impl {
             cmd.current_dir(current_dir);
         }
 
-        log::info!("⚡ Executing command via shell with timeout of {:?}", config.command_timeout);
+        log::info!(
+            "⚡ Executing command via shell with timeout of {:?}",
+            config.command_timeout
+        );
 
         // Execute with timeout (simplified approach - in production, use tokio::time::timeout)
-        let output = cmd.output()
+        let output = cmd
+            .output()
             .map_err(|e| format!("Failed to spawn shell process for '{}': {}", command_str, e))?;
 
         let execution_time = start_time.elapsed();
 
         // Check if execution exceeded timeout (post-execution check)
         if execution_time > config.command_timeout {
-            log::warn!("⚠️ Command execution time ({:?}) exceeded timeout ({:?})",
-                execution_time, config.command_timeout);
+            log::warn!(
+                "⚠️ Command execution time ({:?}) exceeded timeout ({:?})",
+                execution_time,
+                config.command_timeout
+            );
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -440,7 +468,14 @@ mod basic_tools_impl {
 /// ✅ Audit logging for monitoring
 pub async fn register_basic_tools(provider: &mut LocalToolProvider) {
     log::info!("🔓 Initializing basic tools with balanced security (maximum freedom)");
-    log::info!("🛡️ Security mode: {}", if cfg!(debug_assertions) { "Development (minimal restrictions)" } else { "Balanced (blacklist approach)" });
+    log::info!(
+        "🛡️ Security mode: {}",
+        if cfg!(debug_assertions) {
+            "Development (minimal restrictions)"
+        } else {
+            "Balanced (blacklist approach)"
+        }
+    );
 
     // read_file with minimal restrictions
     let read_def = basic_tools_impl::read_file_definition();
@@ -456,7 +491,9 @@ pub async fn register_basic_tools(provider: &mut LocalToolProvider) {
         let result = basic_tools_impl::run_terminal_command_exec(input);
         async move { result }
     };
-    provider.register_async_tool(run_cmd_def, run_cmd_exec).await;
+    provider
+        .register_async_tool(run_cmd_def, run_cmd_exec)
+        .await;
 
     log::info!("✅ Registered permissive basic tools: read_file (minimal restrictions), run_terminal_command (blacklist approach)");
     log::info!("🚀 AI now has maximum freedom with minimal security constraints");

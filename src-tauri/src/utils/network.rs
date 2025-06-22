@@ -1,8 +1,8 @@
-/// TODO: ELIMINATE STRING MATCHING
-use std::time::Duration;
-use tracing::{info, warn, debug};
 use std::future::Future;
 use std::pin::Pin;
+/// TODO: ELIMINATE STRING MATCHING
+use std::time::Duration;
+use tracing::{debug, info, warn};
 
 /// Check if the device has internet connectivity
 /// Returns true if online, false if offline
@@ -33,12 +33,14 @@ pub async fn is_online() -> bool {
 async fn check_dns_resolution() -> bool {
     match tokio::time::timeout(
         Duration::from_secs(2),
-        tokio::net::lookup_host("1.1.1.1:53")
-    ).await {
+        tokio::net::lookup_host("1.1.1.1:53"),
+    )
+    .await
+    {
         Ok(Ok(_)) => {
             debug!("DNS connectivity check: SUCCESS");
             true
-        },
+        }
         _ => {
             debug!("DNS connectivity check: FAILED");
             false
@@ -50,12 +52,14 @@ async fn check_dns_resolution() -> bool {
 async fn check_http_connectivity() -> bool {
     match tokio::time::timeout(
         Duration::from_secs(3),
-        reqwest::get("https://httpbin.org/status/200")
-    ).await {
+        reqwest::get("https://httpbin.org/status/200"),
+    )
+    .await
+    {
         Ok(Ok(response)) if response.status().is_success() => {
             debug!("HTTP connectivity check: SUCCESS");
             true
-        },
+        }
         _ => {
             debug!("HTTP connectivity check: FAILED");
             false
@@ -69,12 +73,14 @@ async fn check_cloud_api_connectivity() -> bool {
     let client = reqwest::Client::new();
     match tokio::time::timeout(
         Duration::from_secs(3),
-        client.head("https://api.anthropic.com/").send()
-    ).await {
+        client.head("https://api.anthropic.com/").send(),
+    )
+    .await
+    {
         Ok(Ok(_)) => {
             debug!("Cloud API connectivity check: SUCCESS");
             true
-        },
+        }
         _ => {
             debug!("Cloud API connectivity check: FAILED");
             false
@@ -91,15 +97,15 @@ pub fn get_offline_message() -> String {
 pub fn is_network_error(error_msg: &str) -> bool {
     let error_lower = error_msg.to_lowercase();
 
-    error_lower.contains("network") ||
-    error_lower.contains("connection") ||
-    error_lower.contains("timeout") ||
-    error_lower.contains("unreachable") ||
-    error_lower.contains("dns") ||
-    error_lower.contains("http request failed") ||
-    error_lower.contains("error sending request") ||
-    error_lower.contains("no route to host") ||
-    error_lower.contains("connection refused") ||
-    error_lower.contains("connection reset") ||
-    error_lower.contains("temporary failure in name resolution")
+    error_lower.contains("network")
+        || error_lower.contains("connection")
+        || error_lower.contains(crate::constants::error_messages::patterns::TIMEOUT)
+        || error_lower.contains("unreachable")
+        || error_lower.contains("dns")
+        || error_lower.contains("http request failed")
+        || error_lower.contains("error sending request")
+        || error_lower.contains("no route to host")
+        || error_lower.contains(crate::constants::error_messages::patterns::CONNECTION_REFUSED)
+        || error_lower.contains("connection reset")
+        || error_lower.contains("temporary failure in name resolution")
 }

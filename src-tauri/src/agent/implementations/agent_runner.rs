@@ -222,7 +222,9 @@ where
                     Ok(Some(response)) => {
                         if response.approved {
                             // User approved continuation - extend max_steps
-                            let additional_steps = response.additional_steps.unwrap_or(20); // Default 20 more steps
+                            let additional_steps = response.additional_steps.unwrap_or(
+                                crate::constants::agent::config::DEFAULT_CONTINUATION_ADDITIONAL_STEPS
+                            );
                             self.max_steps += additional_steps;
                             log::info!(
                                 "User approved continuation. Extended max steps to {} (+{} steps)",
