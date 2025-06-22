@@ -102,6 +102,7 @@ pub(crate) fn run_check_accessibility() -> Result<(), String> {
 pub mod log_formatter;
 
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 /// Get current timestamp in milliseconds
 pub fn current_timestamp_ms() -> u64 {
@@ -109,6 +110,39 @@ pub fn current_timestamp_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+/// Get the preferred directory for agent-created files
+///
+/// Returns ~/Juno/ as the preferred location for files created autonomously by the agent.
+/// This keeps agent work organized and isolated from user files.
+///
+/// The directory is created if it doesn't exist.
+pub fn get_agent_preferred_directory() -> Result<PathBuf, String> {
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "Could not determine home directory".to_string())?;
+
+    let juno_dir = home_dir.join("Juno");
+
+    // Create the directory if it doesn't exist
+    if !juno_dir.exists() {
+        std::fs::create_dir_all(&juno_dir)
+            .map_err(|e| format!("Failed to create Juno directory: {}", e))?;
+    }
+
+    Ok(juno_dir)
+}
+
+/// Get a file path in the agent's preferred directory
+///
+/// # Arguments
+/// * `filename` - The filename to create in the Juno directory
+///
+/// # Returns
+/// Full path to the file in ~/Juno/filename
+pub fn get_agent_preferred_file_path(filename: &str) -> Result<PathBuf, String> {
+    let juno_dir = get_agent_preferred_directory()?;
+    Ok(juno_dir.join(filename))
 }
 
 /// Get current timestamp in seconds
