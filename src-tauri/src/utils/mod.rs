@@ -380,6 +380,11 @@ pub struct SystemContext {
     pub running_applications: Vec<RunningApplicationInfo>,
     pub installed_applications: Vec<InstalledApplicationInfo>,
     pub user_preferences: UserPreferences,
+    // Enhanced context sources
+    pub clipboard_content: Option<String>,
+    pub selected_text: Option<String>,
+    pub hardware_info: Option<HardwareInfo>,
+    pub voice_audio_state: Option<VoiceAudioState>,
 }
 
 /// Information about the currently focused window
@@ -436,6 +441,28 @@ pub struct PreferredApp {
     pub confidence: f32, // 0.0 to 1.0 based on usage patterns
 }
 
+/// Hardware monitoring information
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HardwareInfo {
+    pub cpu_usage: Option<f32>,
+    pub memory_usage: Option<f32>,
+    pub disk_usage: Option<f32>,
+    pub screen_resolution: Option<String>,
+}
+
+/// Voice and audio state information
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VoiceAudioState {
+    pub mode: String, // "dictation", "agent", "idle"
+    pub is_listening: bool,
+    pub is_transcribing: bool,
+    pub is_speaking: bool,
+    pub current_transcription: Option<String>,
+    pub audio_level: f32,
+    pub has_error: bool,
+    pub error_message: Option<String>,
+}
+
 /// Gather comprehensive system context for agent initialization
 pub async fn gather_system_context(app_state: Option<&crate::state::AppState>) -> Result<SystemContext, String> {
     // Get current time
@@ -461,6 +488,12 @@ pub async fn gather_system_context(app_state: Option<&crate::state::AppState>) -
     // Get user preferences based on application usage patterns
     let user_preferences = get_user_preferences(&running_applications, &installed_applications).await;
 
+    // Enhanced context gathering
+    let clipboard_content = get_clipboard_content_safe(app_state).await;
+    let selected_text = get_selected_text_safe(app_state).await;
+    let hardware_info = get_hardware_info_safe().await;
+    let voice_audio_state = get_voice_audio_state_safe(app_state).await;
+
     Ok(SystemContext {
         current_time,
         current_timestamp,
@@ -473,6 +506,10 @@ pub async fn gather_system_context(app_state: Option<&crate::state::AppState>) -
         running_applications,
         installed_applications,
         user_preferences,
+        clipboard_content,
+        selected_text,
+        hardware_info,
+        voice_audio_state,
     })
 }
 
@@ -945,6 +982,294 @@ async fn get_user_preferences(
     }
 }
 
+/// Safely get clipboard content for context (with length limits)
+async fn get_clipboard_content_safe(app_state: Option<&crate::state::AppState>) -> Option<String> {
+    if let Some(state) = app_state {
+        match state.desktop.get_clipboard_content() {
+            Ok(content) => {
+                // Limit clipboard content length to avoid overwhelming context
+                const MAX_CLIPBOARD_LENGTH: usize = 500;
+                if content.len() > MAX_CLIPBOARD_LENGTH {
+                    Some(format!("{}... (truncated from {} chars)",
+                        &content[..MAX_CLIPBOARD_LENGTH], content.len()))
+                } else if content.trim().is_empty() {
+                    Some("[Empty clipboard]".to_string())
+                } else {
+                    Some(content)
+                }
+            }
+            Err(e) => {
+                log::debug!("Could not get clipboard content: {}", e);
+                None
+            }
+        }
+    } else {
+        log::debug!("No app state available for clipboard access");
+        None
+    }
+}
+
+/// Safely get selected text for context (with length limits)
+async fn get_selected_text_safe(app_state: Option<&crate::state::AppState>) -> Option<String> {
+    if let Some(state) = app_state {
+        // Use the same pattern as dev_get_selected_text command
+        match state.desktop.get_desktop() {
+            Ok(desktop) => {
+                match desktop.get_selected_text() {
+                    Ok(text) => {
+                        const MAX_SELECTED_TEXT_LENGTH: usize = 300;
+                        if text.trim().is_empty() {
+                            Some("[No text selected]".to_string())
+                        } else if text.len() > MAX_SELECTED_TEXT_LENGTH {
+                            Some(format!("{}... (truncated from {} chars)",
+                                &text[..MAX_SELECTED_TEXT_LENGTH], text.len()))
+                        } else {
+                            Some(text)
+                        }
+                    }
+                    Err(e) => {
+                        log::debug!("Could not get selected text: {}", e);
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log::debug!("Desktop not available for selected text access: {}", e);
+                None
+            }
+        }
+    } else {
+        log::debug!("No app state available for selected text access");
+        None
+    }
+}
+
+/// Safely get hardware information for context
+async fn get_hardware_info_safe() -> Option<HardwareInfo> {
+    // Implement hardware monitoring directly here to avoid circular dependencies
+    let (cpu_usage, memory_usage, disk_usage) = tokio::join!(
+        get_cpu_usage_direct(),
+        get_memory_usage_direct(),
+        get_disk_usage_direct()
+    );
+
+    // Only include if we have at least some hardware info
+    if cpu_usage.is_some() || memory_usage.is_some() || disk_usage.is_some() {
+        Some(HardwareInfo {
+            cpu_usage,
+            memory_usage,
+            disk_usage,
+            screen_resolution: None, // Screen resolution already available in SystemInfo
+        })
+    } else {
+        log::debug!("No hardware information available");
+        None
+    }
+}
+
+/// Get CPU usage directly (simplified version)
+async fn get_cpu_usage_direct() -> Option<f32> {
+    #[cfg(target_os = "macos")]
+    {
+        use tokio::process::Command;
+
+        match Command::new("top")
+            .args(&["-l", "1", "-n", "0"])
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                parse_cpu_usage_direct(&output_str)
+            }
+            Err(e) => {
+                log::debug!("Failed to get CPU usage: {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// Parse CPU usage from top command output
+fn parse_cpu_usage_direct(output: &str) -> Option<f32> {
+    for line in output.lines() {
+        if line.contains("CPU usage:") {
+            // Parse line like "CPU usage: 15.2% user, 8.1% sys, 76.7% idle"
+            if let Some(user_part) = line.split("CPU usage:").nth(1) {
+                if let Some(user_str) = user_part.split('%').next() {
+                    if let Ok(user_cpu) = user_str.trim().parse::<f32>() {
+                        return Some(user_cpu);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Get memory usage directly (simplified version)
+async fn get_memory_usage_direct() -> Option<f32> {
+    #[cfg(target_os = "macos")]
+    {
+        use tokio::process::Command;
+
+        match Command::new("vm_stat").output().await {
+            Ok(output) => {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                parse_memory_usage_direct(&output_str)
+            }
+            Err(e) => {
+                log::debug!("Failed to get memory usage: {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// Parse memory usage from vm_stat output
+fn parse_memory_usage_direct(output: &str) -> Option<f32> {
+    let mut free_pages = 0u64;
+    let mut inactive_pages = 0u64;
+    let mut active_pages = 0u64;
+    let mut wired_pages = 0u64;
+
+    for line in output.lines() {
+        if line.contains("Pages free:") {
+            if let Some(num_str) = line.split(':').nth(1) {
+                if let Ok(num) = num_str.trim().replace('.', "").parse::<u64>() {
+                    free_pages = num;
+                }
+            }
+        } else if line.contains("Pages active:") {
+            if let Some(num_str) = line.split(':').nth(1) {
+                if let Ok(num) = num_str.trim().replace('.', "").parse::<u64>() {
+                    active_pages = num;
+                }
+            }
+        } else if line.contains("Pages inactive:") {
+            if let Some(num_str) = line.split(':').nth(1) {
+                if let Ok(num) = num_str.trim().replace('.', "").parse::<u64>() {
+                    inactive_pages = num;
+                }
+            }
+        } else if line.contains("Pages wired down:") {
+            if let Some(num_str) = line.split(':').nth(1) {
+                if let Ok(num) = num_str.trim().replace('.', "").parse::<u64>() {
+                    wired_pages = num;
+                }
+            }
+        }
+    }
+
+    let total_pages = free_pages + inactive_pages + active_pages + wired_pages;
+    let used_pages = active_pages + wired_pages;
+
+    if total_pages > 0 {
+        Some((used_pages as f32 / total_pages as f32) * 100.0)
+    } else {
+        None
+    }
+}
+
+/// Get disk usage directly (simplified version)
+async fn get_disk_usage_direct() -> Option<f32> {
+    #[cfg(target_os = "macos")]
+    {
+        use tokio::process::Command;
+
+        match Command::new("df")
+            .args(&["-h", "/"])
+            .output()
+            .await
+        {
+            Ok(output) => {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                parse_disk_usage_direct(&output_str)
+            }
+            Err(e) => {
+                log::debug!("Failed to get disk usage: {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// Parse disk usage from df output
+fn parse_disk_usage_direct(output: &str) -> Option<f32> {
+    for line in output.lines().skip(1) { // Skip header
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 5 {
+            // Extract percentage from format like "85%"
+            let usage_str = parts[4];
+            if let Some(percent_str) = usage_str.strip_suffix('%') {
+                if let Ok(usage) = percent_str.parse::<f32>() {
+                    return Some(usage);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Safely get voice/audio state for context
+async fn get_voice_audio_state_safe(app_state: Option<&crate::state::AppState>) -> Option<VoiceAudioState> {
+    if let Some(state) = app_state {
+        // Get voice controller state if available
+        let is_dictation_active = if let Ok(dictation_guard) = state.dictation_active.lock() {
+            *dictation_guard
+        } else {
+            false
+        };
+        let is_agent_executing = state.is_agent_executing();
+
+        // Determine mode based on app state
+        let mode = if is_agent_executing {
+            "agent".to_string()
+        } else if is_dictation_active {
+            "dictation".to_string()
+        } else {
+            "idle".to_string()
+        };
+
+        // Get TTS state if available
+        let is_speaking = if let Ok(tts_provider) = state.tts_provider.lock() {
+            // Check if TTS is currently active (this is a simplified check)
+            false // TODO: Implement actual TTS state checking
+        } else {
+            false
+        };
+
+        Some(VoiceAudioState {
+            mode,
+            is_listening: is_dictation_active,
+            is_transcribing: false, // TODO: Get actual transcription state
+            is_speaking,
+            current_transcription: None, // TODO: Get current transcription if available
+            audio_level: 0.0, // TODO: Get actual audio level
+            has_error: false, // TODO: Check for voice errors
+            error_message: None,
+        })
+    } else {
+        log::debug!("No app state available for voice/audio state");
+        None
+    }
+}
+
 /// Format system context as a user-friendly string for agent prompts
 pub fn format_system_context_for_agent(context: &SystemContext) -> String {
     let mut context_parts = vec![
@@ -1051,6 +1376,92 @@ pub fn format_system_context_for_agent(context: &SystemContext) -> String {
 
         if !editors.is_empty() {
             context_parts.push(format!("Available editors: {}", editors.join(", ")));
+        }
+    }
+
+    // Enhanced context sections
+
+    // Add clipboard content
+    if let Some(clipboard) = &context.clipboard_content {
+        context_parts.push("\n--- Clipboard Content ---".to_string());
+        context_parts.push(format!("Current clipboard: {}", clipboard));
+    }
+
+    // Add selected text
+    if let Some(selected) = &context.selected_text {
+        context_parts.push("\n--- Selected Text ---".to_string());
+        context_parts.push(format!("Currently selected: {}", selected));
+    }
+
+    // Add hardware information
+    if let Some(hardware) = &context.hardware_info {
+        context_parts.push("\n--- System Performance ---".to_string());
+
+        if let Some(cpu) = hardware.cpu_usage {
+            context_parts.push(format!("CPU usage: {:.1}%", cpu));
+        }
+
+        if let Some(memory) = hardware.memory_usage {
+            context_parts.push(format!("Memory usage: {:.1}%", memory));
+        }
+
+        if let Some(disk) = hardware.disk_usage {
+            context_parts.push(format!("Disk usage: {:.1}%", disk));
+        }
+
+        // Add performance context
+        let mut performance_notes = Vec::new();
+        if let Some(cpu) = hardware.cpu_usage {
+            if cpu > 80.0 {
+                performance_notes.push("High CPU usage detected");
+            }
+        }
+        if let Some(memory) = hardware.memory_usage {
+            if memory > 85.0 {
+                performance_notes.push("High memory usage detected");
+            }
+        }
+        if let Some(disk) = hardware.disk_usage {
+            if disk > 90.0 {
+                performance_notes.push("Low disk space available");
+            }
+        }
+
+        if !performance_notes.is_empty() {
+            context_parts.push(format!("Performance alerts: {}", performance_notes.join(", ")));
+        }
+    }
+
+    // Add voice/audio state
+    if let Some(voice) = &context.voice_audio_state {
+        context_parts.push("\n--- Voice/Audio State ---".to_string());
+        context_parts.push(format!("Voice mode: {}", voice.mode));
+
+        let mut voice_status = Vec::new();
+        if voice.is_listening {
+            voice_status.push("listening");
+        }
+        if voice.is_transcribing {
+            voice_status.push("transcribing");
+        }
+        if voice.is_speaking {
+            voice_status.push("speaking");
+        }
+
+        if !voice_status.is_empty() {
+            context_parts.push(format!("Voice status: {}", voice_status.join(", ")));
+        }
+
+        if let Some(transcription) = &voice.current_transcription {
+            context_parts.push(format!("Current transcription: {}", transcription));
+        }
+
+        if voice.has_error {
+            if let Some(error) = &voice.error_message {
+                context_parts.push(format!("Voice error: {}", error));
+            } else {
+                context_parts.push("Voice system has an error".to_string());
+            }
         }
     }
 
