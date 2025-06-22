@@ -1101,20 +1101,26 @@ async fn execute_specialized_agent_task(
                     "Specialist {} agent returned JSX content, preserving for rendering",
                     agent_type
                 );
+                // Log communication handling for debugging
+                info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
                 Ok(serde_json::json!({
                     "success": true,
                     "agent_type": agent_type,
                     "result": result,
                     "is_jsx": true,
+                    "user_communication_handled": true, // Signal that specialist handled user communication
                     "message": format!("{} agent completed the task successfully with visual components", agent_type)
                 }))
             } else {
                 // Standard non-JSX response
+                // Log communication handling for debugging
+                info!("Specialist {} agent handled user communication - orchestrator should remain silent for TTS", agent_type);
                 Ok(serde_json::json!({
                     "success": true,
                     "agent_type": agent_type,
                     "result": result,
                     "is_jsx": false,
+                    "user_communication_handled": true, // Signal that specialist handled user communication
                     "message": format!("{} agent completed the task successfully", agent_type)
                 }))
             }
