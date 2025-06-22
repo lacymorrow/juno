@@ -12,18 +12,16 @@ use crate::platforms::AccessibilityEngine;
 use crate::{AutomationError, Selector, UIElement};
 use accessibility::{AXAttribute, AXUIElementAttributes, Error as AXError};
 use accessibility_sys::{
-    kAXErrorNoValue, kAXFocusedUIElementAttribute, kAXFrontmostAttribute, AXUIElementGetTypeID,
-    AXUIElementRef,
+    kAXErrorNoValue, kAXFrontmostAttribute,
 };
 use anyhow::Result;
-use core_foundation::base::{CFGetTypeID, CFType, CFTypeID, TCFType};
+use core_foundation::base::{CFType, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use libc;
 use std::collections::BTreeMap;
 use tracing::{debug, trace, warn};
 // Re-add interaction module for non-mouse actions
@@ -267,6 +265,178 @@ impl MacOSEngine {
             "attributes": attributes,
             "children": children_json
         }))
+    }
+
+    /// Safer implementation using NSWorkspace to get focused element
+    fn get_focused_element_via_nsworkspace(&self) -> Result<UIElement, AutomationError> {
+        unsafe {
+            use objc::{class, msg_send, sel, sel_impl};
+
+            // Get NSWorkspace shared instance with null check
+            let workspace_class = class!(NSWorkspace);
+            let shared_workspace: *mut objc::runtime::Object =
+                msg_send![workspace_class, sharedWorkspace];
+            if shared_workspace.is_null() {
+                return Err(AutomationError::PlatformError(
+                    "Failed to get shared NSWorkspace instance".to_string(),
+                ));
+            }
+
+            // Get the frontmost application with null check
+            let frontmost_app: *mut objc::runtime::Object =
+                msg_send![shared_workspace, frontmostApplication];
+            if frontmost_app.is_null() {
+                return Err(AutomationError::NoFocusedElement(
+                    "NSWorkspace reported no frontmost application".to_string(),
+                ));
+            }
+
+            // Get the PID of the frontmost application
+            let pid: i32 = msg_send![frontmost_app, processIdentifier];
+            if pid <= 0 {
+                return Err(AutomationError::PlatformError(format!(
+                    "Invalid PID for frontmost application: {}",
+                    pid
+                )));
+            }
+            debug!("Frontmost application PID: {}", pid);
+
+            // Create AXUIElement for the application with error handling
+            let app_element = accessibility::AXUIElement::application(pid);
+
+            // Try to get focused UI element from the application
+            let focused_element_attr_name = CFString::new("AXFocusedUIElement");
+            let focused_element_attr = AXAttribute::new(&focused_element_attr_name);
+
+            match app_element.attribute(&focused_element_attr) {
+                Ok(focused_element_cf) => {
+                    if let Some(focused_element) =
+                        focused_element_cf.downcast::<accessibility::AXUIElement>()
+                    {
+                        debug!("Successfully found focused element via NSWorkspace");
+                        Ok(self.wrap_element(
+                            ThreadSafeAXUIElement::new(focused_element),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ))
+                    } else {
+                        debug!("AXFocusedUIElement was not an AXUIElement, returning app element");
+                        Ok(self.wrap_element(
+                            ThreadSafeAXUIElement::new(app_element),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ))
+                    }
+                }
+                Err(e) => {
+                    // Check if error is kAXErrorNoValue (-25212) which is normal
+                    if let AXError::Ax(err_num) = e {
+                        if err_num == kAXErrorNoValue {
+                            debug!("No specific focused element, returning app element");
+                            return Ok(self.wrap_element(
+                                ThreadSafeAXUIElement::new(app_element),
+                                None,
+                                None,
+                                None,
+                                None,
+                            ));
+                        }
+                    }
+                    Err(AutomationError::PlatformError(format!(
+                        "Failed to get focused UI element for PID {}: {:?}",
+                        pid, e
+                    )))
+                }
+            }
+        }
+    }
+
+    /// Safer system-wide focused element implementation with bounds checking
+    fn get_system_focused_element_safe(&self) -> Result<UIElement, AutomationError> {
+        debug!("Attempting system-wide focused element lookup");
+
+        // Get system-wide focused element attribute
+        let focused_attr_name = CFString::new("AXFocusedUIElement");
+        let focused_attr = AXAttribute::new(&focused_attr_name);
+
+        match self.system_wide.0.attribute(&focused_attr) {
+            Ok(focused_cf) => {
+                if let Some(focused_element) = focused_cf.downcast::<accessibility::AXUIElement>() {
+                    debug!("Found system-wide focused element");
+                    Ok(self.wrap_element(
+                        ThreadSafeAXUIElement::new(focused_element),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ))
+                } else {
+                    Err(AutomationError::PlatformError(
+                        "System-wide focused element was not an AXUIElement".to_string(),
+                    ))
+                }
+            }
+            Err(e) => {
+                debug!("System-wide focused element lookup failed: {:?}", e);
+                Err(AutomationError::NoFocusedElement(format!(
+                    "No system-wide focused element: {:?}",
+                    e
+                )))
+            }
+        }
+    }
+
+    /// Final fallback: get frontmost application as focused element
+    fn get_frontmost_application_as_fallback(&self) -> Result<UIElement, AutomationError> {
+        debug!("Using frontmost application as final fallback");
+
+        let pids = get_running_application_pids(true)?;
+        let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
+        let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
+
+        for pid in pids {
+            let app_element = accessibility::AXUIElement::application(pid);
+
+            // Check if this app is frontmost (with error handling)
+            match app_element.attribute(&frontmost_attr) {
+                Ok(frontmost_val) => {
+                    if let Some(is_frontmost) = frontmost_val.downcast_into::<CFBoolean>() {
+                        if is_frontmost == CFBoolean::true_value() {
+                            debug!("Found frontmost application with PID: {}", pid);
+                            return Ok(self.wrap_element(
+                                ThreadSafeAXUIElement::new(app_element),
+                                Some("AXApplication".to_string()),
+                                None,
+                                None,
+                                None,
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    trace!(
+                        "Error checking frontmost attribute for PID {}: {:?}",
+                        pid,
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+
+        // Absolute final fallback: return system-wide element
+        warn!("No frontmost application found, returning system-wide element");
+        Ok(self.wrap_element(
+            self.system_wide.clone(),
+            Some("AXSystemWide".to_string()),
+            Some("System".to_string()),
+            None,
+            None,
+        ))
     }
 }
 
@@ -534,176 +704,7 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     /// Safer implementation using NSWorkspace to get focused element
-    fn get_focused_element_via_nsworkspace(&self) -> Result<UIElement, AutomationError> {
-        unsafe {
-            use objc::{class, msg_send, sel, sel_impl};
 
-            // Get NSWorkspace shared instance with null check
-            let workspace_class = class!(NSWorkspace);
-            let shared_workspace: *mut objc::runtime::Object =
-                msg_send![workspace_class, sharedWorkspace];
-            if shared_workspace.is_null() {
-                return Err(AutomationError::PlatformError(
-                    "Failed to get shared NSWorkspace instance".to_string(),
-                ));
-            }
-
-            // Get the frontmost application with null check
-            let frontmost_app: *mut objc::runtime::Object =
-                msg_send![shared_workspace, frontmostApplication];
-            if frontmost_app.is_null() {
-                return Err(AutomationError::NoFocusedElement(
-                    "NSWorkspace reported no frontmost application".to_string(),
-                ));
-            }
-
-            // Get the PID of the frontmost application
-            let pid: i32 = msg_send![frontmost_app, processIdentifier];
-            if pid <= 0 {
-                return Err(AutomationError::PlatformError(format!(
-                    "Invalid PID for frontmost application: {}",
-                    pid
-                )));
-            }
-            debug!("Frontmost application PID: {}", pid);
-
-            // Create AXUIElement for the application with error handling
-            let app_element = accessibility::AXUIElement::application(pid);
-
-            // Try to get focused UI element from the application
-            let focused_element_attr_name = CFString::new("AXFocusedUIElement");
-            let focused_element_attr = AXAttribute::new(&focused_element_attr_name);
-
-            match app_element.attribute(&focused_element_attr) {
-                Ok(focused_element_cf) => {
-                    if let Some(focused_element) =
-                        focused_element_cf.downcast::<accessibility::AXUIElement>()
-                    {
-                        debug!("Successfully found focused element via NSWorkspace");
-                        Ok(self.wrap_element(
-                            ThreadSafeAXUIElement::new(focused_element),
-                            None,
-                            None,
-                            None,
-                            None,
-                        ))
-                    } else {
-                        debug!("AXFocusedUIElement was not an AXUIElement, returning app element");
-                        Ok(self.wrap_element(
-                            ThreadSafeAXUIElement::new(app_element),
-                            None,
-                            None,
-                            None,
-                            None,
-                        ))
-                    }
-                }
-                Err(e) => {
-                    // Check if error is kAXErrorNoValue (-25212) which is normal
-                    if let AXError::Ax(err_num) = e {
-                        if err_num == kAXErrorNoValue {
-                            debug!("No specific focused element, returning app element");
-                            return Ok(self.wrap_element(
-                                ThreadSafeAXUIElement::new(app_element),
-                                None,
-                                None,
-                                None,
-                                None,
-                            ));
-                        }
-                    }
-                    Err(AutomationError::PlatformError(format!(
-                        "Failed to get focused UI element for PID {}: {:?}",
-                        pid, e
-                    )))
-                }
-            }
-        }
-    }
-
-    /// Safer system-wide focused element implementation with bounds checking
-    fn get_system_focused_element_safe(&self) -> Result<UIElement, AutomationError> {
-        debug!("Attempting system-wide focused element lookup");
-
-        // Get system-wide focused element attribute
-        let focused_attr_name = CFString::new("AXFocusedUIElement");
-        let focused_attr = AXAttribute::new(&focused_attr_name);
-
-        match self.system_wide.0.attribute(&focused_attr) {
-            Ok(focused_cf) => {
-                if let Some(focused_element) = focused_cf.downcast::<accessibility::AXUIElement>() {
-                    debug!("Found system-wide focused element");
-                    Ok(self.wrap_element(
-                        ThreadSafeAXUIElement::new(focused_element),
-                        None,
-                        None,
-                        None,
-                        None,
-                    ))
-                } else {
-                    Err(AutomationError::PlatformError(
-                        "System-wide focused element was not an AXUIElement".to_string(),
-                    ))
-                }
-            }
-            Err(e) => {
-                debug!("System-wide focused element lookup failed: {:?}", e);
-                Err(AutomationError::NoFocusedElement(format!(
-                    "No system-wide focused element: {:?}",
-                    e
-                )))
-            }
-        }
-    }
-
-    /// Final fallback: get frontmost application as focused element
-    fn get_frontmost_application_as_fallback(&self) -> Result<UIElement, AutomationError> {
-        debug!("Using frontmost application as final fallback");
-
-        let pids = get_running_application_pids(true)?;
-        let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
-        let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
-
-        for pid in pids {
-            let app_element = accessibility::AXUIElement::application(pid);
-
-            // Check if this app is frontmost (with error handling)
-            match app_element.attribute(&frontmost_attr) {
-                Ok(frontmost_val) => {
-                    if let Some(is_frontmost) = frontmost_val.downcast_into::<CFBoolean>() {
-                        if is_frontmost == CFBoolean::true_value() {
-                            debug!("Found frontmost application with PID: {}", pid);
-                            return Ok(self.wrap_element(
-                                ThreadSafeAXUIElement::new(app_element),
-                                Some("AXApplication".to_string()),
-                                None,
-                                None,
-                                None,
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    trace!(
-                        "Error checking frontmost attribute for PID {}: {:?}",
-                        pid,
-                        e
-                    );
-                    continue;
-                }
-            }
-        }
-
-        // Absolute final fallback: return system-wide element
-        warn!("No frontmost application found, returning system-wide element");
-        Ok(self.wrap_element(
-            self.system_wide.clone(),
-            Some("AXSystemWide".to_string()),
-            Some("System".to_string()),
-            None,
-            None,
-        ))
-    }
 
     fn get_application_by_name(&self, name: &str) -> Result<UIElement, AutomationError> {
         // Refresh the accessibility tree before searching

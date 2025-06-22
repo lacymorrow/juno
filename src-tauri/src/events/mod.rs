@@ -6,6 +6,7 @@
 
 pub mod handlers;
 pub mod shortcuts;
+pub mod timer_handlers;
 
 // Re-export key functionality
 pub use handlers::*;
