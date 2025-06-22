@@ -422,6 +422,7 @@ pub fn run() {
         .manage(app_state) // Manage the AppState
         .manage(crate::commands::collaborative_ai_commands::initialize_collaborative_ai_state()) // Manage the Collaborative AI state
         .manage(initialize_visual_reasoning_state()) // Manage the Enhanced Visual Reasoning state
+        .manage(commands::self_improvement::initialize_self_improvement_state()) // Manage the Self-Improvement state (development mode only)
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
             list_apps,
@@ -798,6 +799,20 @@ pub fn run() {
             validate_visual_analysis_request,
             get_scene_types,
             test_visual_reasoning_engine,
+
+            // Self-Improvement Commands (Development Mode Only)
+            commands::self_improvement::initialize_self_improvement,
+            commands::self_improvement::start_improvement_cycle,
+            commands::self_improvement::get_self_improvement_status,
+            commands::self_improvement::analyze_system_performance,
+            commands::self_improvement::get_improvement_archive,
+            commands::self_improvement::get_iteration_details,
+            commands::self_improvement::update_self_improvement_config,
+            commands::self_improvement::emergency_stop_improvement,
+            commands::self_improvement::generate_improvement_proposal,
+            commands::self_improvement::run_performance_benchmarks,
+            commands::self_improvement::get_system_health_metrics,
+            commands::self_improvement::get_available_benchmarks,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
