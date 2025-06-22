@@ -1488,26 +1488,27 @@ impl SafetyValidator {
             )));
         }
 
-        // Check protected files
+        // Check protected files using proper regex matching
         for pattern in &self.constraints.protected_files {
             let regex = match Regex::new(pattern) {
                 Ok(r) => r,
-                Err(_) => {
-                    // Fallback to simple string matching if regex is invalid
-                    if improvement.file_path.contains(pattern) {
-                        return Err(AgentError::InputError(format!(
-                            "Attempted to modify protected file: {}",
-                            improvement.file_path
-                        )));
-                    }
-                    continue;
+                Err(e) => {
+                    // Log the invalid regex pattern and return error
+                    warn!(
+                        "Invalid regex pattern in protected_files: '{}' - {}",
+                        pattern, e
+                    );
+                    return Err(AgentError::ConfigurationError(format!(
+                        "Invalid regex pattern in protected files: '{}' - {}",
+                        pattern, e
+                    )));
                 }
             };
 
             if regex.is_match(&improvement.file_path) {
                 return Err(AgentError::InputError(format!(
-                    "Attempted to modify protected file: {}",
-                    improvement.file_path
+                    "Attempted to modify protected file: {} (matched pattern: {})",
+                    improvement.file_path, pattern
                 )));
             }
         }
@@ -1529,24 +1530,6 @@ impl PerformanceMetricsCollector {
             config: config.clone(),
         })
     }
-}
-
-/// Register self-improvement tools with the tool provider
-pub fn register_self_improvement_tools() -> Result<Vec<String>, AgentError> {
-    // CRITICAL: Only allow in development mode
-    if !cfg!(debug_assertions) {
-        return Ok(Vec::new());
-    }
-
-    info!("🔧 Registering self-improvement tools (Development Mode Only)");
-
-    // Return list of registered tool names
-    Ok(vec![
-        "self_improvement_analyze".to_string(),
-        "self_improvement_generate".to_string(),
-        "self_improvement_validate".to_string(),
-        "self_improvement_benchmark".to_string(),
-    ])
 }
 
 /// Register self-improvement tools with the tool provider

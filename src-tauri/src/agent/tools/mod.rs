@@ -53,9 +53,7 @@ pub use enhanced_visual_reasoning::{
 pub use exploration_reasoning::{ExplorationConfig, ExplorationEngine, ExplorationResult}; // Export exploration-reasoning components
 pub use mcp_integration::{MCPManager, MCPServerConfig, MCPServerStatus, MCPToolInfo};
 pub use self_awareness_tools::register_self_awareness_tools; // Export self-awareness tool registration
-pub use self_improvement::{
-    register_self_improvement_tools, register_self_improvement_tools_with_provider,
-}; // Export self-improvement tool registration (debug mode only)
+pub use self_improvement::register_self_improvement_tools_with_provider; // Export self-improvement tool registration (debug mode only)
 pub use timer_tools::{register_timer_tools, TimerManager, TimerTask}; // Export timer functions and types
 pub use tool_config::{ToolCategory, ToolConfig, ToolConfigManager}; // Export tool configuration types
 pub use tool_mapping::ToolMappingService; // Export centralized tool mapping service // Export enhanced visual reasoning components
