@@ -41,6 +41,31 @@ impl Default for UBPConfig {
     }
 }
 
+impl UBPConfig {
+    /// Validates the configuration and returns an error if invalid
+    pub fn validate(&self) -> Result<(), UBPError> {
+        if self.block_size == 0 {
+            return Err(UBPError::InvalidInput("block_size cannot be zero".to_string()));
+        }
+        if self.min_block_size == 0 {
+            return Err(UBPError::InvalidInput("min_block_size cannot be zero".to_string()));
+        }
+        if self.max_block_size == 0 {
+            return Err(UBPError::InvalidInput("max_block_size cannot be zero".to_string()));
+        }
+        if self.min_block_size > self.max_block_size {
+            return Err(UBPError::InvalidInput("min_block_size cannot be greater than max_block_size".to_string()));
+        }
+        if self.block_overlap < 0.0 || self.block_overlap >= 1.0 {
+            return Err(UBPError::InvalidInput("block_overlap must be between 0.0 and 1.0 (exclusive)".to_string()));
+        }
+        if self.detection_confidence < 0.0 || self.detection_confidence > 1.0 {
+            return Err(UBPError::InvalidInput("detection_confidence must be between 0.0 and 1.0 (inclusive)".to_string()));
+        }
+        Ok(())
+    }
+}
+
 /// Block-specific coordinates within a UBP grid
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockCoordinates {
@@ -132,8 +157,9 @@ impl UniversalBlockParser {
     }
 
     /// Creates a new UBP parser with custom configuration
-    pub fn new_with_config(config: UBPConfig) -> Self {
-        Self { config }
+    pub fn new_with_config(config: UBPConfig) -> Result<Self, UBPError> {
+        config.validate()?;
+        Ok(Self { config })
     }
 
     /// Parses a screenshot into a UBP grid structure
@@ -210,14 +236,15 @@ impl UniversalBlockParser {
     ) -> Result<BlockCoordinates, UBPError> {
         let (blocks_x, blocks_y) = ubp_result.grid_dimensions;
 
-        // Validate input coordinates - reject negative coordinates
-        if global_x < 0.0 || global_y < 0.0 {
-            return Err(UBPError::InvalidInput(format!(
-                "Negative coordinates not supported: ({}, {})", global_x, global_y
-            )));
+        // Check for zero block size to prevent division by zero
+        if ubp_result.actual_block_size == 0 {
+            return Err(UBPError::InvalidInput(
+                "Block size cannot be zero".to_string()
+            ));
         }
 
         // Clamp coordinates to image boundaries to prevent out-of-bounds access
+        // This handles both negative coordinates and coordinates beyond image bounds
         let clamped_x = global_x.min(ubp_result.image_width as f64 - 1.0).max(0.0);
         let clamped_y = global_y.min(ubp_result.image_height as f64 - 1.0).max(0.0);
 
@@ -306,10 +333,13 @@ impl UniversalBlockParser {
             self.config.block_size
         };
 
-        let blocks_x = (width + block_size - 1) / block_size; // Ceiling division
-        let blocks_y = (height + block_size - 1) / block_size;
+        // Prevent division by zero by ensuring block_size is at least 1
+        let safe_block_size = block_size.max(1);
 
-        (blocks_x, blocks_y, block_size)
+        let blocks_x = (width + safe_block_size - 1) / safe_block_size; // Ceiling division
+        let blocks_y = (height + safe_block_size - 1) / safe_block_size;
+
+        (blocks_x, blocks_y, safe_block_size)
     }
 
     /// Creates a single block with position embedding and element detection
