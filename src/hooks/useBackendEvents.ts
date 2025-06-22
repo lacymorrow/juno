@@ -337,7 +337,7 @@ export function useBackendEvents({
                             // Collect TTS content for decorative display
                             const existingTtsContent = msg.tts_metadata?.tts_parts || [];
                             const newTtsContent = tts_content ? [...existingTtsContent, tts_content] : existingTtsContent;
-                            
+
                             return {
                                 ...msg,
                                 content: msg.content + chunk,
@@ -487,6 +487,131 @@ export function useBackendEvents({
             unlisten.then((unlistenFn) => unlistenFn());
         };
     }, [setIsProcessing, addSystemMessage]);
+
+    // Listen for agent continuation requests
+    useEffect(() => {
+        const unlisten = listen<{
+            request_id: string;
+            execution_id: string;
+            current_step: number;
+            max_steps: number;
+            message: string;
+        }>("agent-continuation-request", (event) => {
+            console.log("Agent continuation request received:", event.payload);
+            const { request_id, execution_id, current_step, max_steps, message } = event.payload;
+
+            // Add system message to conversation
+            addSystemMessage(
+                `🔄 Agent reached ${max_steps} step limit (step ${current_step}). Requesting continuation...`
+            );
+
+            // Show a toast notification with Continue action
+            toast.warning(message, {
+                duration: 300000, // 5 minutes to match backend timeout
+                id: `continuation-${request_id}`,
+                description: `Step ${current_step}/${max_steps} - Choose to continue or stop execution`,
+                action: {
+                    label: "Continue (+20 steps)",
+                    onClick: () => {
+                        invoke("respond_to_agent_continuation", {
+                            requestId: request_id,
+                            approved: true,
+                            additionalSteps: 20
+                        }).then(() => {
+                            toast.dismiss(`continuation-${request_id}`);
+                            toast.success("Agent continuation approved", {
+                                id: `continuation-approved-${request_id}`,
+                                duration: 3000,
+                            });
+                        }).catch((error) => {
+                            console.error("Failed to approve continuation:", error);
+                            toast.error("Failed to approve continuation", {
+                                duration: 5000,
+                            });
+                        });
+                    },
+                },
+                // Add a close button that acts as "deny"
+                closeButton: true,
+                onDismiss: () => {
+                    // When user dismisses/closes the toast, treat it as denial
+                    invoke("respond_to_agent_continuation", {
+                        requestId: request_id,
+                        approved: false
+                    }).then(() => {
+                        toast.info("Agent execution stopped", {
+                            id: `continuation-denied-${request_id}`,
+                            duration: 3000,
+                        });
+                    }).catch((error) => {
+                        console.error("Failed to deny continuation:", error);
+                        toast.error("Failed to stop agent", {
+                            duration: 5000,
+                        });
+                    });
+                },
+                className: "agent-continuation-toast",
+            });
+
+            // Also show a secondary action for immediate stop
+            setTimeout(() => {
+                toast.error("Or click here to stop immediately", {
+                    duration: 300000, // Same timeout
+                    id: `continuation-stop-${request_id}`,
+                    action: {
+                        label: "Stop Now",
+                        onClick: () => {
+                            invoke("respond_to_agent_continuation", {
+                                requestId: request_id,
+                                approved: false
+                            }).then(() => {
+                                toast.dismiss(`continuation-${request_id}`);
+                                toast.dismiss(`continuation-stop-${request_id}`);
+                                toast.info("Agent execution stopped", {
+                                    id: `continuation-denied-${request_id}`,
+                                    duration: 3000,
+                                });
+                            }).catch((error) => {
+                                console.error("Failed to deny continuation:", error);
+                                toast.error("Failed to stop agent", {
+                                    duration: 5000,
+                                });
+                            });
+                        },
+                    },
+                });
+            }, 100); // Small delay to show both toasts
+        });
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [addSystemMessage]);
+
+    // Listen for agent continuation responses
+    useEffect(() => {
+        const unlisten = listen<{
+            request_id: string;
+            approved: boolean;
+            additional_steps?: number;
+        }>("agent-continuation-response", (event) => {
+            console.log("Agent continuation response received:", event.payload);
+            const { approved, additional_steps } = event.payload;
+
+            if (approved) {
+                const steps = additional_steps || 20;
+                addSystemMessage(
+                    `✅ Agent continuation approved (+${steps} steps). Resuming execution...`
+                );
+            } else {
+                addSystemMessage("❌ Agent continuation denied. Execution stopped.");
+            }
+        });
+
+        return () => {
+            unlisten.then((unlistenFn) => unlistenFn());
+        };
+    }, [addSystemMessage]);
 
     // Listen for comprehensive agent-stop-all events
     useEffect(() => {
