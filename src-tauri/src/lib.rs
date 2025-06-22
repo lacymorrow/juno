@@ -757,6 +757,15 @@ pub fn run() {
             commands::testing::run_test_suite,
             commands::testing::run_human_comparison_benchmark,
             commands::testing::generate_benchmark_report,
+            
+            // QA Commands - LLM-to-LLM Quality Assurance
+            commands::qa_commands::run_agent_qa_cycle,
+            commands::qa_commands::run_calibration_assessment,
+            commands::qa_commands::test_agent_consensus,
+            commands::qa_commands::run_adversarial_qa_tests,
+            commands::qa_commands::get_qa_performance_dashboard,
+            commands::qa_commands::get_calibration_metrics,
+            commands::qa_commands::configure_qa_settings,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

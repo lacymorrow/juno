@@ -4,18 +4,36 @@
 //! calibration, and performance assessment. Implements best practices from recent research
 //! on LLM self-evaluation and confidence calibration.
 
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{RwLock, Mutex};
-use uuid::Uuid;
+use tokio::sync::RwLock;
 
-use crate::agent::core::{AgentError, Message, Role};
-use crate::agent::structs::{ToolDefinition, ToolCall, AgentAction};
-use crate::agent::traits::{AgentBrain, MemoryManager, ToolProvider};
-use crate::agents::{AgentType, Task, TaskResult, SpecializedAgent, Orchestrator};
+use crate::agent::core::AgentError as CoreAgentError;
+use crate::agent::structs::{AgentError, Message, Role, AgentAction};
+use crate::agent::traits::AgentBrain;
+use crate::agents::{AgentType, Task, TaskResult};
+
+// Helper function to convert between error types
+fn convert_agent_error(err: AgentError) -> CoreAgentError {
+    match err {
+        AgentError::LlmError(msg) => CoreAgentError::LlmError(msg),
+        AgentError::ToolError(msg) => CoreAgentError::ToolError(msg),
+        AgentError::MemoryError(msg) => CoreAgentError::MemoryError(msg),
+        AgentError::ConfigurationError(msg) => CoreAgentError::ConfigurationError(msg),
+        AgentError::StateError(msg) => CoreAgentError::StateError(msg),
+        AgentError::MaxStepsReached => CoreAgentError::MaxStepsReached,
+        AgentError::LoopError(msg) => CoreAgentError::LoopError(msg),
+        AgentError::InputError(msg) => CoreAgentError::InputError(msg),
+        AgentError::OutputError(msg) => CoreAgentError::OutputError(msg),
+        AgentError::ToolNotFound(msg) => CoreAgentError::ToolNotFound(msg),
+        AgentError::Terminated => CoreAgentError::Terminated,
+        AgentError::PermissionDenied(msg) => CoreAgentError::PermissionDenied(msg),
+        AgentError::Unknown(msg) => CoreAgentError::Unknown(msg),
+        _ => CoreAgentError::Unknown("Unknown error during conversion".to_string()),
+    }
+}
 
 /// QA test case for agent evaluation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +59,7 @@ pub enum TestDifficulty {
 }
 
 /// Test domains for categorized evaluation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TestDomain {
     ComputerUse,
     CodeGeneration,
@@ -196,7 +214,7 @@ impl AgentQACoordinator {
     }
 
     /// Run comprehensive QA testing cycle
-    pub async fn run_qa_cycle(&self, test_cases: Vec<QATestCase>) -> Result<Vec<QAResults>, AgentError> {
+    pub async fn run_qa_cycle(&self, test_cases: Vec<QATestCase>) -> Result<Vec<QAResults>, CoreAgentError> {
         let mut results = Vec::new();
         
         for test_case in test_cases {
@@ -223,7 +241,7 @@ impl AgentQACoordinator {
     }
 
     /// Run a single QA test with validation
-    pub async fn run_single_qa_test(&self, test_case: QATestCase) -> Result<QAResults, AgentError> {
+    pub async fn run_single_qa_test(&self, test_case: QATestCase) -> Result<QAResults, CoreAgentError> {
         let start_time = Instant::now();
         
         // 1. Primary agent performs the task
@@ -271,14 +289,14 @@ impl AgentQACoordinator {
     }
 
     /// Execute test case with primary agent
-    async fn execute_test_with_primary_agent(&self, test_case: &QATestCase) -> Result<TaskResult, AgentError> {
+    async fn execute_test_with_primary_agent(&self, test_case: &QATestCase) -> Result<TaskResult, CoreAgentError> {
         // Convert QA test case to agent task
         let task = self.convert_test_case_to_task(test_case)?;
         
         // Execute with timeout
         match tokio::time::timeout(self.config.max_test_duration, self.execute_task_with_agent(&task, &self.primary_agent)).await {
             Ok(result) => result,
-            Err(_) => Err(AgentError::Timeout(format!("Test {} timed out", test_case.id))),
+            Err(_) => Err(CoreAgentError::Timeout(format!("Test {} timed out", test_case.id))),
         }
     }
 
@@ -287,7 +305,7 @@ impl AgentQACoordinator {
         &self, 
         test_case: &QATestCase, 
         primary_result: &TaskResult
-    ) -> Result<Vec<ValidationResult>, AgentError> {
+    ) -> Result<Vec<ValidationResult>, CoreAgentError> {
         let mut validation_results = Vec::new();
         
         for (i, validator) in self.validator_agents.iter().enumerate() {
@@ -317,7 +335,7 @@ impl AgentQACoordinator {
         test_case: &QATestCase,
         primary_result: &TaskResult,
         validation_results: &[ValidationResult]
-    ) -> Result<ConfidenceScore, AgentError> {
+    ) -> Result<ConfidenceScore, CoreAgentError> {
         // P(True) - probability the answer is correct
         let validation_agreement = validation_results.iter()
             .map(|v| if v.agrees_with_primary { 1.0 } else { 0.0 })
@@ -364,7 +382,7 @@ impl AgentQACoordinator {
     }
 
     // Helper methods
-    fn convert_test_case_to_task(&self, test_case: &QATestCase) -> Result<Task, AgentError> {
+    fn convert_test_case_to_task(&self, test_case: &QATestCase) -> Result<Task, CoreAgentError> {
         // Convert QA test case format to internal Task format
         // This bridges the QA system with the existing agent infrastructure
         Ok(Task {
@@ -383,16 +401,18 @@ impl AgentQACoordinator {
         &self, 
         task: &Task, 
         agent: &Arc<dyn AgentBrain + Send + Sync>
-    ) -> Result<TaskResult, AgentError> {
+    ) -> Result<TaskResult, CoreAgentError> {
         // Execute task with the specified agent brain
         // This integrates with the existing agent execution infrastructure
         let messages = vec![Message {
             role: Role::User,
             content: task.description.clone(),
             tool_calls: None,
+            tool_call_id: None,
+            name: None,
         }];
 
-        let action = agent.decide_next_action(&messages, &[]).await?;
+        let action = agent.decide_next_action(&messages, &[]).await.map_err(convert_agent_error)?;
         
         // Convert action to TaskResult format
         Ok(TaskResult {
@@ -409,7 +429,7 @@ impl AgentQACoordinator {
         })
     }
 
-    fn create_validation_task(&self, test_case: &QATestCase, primary_result: &TaskResult) -> Result<Task, AgentError> {
+    fn create_validation_task(&self, test_case: &QATestCase, primary_result: &TaskResult) -> Result<Task, CoreAgentError> {
         // Create a task for validators to evaluate the primary result
         Ok(Task {
             id: format!("{}_validation", test_case.id),
@@ -419,7 +439,7 @@ impl AgentQACoordinator {
                 primary_result.output
             ),
             tool_calls: vec![],
-            agent_type: AgentType::GeneralExpert,
+            agent_type: AgentType::Desktop,
             priority: crate::agents::TaskPriority::Normal,
             dependencies: vec![],
             timeout: Some(Duration::from_secs(60)),
@@ -430,7 +450,7 @@ impl AgentQACoordinator {
         })
     }
 
-    fn parse_validation_result(&self, validator_id: String, result: &TaskResult) -> Result<ValidationResult, AgentError> {
+    fn parse_validation_result(&self, validator_id: String, result: &TaskResult) -> Result<ValidationResult, CoreAgentError> {
         // Parse validator response into structured ValidationResult
         // Extract validation score, agreement, confidence, feedback
         Ok(ValidationResult {
@@ -486,7 +506,7 @@ impl AgentQACoordinator {
         }
     }
 
-    async fn assess_calibration(&self, _confidence: &ConfidenceScore, _result: &TaskResult) -> Result<CalibrationMetrics, AgentError> {
+    async fn assess_calibration(&self, _confidence: &ConfidenceScore, _result: &TaskResult) -> Result<CalibrationMetrics, CoreAgentError> {
         Ok(CalibrationMetrics {
             calibration_error: 0.1,
             reliability_score: 0.85,

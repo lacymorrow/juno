@@ -37,6 +37,8 @@ pub enum AgentError {
     Unknown(String),
     #[error("General error: {0}")]
     Other(String),
+    #[error("Operation timed out: {0}")]
+    Timeout(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

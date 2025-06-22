@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentError {
     #[error("LLM communication error: {0}")]
     LlmError(String),
@@ -107,7 +107,7 @@ pub enum AgentState {
 }
 
 // Represents the action the agent decided to take next
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentAction {
     ExecuteTool(Vec<ToolCall>),
     RespondToUser(String),

@@ -322,8 +322,8 @@ fn create_test_case_for_domain(
     difficulty: &TestDifficulty,
     index: usize,
 ) -> Result<QATestCase, String> {
-    use crate::agent::core::{Message, Role};
-    use crate::agent::qa::coordinator::{SuccessCriteria, ValidationCriteria};
+    use crate::agent::structs::{Message, Role};
+    use crate::agent::qa::coordinator::SuccessCriteria;
     
     let description = format!("Test case for {:?} domain at {:?} level #{}", domain, difficulty, index);
     
@@ -334,6 +334,8 @@ fn create_test_case_for_domain(
             role: Role::User,
             content: description,
             tool_calls: None,
+            tool_call_id: None,
+            name: None,
         },
         expected_capabilities: vec!["reasoning".to_string(), "accuracy".to_string()],
         difficulty_level: difficulty.clone(),
@@ -374,7 +376,7 @@ fn create_mock_qa_result(test_case: QATestCase) -> Result<QAResults, String> {
         timestamp: chrono::Utc::now(),
         primary_result: TaskResult {
             task_id: test_case.id.clone(),
-            agent_type: crate::agents::AgentType::GeneralExpert,
+            agent_type: crate::agents::AgentType::Desktop,
             success: true,
             output: serde_json::json!("Mock result for test case"),
             error: None,
