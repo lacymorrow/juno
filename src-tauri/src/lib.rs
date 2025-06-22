@@ -291,6 +291,17 @@ use crate::commands::mcp::{
     check_mcp_prerequisites,
 };
 
+// Import collaborative AI commands explicitly
+use crate::commands::collaborative_ai_commands::{
+    design_collaborative_ai_system,
+    execute_collaborative_workflow,
+    get_collaborative_ai_capabilities,
+    get_collaborative_ai_statistics,
+    create_sample_collaborative_ai_request,
+    validate_collaborative_ai_request,
+    get_complexity_levels,
+};
+
 // Added for selector parsing
 
 // Old BarStateChangeEventPayload removed - now using floating bar manager
@@ -399,6 +410,7 @@ pub fn run() {
             events::shortcuts::handle_global_shortcut(app, shortcut, &event);
         }).build())
         .manage(app_state) // Manage the AppState
+        .manage(crate::commands::collaborative_ai_commands::initialize_collaborative_ai_state()) // Manage the Collaborative AI state
         .invoke_handler(tauri::generate_handler![
             // Use re-exported commands
             list_apps,
@@ -757,6 +769,15 @@ pub fn run() {
             commands::testing::run_test_suite,
             commands::testing::run_human_comparison_benchmark,
             commands::testing::generate_benchmark_report,
+
+            // Collaborative AI Commands
+            design_collaborative_ai_system,
+            execute_collaborative_workflow,
+            get_collaborative_ai_capabilities,
+            get_collaborative_ai_statistics,
+            create_sample_collaborative_ai_request,
+            validate_collaborative_ai_request,
+            get_complexity_levels,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

@@ -354,18 +354,16 @@ pub fn initialize_collaborative_ai_state() -> CollaborativeAIState {
     CollaborativeAIState::new()
 }
 
-/// Register all collaborative AI commands
-pub fn get_collaborative_ai_commands() -> Vec<Box<dyn Fn(tauri::Invoke) + Send + Sync>> {
-    vec![
-        Box::new(design_collaborative_ai_system),
-        Box::new(execute_collaborative_workflow),
-        Box::new(get_collaborative_ai_capabilities),
-        Box::new(get_collaborative_ai_statistics),
-        Box::new(create_sample_collaborative_ai_request),
-        Box::new(validate_collaborative_ai_request),
-        Box::new(get_complexity_levels),
-    ]
-}
+/// List of all collaborative AI command names for reference
+pub const COLLABORATIVE_AI_COMMANDS: &[&str] = &[
+    "design_collaborative_ai_system",
+    "execute_collaborative_workflow",
+    "get_collaborative_ai_capabilities",
+    "get_collaborative_ai_statistics",
+    "create_sample_collaborative_ai_request",
+    "validate_collaborative_ai_request",
+    "get_complexity_levels",
+];
 
 #[cfg(test)]
 mod tests {
