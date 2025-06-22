@@ -62,7 +62,8 @@ pub async fn analyze_gui_scene_with_visual_reasoning(
     tracing::debug!("Analyzing GUI scene with enhanced visual reasoning");
 
     // Decode base64 screenshot
-    let screenshot_data = base64::decode(&request.screenshot_base64)
+    use base64::{Engine, engine::general_purpose};
+    let screenshot_data = general_purpose::STANDARD.decode(&request.screenshot_base64)
         .map_err(|e| format!("Failed to decode screenshot: {}", e))?;
 
     let context = ReasoningContext::from(request.clone());
@@ -138,8 +139,11 @@ pub async fn validate_visual_analysis_request(
     // Validate screenshot data
     if request.screenshot_base64.is_empty() {
         errors.push("Screenshot data is required".to_string());
-    } else if let Err(e) = base64::decode(&request.screenshot_base64) {
-        errors.push(format!("Invalid screenshot base64 encoding: {}", e));
+    } else {
+        use base64::{Engine, engine::general_purpose};
+        if let Err(e) = general_purpose::STANDARD.decode(&request.screenshot_base64) {
+            errors.push(format!("Invalid screenshot base64 encoding: {}", e));
+        }
     }
 
     // Validate task description
