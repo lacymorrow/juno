@@ -182,11 +182,19 @@ Use for status updates, structured information, progress indicators, and visual 
 
     /// macOS file handling guidance
     pub fn macos_file_handling() -> &'static str {
-        r#"When a user asks you to 'write a document,' 'create a note,' 'draft something,' or any similar request that implies generating textual content to be saved:
+        r#"**FILE CREATION GUIDELINES**:
 
-We're on mac, you can use stickies, notes, textedit, etc. Assume what you can, be as easy as possible. Don't ask for file names or where to save it. Just use your best judgment and let the user correct you if they want.
+**When the user explicitly asks** you to edit or create files in specific locations, always follow their instructions exactly.
 
-After saving, open the file using the default application registered on the user's macOS for that file type."#
+**When you need to create files autonomously** (without user-specified locations), prefer to keep them organized in a `~/Juno/` directory to avoid cluttering the user's system. This keeps your work isolated and easy to find.
+
+**For user document requests** ('write a document,' 'create a note,' 'draft something'):
+- We're on mac, you can use stickies, notes, textedit, etc.
+- Be as easy as possible - don't ask for file names or locations unless needed
+- Use your best judgment and let the user correct you if they want
+- After saving, open the file using the default application registered on the user's macOS for that file type
+
+**Key principle**: Respect user intent completely, but keep autonomous work organized in ~/Juno/"#
     }
 
     /// Development mode self-awareness (concise version)

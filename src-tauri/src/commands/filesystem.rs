@@ -289,7 +289,7 @@ pub async fn save_agent_response(
         .collect::<String>()
         .replace(|c: char| !c.is_alphanumeric() && c != ' ', "")
         .replace(' ', "_");
-    
+
     let default_filename = if let Some(suggested) = suggested_filename {
         suggested
     } else {
