@@ -1,27 +1,23 @@
-use std::{
-    net::SocketAddr,
-    sync::Arc,
-    io::ErrorKind,
-};
+use std::{io::ErrorKind, net::SocketAddr, sync::Arc};
 
 use axum::{routing::post, Router};
-use tokio::sync::Mutex;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, level_filters::LevelFilter};
 use computer_use_ai_sdk::Desktop;
+use serde_json::{self, json, Value};
 use server::handlers::click_by_index::click_by_index_handler;
 use server::handlers::input_control::input_control_handler;
 use server::handlers::list_elements_and_attributes::list_elements_and_attributes_handler;
 use server::handlers::mcp::{
-    handle_execute_tool_function, handle_initialize, mcp_error_response,
+    handle_execute_tool_function, handle_initialize, mcp_error_response, mcp_handler,
 };
 use server::handlers::open_application::open_application_handler;
 use server::handlers::open_url::open_url_handler;
 use server::handlers::press_key_by_index::press_key_by_index_handler;
 use server::handlers::type_by_index::type_by_index_handler;
 use server::types::{AppState, MCPRequest};
-use serde_json::{self, json, Value};
 use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::sync::Mutex;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tracing::{error, info, level_filters::LevelFilter, warn};
 
 // Declare the server module
 mod server;
@@ -98,32 +94,64 @@ async fn run_stdio_mode(state: Arc<AppState>) -> anyhow::Result<()> {
                     Ok(request) => {
                         let request_id = request.id.clone(); // Clone id for error handling
                         match request.method.as_str() {
-                            "initialize" => handle_initialize(request.id).into_inner(),
+                            "initialize" => {
+                                let resp = handle_initialize(request.id);
+                                serde_json::from_str(&serde_json::to_string(&resp.0).unwrap())
+                                    .unwrap()
+                            }
                             "executeToolFunction" => {
                                 if let Some(params) = request.params {
                                     // Need to await the async function here
-                                    handle_execute_tool_function(state.clone(), request.id, params).await.into_inner()
+                                    let resp = handle_execute_tool_function(
+                                        state.clone(),
+                                        request.id,
+                                        params,
+                                    )
+                                    .await;
+                                    serde_json::from_str(&serde_json::to_string(&resp.0).unwrap())
+                                        .unwrap()
                                 } else {
-                                    mcp_error_response(request_id, -32602, "invalid params".to_string(), None).into_inner()
+                                    let resp = mcp_error_response(
+                                        request_id,
+                                        -32602,
+                                        "invalid params".to_string(),
+                                        None,
+                                    );
+                                    serde_json::from_str(&serde_json::to_string(&resp.0).unwrap())
+                                        .unwrap()
                                 }
                             }
-                            _ => mcp_error_response(
-                                request_id,
-                                -32601,
-                                "method not found".to_string(),
-                                None,
-                            ).into_inner(),
+                            _ => {
+                                let resp = mcp_error_response(
+                                    request_id,
+                                    -32601,
+                                    "method not found".to_string(),
+                                    None,
+                                );
+                                serde_json::from_str(&serde_json::to_string(&resp.0).unwrap())
+                                    .unwrap()
+                            }
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to parse stdin line as MCPRequest JSON: {}. Line: {}", e, line_buffer.trim());
+                        warn!(
+                            "Failed to parse stdin line as MCPRequest JSON: {}. Line: {}",
+                            e,
+                            line_buffer.trim()
+                        );
                         // Construct a basic MCP error response if possible, otherwise skip
                         // Try to extract ID if it was partially valid JSON
                         let id_val = serde_json::from_str::<Value>(&line_buffer)
                             .ok()
                             .and_then(|v| v.get("id").cloned())
                             .unwrap_or(Value::Null);
-                        mcp_error_response(id_val, -32700, "parse error".to_string(), Some(json!({ "error_details": e.to_string() }))).into_inner()
+                        let resp = mcp_error_response(
+                            id_val,
+                            -32700,
+                            "parse error".to_string(),
+                            Some(json!({ "error_details": e.to_string() })),
+                        );
+                        serde_json::from_str(&serde_json::to_string(&resp.0).unwrap()).unwrap()
                     }
                 };
 
@@ -134,7 +162,8 @@ async fn run_stdio_mode(state: Arc<AppState>) -> anyhow::Result<()> {
                             error!("Failed to write response to stdout: {}", e);
                             break; // Exit if we can't write
                         }
-                        if let Err(e) = writer.write_all(b"\n").await { // Add newline separator
+                        if let Err(e) = writer.write_all(b"\n").await {
+                            // Add newline separator
                             error!("Failed to write newline to stdout: {}", e);
                             break;
                         }
@@ -206,7 +235,9 @@ fn check_os_permissions() {
         match check_accessibility_permissions_with_auto_redirect(true, false) {
             Ok(granted) => {
                 if !granted {
-                    info!("accessibility permissions: prompt shown to user (auto-redirect disabled)");
+                    info!(
+                        "accessibility permissions: prompt shown to user (auto-redirect disabled)"
+                    );
                     // Sleep to give user time to respond to the prompt and open settings
                     std::thread::sleep(std::time::Duration::from_secs(3));
 
@@ -223,14 +254,20 @@ fn check_os_permissions() {
                                 info!("* Without this permission, UI automation will not function.   *");
                                 info!("**************************************************************");
                             }
-                        },
+                        }
                         Err(e) => {
                             error!("accessibility permissions check failed: {}", e);
                             info!("**************************************************************");
-                            info!("* ACCESSIBILITY PERMISSIONS REQUIRED                          *");
-                            info!("* Please open System Settings manually to grant permissions.  *");
+                            info!(
+                                "* ACCESSIBILITY PERMISSIONS REQUIRED                          *"
+                            );
+                            info!(
+                                "* Please open System Settings manually to grant permissions.  *"
+                            );
                             info!("* Go to: System Settings > Privacy & Security > Accessibility*");
-                            info!("* Without this permission, UI automation will not function.   *");
+                            info!(
+                                "* Without this permission, UI automation will not function.   *"
+                            );
                             info!("**************************************************************");
                         }
                     }
