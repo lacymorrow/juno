@@ -1,7 +1,9 @@
+use crate::state::AppState;
 use chrono::{DateTime, Local};
 use futures::FutureExt;
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::{error, info, warn};
@@ -413,12 +415,118 @@ struct StreamEndPayload {
     complete_text: String,
 }
 
-// Emit an event when a tool is used
-// This function would be called from your tool execution logic
 fn emit_agent_event(app_handle: &AppHandle, event: AgentEvent) {
-    info!("Emitting agent-event: {:?}", event);
+    // Use sanitized version for logging to prevent base64 console spam
+    info!(
+        "Emitting agent-event: {:?}",
+        sanitize_event_for_logging(&event)
+    );
     if let Err(e) = app_handle.emit("agent-event", event) {
         warn!("Failed to emit agent-event: {}", e);
+    }
+}
+
+/// Sanitize agent events for logging by removing or truncating base64 data
+fn sanitize_event_for_logging(event: &AgentEvent) -> AgentEvent {
+    let sanitized_payload = match &event.payload {
+        AgentEventPayload::ToolCallResult(payload) => {
+            let sanitized_screenshot = payload.screenshot_base64.as_ref().map(|base64| {
+                // Truncate base64 data for logging
+                if base64.len() > 100 {
+                    format!(
+                        "{}...[BASE64_SCREENSHOT_TRUNCATED_{}bytes]",
+                        &base64[..std::cmp::min(50, base64.len())],
+                        base64.len()
+                    )
+                } else {
+                    base64.clone()
+                }
+            });
+
+            let sanitized_tool_output = sanitize_value_for_logging(&payload.tool_output);
+
+            AgentEventPayload::ToolCallResult(ToolCallResultPayload {
+                tool_name: payload.tool_name.clone(),
+                tool_output: sanitized_tool_output,
+                success: payload.success,
+                content: payload.content.clone(),
+                screenshot_base64: sanitized_screenshot,
+                tool_category: payload.tool_category.clone(),
+                execution_time_ms: payload.execution_time_ms,
+                notification_level: payload.notification_level.clone(),
+            })
+        }
+        AgentEventPayload::Screenshot(payload) => {
+            let sanitized_base64 = if payload.screenshot_base64.len() > 100 {
+                format!(
+                    "{}...[BASE64_SCREENSHOT_TRUNCATED_{}bytes]",
+                    &payload.screenshot_base64
+                        [..std::cmp::min(50, payload.screenshot_base64.len())],
+                    payload.screenshot_base64.len()
+                )
+            } else {
+                payload.screenshot_base64.clone()
+            };
+
+            AgentEventPayload::Screenshot(ScreenshotPayload {
+                screenshot_base64: sanitized_base64,
+                content: payload.content.clone(),
+            })
+        }
+        AgentEventPayload::ToolCallRequest(payload) => {
+            let sanitized_tool_args = sanitize_value_for_logging(&payload.tool_args);
+
+            AgentEventPayload::ToolCallRequest(ToolCallRequestPayload {
+                tool_name: payload.tool_name.clone(),
+                tool_args: sanitized_tool_args,
+                content: payload.content.clone(),
+                tool_category: payload.tool_category.clone(),
+                tool_description: payload.tool_description.clone(),
+                notification_level: payload.notification_level.clone(),
+                estimated_duration: payload.estimated_duration.clone(),
+            })
+        }
+        // Other payload types don't contain base64 data, so clone as-is
+        other => other.clone(),
+    };
+
+    AgentEvent {
+        event_type: event.event_type.clone(),
+        payload: sanitized_payload,
+    }
+}
+
+/// Sanitize serde_json::Value for logging by removing or truncating base64 data
+fn sanitize_value_for_logging(value: &Value) -> Value {
+    match value {
+        Value::String(s) => {
+            // Check if this looks like base64 data (long string with base64 characters)
+            if s.len() > 100
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+            {
+                // Truncate base64 data and add indication it was truncated
+                Value::String(format!(
+                    "{}...[BASE64_DATA_TRUNCATED_{}bytes]",
+                    &s[..std::cmp::min(50, s.len())],
+                    s.len()
+                ))
+            } else {
+                Value::String(s.clone())
+            }
+        }
+        Value::Object(obj) => {
+            let mut sanitized = serde_json::Map::new();
+            for (key, val) in obj {
+                sanitized.insert(key.clone(), sanitize_value_for_logging(val));
+            }
+            Value::Object(sanitized)
+        }
+        Value::Array(arr) => {
+            let sanitized: Vec<_> = arr.iter().map(sanitize_value_for_logging).collect();
+            Value::Array(sanitized)
+        }
+        _ => value.clone(),
     }
 }
 
@@ -1063,12 +1171,20 @@ pub fn emit_stream_start(app_handle: &AppHandle, message_id: String) {
         "message_id": message_id
     });
 
-    if let Err(e) = app_handle.emit(crate::constants::events::streaming::STREAM_START, event_data) {
+    if let Err(e) = app_handle.emit(
+        crate::constants::events::streaming::STREAM_START,
+        event_data,
+    ) {
         warn!("Failed to emit agent-stream-start event: {}", e);
     }
 }
 
-pub fn emit_streaming_text_chunk(app_handle: &AppHandle, text: String, message_id: Option<String>, tts_content: Option<String>) {
+pub fn emit_streaming_text_chunk(
+    app_handle: &AppHandle,
+    text: String,
+    message_id: Option<String>,
+    tts_content: Option<String>,
+) {
     let event_data = serde_json::json!({
         "chunk": text,
         "message_id": message_id,
@@ -1106,7 +1222,9 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
     // Get TTS provider from app state
     let tts_provider = {
         let app_state = app_handle.state::<crate::state::AppState>();
-        app_state.tts_provider.lock()
+        app_state
+            .tts_provider
+            .lock()
             .map(|provider| provider.clone())
             .unwrap_or_else(|_| "system".to_string())
     };
@@ -1117,14 +1235,19 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
 
         // Check if TTS is disabled
         if tts_provider.is_empty() || tts_provider.to_lowercase() == "off" {
-            info!("TTS is disabled (provider: {}), skipping immediate TTS", tts_provider);
+            info!(
+                "TTS is disabled (provider: {}), skipping immediate TTS",
+                tts_provider
+            );
             return;
         }
 
         // Filter TTS content to prevent code/unwanted content from being spoken
         let filtered_text = crate::tts::filter_tts_content(&content_clone);
         if filtered_text.is_empty() {
-            info!("TTS content was filtered out (appears to be code/unwanted content), skipping TTS");
+            info!(
+                "TTS content was filtered out (appears to be code/unwanted content), skipping TTS"
+            );
             return;
         }
 
@@ -1134,13 +1257,18 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
         // Call TTS with fallback directly instead of going through the command interface
         match crate::tts::invoke_tts_with_fallback(filtered_text, &tts_provider).await {
             Ok(audio_result) => {
-                if audio_result != "TTS_DISABLED_BY_SETTING" && audio_result != "TTS_CONTENT_FILTERED" {
+                if audio_result != "TTS_DISABLED_BY_SETTING"
+                    && audio_result != "TTS_CONTENT_FILTERED"
+                {
                     info!("Immediate TTS audio generated successfully");
 
                     // Emit TTS audio event for frontend to play
-                    if let Err(e) = app_handle_for_emit.emit("tts-audio-ready", serde_json::json!({
-                        "audio_base64": audio_result
-                    })) {
+                    if let Err(e) = app_handle_for_emit.emit(
+                        "tts-audio-ready",
+                        serde_json::json!({
+                            "audio_base64": audio_result
+                        }),
+                    ) {
                         warn!("Failed to emit immediate TTS audio event: {}", e);
                     }
                 } else {
@@ -1148,7 +1276,10 @@ pub fn process_tts_content_immediately(app_handle: AppHandle, tts_content: Strin
                 }
             }
             Err(e) => {
-                warn!("Failed to generate immediate TTS audio: {}. Continuing without audio.", e);
+                warn!(
+                    "Failed to generate immediate TTS audio: {}. Continuing without audio.",
+                    e
+                );
             }
         }
 
@@ -1177,7 +1308,12 @@ pub fn emit_stream_end(app_handle: &AppHandle, message_id: String, complete_text
     }
 }
 
-pub fn emit_stream_end_with_state(app_handle: &AppHandle, message_id: String, complete_text: String, agent_state: String) {
+pub fn emit_stream_end_with_state(
+    app_handle: &AppHandle,
+    message_id: String,
+    complete_text: String,
+    agent_state: String,
+) {
     let event_data = serde_json::json!({
         "message_id": message_id,
         "complete_text": complete_text,
