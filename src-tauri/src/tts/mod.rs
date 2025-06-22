@@ -264,7 +264,14 @@ pub async fn invoke_tts(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    // Reset stop flag before starting new TTS
+    // CRITICAL FIX: Stop any existing TTS before starting new one to prevent token waste
+    info!("New TTS request received, stopping any existing TTS to prevent token waste");
+    stop_speech();
+    
+    // Brief pause to allow existing TTS operations to detect the stop signal
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    
+    // Reset stop flag for the new TTS request
     reset_tts_stop_flag();
 
     let provider_from_state = state.tts_provider.lock().map_err(|e| format!("Failed to lock tts_provider for invoke_tts: {}", e))?.clone();
@@ -334,9 +341,19 @@ pub async fn invoke_tts_with_fallback(
 ) -> Result<String, String> {
     info!("Invoking TTS with fallback, primary provider: {}", primary_provider);
 
-    // Check if stop was requested before starting
+    // CRITICAL FIX: Stop any existing TTS before starting new one to prevent token waste
+    // This prevents multiple TTS requests from running concurrently during streaming
+    stop_speech();
+    
+    // Brief pause to allow existing TTS operations to detect the stop signal
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    
+    // Reset stop flag for the new TTS request
+    reset_tts_stop_flag();
+
+    // Check if stop was requested during the brief pause (edge case)
     if is_tts_stop_requested() {
-        info!("TTS stop was requested before starting TTS with fallback, aborting");
+        info!("TTS stop was requested during initialization, aborting");
         return Ok("TTS_STOPPED_BY_USER".to_string());
     }
 
