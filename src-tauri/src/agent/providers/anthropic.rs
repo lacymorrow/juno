@@ -190,7 +190,7 @@ impl AnthropicBrain {
             model,
             max_tokens,
             system_prompt,
-            streaming_enabled: false, // Default to non-streaming
+            streaming_enabled: true, // Default to streaming for real-time user experience
         })
     }
 

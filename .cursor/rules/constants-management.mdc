@@ -3,3 +3,274 @@ description:
 globs:
 alwaysApply: false
 ---
+# Constants Management and Generation
+
+## Overview
+
+Juno uses a hybrid approach for constants management with automatic generation from Rust to TypeScript to ensure consistency between backend and frontend.
+
+## Architecture
+
+### Generated Constants: [src/lib/constants.generated.ts](mdc:src/lib/constants.generated.ts)
+
+**Auto-generated from Rust** - Never edit manually!
+
+```typescript
+// This file is auto-generated from Rust constants
+// Run `npm run generate-constants` to regenerate
+
+export const EVENTS = {
+    AGENT_ACTIVITY_UPDATE: "agent-activity-update",
+    AGENT_CONTINUATION_REQUEST: "agent-continuation-request",
+    // ... 62 total events
+} as const;
+
+export const HTTP_STATUS = {
+    OK: 200,
+    BAD_REQUEST: 400,
+    // ...
+} as const;
+```
+
+### Frontend-Only Constants: [src/lib/constants.ts](mdc:src/lib/constants.ts)
+
+**Frontend-specific constants** that don't need Rust equivalents:
+
+```typescript
+// Re-export generated constants for convenience
+export * from './constants.generated';
+
+export const TIMEOUTS = {
+    SOUND_DEBOUNCE_MS: 300,
+    HEARTBEAT_INTERVAL_MS: 30000,
+    CLOUD_CONNECTION_TIMEOUT_MS: 10000,
+} as const;
+
+export const UI = {
+    MAX_CONVERSATION_DISPLAY: 1000,
+    SCROLL_THRESHOLD: 100,
+    ANIMATION_DURATION_MS: 200,
+} as const;
+```
+
+## Generation Process
+
+### Build Script: [scripts/generate-ts-constants.js](mdc:scripts/generate-ts-constants.js)
+
+Automatically extracts constants from Rust files and generates TypeScript:
+
+```javascript
+// Extracts from multiple Rust files
+const rustFiles = [
+    'src-tauri/src/constants/events.rs',
+    'src-tauri/src/constants/http.rs',
+    'src-tauri/src/constants/agent.rs',
+    // ...
+];
+
+// Generates typed TypeScript constants
+generateTypedConstants(rustConstants, outputPath);
+```
+
+### NPM Scripts: [package.json](mdc:package.json)
+
+```json
+{
+    "scripts": {
+        "generate-constants": "node scripts/generate-ts-constants.js",
+        "prebuild": "npm run generate-constants",
+        "build": "tsc && vite build"
+    }
+}
+```
+
+**CRITICAL RULES:**
+- **Constants are auto-generated before every build**
+- **Never manually edit generated files**
+- **Always run generation after Rust constant changes**
+
+## Rust Constants Structure
+
+### Events: [src-tauri/src/constants/events.rs](mdc:src-tauri/src/constants/events.rs)
+
+```rust
+pub mod events {
+    // Agent events
+    pub const AGENT_ACTIVITY_UPDATE: &str = "agent-activity-update";
+    pub const AGENT_CONTINUATION_REQUEST: &str = "agent-continuation-request";
+
+    // System events
+    pub const SYSTEM_READY: &str = "system-ready";
+    pub const ERROR_OCCURRED: &str = "error-occurred";
+}
+```
+
+### Agent Configuration: [src-tauri/src/constants/agent.rs](mdc:src-tauri/src/constants/agent.rs)
+
+```rust
+pub mod config {
+    pub const MAX_ITERATIONS: u32 = 15;
+    pub const MAX_ITERATIONS_REDUCED: u32 = 10;
+    pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
+}
+```
+
+### HTTP Status: [src-tauri/src/constants/http.rs](mdc:src-tauri/src/constants/http.rs)
+
+```rust
+pub mod http {
+    pub const OK: u16 = 200;
+    pub const BAD_REQUEST: u16 = 400;
+    pub const UNAUTHORIZED: u16 = 401;
+}
+```
+
+## Usage Patterns
+
+### In Rust Code
+
+```rust
+use crate::constants::events;
+use crate::constants::agent::config;
+
+// Emit event
+app_handle.emit(events::AGENT_ACTIVITY_UPDATE, payload)?;
+
+// Use configuration
+if current_step >= config::MAX_ITERATIONS {
+    // Handle limit reached
+}
+```
+
+### In TypeScript Code
+
+```typescript
+import { EVENTS, HTTP_STATUS, TIMEOUTS } from '@/lib/constants';
+
+// Listen for events
+listen(EVENTS.AGENT_ACTIVITY_UPDATE, handleUpdate);
+
+// Use HTTP status
+if (response.status === HTTP_STATUS.OK) {
+    // Handle success
+}
+
+// Use frontend-only constants
+setTimeout(callback, TIMEOUTS.SOUND_DEBOUNCE_MS);
+```
+
+## Common Issues and Solutions
+
+### Issue: Constants Out of Sync
+
+**Symptoms:**
+- TypeScript errors about missing constants
+- Events not firing/listening correctly
+- Build failures with constant references
+
+**Solutions:**
+1. Run `npm run generate-constants`
+2. Check if Rust constants were added/renamed
+3. Verify generation script includes new files
+4. Rebuild project completely
+
+### Issue: Duplicate Constants
+
+**Anti-Pattern:**
+```typescript
+// DON'T DO THIS - creates duplication
+export const EVENTS = {
+    AGENT_UPDATE: "agent-update", // Duplicates Rust constant
+};
+```
+
+**Correct Pattern:**
+```typescript
+// DO THIS - use generated constants
+import { EVENTS } from './constants.generated';
+// Add only frontend-specific constants
+export const UI_TIMEOUTS = { /* ... */ };
+```
+
+### Issue: Generation Script Failures
+
+**Common Causes:**
+- Rust syntax errors in constant files
+- Missing constant files in generation script
+- File permission issues
+- Node.js version compatibility
+
+**Debugging:**
+```bash
+# Test generation manually
+node scripts/generate-ts-constants.js
+
+# Check Rust compilation first
+cargo check --manifest-path src-tauri/Cargo.toml
+
+# Verify file permissions
+ls -la src/lib/constants.generated.ts
+```
+
+## Best Practices
+
+### For Rust Constants
+
+1. **Group related constants** in modules
+2. **Use descriptive names** that are self-documenting
+3. **Maintain consistent naming** (SCREAMING_SNAKE_CASE)
+4. **Add comments** for complex constants
+5. **Keep constants focused** - one file per domain
+
+### For TypeScript Constants
+
+1. **Never duplicate Rust constants** - use generated ones
+2. **Add only frontend-specific values** to constants.ts
+3. **Use `as const`** for type safety
+4. **Group by functionality** not by type
+5. **Re-export generated constants** for convenience
+
+### For Generation Process
+
+1. **Run generation before builds** (automated in prebuild)
+2. **Include new Rust files** in generation script
+3. **Test generation** after adding constants
+4. **Commit generated files** to version control
+5. **Document custom constants** that aren't generated
+
+## File Organization
+
+```
+src-tauri/src/constants/
+├── mod.rs              # Module exports
+├── events.rs           # Event name constants
+├── agent.rs            # Agent configuration
+├── http.rs             # HTTP status codes
+└── ui.rs               # UI-related constants
+
+src/lib/
+├── constants.ts        # Frontend-only constants + re-exports
+└── constants.generated.ts  # Auto-generated from Rust
+
+scripts/
+└── generate-ts-constants.js  # Generation script
+```
+
+## Integration with Build System
+
+### Development Workflow
+
+1. **Add/modify Rust constants**
+2. **Run `npm run generate-constants`** (or let prebuild do it)
+3. **Use constants in TypeScript** via imports
+4. **Test that events/values work** end-to-end
+5. **Commit both Rust and generated files**
+
+### CI/CD Considerations
+
+- **Generation runs automatically** during build
+- **Generated files should be committed** for deployment
+- **Rust compilation must succeed** before generation
+- **TypeScript compilation validates** constant usage
+
+This system ensures type-safe, consistent constants across the entire application while maintaining a single source of truth in Rust.
