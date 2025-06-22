@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::collections::HashMap;
 use tauri::{AppHandle, Manager, State, Emitter};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn, error, debug};
 
 /// Request for agent continuation when max iterations reached
@@ -32,8 +32,8 @@ pub struct ContinuationManager {
     pending_requests: Arc<Mutex<HashMap<String, ContinuationRequest>>>,
     /// Continuation responses (approved/denied)
     responses: Arc<Mutex<HashMap<String, ContinuationResponse>>>,
-    /// Notify agents waiting for continuation decisions
-    continuation_notifier: Arc<Mutex<HashMap<String, watch::Sender<Option<ContinuationResponse>>>>>,
+    /// Notify agents waiting for continuation decisions (using oneshot channels)
+    continuation_notifiers: Arc<Mutex<HashMap<String, oneshot::Sender<Option<ContinuationResponse>>>>>,
 }
 
 impl ContinuationManager {
@@ -41,7 +41,7 @@ impl ContinuationManager {
         Self {
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             responses: Arc::new(Mutex::new(HashMap::new())),
-            continuation_notifier: Arc::new(Mutex::new(HashMap::new())),
+            continuation_notifiers: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -71,8 +71,8 @@ impl ContinuationManager {
                 .as_secs(),
         };
 
-        // Create a watch channel for this specific request
-        let (tx, mut rx) = watch::channel(None);
+        // Create a oneshot channel for this specific request
+        let (tx, rx) = oneshot::channel();
 
         // Store the request and the notifier
         {
@@ -80,7 +80,7 @@ impl ContinuationManager {
             pending.insert(request_id.clone(), request.clone());
         }
         {
-            let mut notifiers = self.continuation_notifier.lock().await;
+            let mut notifiers = self.continuation_notifiers.lock().await;
             notifiers.insert(request_id.clone(), tx);
         }
 
@@ -102,16 +102,14 @@ impl ContinuationManager {
 
         // Wait for user response (with timeout)
         let timeout_duration = std::time::Duration::from_secs(300); // 5 minutes timeout
-        match tokio::time::timeout(timeout_duration, rx.changed()).await {
-            Ok(Ok(())) => {
-                if let Some(response) = rx.borrow().clone() {
-                    // Clean up the request
-                    self.cleanup_request(&request_id).await;
-                    return Ok(Some(response));
-                }
+        match tokio::time::timeout(timeout_duration, rx).await {
+            Ok(Ok(response)) => {
+                // Clean up the request
+                self.cleanup_request(&request_id).await;
+                return Ok(response);
             }
-            Ok(Err(e)) => {
-                error!("Watch channel error while waiting for continuation: {}", e);
+            Ok(Err(_)) => {
+                error!("Oneshot channel error while waiting for continuation");
             }
             Err(_) => {
                 warn!("Timeout waiting for continuation response for execution {}", execution_id);
@@ -144,10 +142,10 @@ impl ContinuationManager {
 
         // Notify waiting agent
         {
-            let mut notifiers = self.continuation_notifier.lock().await;
-            if let Some(tx) = notifiers.get(&request_id) {
-                if let Err(e) = tx.send(Some(response.clone())) {
-                    error!("Failed to send continuation response: {}", e);
+            let mut notifiers = self.continuation_notifiers.lock().await;
+            if let Some(tx) = notifiers.remove(&request_id) {
+                if let Err(_) = tx.send(Some(response.clone())) {
+                    error!("Failed to send continuation response: receiver dropped");
                     return Err("Failed to notify agent of continuation decision".to_string());
                 }
             }
@@ -175,7 +173,7 @@ impl ContinuationManager {
             responses.remove(request_id);
         }
         {
-            let mut notifiers = self.continuation_notifier.lock().await;
+            let mut notifiers = self.continuation_notifiers.lock().await;
             notifiers.remove(request_id);
         }
         debug!("Cleaned up continuation request {}", request_id);

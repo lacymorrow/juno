@@ -229,8 +229,8 @@ where
                     Err(e) => {
                         log::error!("Failed to request continuation: {}. Terminating agent.", e);
                         self.transition_state(AgentState::Failed("Max steps reached (continuation error)".to_string()))
-                            .await;
-                        return Err(AgentError::MaxStepsReached);
+                    .await;
+                return Err(AgentError::MaxStepsReached);
                     }
                 }
             }
