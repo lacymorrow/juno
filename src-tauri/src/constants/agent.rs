@@ -40,8 +40,8 @@ pub mod tool_names {
 
 // Agent configuration
 pub mod config {
-    pub const MAX_ITERATIONS: u32 = 2;
-    pub const MAX_ITERATIONS_REDUCED: u32 = 2;
+    pub const MAX_ITERATIONS: u32 = 15;
+    pub const MAX_ITERATIONS_REDUCED: u32 = 10;
 
     // Token limits
     pub const DEFAULT_MAX_TOKENS_STANDARD: u32 = 4096;
