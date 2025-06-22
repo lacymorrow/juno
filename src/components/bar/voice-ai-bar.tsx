@@ -664,11 +664,7 @@ const styles = \`
 
         {/* Audio Visualizer - Replaces the old waveform animation */}
         {/* Audio Visualizer + Status Text - Show both together */}
-        {assistantState !== "input" &&
-          assistantState !== "response" &&
-          assistantState !== "idle" &&
-          assistantState !== "error" &&
-          assistantState !== "success" && (
+        {["listening", "processing", "speaking"].includes(assistantState) && (
             <div className="visualizer-status-container">
               {/* Audio Visualizer */}
               <div className="audio-visualizer-wrapper">
@@ -685,7 +681,7 @@ const styles = \`
                   }`}
                 >
                   <AudioVisualizer
-                    appState={assistantState}
+                    appState={assistantState as any}
                     width={60}
                     height={20}
                     enableMicrophone={false}
@@ -708,10 +704,7 @@ const styles = \`
                     gradientWidth={8}
                     pauseOnHover={true}
                     delay={1.5}
-                    play={
-                      (assistantState as AssistantState) !== "idle" &&
-                      !isTransitioning
-                    }
+                    play={!isTransitioning}
                   >
                     <span className="marquee-text text-white/80 text-xs whitespace-nowrap pr-12">
                       {currentMessage || "Processing..."}

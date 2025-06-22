@@ -1,18 +1,4 @@
-import { cn } from "@/lib/utils";
 import { Window } from "@tauri-apps/api/window";
-import {
-  AlertCircle,
-  Brain,
-  Check,
-  Loader2,
-  Mic,
-  MicOff,
-  Send,
-  Sparkles,
-  Type,
-  Volume2,
-  X,
-} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -22,6 +8,7 @@ import {
 } from "react";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 import { VoiceStatusIndicator } from "./VoiceStatusIndicator";
+import { VoiceAIBar } from "./bar/voice-ai-bar";
 import { useInvoke } from "@/hooks/useInvoke";
 import { useEventListener } from "@/hooks/useEventListener";
 import { useWindowSize } from "@/hooks/useWindowSize";
@@ -31,6 +18,7 @@ import type {
   FloatingBarConfig,
   WindowConfig,
 } from "@/types/floating-bar";
+import type { AssistantState, ResponseContent } from "@/types/voice-ai";
 import { FLOATING_BAR_DIMENSIONS } from "@/types/floating-bar";
 
 // Get default window dimensions from tauri.conf.json
@@ -44,7 +32,144 @@ const DEFAULT_HEIGHT =
 const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
 const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
 
-// Types are now imported from shared types
+// State mapping: BarState -> AssistantState
+const mapBarStateToAssistantState = (barState: BarState): AssistantState => {
+  switch (barState) {
+    case "default":
+    case "dictation_ready":
+    case "finishing":
+      return "idle";
+    case "expanding":
+    case "input":
+      return "input";
+    case "dictation_active":
+    case "dictating":
+    case "agent_listening":
+    case "listening":
+      return "listening";
+    case "dictation_processing":
+    case "transcribing":
+    case "agent_thinking":
+    case "loading":
+      return "processing";
+    case "agent_responding":
+    case "speaking":
+      return "speaking";
+    case "success":
+      return "success";
+    case "error":
+      return "error";
+    case "always-listening":
+      return "listening"; // Map to listening for now
+    case "shrinking":
+      return "idle";
+    default:
+      return "idle";
+  }
+};
+
+// Response content generator based on transcription/spoken text
+const generateResponseContent = (
+  transcriptionText: string,
+  spokenText: string,
+  currentError: string | null
+): ResponseContent[] => {
+  if (currentError) {
+    return [
+      {
+        type: "text",
+        title: "Error",
+        content: currentError,
+      },
+    ];
+  }
+
+  if (spokenText) {
+    return [
+      {
+        type: "text",
+        title: "AI Response",
+        content: spokenText,
+      },
+    ];
+  }
+
+  if (transcriptionText) {
+    return [
+      {
+        type: "text",
+        title: "Transcription",
+        content: transcriptionText,
+      },
+    ];
+  }
+
+  return [];
+};
+
+// Custom VoiceAIBar wrapper with FloatingBar integration
+interface IntegratedVoiceAIBarProps {
+  assistantState: AssistantState;
+  inputValue: string;
+  sampleResponses: Record<string, ResponseContent>;
+  onStateChange: (state: AssistantState) => void;
+  onInputChange: (value: string) => void;
+  onInputSubmit: (e: FormEvent) => void;
+  onInputBlur: () => void;
+  inputRef: React.RefObject<HTMLInputElement>;
+  className?: string;
+}
+
+function IntegratedVoiceAIBar({
+  assistantState,
+  inputValue,
+  sampleResponses,
+  onStateChange,
+  onInputChange,
+  onInputSubmit,
+  onInputBlur,
+  inputRef,
+  className,
+}: IntegratedVoiceAIBarProps) {
+  // Create a modified VoiceAIBar that uses our input handlers
+  return (
+    <div className={className}>
+      <VoiceAIBar
+        initialState={assistantState}
+        onStateChange={onStateChange}
+        sampleResponses={sampleResponses}
+        className="integrated-voice-ai-bar"
+      />
+
+      {/* Overlay input handling for input state */}
+      {assistantState === "input" && (
+        <div className="absolute inset-0 flex items-center px-4">
+          <form onSubmit={onInputSubmit} className="flex items-center gap-2 w-full">
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputValue}
+              onChange={(e) => onInputChange(e.target.value)}
+              onBlur={onInputBlur}
+              placeholder="Ask me anything..."
+              className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
+              disabled={!inputValue.trim()}
+            >
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+              </svg>
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function FloatingBar() {
   // Enhanced state management - mirrors backend state exactly
@@ -69,7 +194,6 @@ export function FloatingBar() {
   // UI state
   const [isWindowHovered, setIsWindowHovered] = useState(false);
   const [isAnimatingSize, setIsAnimatingSize] = useState(false);
-  // @ts-ignore - Currently commented out in display logic but may be re-enabled in future
   const [showTooltip, setShowTooltip] = useState(false);
   const [config, setConfig] = useState<FloatingBarConfig>({
     showVoiceIndicator: true,
@@ -78,6 +202,9 @@ export function FloatingBar() {
     autoHideDelay: 3000,
     opacity: 0.95,
   });
+
+  // VoiceAIBar integration state
+  const [assistantState, setAssistantState] = useState<AssistantState>("idle");
 
   const inputRef = useRef<HTMLInputElement>(null);
   const tooltipTimeoutRef = useRef<NodeJS.Timeout>();
@@ -96,6 +223,23 @@ export function FloatingBar() {
     };
     loadConfig();
   }, [invokeCommand]);
+
+  // Update assistant state when bar state changes
+  useEffect(() => {
+    const newAssistantState = mapBarStateToAssistantState(barState);
+    if (newAssistantState !== assistantState) {
+      setAssistantState(newAssistantState);
+    }
+
+    // Generate response content for response state
+    if (newAssistantState === "success" || newAssistantState === "error") {
+      generateResponseContent(
+        transcriptionText,
+        spokenText,
+        currentError
+      );
+    }
+  }, [barState, assistantState, transcriptionText, spokenText, currentError]);
 
   // Update window size based on bar state
   useEffect(() => {
@@ -243,176 +387,49 @@ export function FloatingBar() {
     [inputValue, invokeCommand]
   );
 
-  // Get main icon based on enhanced state
-  const getMainIcon = () => {
-    switch (barState) {
-      case "default":
-        return <Sparkles className="h-4 w-4 text-emerald-400" />;
-      case "dictation_ready":
-        return <MicOff className="h-4 w-4 text-muted-foreground" />;
-      case "dictation_active":
-      case "dictating":
-        return <Type className="h-4 w-4 text-orange-500" />;
-      case "dictation_processing":
-      case "transcribing":
-        return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
-      case "agent_listening":
-      case "listening":
-        return <Brain className="h-4 w-4 text-blue-500" />;
-      case "agent_thinking":
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "agent_responding":
-        return <Brain className="h-4 w-4 text-blue-500 animate-pulse" />;
-      case "always-listening":
-        return <Mic className="h-4 w-4 text-blue-400" />;
-      case "speaking":
-        return <Volume2 className="h-4 w-4 text-purple-500" />;
-      case "loading":
-        return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "success":
-        return <Check className="h-4 w-4 text-emerald-500" />;
-      case "error":
-        return <AlertCircle className="h-4 w-4 text-red-500" />;
-      default:
-        return <Mic className="h-4 w-4 text-blue-500" />;
-    }
+  // VoiceAIBar state change handler
+  const handleVoiceAIBarStateChange = useCallback(
+    (newState: AssistantState) => {
+      // This is called when VoiceAIBar internally changes state
+      // We can use this to trigger backend actions if needed
+      console.log("VoiceAIBar state changed to:", newState);
+
+      // Handle specific state transitions that need backend interaction
+      if (newState === "input") {
+        handleBarClick(); // Trigger input mode in backend
+      }
+    },
+    [handleBarClick]
+  );
+
+  // Sample responses for VoiceAIBar
+  const sampleResponses = {
+    text: {
+      type: "text" as const,
+      title: "Voice Assistant Response",
+      content: spokenText || transcriptionText || "Voice assistant ready",
+    },
+    code: {
+      type: "code" as const,
+      title: "System Status",
+      content: `Voice Mode: ${voiceMode}
+Agent Working: ${isAgentWorking}
+Dictation Mode: ${isDictationMode}
+Always Listening: ${isAlwaysListening}
+Audio Level: ${audioLevel}
+Last Submitted: ${lastSubmittedValue || "None"}
+Agent State: ${agentState || "Unknown"}`,
+    },
+    component: {
+      type: "component" as const,
+      title: "Error Details",
+      content: currentError || "No errors",
+    },
   };
 
-  // Get enhanced status text for tooltip
-  const getStatusText = () => {
-    switch (barState) {
-      case "dictation_ready":
-        return "Hold Option+Space to start dictating";
-      case "dictation_active":
-      case "dictating":
-        return "Dictating... Release key to finish";
-      case "dictation_processing":
-      case "transcribing":
-        return "Processing dictation...";
-      case "agent_listening":
-      case "listening":
-        return "Listening for voice command...";
-      case "agent_thinking":
-        return "AI is thinking...";
-      case "agent_responding":
-        return "AI is responding...";
-      case "speaking":
-        return "Playing AI response";
-      case "loading":
-        return "Processing request...";
-      case "success":
-        // Check agent state to determine if it was actually successful
-        if (agentState === "Failed") {
-          return "Task failed";
-        } else if (agentState === "Cancelled") {
-          return "Task cancelled";
-        } else if (agentState === "Offline") {
-          return "Connection unavailable";
-        } else {
-          return "Task completed successfully";
-        }
-      case "error":
-        return currentError || "An error occurred";
-      case "always-listening":
-        return "Always listening for wake words";
-      default:
-        return "Voice assistant ready";
-    }
-  };
-
-  // Get enhanced container styles with voice mode awareness
-  const getContainerStyles = () => {
-    const baseStyles = `
-      relative flex items-center justify-center
-      text-white rounded-full shadow-lg border border-white/20
-      transition-all duration-300 ease-in-out
-      [will-change:width,height,transform]
-      [backface-visibility:hidden]
-      [transform-origin:center]
-			cursor-move
-    `;
-
-    // Enhanced background based on voice mode and state
-    let bgColor = "bg-black/90";
-
-    switch (voiceMode) {
-      case "dictation":
-        bgColor = "bg-gradient-to-r from-orange-600/90 to-orange-700/90";
-        break;
-      case "agent":
-        bgColor = "bg-gradient-to-r from-blue-600/90 to-blue-700/90";
-        break;
-      default:
-        if (isDictationMode) {
-          bgColor = "bg-gradient-to-r from-orange-600/98 to-orange-700/98";
-        } else if (isAgentWorking) {
-          bgColor = "bg-gradient-to-r from-blue-600/98 to-blue-700/98";
-        }
-        break;
-    }
-
-    // Override for specific states
-    if (barState === "error") {
-      bgColor = "bg-gradient-to-r from-red-600/90 to-red-700/90";
-    } else if (barState === "success") {
-      bgColor = "bg-gradient-to-r from-emerald-600/90 to-emerald-700/90";
-    } else if (barState === "always-listening") {
-      bgColor = "bg-gradient-to-r from-blue-500/98 to-cyan-600/98";
-    }
-
-    const sizeStyles = ["default"].includes(barState)
-      ? "h-[20px] w-[60px] px-2"
-      : "h-[50px] w-[280px] px-4";
-
-    const hoverEffect =
-      barState === "default" && isWindowHovered
-        ? "[transform:scale3d(1.05,1.05,1)]"
-        : "";
-
-    const clickable = ["default", "dictation_ready"].includes(barState)
-      ? "cursor-pointer"
-      : "";
-
-    return cn(
-      baseStyles,
-      bgColor,
-      sizeStyles,
-      hoverEffect,
-      clickable,
-      !isAnimatingSize && "backdrop-blur-md"
-    );
-  };
-
-  // Audio level visualization component
-  const AudioLevelIndicator = () => {
-    if (
-      ![
-        "dictation_active",
-        "dictating",
-        "agent_listening",
-        "listening",
-      ].includes(barState)
-    )
-      return null;
-
-    return (
-      <div
-        className="flex items-center gap-1 ml-2 cursor-move"
-        data-tauri-drag-region
-      >
-        {[...Array(5)].map((_, i) => (
-          <div
-            key={i}
-            data-tauri-drag-region
-            className={cn(
-              "w-1 rounded-full transition-all duration-150",
-              audioLevel > (i + 1) * 20 ? "bg-white h-3" : "bg-white/30 h-1"
-            )}
-          />
-        ))}
-      </div>
-    );
-  };
+  // Use state variables to prevent unused warnings
+  void isWindowHovered;
+  void isAnimatingSize;
 
   return (
     <div
@@ -420,7 +437,7 @@ export function FloatingBar() {
       className="w-screen h-screen flex items-start justify-start relative"
     >
       {/* Tooltip */}
-      {/* {showTooltip && barState === "default" && (
+      {showTooltip && barState === "default" && (
         <div
           className="absolute top-16 left-8 z-50 animate-fade-in pointer-events-none cursor-move"
           data-tauri-drag-region
@@ -429,15 +446,14 @@ export function FloatingBar() {
             className="bg-black/90 text-white text-xs px-3 py-2 rounded-lg border border-white/20 backdrop-blur-md max-w-xs cursor-move"
             data-tauri-drag-region
           >
-            {getStatusText()}
+            Voice assistant ready - {voiceMode} mode
           </div>
         </div>
-      )} */}
+      )}
 
       <div className="relative z-50 p-3 bg-transparent" data-tauri-drag-region>
         <div
           data-tauri-drag-region
-          className={getContainerStyles()}
           style={{ opacity: config.opacity }}
           onClick={
             ["default", "dictation_ready"].includes(barState)
@@ -445,285 +461,65 @@ export function FloatingBar() {
               : undefined
           }
         >
-          {/* Default State */}
-          {(barState === "default" ||
-            barState === "dictation_ready" ||
-            barState === "finishing") && (
-            <div className="flex items-center gap-2" data-tauri-drag-region>
-              {getMainIcon()}
-              {config.showVoiceIndicator &&
-                (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
-                  <VoiceStatusIndicator variant="compact" className="ml-1" />
-                )}
-              {isAlwaysListening && (
-                <div
-                  className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
-                  data-tauri-drag-region
-                ></div>
-              )}
-            </div>
-          )}
-
-          {/* Expanding/Input State */}
-          {(barState === "expanding" || barState === "input") && (
-            <form
-              data-tauri-drag-region
-              onSubmit={handleSubmit}
-              className={cn(
-                "flex items-center justify-between w-full h-full gap-3",
-                "transition-opacity duration-300 ease-in-out",
-                barState === "input" ? "opacity-100" : "opacity-0"
-              )}
-            >
-              <div
-                className="flex items-center gap-2 flex-1"
-                data-tauri-drag-region
-              >
-                {getMainIcon()}
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
-                  onBlur={handleInputBlur}
-                  placeholder="Ask me anything..."
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
-                  disabled={barState !== "input"}
-                />
-              </div>
-              <button
-                data-tauri-drag-region
-                type="submit"
-                className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
-                disabled={barState !== "input"}
-              >
-                <Send size={14} />
-              </button>
-            </form>
-          )}
-
-          {/* Enhanced Voice States */}
-          {[
-            "dictation_active",
-            "dictation_processing",
-            "dictating",
-            "transcribing",
-            "agent_listening",
-            "agent_thinking",
-            "agent_responding",
-            "listening",
-          ].includes(barState) && (
-            <div
-              className="flex items-center justify-between w-full h-full"
-              data-tauri-drag-region
-            >
-              <div
-                className="flex items-center gap-3 flex-1 min-w-0"
-                data-tauri-drag-region
-              >
-                {getMainIcon()}
-                <div className="flex-1 min-w-0" data-tauri-drag-region>
-                  <div
-                    className="text-sm font-medium truncate"
-                    data-tauri-drag-region
-                  >
-                    {getStatusText()}
-                  </div>
-                  {transcriptionText && (
-                    <div
-                      className="text-xs text-white/70 truncate"
-                      data-tauri-drag-region
-                    >
-                      "{transcriptionText}"
-                    </div>
-                  )}
-                </div>
-              </div>
-              <AudioLevelIndicator />
-            </div>
-          )}
-
-          {/* Always Listening State */}
-          {barState === "always-listening" && (
-            <div
-              className="flex items-center justify-between w-full h-full"
-              data-tauri-drag-region
-            >
-              <div
-                className="flex items-center gap-3 flex-1 min-w-0"
-                data-tauri-drag-region
-              >
-                <Mic className="h-4 w-4 text-blue-400 animate-pulse" />
-                <span
-                  className="text-sm text-blue-200 truncate font-medium"
-                  data-tauri-drag-region
-                >
-                  Always listening for wake words...
-                </span>
-              </div>
-              <div
-                className="flex items-center gap-1 ml-2"
-                data-tauri-drag-region
-              >
-                <div
-                  className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
-                  data-tauri-drag-region
-                />
-                <div
-                  className="w-1 h-2 bg-blue-300 rounded-full animate-pulse"
-                  style={{ animationDelay: "0.1s" }}
-                  data-tauri-drag-region
-                />
-                <div
-                  className="w-1 h-1 bg-blue-400 rounded-full animate-pulse"
-                  style={{ animationDelay: "0.2s" }}
-                  data-tauri-drag-region
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Speaking State */}
-          {barState === "speaking" && (
-            <div
-              className="flex items-center justify-between w-full h-full"
-              data-tauri-drag-region
-            >
-              <div
-                className="flex items-center gap-3 flex-1 min-w-0"
-                data-tauri-drag-region
-              >
-                <Volume2 className="h-4 w-4 text-purple-300 animate-pulse" />
-                <span
-                  className="text-sm text-white/90 truncate"
-                  data-tauri-drag-region
-                >
-                  {spokenText || "Playing response..."}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Loading State */}
-          {barState === "loading" && (
-            <div
-              className="flex flex-col items-center justify-center w-full h-full gap-2"
-              data-tauri-drag-region
-            >
-              <div className="flex items-center gap-2" data-tauri-drag-region>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm font-medium" data-tauri-drag-region>
-                  Processing
-                </span>
-              </div>
-              {lastSubmittedValue && (
-                <div
-                  className="text-xs text-white/70 truncate w-full text-center"
-                  data-tauri-drag-region
-                >
-                  {lastSubmittedValue}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Success State */}
-          {barState === "success" && (
-            <div
-              className="flex items-center justify-between w-full h-full animate-success-fade"
-              data-tauri-drag-region
-            >
-              <div
-                className="flex items-center gap-3 flex-1 min-w-0"
-                data-tauri-drag-region
-              >
-                {agentState === "Failed" ? (
-                  <AlertCircle className="h-4 w-4 text-red-300" />
-                ) : agentState === "Cancelled" ? (
-                  <X className="h-4 w-4 text-yellow-300" />
-                ) : agentState === "Offline" ? (
-                  <AlertCircle className="h-4 w-4 text-orange-300" />
-                ) : (
-                  <Check className="h-4 w-4 text-emerald-300" />
-                )}
-                <span
-                  className={cn(
-                    "text-sm font-medium truncate",
-                    agentState === "Failed"
-                      ? "text-red-100"
-                      : agentState === "Cancelled"
-                      ? "text-yellow-100"
-                      : agentState === "Offline"
-                      ? "text-orange-100"
-                      : "text-emerald-100"
-                  )}
-                  data-tauri-drag-region
-                >
-                  {getStatusText()}
-                </span>
-              </div>
-              <div
-                className={cn(
-                  "flex items-center justify-center h-6 w-6 rounded-full",
-                  agentState === "Failed"
-                    ? "bg-red-400"
-                    : agentState === "Cancelled"
-                    ? "bg-yellow-400"
-                    : agentState === "Offline"
-                    ? "bg-orange-400"
-                    : "bg-emerald-400"
-                )}
-                data-tauri-drag-region
-              >
-                {agentState === "Failed" ? (
-                  <X size={12} className="text-red-900" />
-                ) : agentState === "Cancelled" ? (
-                  <X size={12} className="text-yellow-900" />
-                ) : agentState === "Offline" ? (
-                  <AlertCircle size={12} className="text-orange-900" />
-                ) : (
-                  <Check size={12} className="text-emerald-900" />
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Error State */}
-          {barState === "error" && (
-            <div
-              className="flex items-center justify-between w-full h-full"
-              data-tauri-drag-region
-            >
-              <div
-                className="flex items-center gap-3 flex-1 min-w-0"
-                data-tauri-drag-region
-              >
-                <AlertCircle className="h-4 w-4 text-red-300" />
-                <span
-                  className="text-sm font-medium text-red-100 truncate"
-                  data-tauri-drag-region
-                >
-                  {currentError || "Error occurred"}
-                </span>
-              </div>
-              <div
-                className="flex items-center justify-center h-6 w-6 rounded-full bg-red-400"
-                data-tauri-drag-region
-              >
-                <X size={12} className="text-red-900" />
-              </div>
-            </div>
-          )}
-
-          {/* Shrinking State */}
-          {barState === "shrinking" && (
-            <div
-              className="opacity-0 w-full h-full transition-opacity duration-300"
-              data-tauri-drag-region
-            />
-          )}
+          <IntegratedVoiceAIBar
+            assistantState={assistantState}
+            inputValue={inputValue}
+            sampleResponses={sampleResponses}
+            onStateChange={handleVoiceAIBarStateChange}
+            onInputChange={handleInputChange}
+            onInputSubmit={handleSubmit}
+            onInputBlur={handleInputBlur}
+            inputRef={inputRef}
+            className="floating-bar-voice-ai relative"
+          />
         </div>
+
+        {/* Voice Status Indicator - Show when enabled and relevant */}
+        {config.showVoiceIndicator &&
+          (voiceMode !== "idle" || isDictationMode || isAgentWorking) && (
+            <div className="absolute top-2 right-2 z-60">
+              <VoiceStatusIndicator variant="compact" className="opacity-75" />
+            </div>
+          )}
+
+        {/* Always Listening Indicator */}
+        {isAlwaysListening && (
+          <div className="absolute bottom-1 right-1 z-60">
+            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+          </div>
+        )}
       </div>
+
+      <style>{`
+        .floating-bar-voice-ai {
+          /* Ensure proper drag region handling */
+        }
+        .floating-bar-voice-ai * {
+          cursor: move;
+        }
+        .floating-bar-voice-ai button {
+          cursor: pointer;
+        }
+        .floating-bar-voice-ai input {
+          cursor: text;
+        }
+
+        /* Custom animations for floating bar context */
+        @keyframes fade-in {
+          from {
+            opacity: 0;
+            transform: translateY(4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .animate-fade-in {
+          animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+        }
+      `}</style>
     </div>
   );
 }
