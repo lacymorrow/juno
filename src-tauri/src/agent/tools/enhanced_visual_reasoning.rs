@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, Mutex};
 use uuid::Uuid;
 
@@ -40,7 +40,7 @@ pub struct SceneUnderstanding {
     pub complexity_score: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SceneType {
     Desktop,
     WebPage,
@@ -65,7 +65,7 @@ pub struct UIElement {
     pub accessibility_info: AccessibilityInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ElementType {
     Button,
     TextField,
@@ -388,6 +388,34 @@ impl Default for VisualReasoningConfig {
     }
 }
 
+/// Cache entry with LRU tracking
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    result: VisualReasoningResult,
+    last_accessed: u64, // Unix timestamp in milliseconds
+}
+
+impl CacheEntry {
+    fn new(result: VisualReasoningResult) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        Self {
+            result,
+            last_accessed: timestamp,
+        }
+    }
+
+    fn touch(&mut self) {
+        self.last_accessed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+    }
+}
+
 /// Main Enhanced Visual Reasoning Engine
 pub struct VisualReasoningEngine {
     config: VisualReasoningConfig,
@@ -396,7 +424,7 @@ pub struct VisualReasoningEngine {
     temporal_modeler: Arc<TemporalModeler>,
     cross_modal_grounder: Arc<CrossModalGrounder>,
     hierarchical_analyzer: Arc<HierarchicalAnalyzer>,
-    reasoning_cache: Arc<RwLock<HashMap<String, VisualReasoningResult>>>,
+    reasoning_cache: Arc<RwLock<HashMap<String, CacheEntry>>>,
     state_history: Arc<RwLock<VecDeque<StateSnapshot>>>,
 }
 
@@ -494,13 +522,18 @@ impl VisualReasoningEngine {
         // Cache result for future reference
         {
             let mut cache = self.reasoning_cache.write().await;
-            cache.insert(analysis_id.clone(), result.clone());
+            cache.insert(analysis_id.clone(), CacheEntry::new(result.clone()));
 
-            // Maintain cache size
+            // Maintain cache size with proper LRU eviction
             if cache.len() > 100 {
-                let oldest_key = cache.keys().next().cloned();
-                if let Some(key) = oldest_key {
+                // Find the least recently used entry
+                let lru_key = cache.iter()
+                    .min_by_key(|(_, entry)| entry.last_accessed)
+                    .map(|(key, _)| key.clone());
+
+                if let Some(key) = lru_key {
                     cache.remove(&key);
+                    debug!("Cache evicted LRU entry: {}", key);
                 }
             }
         }
@@ -513,8 +546,8 @@ impl VisualReasoningEngine {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_millis() as u64,
-                elements: scene_understanding.primary_elements.clone(),
-                layout_hash: self.calculate_layout_hash(&scene_understanding),
+                elements: result.scene_understanding.primary_elements.clone(),
+                layout_hash: self.calculate_layout_hash(&result.scene_understanding),
                 interaction_context: context.interaction_context.clone(),
             });
 
@@ -553,6 +586,18 @@ impl VisualReasoningEngine {
         }
     }
 
+    /// Get cached reasoning result with LRU tracking
+    pub async fn get_cached_result(&self, analysis_id: &str) -> Option<VisualReasoningResult> {
+        let mut cache = self.reasoning_cache.write().await;
+
+        if let Some(entry) = cache.get_mut(analysis_id) {
+            entry.touch(); // Update last accessed time
+            Some(entry.result.clone())
+        } else {
+            None
+        }
+    }
+
     /// Get visual reasoning statistics
     pub async fn get_reasoning_statistics(&self) -> ReasoningStatistics {
         let cache = self.reasoning_cache.read().await;
@@ -560,7 +605,7 @@ impl VisualReasoningEngine {
 
         let average_processing_time = if !cache.is_empty() {
             cache.values()
-                .map(|result| result.processing_time_ms)
+                .map(|entry| entry.result.processing_time_ms)
                 .sum::<u64>() / cache.len() as u64
         } else {
             0
@@ -568,7 +613,7 @@ impl VisualReasoningEngine {
 
         let average_confidence = if !cache.is_empty() {
             cache.values()
-                .map(|result| result.reasoning_confidence)
+                .map(|entry| entry.result.reasoning_confidence)
                 .sum::<f32>() / cache.len() as f32
         } else {
             0.0
@@ -641,7 +686,8 @@ impl VisualReasoningEngine {
             element.bounds.y.to_bits().hash(&mut hasher);
             element.bounds.width.to_bits().hash(&mut hasher);
             element.bounds.height.to_bits().hash(&mut hasher);
-            element.element_type.hash(&mut hasher);
+            // Hash the element type as a string representation
+            format!("{:?}", element.element_type).hash(&mut hasher);
         }
 
         format!("{:x}", hasher.finish())
@@ -1019,8 +1065,4 @@ impl Default for HierarchicalStructure {
     }
 }
 
-impl std::hash::Hash for ElementType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
-    }
-}
+
