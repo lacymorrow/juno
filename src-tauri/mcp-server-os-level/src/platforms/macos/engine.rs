@@ -1,25 +1,27 @@
+use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
 use super::element::MacOSUIElement;
 use super::permissions::check_accessibility_permissions;
 use super::utils::{
-    element_contains_text,
-    get_running_application_pids, map_generic_role_to_macos_roles,
+    element_contains_text, get_running_application_pids, map_generic_role_to_macos_roles,
 };
 use super::wrappers::ThreadSafeAXUIElement;
-use super::display::{adjust_coordinates_for_display, get_displays_debug_info};
 use crate::platforms::tree_search::{
     ElementFinderWithWindows, ElementsCollectorWithWindows, TreeWalkerWithWindows,
 };
 use crate::platforms::AccessibilityEngine;
 use crate::{AutomationError, Selector, UIElement};
 use accessibility::{AXAttribute, AXUIElementAttributes, Error as AXError};
-use accessibility_sys::{kAXFocusedUIElementAttribute, AXUIElementRef, kAXFrontmostAttribute, AXUIElementGetTypeID, kAXErrorNoValue};
+use accessibility_sys::{
+    kAXErrorNoValue, kAXFocusedUIElementAttribute, kAXFrontmostAttribute, AXUIElementGetTypeID,
+    AXUIElementRef,
+};
 use anyhow::Result;
-use core_foundation::base::{TCFType, CFTypeID, CFGetTypeID, CFType};
+use core_foundation::base::{CFGetTypeID, CFType, CFTypeID, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_graphics::display::CGPoint;
-use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, CGEventFlags};
+use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use libc;
 use std::collections::BTreeMap;
@@ -29,8 +31,8 @@ use crate::platforms::macos::interaction::{self};
 // Import keycode mapping function
 use crate::platforms::macos::constants::key_name_to_keycode;
 
-use serde_json::{json, Value as JsonValue};
 use crate::element::ElementTreeNode;
+use serde_json::{json, Value as JsonValue};
 
 pub struct MacOSEngine {
     pub(crate) system_wide: ThreadSafeAXUIElement,
@@ -49,7 +51,11 @@ impl MacOSEngine {
         })
     }
 
-    pub fn new_with_auto_redirect(use_background_apps: bool, activate_app: bool, auto_open_settings: bool) -> Result<Self, AutomationError> {
+    pub fn new_with_auto_redirect(
+        use_background_apps: bool,
+        activate_app: bool,
+        auto_open_settings: bool,
+    ) -> Result<Self, AutomationError> {
         use super::permissions::check_accessibility_permissions_with_auto_redirect;
         check_accessibility_permissions_with_auto_redirect(false, auto_open_settings)?;
 
@@ -185,7 +191,7 @@ impl MacOSEngine {
                 }
 
                 Some(flags)
-            },
+            }
             None => None,
         };
 
@@ -230,7 +236,11 @@ impl MacOSEngine {
     }
 
     // Recursive helper to build the JSON representation of the UI tree
-    fn build_element_tree(&self, element: &UIElement, depth: usize) -> Result<JsonValue, AutomationError> {
+    fn build_element_tree(
+        &self,
+        element: &UIElement,
+        depth: usize,
+    ) -> Result<JsonValue, AutomationError> {
         const MAX_DEPTH: usize = 10; // Limit recursion depth
         if depth > MAX_DEPTH {
             return Ok(json!({ "error": "Max recursion depth reached" }));
@@ -245,7 +255,9 @@ impl MacOSEngine {
                     Ok(child_json) => children_json.push(child_json),
                     Err(e) => {
                         warn!("Error building child tree: {}", e);
-                        children_json.push(json!({ "error": format!("Failed to get child attributes: {}", e) }));
+                        children_json.push(
+                            json!({ "error": format!("Failed to get child attributes: {}", e) }),
+                        );
                     }
                 }
             }
@@ -290,7 +302,9 @@ fn check_ax_element_attributes_match(
                     .attribute(&title_attr)
                     .ok()
                     .and_then(|v| v.downcast_into::<CFString>())
-                    .map_or(false, |s| !s.to_string().is_empty() && s.to_string().to_lowercase() == value_lower);
+                    .map_or(false, |s| {
+                        !s.to_string().is_empty() && s.to_string().to_lowercase() == value_lower
+                    });
 
                 if title_match {
                     true
@@ -311,42 +325,40 @@ fn check_ax_element_attributes_match(
                     .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
             }
             "value" => {
-                 let value_attr = AXAttribute::new(&CFString::new("AXValue"));
-                 e.attribute(&value_attr)
-                     .ok()
-                     .map_or(false, |v| {
-                         if let Some(s) = v.clone().downcast_into::<CFString>() {
-                             s.to_string().to_lowercase() == value_lower
-                         } else if let Some(n) = v.clone().downcast_into::<CFNumber>() {
-                             // Handle numeric comparison if necessary, for now just stringify
-                             if let Some(int_val) = n.to_i64() {
-                                 int_val.to_string() == value_lower
-                             } else if let Some(float_val) = n.to_f64() {
-                                 float_val.to_string() == value_lower
-                             } else {
-                                 false
-                             }
-                         } else if let Some(b) = v.clone().downcast_into::<CFBoolean>(){
-                            (b == true.into()).to_string() == value_lower
-                         } else {
-                             false
-                         }
-                     })
-             }
+                let value_attr = AXAttribute::new(&CFString::new("AXValue"));
+                e.attribute(&value_attr).ok().map_or(false, |v| {
+                    if let Some(s) = v.clone().downcast_into::<CFString>() {
+                        s.to_string().to_lowercase() == value_lower
+                    } else if let Some(n) = v.clone().downcast_into::<CFNumber>() {
+                        // Handle numeric comparison if necessary, for now just stringify
+                        if let Some(int_val) = n.to_i64() {
+                            int_val.to_string() == value_lower
+                        } else if let Some(float_val) = n.to_f64() {
+                            float_val.to_string() == value_lower
+                        } else {
+                            false
+                        }
+                    } else if let Some(b) = v.clone().downcast_into::<CFBoolean>() {
+                        (b == true.into()).to_string() == value_lower
+                    } else {
+                        false
+                    }
+                })
+            }
             "id" => {
-                 // Check AXIdentifier first
-                 let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
-                 e.attribute(&axid_attr)
-                     .ok()
-                     .and_then(|v| v.downcast_into::<CFString>())
-                     .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
+                // Check AXIdentifier first
+                let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
+                e.attribute(&axid_attr)
+                    .ok()
+                    .and_then(|v| v.downcast_into::<CFString>())
+                    .map_or(false, |s| s.to_string().to_lowercase() == value_lower)
                 // Note: We don't check the generated ID here for efficiency
             }
-             // Add more attribute checks here if needed (e.g., AXEnabled)
-             _ => {
-                 warn!("Unsupported attribute key in selector: {}", key);
-                 false // Treat unsupported keys as non-matching for now
-             }
+            // Add more attribute checks here if needed (e.g., AXEnabled)
+            _ => {
+                warn!("Unsupported attribute key in selector: {}", key);
+                false // Treat unsupported keys as non-matching for now
+            }
         };
 
         if !match_result {
@@ -363,7 +375,7 @@ fn post_mouse_event(
     event_type: CGEventType,
     point: CGPoint,
     button: CGMouseButton,
-    click_count: Option<i64>, // For clicks/double/triple
+    click_count: Option<i64>,        // For clicks/double/triple
     modifiers: Option<CGEventFlags>, // For modifier keys during click
 ) -> Result<(), AutomationError> {
     // Multi-monitor support: adjust coordinates for the appropriate display
@@ -372,8 +384,10 @@ fn post_mouse_event(
 
     // Log display information for debugging multi-monitor issues
     if point.x != adjusted_x || point.y != adjusted_y {
-        debug!("Multi-monitor coordinate adjustment: ({}, {}) → ({}, {})",
-            point.x, point.y, adjusted_x, adjusted_y);
+        debug!(
+            "Multi-monitor coordinate adjustment: ({}, {}) → ({}, {})",
+            point.x, point.y, adjusted_x, adjusted_y
+        );
         trace!("Display info: {}", get_displays_debug_info());
     }
 
@@ -381,8 +395,10 @@ fn post_mouse_event(
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
 
     // Use adjusted point for multi-monitor support
-    let event = CGEvent::new_mouse_event(source, event_type, adjusted_point, button)
-        .map_err(|e| AutomationError::PlatformError(format!("Failed to create mouse event: {:?}", e)))?;
+    let event =
+        CGEvent::new_mouse_event(source, event_type, adjusted_point, button).map_err(|e| {
+            AutomationError::PlatformError(format!("Failed to create mouse event: {:?}", e))
+        })?;
 
     if let Some(count) = click_count {
         // Use the correct constant kCGMouseEventClickState - try fully qualified path
@@ -395,7 +411,6 @@ fn post_mouse_event(
     if let Some(flags) = modifiers {
         event.set_flags(flags);
     }
-
 
     event.post(CGEventTapLocation::HID);
     // Add a small delay after posting, can improve reliability sometimes
@@ -436,8 +451,9 @@ fn post_keyboard_event(
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
         .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
 
-    let event = CGEvent::new_keyboard_event(source, key_code, is_down)
-        .map_err(|e| AutomationError::PlatformError(format!("Failed to create keyboard event: {:?}", e)))?;
+    let event = CGEvent::new_keyboard_event(source, key_code, is_down).map_err(|e| {
+        AutomationError::PlatformError(format!("Failed to create keyboard event: {:?}", e))
+    })?;
 
     // Set modifier flags AFTER creating the event
     event.set_flags(flags);
@@ -471,7 +487,9 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {
-        tracing::info!("Entering MacOSEngine::get_focused_element (using kAXFrontmostAttribute strategy)");
+        tracing::info!(
+            "Entering MacOSEngine::get_focused_element (using kAXFrontmostAttribute strategy)"
+        );
 
         // 1. Find the frontmost application by iterating (including accessory apps)
         let pids = get_running_application_pids(true)?; // Include accessory apps initially
@@ -491,11 +509,13 @@ impl AccessibilityEngine for MacOSEngine {
                     // Downcast the CFType result to CFBoolean
                     if let Some(is_frontmost) = frontmost_val.downcast_into::<CFBoolean>() {
                         // Compare CFBoolean to true
-                        if is_frontmost == true.into() { // Correct comparison
+                        if is_frontmost == true.into() {
+                            // Correct comparison
                             debug!("Found frontmost application with PID: {}", pid);
                             // Double check it's not a background-only process before accepting
-                             if let Ok(role) = app_element.role(){
-                                if role.to_string() == "AXApplication" { // Basic sanity check
+                            if let Ok(role) = app_element.role() {
+                                if role.to_string() == "AXApplication" {
+                                    // Basic sanity check
                                     focused_app_element = Some(app_element);
                                     break; // Found the focused app
                                 }
@@ -507,7 +527,11 @@ impl AccessibilityEngine for MacOSEngine {
                 }
                 Err(e) => {
                     // Log error but continue checking other apps
-                    trace!("Error checking kAXFrontmostAttribute for PID {}: {:?}", pid, e);
+                    trace!(
+                        "Error checking kAXFrontmostAttribute for PID {}: {:?}",
+                        pid,
+                        e
+                    );
                 }
             }
         }
@@ -526,8 +550,11 @@ impl AccessibilityEngine for MacOSEngine {
         // Log details about the focused application (optional but helpful)
         // ... (logging code can remain the same, using focused_app_element)
         match focused_app_element.title() {
-             Ok(title) => debug!("Focused Application Title (found via frontmost): {}", title.to_string()),
-             Err(e) => debug!("Error getting focused app title: {:?}", e),
+            Ok(title) => debug!(
+                "Focused Application Title (found via frontmost): {}",
+                title.to_string()
+            ),
+            Err(e) => debug!("Error getting focused app title: {:?}", e),
         }
 
         // 2. Get the focused UI element AS CFType *from the identified frontmost application*
@@ -547,7 +574,10 @@ impl AccessibilityEngine for MacOSEngine {
                 // --- Safety Check: Verify CFTypeID before casting ---
                 let expected_type_id: CFTypeID = unsafe { AXUIElementGetTypeID() };
                 let actual_type_id: CFTypeID = unsafe { CFGetTypeID(focused_element_ref) };
-                debug!("Focused Element CFType Check: Expected TypeID: {}, Actual TypeID: {}", expected_type_id, actual_type_id);
+                debug!(
+                    "Focused Element CFType Check: Expected TypeID: {}, Actual TypeID: {}",
+                    expected_type_id, actual_type_id
+                );
 
                 if actual_type_id != expected_type_id {
                     warn!(
@@ -567,7 +597,8 @@ impl AccessibilityEngine for MacOSEngine {
                     let element_ref = focused_element_ref as *mut libc::c_void as AXUIElementRef;
                     // No null check needed here as we checked focused_element_ref above
                     debug!("Cast successful. Wrapping AXUIElementRef...");
-                    let wrapped_element = accessibility::AXUIElement::wrap_under_create_rule(element_ref);
+                    let wrapped_element =
+                        accessibility::AXUIElement::wrap_under_create_rule(element_ref);
                     debug!("Wrapping successful.");
                     wrapped_element
                 };
@@ -628,7 +659,7 @@ impl AccessibilityEngine for MacOSEngine {
                 debug!("Pre-fetched Value: {:?}", fetched_value);
                 // --- End Fetching Core Attributes Early ---
 
-                 if !fetched_role.is_empty()
+                if !fetched_role.is_empty()
                     || fetched_label.is_some()
                     || fetched_description.is_some()
                 {
@@ -642,7 +673,13 @@ impl AccessibilityEngine for MacOSEngine {
                     ))
                 } else {
                     debug!("Specific focused element seems invalid, returning frontmost app element instead.");
-                    Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None))
+                    Ok(self.wrap_element(
+                        ThreadSafeAXUIElement::new(focused_app_element),
+                        None,
+                        None,
+                        None,
+                        None,
+                    ))
                 }
             }
             Err(e) => {
@@ -653,15 +690,21 @@ impl AccessibilityEngine for MacOSEngine {
                             "Frontmost application has no specific focused UI element (kAXErrorNoValue). Returning the application element itself."
                         );
                         // Return the application element we found earlier
-                        return Ok(self.wrap_element(ThreadSafeAXUIElement::new(focused_app_element), None, None, None, None));
+                        return Ok(self.wrap_element(
+                            ThreadSafeAXUIElement::new(focused_app_element),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ));
                     }
                 }
                 // For any other error, report it as before
-                 warn!("Failed to get kAXFocusedUIElementAttribute (as CFType) from frontmost application: {:?}", e);
-                 Err(AutomationError::PlatformError(format!(
+                warn!("Failed to get kAXFocusedUIElementAttribute (as CFType) from frontmost application: {:?}", e);
+                Err(AutomationError::PlatformError(format!(
                     "Failed to get focused UI element from frontmost application: {:?}",
                     e
-                 )))
+                )))
             }
         }
     }
@@ -736,7 +779,8 @@ impl AccessibilityEngine for MacOSEngine {
 
         // Regular element finding logic
         match selector {
-            Selector::Role { role, name } => { // Handle optional name here too
+            Selector::Role { role, name } => {
+                // Handle optional name here too
                 // Get all possible macOS roles for this generic role
                 let macos_roles = map_generic_role_to_macos_roles(role);
                 let target_name = name.clone(); // Clone name for use in closure
@@ -769,7 +813,7 @@ impl AccessibilityEngine for MacOSEngine {
                         return Err(AutomationError::ElementNotFound(format!(
                             "Element matching selector '{:?}' not found", // Improved error message
                             selector
-                        )))
+                        )));
                     }
                 };
                 Ok(self.wrap_element(
@@ -788,7 +832,7 @@ impl AccessibilityEngine for MacOSEngine {
                         // Check AXIdentifier first for a more direct match
                         let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
                         if let Ok(axid_val) = e.attribute(&axid_attr) {
-                             if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
+                            if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
                                 if cf_string.to_string() == id_owned {
                                     return true;
                                 }
@@ -816,7 +860,7 @@ impl AccessibilityEngine for MacOSEngine {
                         return Err(AutomationError::ElementNotFound(format!(
                             "Element with ID (AXIdentifier) '{}' not found", // Clarify ID type
                             id
-                        )))
+                        )));
                     }
                 };
                 Ok(self.wrap_element(
@@ -827,7 +871,7 @@ impl AccessibilityEngine for MacOSEngine {
                     None,
                 ))
             }
-             Selector::Name(name) => {
+            Selector::Name(name) => {
                 let name_lower = name.to_lowercase(); // Case-insensitive comparison
                 let collector = ElementFinderWithWindows::new(
                     start_element, // Pass start_element correctly
@@ -841,8 +885,8 @@ impl AccessibilityEngine for MacOSEngine {
                         }
                         // Fallback to AXLabel
                         let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
-                         if let Ok(label_val) = e.attribute(&label_attr) {
-                             if let Some(cf_string) = label_val.downcast_into::<CFString>() {
+                        if let Ok(label_val) = e.attribute(&label_attr) {
+                            if let Some(cf_string) = label_val.downcast_into::<CFString>() {
                                 if cf_string.to_string().to_lowercase() == name_lower {
                                     return true;
                                 }
@@ -856,7 +900,7 @@ impl AccessibilityEngine for MacOSEngine {
 
                 walker.walk(start_element, &collector);
 
-                 let ax_ui_element = match collector.find() {
+                let ax_ui_element = match collector.find() {
                     Ok(ax_ui_element) => ax_ui_element,
                     Err(_) => {
                         return Err(AutomationError::ElementNotFound(format!(
@@ -936,7 +980,7 @@ impl AccessibilityEngine for MacOSEngine {
                         )))
                     }
                 };
-                 Ok(self.wrap_element(
+                Ok(self.wrap_element(
                     ThreadSafeAXUIElement::new(ax_ui_element),
                     None,
                     None,
@@ -968,9 +1012,12 @@ impl AccessibilityEngine for MacOSEngine {
                         )))
                     }
                 };
-                 Ok(self.wrap_element(
+                Ok(self.wrap_element(
                     ThreadSafeAXUIElement::new(ax_ui_element),
-                    None, None, None, None
+                    None,
+                    None,
+                    None,
+                    None,
                 ))
             }
             Selector::Path(path) => {
@@ -986,7 +1033,9 @@ impl AccessibilityEngine for MacOSEngine {
                 let mut current_root_ref = root; // Keep track of the current root for find_element
 
                 for segment in segments {
-                    if segment.is_empty() { continue; }
+                    if segment.is_empty() {
+                        continue;
+                    }
                     // Very basic parsing: If it contains '[', assume attribute for now (unsupported)
                     // Otherwise, treat as Role or Name
                     if segment.contains('[') || segment.contains('@') {
@@ -1007,14 +1056,19 @@ impl AccessibilityEngine for MacOSEngine {
                 }
 
                 // Return the final element found, or error if the chain broke
-                current_element_opt.ok_or_else(|| AutomationError::ElementNotFound(format!(
-                    "Path selector '{}' did not resolve to an element.", path
-                )))
+                current_element_opt.ok_or_else(|| {
+                    AutomationError::ElementNotFound(format!(
+                        "Path selector '{}' did not resolve to an element.",
+                        path
+                    ))
+                })
             }
             Selector::Chain(selectors) => {
                 debug!("Processing Chain selector with {} parts", selectors.len());
                 if selectors.is_empty() {
-                    return Err(AutomationError::InvalidArgument("Chain selector cannot be empty".to_string()));
+                    return Err(AutomationError::InvalidArgument(
+                        "Chain selector cannot be empty".to_string(),
+                    ));
                 }
 
                 let mut current_element_opt = root.cloned();
@@ -1030,9 +1084,12 @@ impl AccessibilityEngine for MacOSEngine {
                 }
 
                 // Return the final element found
-                current_element_opt.ok_or_else(|| AutomationError::ElementNotFound(
-                    "Chain selector did not resolve to an element (intermediate step failed)".to_string()
-                ))
+                current_element_opt.ok_or_else(|| {
+                    AutomationError::ElementNotFound(
+                        "Chain selector did not resolve to an element (intermediate step failed)"
+                            .to_string(),
+                    )
+                })
             }
             Selector::Filter(_filter_id) => {
                 // Filter selector requires a predicate registry to resolve filter IDs
@@ -1050,35 +1107,35 @@ impl AccessibilityEngine for MacOSEngine {
         root: Option<&UIElement>,
     ) -> Result<Vec<UIElement>, AutomationError> {
         // Get the start element from the provided root or fall back to system_wide
-         let start_element = root
+        let start_element = root
             .map(|el| {
                 if let Some(macos_el) = el.as_any().downcast_ref::<MacOSUIElement>() {
                     &macos_el.element.0
                 } else {
-                     panic!("Root element is not a macOS element") // Indicate programming error
+                    panic!("Root element is not a macOS element") // Indicate programming error
                 }
             })
             .unwrap_or(&self.system_wide.0);
 
-
         match selector {
-            Selector::Role { role, name } => { // Handle optional name
+            Selector::Role { role, name } => {
+                // Handle optional name
                 let macos_roles = map_generic_role_to_macos_roles(role);
-                 let target_name = name.clone(); // Clone name for use in closure
+                let target_name = name.clone(); // Clone name for use in closure
 
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
                     let element_role = e.role().unwrap_or(CFString::new("")).to_string();
-                     if !macos_roles.contains(&element_role) {
-                         return false;
-                     }
-                     // If name is specified, check it
-                     if let Some(ref required_name) = target_name {
-                         let element_title = e.title().unwrap_or(CFString::new("")).to_string();
-                         if element_title != *required_name {
-                             return false;
-                         }
-                     }
-                     true
+                    if !macos_roles.contains(&element_role) {
+                        return false;
+                    }
+                    // If name is specified, check it
+                    if let Some(ref required_name) = target_name {
+                        let element_title = e.title().unwrap_or(CFString::new("")).to_string();
+                        if element_title != *required_name {
+                            return false;
+                        }
+                    }
+                    true
                 });
 
                 let ax_ui_elements = collector.find_all();
@@ -1093,46 +1150,48 @@ impl AccessibilityEngine for MacOSEngine {
 
                 Ok(ui_elements)
             }
-             Selector::Id(id) => {
+            Selector::Id(id) => {
                 let id_owned = id.clone();
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
                     // Check AXIdentifier first
-                     let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
-                     if let Ok(axid_val) = e.attribute(&axid_attr) {
-                         if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
-                             if cf_string.to_string() == id_owned {
-                                 return true;
-                             }
-                         }
-                     }
-                     // Fallback: generated ID (commented out due to inefficiency)
-                     /*
+                    let axid_attr = AXAttribute::new(&CFString::new("AXIdentifier"));
+                    if let Ok(axid_val) = e.attribute(&axid_attr) {
+                        if let Some(cf_string) = axid_val.downcast_into::<CFString>() {
+                            if cf_string.to_string() == id_owned {
+                                return true;
+                            }
+                        }
+                    }
+                    // Fallback: generated ID (commented out due to inefficiency)
+                    /*
                     let wrapped = self.wrap_element(ThreadSafeAXUIElement::new(e.clone()), None, None, None, None);
                     wrapped.id().map_or(false, |gen_id| gen_id == id_owned)
                     */
-                     false
+                    false
                 });
                 let ax_ui_elements = collector.find_all();
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
                 Ok(ui_elements)
             }
             Selector::Name(name) => {
                 let name_lower = name.to_lowercase();
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
-                     // Check AXTitle first
-                     let title_match = e
-                         .title()
-                         .map_or(false, |t| t.to_string().to_lowercase() == name_lower);
-                     if title_match {
-                         return true;
-                     }
-                     // Fallback to AXLabel
+                    // Check AXTitle first
+                    let title_match = e
+                        .title()
+                        .map_or(false, |t| t.to_string().to_lowercase() == name_lower);
+                    if title_match {
+                        return true;
+                    }
+                    // Fallback to AXLabel
                     let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
-                     if let Ok(label_val) = e.attribute(&label_attr) {
-                         if let Some(cf_string) = label_val.downcast_into::<CFString>() {
+                    if let Ok(label_val) = e.attribute(&label_attr) {
+                        if let Some(cf_string) = label_val.downcast_into::<CFString>() {
                             if cf_string.to_string().to_lowercase() == name_lower {
                                 return true;
                             }
@@ -1140,10 +1199,12 @@ impl AccessibilityEngine for MacOSEngine {
                     }
                     false
                 });
-                 let ax_ui_elements = collector.find_all();
+                let ax_ui_elements = collector.find_all();
                 let ui_elements = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
                 Ok(ui_elements)
             }
@@ -1164,7 +1225,9 @@ impl AccessibilityEngine for MacOSEngine {
                 let ax_ui_elements = collector.find_all();
                 let ui_elements: Vec<UIElement> = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
                 Ok(ui_elements)
             }
@@ -1173,14 +1236,16 @@ impl AccessibilityEngine for MacOSEngine {
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
                     element_contains_text(e, &text_lower) // Use lower case text
                 });
-                 let ax_ui_elements = collector.find_all();
+                let ax_ui_elements = collector.find_all();
                 let ui_elements: Vec<UIElement> = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
                 Ok(ui_elements)
             }
-             Selector::Attributes(attrs) => {
+            Selector::Attributes(attrs) => {
                 let attrs_clone = attrs.clone();
                 // Use ElementsCollectorWithWindows which handles traversal
                 let collector = ElementsCollectorWithWindows::new(start_element, move |e| {
@@ -1188,15 +1253,17 @@ impl AccessibilityEngine for MacOSEngine {
                     check_ax_element_attributes_match(e, &attrs_clone)
                 });
 
-                 let ax_ui_elements = collector.find_all(); // Get all matching AXUIElements
+                let ax_ui_elements = collector.find_all(); // Get all matching AXUIElements
 
-                 // Convert AXUIElements to UIElements
+                // Convert AXUIElements to UIElements
                 let ui_elements: Vec<UIElement> = ax_ui_elements
                     .into_iter()
-                    .map(|e| self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None))
+                    .map(|e| {
+                        self.wrap_element(ThreadSafeAXUIElement::new(e), None, None, None, None)
+                    })
                     .collect();
 
-                 Ok(ui_elements)
+                Ok(ui_elements)
             }
             Selector::Path(path) => {
                 // For find_elements, we can use a simpler approach than find_element
@@ -1220,7 +1287,10 @@ impl AccessibilityEngine for MacOSEngine {
             }
             Selector::Chain(selectors) => {
                 // For find_elements with Chain, return the first element found by chain selector
-                debug!("Processing Chain selector for find_elements with {} parts", selectors.len());
+                debug!(
+                    "Processing Chain selector for find_elements with {} parts",
+                    selectors.len()
+                );
                 match self.find_element(selector, root) {
                     Ok(element) => Ok(vec![element]),
                     Err(_) => Ok(vec![]), // Return empty instead of error for find_elements
@@ -1429,7 +1499,7 @@ impl AccessibilityEngine for MacOSEngine {
 
         let key_code = match key_name_to_keycode(actual_key_name) {
             Some(code) => code,
-            None => interaction::get_key_code(actual_key_name)?
+            None => interaction::get_key_code(actual_key_name)?,
         };
 
         interaction::hold_key(key_code, flags, duration_ms)
@@ -1464,15 +1534,20 @@ impl AccessibilityEngine for MacOSEngine {
 
         let key_code = match key_name_to_keycode(actual_key_name) {
             Some(code) => code,
-            None => interaction::get_key_code(actual_key_name)?
+            None => interaction::get_key_code(actual_key_name)?,
         };
 
         let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
-            AutomationError::PlatformError("Failed to create event source for key release".to_string())
+            AutomationError::PlatformError(
+                "Failed to create event source for key release".to_string(),
+            )
         })?;
 
         let key_up = CGEvent::new_keyboard_event(source, key_code, false).map_err(|_| {
-            AutomationError::PlatformError(format!("Failed to create key up event for {}", actual_key_name))
+            AutomationError::PlatformError(format!(
+                "Failed to create key up event for {}",
+                actual_key_name
+            ))
         })?;
 
         if flags != CGEventFlags::empty() {
@@ -1499,7 +1574,10 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn press_key(&self, key_name: &str, modifier: Option<&str>) -> Result<(), AutomationError> {
-        debug!("Pressing key: '{}' with modifier: {:?} using CGEvent", key_name, modifier);
+        debug!(
+            "Pressing key: '{}' with modifier: {:?} using CGEvent",
+            key_name, modifier
+        );
 
         // Check if key_name contains a modifier already (like "ctrl+n" or "cmd+shift+a")
         if key_name.contains('+') {
@@ -1512,12 +1590,13 @@ impl AccessibilityEngine for MacOSEngine {
         // First try key_name_to_keycode, then fall back to interaction::get_key_code
         let key_code = match key_name_to_keycode(key_name) {
             Some(code) => code,
-            None => interaction::get_key_code(key_name)? // Fall back to interaction::get_key_code
+            None => interaction::get_key_code(key_name)?, // Fall back to interaction::get_key_code
         };
 
         let modifier_flags = if let Some(mod_name) = modifier {
-            super::constants::modifier_name_to_flags(mod_name)
-                .ok_or_else(|| AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name)))?
+            super::constants::modifier_name_to_flags(mod_name).ok_or_else(|| {
+                AutomationError::InvalidArgument(format!("Invalid modifier name: {}", mod_name))
+            })?
         } else {
             CGEventFlags::empty()
         };
@@ -1527,10 +1606,15 @@ impl AccessibilityEngine for MacOSEngine {
 
     /// Get the current mouse cursor position.
     fn cursor_position(&self) -> Result<(f64, f64), AutomationError> {
-        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .map_err(|_| AutomationError::PlatformError("Failed to create event source".to_string()))?;
+        let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState).map_err(|_| {
+            AutomationError::PlatformError("Failed to create event source".to_string())
+        })?;
         let event = CGEvent::new(source) // Create a null event just to get location
-             .map_err(|_| AutomationError::PlatformError("Failed to create null event for location".to_string()))?;
+            .map_err(|_| {
+                AutomationError::PlatformError(
+                    "Failed to create null event for location".to_string(),
+                )
+            })?;
         let point = event.location();
         Ok((point.x, point.y))
     }
@@ -1538,7 +1622,13 @@ impl AccessibilityEngine for MacOSEngine {
     fn mouse_move(&self, x: f64, y: f64) -> Result<(), AutomationError> {
         debug!("Moving mouse to ({}, {}) using CGEvent", x, y);
         let point = CGPoint::new(x, y);
-        post_mouse_event(CGEventType::MouseMoved, point, CGMouseButton::Left, None, None) // Button doesn't matter for move
+        post_mouse_event(
+            CGEventType::MouseMoved,
+            point,
+            CGMouseButton::Left,
+            None,
+            None,
+        ) // Button doesn't matter for move
     }
 
     fn left_mouse_down(&self, x: f64, y: f64) -> Result<(), AutomationError> {
@@ -1554,52 +1644,151 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn left_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        debug!("Engine calling left_click at ({}, {}) with modifiers: {:?}", x, y, modifiers);
+        debug!(
+            "Engine calling left_click at ({}, {}) with modifiers: {:?}",
+            x, y, modifiers
+        );
 
         let parsed_modifiers = modifiers.map(|m| parse_modifiers(Some(m)));
         interaction::left_click(x, y, parsed_modifiers)
     }
 
     fn right_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        debug!("Right click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        debug!(
+            "Right click at ({}, {}) with modifiers {:?} using CGEvent",
+            x, y, modifiers
+        );
         let point = CGPoint::new(x, y);
-         let flags = parse_modifiers(modifiers);
+        let flags = parse_modifiers(modifiers);
         // Simulate down then up
-        post_mouse_event(CGEventType::RightMouseDown, point, CGMouseButton::Right, Some(1), Some(flags))?;
-        post_mouse_event(CGEventType::RightMouseUp, point, CGMouseButton::Right, Some(1), Some(flags))
+        post_mouse_event(
+            CGEventType::RightMouseDown,
+            point,
+            CGMouseButton::Right,
+            Some(1),
+            Some(flags),
+        )?;
+        post_mouse_event(
+            CGEventType::RightMouseUp,
+            point,
+            CGMouseButton::Right,
+            Some(1),
+            Some(flags),
+        )
     }
 
     fn middle_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-        debug!("Middle click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        debug!(
+            "Middle click at ({}, {}) with modifiers {:?} using CGEvent",
+            x, y, modifiers
+        );
         let point = CGPoint::new(x, y);
-         let flags = parse_modifiers(modifiers);
+        let flags = parse_modifiers(modifiers);
         // Simulate down then up
-        post_mouse_event(CGEventType::OtherMouseDown, point, CGMouseButton::Center, Some(1), Some(flags))?;
-        post_mouse_event(CGEventType::OtherMouseUp, point, CGMouseButton::Center, Some(1), Some(flags))
+        post_mouse_event(
+            CGEventType::OtherMouseDown,
+            point,
+            CGMouseButton::Center,
+            Some(1),
+            Some(flags),
+        )?;
+        post_mouse_event(
+            CGEventType::OtherMouseUp,
+            point,
+            CGMouseButton::Center,
+            Some(1),
+            Some(flags),
+        )
     }
 
     fn double_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-         debug!("Double click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        debug!(
+            "Double click at ({}, {}) with modifiers {:?} using CGEvent",
+            x, y, modifiers
+        );
         let point = CGPoint::new(x, y);
-         let flags = parse_modifiers(modifiers);
+        let flags = parse_modifiers(modifiers);
         // Simulate two clicks (down, up, down, up) with click count 2
-        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(1), Some(flags))?; // Click 1 down
-        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(1), Some(flags))?;   // Click 1 up
-        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(2), Some(flags))?; // Click 2 down (state=2)
-        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(2), Some(flags))     // Click 2 up (state=2)
+        post_mouse_event(
+            CGEventType::LeftMouseDown,
+            point,
+            CGMouseButton::Left,
+            Some(1),
+            Some(flags),
+        )?; // Click 1 down
+        post_mouse_event(
+            CGEventType::LeftMouseUp,
+            point,
+            CGMouseButton::Left,
+            Some(1),
+            Some(flags),
+        )?; // Click 1 up
+        post_mouse_event(
+            CGEventType::LeftMouseDown,
+            point,
+            CGMouseButton::Left,
+            Some(2),
+            Some(flags),
+        )?; // Click 2 down (state=2)
+        post_mouse_event(
+            CGEventType::LeftMouseUp,
+            point,
+            CGMouseButton::Left,
+            Some(2),
+            Some(flags),
+        ) // Click 2 up (state=2)
     }
 
     fn triple_click(&self, x: f64, y: f64, modifiers: Option<&str>) -> Result<(), AutomationError> {
-         debug!("Triple click at ({}, {}) with modifiers {:?} using CGEvent", x, y, modifiers);
+        debug!(
+            "Triple click at ({}, {}) with modifiers {:?} using CGEvent",
+            x, y, modifiers
+        );
         let point = CGPoint::new(x, y);
         let flags = parse_modifiers(modifiers);
         // Simulate three clicks
-        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(1), Some(flags))?;
-        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(1), Some(flags))?;
-        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(2), Some(flags))?;
-        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(2), Some(flags))?;
-        post_mouse_event(CGEventType::LeftMouseDown, point, CGMouseButton::Left, Some(3), Some(flags))?;
-        post_mouse_event(CGEventType::LeftMouseUp, point, CGMouseButton::Left, Some(3), Some(flags))
+        post_mouse_event(
+            CGEventType::LeftMouseDown,
+            point,
+            CGMouseButton::Left,
+            Some(1),
+            Some(flags),
+        )?;
+        post_mouse_event(
+            CGEventType::LeftMouseUp,
+            point,
+            CGMouseButton::Left,
+            Some(1),
+            Some(flags),
+        )?;
+        post_mouse_event(
+            CGEventType::LeftMouseDown,
+            point,
+            CGMouseButton::Left,
+            Some(2),
+            Some(flags),
+        )?;
+        post_mouse_event(
+            CGEventType::LeftMouseUp,
+            point,
+            CGMouseButton::Left,
+            Some(2),
+            Some(flags),
+        )?;
+        post_mouse_event(
+            CGEventType::LeftMouseDown,
+            point,
+            CGMouseButton::Left,
+            Some(3),
+            Some(flags),
+        )?;
+        post_mouse_event(
+            CGEventType::LeftMouseUp,
+            point,
+            CGMouseButton::Left,
+            Some(3),
+            Some(flags),
+        )
     }
 
     fn left_click_drag(
@@ -1609,20 +1798,41 @@ impl AccessibilityEngine for MacOSEngine {
         end_x: f64,
         end_y: f64,
     ) -> Result<(), AutomationError> {
-         debug!("Left click drag from ({}, {}) to ({}, {}) using CGEvent", start_x, start_y, end_x, end_y);
+        debug!(
+            "Left click drag from ({}, {}) to ({}, {}) using CGEvent",
+            start_x, start_y, end_x, end_y
+        );
         let start_point = CGPoint::new(start_x, start_y);
         let end_point = CGPoint::new(end_x, end_y);
 
         // Mouse down at start
-        post_mouse_event(CGEventType::LeftMouseDown, start_point, CGMouseButton::Left, Some(1), None)?;
+        post_mouse_event(
+            CGEventType::LeftMouseDown,
+            start_point,
+            CGMouseButton::Left,
+            Some(1),
+            None,
+        )?;
         // Small delay before dragging
         std::thread::sleep(std::time::Duration::from_millis(50));
         // Drag to end
-        post_mouse_event(CGEventType::LeftMouseDragged, end_point, CGMouseButton::Left, None, None)?; // Button indicates drag type
-        // Small delay at end
+        post_mouse_event(
+            CGEventType::LeftMouseDragged,
+            end_point,
+            CGMouseButton::Left,
+            None,
+            None,
+        )?; // Button indicates drag type
+            // Small delay at end
         std::thread::sleep(std::time::Duration::from_millis(50));
         // Mouse up at end
-        post_mouse_event(CGEventType::LeftMouseUp, end_point, CGMouseButton::Left, Some(1), None)
+        post_mouse_event(
+            CGEventType::LeftMouseUp,
+            end_point,
+            CGMouseButton::Left,
+            Some(1),
+            None,
+        )
     }
 
     fn get_window_title(&self) -> Result<String, AutomationError> {
@@ -1681,7 +1891,9 @@ impl AccessibilityEngine for MacOSEngine {
         let apps = self.get_applications()?;
 
         for app_ui_element in apps {
-            if let Some(macos_app_element) = app_ui_element.as_any().downcast_ref::<MacOSUIElement>() {
+            if let Some(macos_app_element) =
+                app_ui_element.as_any().downcast_ref::<MacOSUIElement>()
+            {
                 let ax_app_element = &macos_app_element.element.0;
 
                 match ax_app_element.windows() {
@@ -1736,7 +1948,10 @@ impl AccessibilityEngine for MacOSEngine {
             // 1. Verify it's a window
             let role = ax_window.role().map_or(String::new(), |r| r.to_string());
             if role != "AXWindow" {
-                warn!("Focused element is not a window (role: {}), cannot close.", role);
+                warn!(
+                    "Focused element is not a window (role: {}), cannot close.",
+                    role
+                );
                 return Err(AutomationError::UnsupportedOperation(
                     "Cannot close a non-window element".to_string(),
                 ));
@@ -1747,7 +1962,8 @@ impl AccessibilityEngine for MacOSEngine {
             let close_button_attr = AXAttribute::new(&CFString::new("AXCloseButton"));
             match ax_window.attribute(&close_button_attr) {
                 Ok(button_val) => {
-                    if let Some(close_button) = button_val.downcast::<accessibility::AXUIElement>() {
+                    if let Some(close_button) = button_val.downcast::<accessibility::AXUIElement>()
+                    {
                         // 3. Perform the press action
                         let press_action = CFString::new("AXPress"); // kAXPressAction
                         match close_button.perform_action(&press_action) {
@@ -1906,7 +2122,10 @@ impl AccessibilityEngine for MacOSEngine {
         // Implementation Note: Get focused element, check if window,
         // set AXSize attribute.
 
-        debug!("Attempting to resize the focused window to width={}, height={}", width, height);
+        debug!(
+            "Attempting to resize the focused window to width={}, height={}",
+            width, height
+        );
 
         let focused_element = self.get_focused_element()?;
 
@@ -1933,7 +2152,8 @@ impl AccessibilityEngine for MacOSEngine {
             unsafe {
                 // Use AXValueCreate from ffi or accessibility_sys if available
                 // Assuming K_AXVALUE_CGSIZE_TYPE is defined similarly to K_AXVALUE_CGPOINT_TYPE
-                let value_ref = super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGSIZE_TYPE, size_ptr);
+                let value_ref =
+                    super::ffi::AXValueCreate(super::constants::K_AXVALUE_CGSIZE_TYPE, size_ptr);
                 if value_ref.is_null() {
                     warn!("Failed to create AXValueRef for CGSize");
                     return Err(AutomationError::PlatformError(
@@ -1957,9 +2177,8 @@ impl AccessibilityEngine for MacOSEngine {
                             "Failed to set the size attribute: {:?}",
                             e
                         )))
-                    }
-                    // Ensure the created CFTypeRef (AXValueRef) is released if wrap_under_create_rule doesn't handle it
-                    // However, CFType wrapper should manage the retain count.
+                    } // Ensure the created CFTypeRef (AXValueRef) is released if wrap_under_create_rule doesn't handle it
+                      // However, CFType wrapper should manage the retain count.
                 }
             }
         } else {
@@ -1984,7 +2203,10 @@ impl AccessibilityEngine for MacOSEngine {
             // 1. Verify it's a window
             let role = ax_window.role().map_or(String::new(), |r| r.to_string());
             if role != "AXWindow" {
-                warn!("Focused element is not a window (role: {}), cannot move.", role);
+                warn!(
+                    "Focused element is not a window (role: {}), cannot move.",
+                    role
+                );
                 return Err(AutomationError::UnsupportedOperation(
                     "Cannot move a non-window element".to_string(),
                 ));
