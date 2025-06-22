@@ -487,226 +487,222 @@ impl AccessibilityEngine for MacOSEngine {
     }
 
     fn get_focused_element(&self) -> Result<UIElement, AutomationError> {
-        tracing::info!(
-            "Entering MacOSEngine::get_focused_element (using kAXFrontmostAttribute strategy)"
-        );
+        tracing::info!("Entering MacOSEngine::get_focused_element (using safe implementation)");
 
-        // 1. Find the frontmost application by iterating (including accessory apps)
-        let pids = get_running_application_pids(true)?; // Include accessory apps initially
-        let mut focused_app_element: Option<accessibility::AXUIElement> = None;
+        // Step 1: Validate accessibility permissions first
+        match check_accessibility_permissions(false) {
+            Ok(true) => {
+                debug!("Accessibility permissions confirmed");
+            }
+            Ok(false) => {
+                warn!("Accessibility permissions not granted");
+                return Err(AutomationError::PermissionDenied(
+                    "Accessibility permissions required for getting focused element".to_string(),
+                ));
+            }
+            Err(e) => {
+                warn!("Failed to check accessibility permissions: {:?}", e);
+                return Err(e);
+            }
+        }
 
-        let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
-        let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
-        // Attribute for checking activation policy manually if needed (though get_pid might be better)
-        // let policy_attr = accessibility::AXAttribute::<CFType>::new(&CFString::new("AXActivationPolicy"));
+        // Step 2: Use safer NSWorkspace approach as primary method
+        debug!("Attempting to get focused element via NSWorkspace (safer method)");
+        match self.get_focused_element_via_nsworkspace() {
+            Ok(element) => {
+                debug!("Successfully got focused element via NSWorkspace method");
+                return Ok(element);
+            }
+            Err(e) => {
+                warn!("NSWorkspace method failed: {:?}", e);
+                debug!("Falling back to system-wide focused element");
+            }
+        }
 
-        for pid in pids {
+        // Step 3: Fallback to system-wide focused element with safety checks
+        match self.get_system_focused_element_safe() {
+            Ok(element) => {
+                debug!("Successfully got focused element via system-wide method");
+                Ok(element)
+            }
+            Err(e) => {
+                warn!("System-wide method also failed: {:?}", e);
+                // Final fallback: return frontmost application
+                self.get_frontmost_application_as_fallback()
+            }
+        }
+    }
+
+    /// Safer implementation using NSWorkspace to get focused element
+    fn get_focused_element_via_nsworkspace(&self) -> Result<UIElement, AutomationError> {
+        unsafe {
+            use objc::{class, msg_send, sel, sel_impl};
+
+            // Get NSWorkspace shared instance with null check
+            let workspace_class = class!(NSWorkspace);
+            let shared_workspace: *mut objc::runtime::Object =
+                msg_send![workspace_class, sharedWorkspace];
+            if shared_workspace.is_null() {
+                return Err(AutomationError::PlatformError(
+                    "Failed to get shared NSWorkspace instance".to_string(),
+                ));
+            }
+
+            // Get the frontmost application with null check
+            let frontmost_app: *mut objc::runtime::Object =
+                msg_send![shared_workspace, frontmostApplication];
+            if frontmost_app.is_null() {
+                return Err(AutomationError::NoFocusedElement(
+                    "NSWorkspace reported no frontmost application".to_string(),
+                ));
+            }
+
+            // Get the PID of the frontmost application
+            let pid: i32 = msg_send![frontmost_app, processIdentifier];
+            if pid <= 0 {
+                return Err(AutomationError::PlatformError(format!(
+                    "Invalid PID for frontmost application: {}",
+                    pid
+                )));
+            }
+            debug!("Frontmost application PID: {}", pid);
+
+            // Create AXUIElement for the application with error handling
             let app_element = accessibility::AXUIElement::application(pid);
 
-            // Get attribute as CFType, then downcast
-            match app_element.attribute(&frontmost_attr) {
-                Ok(frontmost_val) => {
-                    // Downcast the CFType result to CFBoolean
-                    if let Some(is_frontmost) = frontmost_val.downcast_into::<CFBoolean>() {
-                        // Compare CFBoolean to true
-                        if is_frontmost == true.into() {
-                            // Correct comparison
-                            debug!("Found frontmost application with PID: {}", pid);
-                            // Double check it's not a background-only process before accepting
-                            if let Ok(role) = app_element.role() {
-                                if role.to_string() == "AXApplication" {
-                                    // Basic sanity check
-                                    focused_app_element = Some(app_element);
-                                    break; // Found the focused app
-                                }
-                            }
-                        }
+            // Try to get focused UI element from the application
+            let focused_element_attr_name = CFString::new("AXFocusedUIElement");
+            let focused_element_attr = AXAttribute::new(&focused_element_attr_name);
+
+            match app_element.attribute(&focused_element_attr) {
+                Ok(focused_element_cf) => {
+                    if let Some(focused_element) =
+                        focused_element_cf.downcast::<accessibility::AXUIElement>()
+                    {
+                        debug!("Successfully found focused element via NSWorkspace");
+                        Ok(self.wrap_element(
+                            ThreadSafeAXUIElement::new(focused_element),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ))
                     } else {
-                        trace!("kAXFrontmostAttribute for PID {} was not a CFBoolean", pid);
+                        debug!("AXFocusedUIElement was not an AXUIElement, returning app element");
+                        Ok(self.wrap_element(
+                            ThreadSafeAXUIElement::new(app_element),
+                            None,
+                            None,
+                            None,
+                            None,
+                        ))
                     }
                 }
                 Err(e) => {
-                    // Log error but continue checking other apps
-                    trace!(
-                        "Error checking kAXFrontmostAttribute for PID {}: {:?}",
-                        pid,
-                        e
-                    );
+                    // Check if error is kAXErrorNoValue (-25212) which is normal
+                    if let AXError::Ax(err_num) = e {
+                        if err_num == kAXErrorNoValue {
+                            debug!("No specific focused element, returning app element");
+                            return Ok(self.wrap_element(
+                                ThreadSafeAXUIElement::new(app_element),
+                                None,
+                                None,
+                                None,
+                                None,
+                            ));
+                        }
+                    }
+                    Err(AutomationError::PlatformError(format!(
+                        "Failed to get focused UI element for PID {}: {:?}",
+                        pid, e
+                    )))
                 }
             }
         }
+    }
 
-        // Ensure we found a focused application
-        let focused_app_element = match focused_app_element {
-            Some(app) => app,
-            None => {
-                warn!("Could not find any frontmost application.");
-                return Err(AutomationError::ElementNotFound(
-                    "No frontmost application found".to_string(),
-                ));
-            }
-        };
+    /// Safer system-wide focused element implementation with bounds checking
+    fn get_system_focused_element_safe(&self) -> Result<UIElement, AutomationError> {
+        debug!("Attempting system-wide focused element lookup");
 
-        // Log details about the focused application (optional but helpful)
-        // ... (logging code can remain the same, using focused_app_element)
-        match focused_app_element.title() {
-            Ok(title) => debug!(
-                "Focused Application Title (found via frontmost): {}",
-                title.to_string()
-            ),
-            Err(e) => debug!("Error getting focused app title: {:?}", e),
-        }
+        // Get system-wide focused element attribute
+        let focused_attr_name = CFString::new("AXFocusedUIElement");
+        let focused_attr = AXAttribute::new(&focused_attr_name);
 
-        // 2. Get the focused UI element AS CFType *from the identified frontmost application*
-        let focused_ui_attr_name = CFString::new(kAXFocusedUIElementAttribute);
-        let focused_ui_attr = accessibility::AXAttribute::<CFType>::new(&focused_ui_attr_name);
-
-        match focused_app_element.attribute(&focused_ui_attr) {
-            Ok(focused_element_val) => {
-                let focused_element_ref = focused_element_val.as_CFTypeRef();
-                if focused_element_ref.is_null() {
-                    warn!("kAXFocusedUIElementAttribute returned NULL CFTypeRef.");
-                    return Err(AutomationError::PlatformError(
-                        "Focused UI element reference from attribute is NULL".to_string(),
-                    ));
-                }
-
-                // --- Safety Check: Verify CFTypeID before casting ---
-                let expected_type_id: CFTypeID = unsafe { AXUIElementGetTypeID() };
-                let actual_type_id: CFTypeID = unsafe { CFGetTypeID(focused_element_ref) };
-                debug!(
-                    "Focused Element CFType Check: Expected TypeID: {}, Actual TypeID: {}",
-                    expected_type_id, actual_type_id
-                );
-
-                if actual_type_id != expected_type_id {
-                    warn!(
-                        "Type mismatch for focused element! Expected AXUIElement ({}), got TypeID {}.",
-                        expected_type_id, actual_type_id
-                    );
-                    return Err(AutomationError::PlatformError(format!(
-                        "Type mismatch for focused element: expected AXUIElement ({}), got TypeID {}",
-                        expected_type_id, actual_type_id
-                    )));
-                }
-                // --- End Safety Check ---
-
-                // Cast CFType to AXUIElement (Now with more confidence)
-                let focused_element = unsafe {
-                    debug!("Attempting cast from CFTypeRef to AXUIElementRef...");
-                    let element_ref = focused_element_ref as *mut libc::c_void as AXUIElementRef;
-                    // No null check needed here as we checked focused_element_ref above
-                    debug!("Cast successful. Wrapping AXUIElementRef...");
-                    let wrapped_element =
-                        accessibility::AXUIElement::wrap_under_create_rule(element_ref);
-                    debug!("Wrapping successful.");
-                    wrapped_element
-                };
-
-                // --- Start Fetching Core Attributes Early ---
-                let mut fetched_role = String::new();
-                let mut fetched_label = None;
-                let mut fetched_description = None;
-                let mut fetched_value = None;
-
-                let role_attr = AXAttribute::new(&CFString::new("AXRole"));
-                if let Ok(role_val) = focused_element.attribute(&role_attr) {
-                    if let Some(cf_string) = role_val.downcast_into::<CFString>() {
-                        fetched_role = cf_string.to_string();
-                    }
-                }
-                debug!("Pre-fetched Role: {}", fetched_role);
-
-                let title_attr = AXAttribute::new(&CFString::new("AXTitle"));
-                if let Ok(title_val) = focused_element.attribute(&title_attr) {
-                    if let Some(cf_string) = title_val.downcast_into::<CFString>() {
-                        let title_str = cf_string.to_string();
-                        if !title_str.is_empty() {
-                            fetched_label = Some(title_str);
-                        }
-                    }
-                }
-                if fetched_label.is_none() {
-                    let label_attr = AXAttribute::new(&CFString::new("AXLabel"));
-                    if let Ok(label_val) = focused_element.attribute(&label_attr) {
-                        if let Some(cf_string) = label_val.downcast_into::<CFString>() {
-                            fetched_label = Some(cf_string.to_string());
-                        }
-                    }
-                }
-                debug!("Pre-fetched Label: {:?}", fetched_label);
-
-                let desc_attr = AXAttribute::new(&CFString::new("AXDescription"));
-                if let Ok(desc_val) = focused_element.attribute(&desc_attr) {
-                    if let Some(cf_string) = desc_val.downcast_into::<CFString>() {
-                        fetched_description = Some(cf_string.to_string());
-                    }
-                }
-                debug!("Pre-fetched Description: {:?}", fetched_description);
-
-                let value_attr = AXAttribute::new(&CFString::new("AXValue"));
-                if let Ok(value_val) = focused_element.attribute(&value_attr) {
-                    if let Some(cf_string) = value_val.clone().downcast_into::<CFString>() {
-                        fetched_value = Some(cf_string.to_string());
-                    } else if let Some(cf_num) = value_val.clone().downcast_into::<CFNumber>() {
-                        if let Some(num) = cf_num.to_i64() {
-                            fetched_value = Some(num.to_string());
-                        } else if let Some(num) = cf_num.to_f64() {
-                            fetched_value = Some(num.to_string());
-                        }
-                    }
-                }
-                debug!("Pre-fetched Value: {:?}", fetched_value);
-                // --- End Fetching Core Attributes Early ---
-
-                if !fetched_role.is_empty()
-                    || fetched_label.is_some()
-                    || fetched_description.is_some()
-                {
-                    debug!("Returning specific focused element within the frontmost app.");
+        match self.system_wide.0.attribute(&focused_attr) {
+            Ok(focused_cf) => {
+                if let Some(focused_element) = focused_cf.downcast::<accessibility::AXUIElement>() {
+                    debug!("Found system-wide focused element");
                     Ok(self.wrap_element(
                         ThreadSafeAXUIElement::new(focused_element),
-                        Some(fetched_role),
-                        fetched_label,
-                        fetched_description,
-                        fetched_value,
+                        None,
+                        None,
+                        None,
+                        None,
                     ))
                 } else {
-                    debug!("Specific focused element seems invalid, returning frontmost app element instead.");
-                    Ok(self.wrap_element(
-                        ThreadSafeAXUIElement::new(focused_app_element),
-                        None,
-                        None,
-                        None,
-                        None,
+                    Err(AutomationError::PlatformError(
+                        "System-wide focused element was not an AXUIElement".to_string(),
                     ))
                 }
             }
             Err(e) => {
-                // Check if the error is kAXErrorNoValue (-25212)
-                if let AXError::Ax(err_num) = e {
-                    if err_num == kAXErrorNoValue {
-                        warn!(
-                            "Frontmost application has no specific focused UI element (kAXErrorNoValue). Returning the application element itself."
-                        );
-                        // Return the application element we found earlier
-                        return Ok(self.wrap_element(
-                            ThreadSafeAXUIElement::new(focused_app_element),
-                            None,
-                            None,
-                            None,
-                            None,
-                        ));
-                    }
-                }
-                // For any other error, report it as before
-                warn!("Failed to get kAXFocusedUIElementAttribute (as CFType) from frontmost application: {:?}", e);
-                Err(AutomationError::PlatformError(format!(
-                    "Failed to get focused UI element from frontmost application: {:?}",
+                debug!("System-wide focused element lookup failed: {:?}", e);
+                Err(AutomationError::NoFocusedElement(format!(
+                    "No system-wide focused element: {:?}",
                     e
                 )))
             }
         }
+    }
+
+    /// Final fallback: get frontmost application as focused element
+    fn get_frontmost_application_as_fallback(&self) -> Result<UIElement, AutomationError> {
+        debug!("Using frontmost application as final fallback");
+
+        let pids = get_running_application_pids(true)?;
+        let frontmost_attr_name = CFString::new(kAXFrontmostAttribute);
+        let frontmost_attr = accessibility::AXAttribute::<CFType>::new(&frontmost_attr_name);
+
+        for pid in pids {
+            let app_element = accessibility::AXUIElement::application(pid);
+
+            // Check if this app is frontmost (with error handling)
+            match app_element.attribute(&frontmost_attr) {
+                Ok(frontmost_val) => {
+                    if let Some(is_frontmost) = frontmost_val.downcast_into::<CFBoolean>() {
+                        if is_frontmost == CFBoolean::true_value() {
+                            debug!("Found frontmost application with PID: {}", pid);
+                            return Ok(self.wrap_element(
+                                ThreadSafeAXUIElement::new(app_element),
+                                Some("AXApplication".to_string()),
+                                None,
+                                None,
+                                None,
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    trace!(
+                        "Error checking frontmost attribute for PID {}: {:?}",
+                        pid,
+                        e
+                    );
+                    continue;
+                }
+            }
+        }
+
+        // Absolute final fallback: return system-wide element
+        warn!("No frontmost application found, returning system-wide element");
+        Ok(self.wrap_element(
+            self.system_wide.clone(),
+            Some("AXSystemWide".to_string()),
+            Some("System".to_string()),
+            None,
+            None,
+        ))
     }
 
     fn get_application_by_name(&self, name: &str) -> Result<UIElement, AutomationError> {
