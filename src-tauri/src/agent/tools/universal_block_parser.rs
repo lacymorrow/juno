@@ -243,6 +243,13 @@ impl UniversalBlockParser {
             ));
         }
 
+        // Check for zero grid dimensions to prevent underflow
+        if blocks_x == 0 || blocks_y == 0 {
+            return Err(UBPError::InvalidInput(
+                "Grid dimensions cannot be zero".to_string()
+            ));
+        }
+
         // Clamp coordinates to image boundaries to prevent out-of-bounds access
         // This handles both negative coordinates and coordinates beyond image bounds
         let clamped_x = global_x.min(ubp_result.image_width as f64 - 1.0).max(0.0);
@@ -252,7 +259,7 @@ impl UniversalBlockParser {
         let block_col = (clamped_x as u32) / ubp_result.actual_block_size;
         let block_row = (clamped_y as u32) / ubp_result.actual_block_size;
 
-        // Additional bounds checking for block indices
+        // Additional bounds checking for block indices (safe from underflow now)
         let block_col = block_col.min(blocks_x - 1);
         let block_row = block_row.min(blocks_y - 1);
 
@@ -267,10 +274,10 @@ impl UniversalBlockParser {
         }
 
         if let Some(block) = ubp_result.blocks.get(block_index as usize) {
-            // Calculate relative coordinates within the block using original (unclamped) coordinates
-            // but ensure they're within the block bounds
-            let block_relative_x = global_x - block.global_x as f64;
-            let block_relative_y = global_y - block.global_y as f64;
+            // Calculate relative coordinates within the block using clamped coordinates
+            // for consistent coordinate handling
+            let block_relative_x = clamped_x - block.global_x as f64;
+            let block_relative_y = clamped_y - block.global_y as f64;
 
             let relative_x = (block_relative_x / block.width as f64).max(0.0).min(1.0) as f32;
             let relative_y = (block_relative_y / block.height as f64).max(0.0).min(1.0) as f32;
@@ -655,5 +662,108 @@ impl UniversalBlockParser {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_global_to_block_coordinates_with_zero_grid_dimensions() {
+        let parser = UniversalBlockParser::new();
+
+        // Create a UBPResult with zero grid dimensions
+        let ubp_result = UBPResult {
+            image_width: 0,
+            image_height: 0,
+            grid_config: UBPConfig::default(),
+            blocks: vec![],
+            grid_dimensions: (0, 0), // Zero dimensions should cause error
+            actual_block_size: 64,
+            processing_time_ms: 0,
+            total_elements_detected: 0,
+        };
+
+        let result = parser.global_to_block_coordinates(&ubp_result, 10.0, 10.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Grid dimensions cannot be zero"));
+    }
+
+    #[test]
+    fn test_global_to_block_coordinates_coordinate_consistency() {
+        let parser = UniversalBlockParser::new();
+
+        // Create a simple UBPResult for testing
+        let block = UBPBlock {
+            id: 0,
+            global_x: 0,
+            global_y: 0,
+            width: 64,
+            height: 64,
+            position_embedding: vec![0.0; 16],
+            elements: vec![],
+            density_score: 0.0,
+        };
+
+        let ubp_result = UBPResult {
+            image_width: 64,
+            image_height: 64,
+            grid_config: UBPConfig::default(),
+            blocks: vec![block],
+            grid_dimensions: (1, 1),
+            actual_block_size: 64,
+            processing_time_ms: 0,
+            total_elements_detected: 0,
+        };
+
+        // Test with out-of-bounds coordinates (should be clamped)
+        let result = parser.global_to_block_coordinates(&ubp_result, 100.0, 100.0);
+        assert!(result.is_ok());
+
+        let coords = result.unwrap();
+        // Should have lower confidence due to clamping
+        assert_eq!(coords.confidence, 0.7);
+        // Relative coordinates should be 1.0, 1.0 (at the edge of the block)
+        assert_eq!(coords.relative_x, 1.0);
+        assert_eq!(coords.relative_y, 1.0);
+    }
+
+    #[test]
+    fn test_global_to_block_coordinates_in_bounds() {
+        let parser = UniversalBlockParser::new();
+
+        let block = UBPBlock {
+            id: 0,
+            global_x: 0,
+            global_y: 0,
+            width: 64,
+            height: 64,
+            position_embedding: vec![0.0; 16],
+            elements: vec![],
+            density_score: 0.0,
+        };
+
+        let ubp_result = UBPResult {
+            image_width: 64,
+            image_height: 64,
+            grid_config: UBPConfig::default(),
+            blocks: vec![block],
+            grid_dimensions: (1, 1),
+            actual_block_size: 64,
+            processing_time_ms: 0,
+            total_elements_detected: 0,
+        };
+
+        // Test with in-bounds coordinates
+        let result = parser.global_to_block_coordinates(&ubp_result, 32.0, 32.0);
+        assert!(result.is_ok());
+
+        let coords = result.unwrap();
+        // Should have high confidence (no clamping)
+        assert_eq!(coords.confidence, 0.95);
+        // Should be in the middle of the block
+        assert!((coords.relative_x - 0.5).abs() < 0.01);
+        assert!((coords.relative_y - 0.5).abs() < 0.01);
     }
 }
