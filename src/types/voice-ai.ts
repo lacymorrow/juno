@@ -21,6 +21,12 @@ export interface VoiceAIBarProps {
 	initialState?: AssistantState;
 	className?: string;
 	sampleResponses?: Record<string, ResponseContent>;
+	// Optional external input handling props for integration with FloatingBar
+	inputValue?: string;
+	onInputChange?: (value: string) => void;
+	onInputSubmit?: (e: React.FormEvent) => void;
+	onInputBlur?: () => void;
+	inputRef?: React.RefObject<HTMLInputElement>;
 }
 
 export interface DevPanelProps {

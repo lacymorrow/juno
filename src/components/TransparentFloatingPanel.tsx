@@ -94,7 +94,7 @@ const generateResponseContent = (
   return responses;
 };
 
-// Integrated VoiceAIBar component that bridges the gap
+// Integrated VoiceAIBar component using the new pattern
 const IntegratedVoiceAIBar = ({
   panelState,
   voiceState,
@@ -120,41 +120,26 @@ const IntegratedVoiceAIBar = ({
     console.log("VoiceAIBar state changed to:", newState);
   };
 
-  return (
-    <div className="relative w-full h-full">
-      <VoiceAIBar
-        onStateChange={handleStateChange}
-        initialState={assistantState}
-        sampleResponses={sampleResponses}
-        className="w-full h-full"
-      />
+  const handleInputChange = (value: string) => {
+    setInputValue(value);
+  };
 
-      {/* Overlay input handling for input state */}
-      {assistantState === "input" && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="pointer-events-auto">
-            <form onSubmit={onSubmit} className="flex gap-2">
-              <input
-                ref={inputRef}
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Type your message..."
-                className="px-3 py-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:border-white/40"
-                autoFocus
-              />
-              <button
-                type="submit"
-                disabled={!inputValue.trim()}
-                className="px-4 py-2 bg-blue-500/80 hover:bg-blue-500/60 rounded-lg text-white transition-colors disabled:opacity-50"
-              >
-                Send
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+  const handleInputBlur = () => {
+    // Handle input blur if needed
+  };
+
+  return (
+    <VoiceAIBar
+      onStateChange={handleStateChange}
+      initialState={assistantState}
+      sampleResponses={sampleResponses}
+      className="w-full h-full"
+      inputValue={inputValue}
+      onInputChange={handleInputChange}
+      onInputSubmit={onSubmit}
+      onInputBlur={handleInputBlur}
+      inputRef={inputRef}
+    />
   );
 };
 

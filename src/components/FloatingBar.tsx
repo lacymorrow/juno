@@ -32,7 +32,7 @@ const DEFAULT_HEIGHT =
 const EXPANDED_WIDTH = FLOATING_BAR_DIMENSIONS.EXPANDED_WIDTH;
 const EXPANDED_HEIGHT = FLOATING_BAR_DIMENSIONS.EXPANDED_HEIGHT;
 
-// State mapping: BarState -> AssistantState
+// Enhanced state mapping: BarState -> AssistantState
 const mapBarStateToAssistantState = (barState: BarState): AssistantState => {
   switch (barState) {
     case "default":
@@ -68,108 +68,64 @@ const mapBarStateToAssistantState = (barState: BarState): AssistantState => {
   }
 };
 
-// Response content generator based on transcription/spoken text
+// Generate comprehensive response content based on current state
 const generateResponseContent = (
   transcriptionText: string,
   spokenText: string,
-  currentError: string | null
-): ResponseContent[] => {
+  currentError: string | null,
+  voiceMode: string,
+  isAgentWorking: boolean,
+  isDictationMode: boolean,
+  isAlwaysListening: boolean,
+  audioLevel: number,
+  lastSubmittedValue: string,
+  agentState: string | null
+): Record<string, ResponseContent> => {
   if (currentError) {
-    return [
-      {
+    return {
+      error: {
         type: "text",
-        title: "Error",
+        title: "Error Details",
         content: currentError,
       },
-    ];
+    };
   }
 
   if (spokenText) {
-    return [
-      {
+    return {
+      response: {
         type: "text",
         title: "AI Response",
         content: spokenText,
       },
-    ];
+    };
   }
 
   if (transcriptionText) {
-    return [
-      {
+    return {
+      transcription: {
         type: "text",
         title: "Transcription",
-        content: transcriptionText,
+        content: `"${transcriptionText}"`,
       },
-    ];
+    };
   }
 
-  return [];
+  // System status for debugging/info
+  return {
+    status: {
+      type: "code",
+      title: "System Status",
+      content: `Voice Mode: ${voiceMode}
+Agent Working: ${isAgentWorking}
+Dictation Mode: ${isDictationMode}
+Always Listening: ${isAlwaysListening}
+Audio Level: ${audioLevel.toFixed(2)}
+Last Submitted: ${lastSubmittedValue || "None"}
+Agent State: ${agentState || "Unknown"}`,
+    },
+  };
 };
-
-// Custom VoiceAIBar wrapper with FloatingBar integration
-interface IntegratedVoiceAIBarProps {
-  assistantState: AssistantState;
-  inputValue: string;
-  sampleResponses: Record<string, ResponseContent>;
-  onStateChange: (state: AssistantState) => void;
-  onInputChange: (value: string) => void;
-  onInputSubmit: (e: FormEvent) => void;
-  onInputBlur: () => void;
-  inputRef: React.RefObject<HTMLInputElement>;
-  className?: string;
-}
-
-function IntegratedVoiceAIBar({
-  assistantState,
-  inputValue,
-  sampleResponses,
-  onStateChange,
-  onInputChange,
-  onInputSubmit,
-  onInputBlur,
-  inputRef,
-  className,
-}: IntegratedVoiceAIBarProps) {
-  // Create a modified VoiceAIBar that uses our input handlers
-  return (
-    <div className={className}>
-      <VoiceAIBar
-        initialState={assistantState}
-        onStateChange={onStateChange}
-        sampleResponses={sampleResponses}
-        className="integrated-voice-ai-bar"
-      />
-
-      {/* Overlay input handling for input state */}
-      {assistantState === "input" && (
-        <div className="absolute inset-0 flex items-center px-4">
-          <form onSubmit={onInputSubmit} className="flex items-center gap-2 w-full">
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => onInputChange(e.target.value)}
-              onBlur={onInputBlur}
-              placeholder="Ask me anything..."
-              className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-white/60"
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="text-white/60 hover:text-white flex items-center justify-center h-6 w-6 transition-colors duration-200"
-              disabled={!inputValue.trim()}
-            >
-              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-              </svg>
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export function FloatingBar() {
   // Enhanced state management - mirrors backend state exactly
@@ -230,33 +186,44 @@ export function FloatingBar() {
     if (newAssistantState !== assistantState) {
       setAssistantState(newAssistantState);
     }
+  }, [barState, assistantState]);
 
-    // Generate response content for response state
-    if (newAssistantState === "success" || newAssistantState === "error") {
-      generateResponseContent(
-        transcriptionText,
-        spokenText,
-        currentError
-      );
-    }
-  }, [barState, assistantState, transcriptionText, spokenText, currentError]);
-
-  // Update window size based on bar state
+  // Dynamic window sizing based on assistant state and content
   useEffect(() => {
-    const isCompact = ["default"].includes(barState);
+    const getWindowDimensionsForState = (state: AssistantState) => {
+      switch (state) {
+        case "idle":
+          return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+        case "input":
+          return { width: 320, height: DEFAULT_HEIGHT };
+        case "listening":
+        case "processing":
+        case "speaking":
+          return { width: 280, height: DEFAULT_HEIGHT };
+        case "response":
+          // Dynamic sizing for response content
+          return { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
+        case "success":
+        case "error":
+          return { width: 240, height: DEFAULT_HEIGHT };
+        default:
+          return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+      }
+    };
 
-    const targetSize = isCompact
-      ? { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT }
-      : { width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT };
+    const targetSize = getWindowDimensionsForState(assistantState);
 
-    if (isCompact) {
+    // Smooth transition timing
+    if (assistantState === "idle") {
+      // Delay shrinking to allow animations to complete
       setTimeout(() => {
         resizeWindow(targetSize);
-      }, 1000);
+      }, 750);
     } else {
+      // Immediate expansion for better UX
       resizeWindow(targetSize);
     }
-  }, [barState, resizeWindow]);
+  }, [assistantState, resizeWindow]);
 
   // Handle animation state tracking
   useEffect(() => {
@@ -387,44 +354,54 @@ export function FloatingBar() {
     [inputValue, invokeCommand]
   );
 
-  // VoiceAIBar state change handler
+  // VoiceAIBar state change handler - bridges VoiceAIBar internal state to backend
   const handleVoiceAIBarStateChange = useCallback(
-    (newState: AssistantState) => {
-      // This is called when VoiceAIBar internally changes state
-      // We can use this to trigger backend actions if needed
+    async (newState: AssistantState) => {
       console.log("VoiceAIBar state changed to:", newState);
 
       // Handle specific state transitions that need backend interaction
-      if (newState === "input") {
-        handleBarClick(); // Trigger input mode in backend
+      switch (newState) {
+        case "input":
+          await handleBarClick(); // Trigger input mode in backend
+          break;
+        case "idle":
+          // Return to default state
+          if (assistantState === "input") {
+            await handleInputBlur();
+          }
+          break;
+        case "listening":
+          // Could trigger voice listening if not already active
+          break;
+        default:
+          // Other states are handled by backend events
+          break;
       }
     },
-    [handleBarClick]
+    [handleBarClick, handleInputBlur, assistantState]
   );
 
-  // Sample responses for VoiceAIBar
-  const sampleResponses = {
-    text: {
-      type: "text" as const,
-      title: "Voice Assistant Response",
-      content: spokenText || transcriptionText || "Voice assistant ready",
-    },
-    code: {
-      type: "code" as const,
-      title: "System Status",
-      content: `Voice Mode: ${voiceMode}
-Agent Working: ${isAgentWorking}
-Dictation Mode: ${isDictationMode}
-Always Listening: ${isAlwaysListening}
-Audio Level: ${audioLevel}
-Last Submitted: ${lastSubmittedValue || "None"}
-Agent State: ${agentState || "Unknown"}`,
-    },
-    component: {
-      type: "component" as const,
-      title: "Error Details",
-      content: currentError || "No errors",
-    },
+  // Generate dynamic response content based on current state
+  const sampleResponses = generateResponseContent(
+    transcriptionText,
+    spokenText,
+    currentError,
+    voiceMode,
+    isAgentWorking,
+    isDictationMode,
+    isAlwaysListening,
+    audioLevel,
+    lastSubmittedValue,
+    agentState
+  );
+
+  // Custom input handling props for VoiceAIBar
+  const inputHandlingProps = {
+    inputValue,
+    onInputChange: handleInputChange,
+    onInputSubmit: handleSubmit,
+    onInputBlur: handleInputBlur,
+    inputRef,
   };
 
   // Use state variables to prevent unused warnings
@@ -461,16 +438,13 @@ Agent State: ${agentState || "Unknown"}`,
               : undefined
           }
         >
-          <IntegratedVoiceAIBar
-            assistantState={assistantState}
-            inputValue={inputValue}
-            sampleResponses={sampleResponses}
+          <VoiceAIBar
+            initialState={assistantState}
             onStateChange={handleVoiceAIBarStateChange}
-            onInputChange={handleInputChange}
-            onInputSubmit={handleSubmit}
-            onInputBlur={handleInputBlur}
-            inputRef={inputRef}
+            sampleResponses={sampleResponses}
             className="floating-bar-voice-ai relative"
+            // Pass input handling props to VoiceAIBar
+            {...inputHandlingProps}
           />
         </div>
 
@@ -486,6 +460,16 @@ Agent State: ${agentState || "Unknown"}`,
         {isAlwaysListening && (
           <div className="absolute bottom-1 right-1 z-60">
             <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+          </div>
+        )}
+
+        {/* Audio Level Indicator for debugging */}
+        {audioLevel > 0 && process.env.NODE_ENV === "development" && (
+          <div className="absolute bottom-2 left-2 z-60">
+            <div
+              className="bg-green-400 h-1 rounded-full transition-all duration-150"
+              style={{ width: `${Math.min(audioLevel * 20, 40)}px` }}
+            />
           </div>
         )}
       </div>
@@ -518,6 +502,17 @@ Agent State: ${agentState || "Unknown"}`,
 
         .animate-fade-in {
           animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1) both;
+        }
+
+        /* Enhanced drag region support */
+        [data-tauri-drag-region] {
+          -webkit-app-region: drag;
+        }
+
+        [data-tauri-drag-region] button,
+        [data-tauri-drag-region] input,
+        [data-tauri-drag-region] [role="button"] {
+          -webkit-app-region: no-drag;
         }
       `}</style>
     </div>

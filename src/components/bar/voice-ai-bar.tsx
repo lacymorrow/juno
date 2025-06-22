@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import {
   Mic,
   MicOff,
@@ -34,6 +34,12 @@ export function VoiceAIBar({
   initialState = "idle",
   className = "",
   sampleResponses: propSampleResponses,
+  // External input handling props
+  inputValue: externalInputValue,
+  onInputChange: externalOnInputChange,
+  onInputSubmit: externalOnInputSubmit,
+  onInputBlur: externalOnInputBlur,
+  inputRef: externalInputRef,
 }: VoiceAIBarProps) {
   const [assistantState, setAssistantState] =
     useState<AssistantState>(initialState);
@@ -61,6 +67,17 @@ export function VoiceAIBar({
   >("collapsed");
   const [isCalculatingDimensions, setIsCalculatingDimensions] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  const isExternalInputHandling = Boolean(
+    externalInputValue !== undefined &&
+    externalOnInputChange &&
+    externalOnInputSubmit &&
+    externalOnInputBlur &&
+    externalInputRef
+  );
+
+  const currentInputValue = isExternalInputHandling ? externalInputValue! : inputText;
+  const currentInputRef = isExternalInputHandling ? externalInputRef! : inputRef;
 
   // Default sample responses
   const defaultSampleResponses = {
@@ -156,7 +173,7 @@ const styles = \`
     // Focus input field when entering input state
     if (newState === "input") {
       setTimeout(() => {
-        inputRef.current?.focus();
+        currentInputRef.current?.focus();
       }, 100);
     }
 
@@ -266,11 +283,22 @@ const styles = \`
     }
   };
 
-  const handleInputSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleInputChange = (value: string) => {
+    if (isExternalInputHandling) {
+      externalOnInputChange!(value);
+    } else {
+      setInputText(value);
+    }
+  };
 
-    if (inputText.trim()) {
-      const userInput = inputText.trim();
+  const handleInputSubmit = (e: FormEvent) => {
+    if (isExternalInputHandling) {
+      externalOnInputSubmit!(e);
+    } else {
+      e.preventDefault();
+      const userInput = currentInputValue.trim();
+      if (!userInput) return;
+
       setInputText("");
       changeState("processing");
 
@@ -307,6 +335,12 @@ const styles = \`
           setIsExpanded(true);
         }, 200);
       }, 800);
+    }
+  };
+
+  const handleInputBlur = () => {
+    if (isExternalInputHandling) {
+      externalOnInputBlur!();
     }
   };
 
@@ -556,10 +590,11 @@ const styles = \`
         {assistantState === "input" && (
           <form onSubmit={handleInputSubmit} className="input-form">
             <input
-              ref={inputRef}
+              ref={currentInputRef}
               type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              value={currentInputValue}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onBlur={handleInputBlur}
               placeholder="Type your request..."
               className="glass-input"
               autoFocus
@@ -567,7 +602,7 @@ const styles = \`
             <button
               type="submit"
               className="glass-send-btn"
-              disabled={!inputText.trim()}
+              disabled={!currentInputValue.trim()}
             >
               <Send className="w-3 h-3 text-white" />
             </button>
