@@ -102,182 +102,174 @@ export default function GeneralSettings({ settings }: SettingsSectionProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-medium text-gray-900 mb-4">
-          General Settings
-        </h3>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Startup Behavior</CardTitle>
-            <CardDescription>
-              Configure how Juno behaves when starting up
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label htmlFor="auto-launch" className="text-sm font-medium">
-                  Launch at Login
-                </Label>
-                <p className="text-xs text-gray-500">
-                  Automatically start Juno when you log in to your computer
-                </p>
-              </div>
-              <Switch
-                id="auto-launch"
-                checked={autoLaunchEnabled}
-                onCheckedChange={handleAutoLaunchChange}
-                disabled={autoLaunchLoading}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-blue-500" />
-              Onboarding
-            </CardTitle>
-            <CardDescription>
-              Restart the onboarding flow to learn about Juno's features
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-sm font-medium">
-                  Restart Onboarding Flow
-                </Label>
-                <p className="text-xs text-gray-500">
-                  Go through the welcome guide and setup process again
-                  {onboardingInfo?.is_development_mode && (
-                    <span className="block text-blue-600 mt-1">
-                      Development mode: Onboarding always shows on restart
-                    </span>
-                  )}
-                </p>
-                {onboardingInfo?.completed_at && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    Last completed:{" "}
-                    {new Date(onboardingInfo.completed_at).toLocaleDateString()}
-                  </p>
-                )}
-              </div>
-              <Button
-                onClick={handleRestartOnboarding}
-                disabled={restartOnboardingLoading}
-                variant="outline"
-                size="sm"
-              >
-                {restartOnboardingLoading ? (
-                  <>
-                    <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
-                    Restarting...
-                  </>
-                ) : (
-                  <>
-                    <RotateCcw className="w-4 h-4 mr-2" />
-                    Restart Onboarding
-                  </>
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Sound Effects</CardTitle>
-            <CardDescription>
-              Configure audio feedback and notifications
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label htmlFor="sound-enabled" className="text-sm font-medium">
-                  Enable Sound Effects
-                </Label>
-                <p className="text-xs text-gray-500">
-                  Play sounds for notifications and feedback
-                </p>
-              </div>
-              <Switch
-                id="sound-enabled"
-                checked={settings.soundEnabled}
-                onCheckedChange={settings.handleSoundEnabledChange}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Agent Mode</CardTitle>
-            <CardDescription>
-              Choose how Juno handles tasks and AI interactions
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label htmlFor="agent-mode">Agent Mode</Label>
-              <Select
-                value={settings.agentMode}
-                onValueChange={settings.handleAgentModeChange}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select agent mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="multi">
-                    Multi-Agent (Recommended)
-                  </SelectItem>
-                  <SelectItem value="single">Single Agent</SelectItem>
-                </SelectContent>
-              </Select>
+      <Card>
+        <CardHeader>
+          <CardTitle>Startup Behavior</CardTitle>
+          <CardDescription>
+            Configure how Juno behaves when starting up
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="auto-launch" className="text-sm font-medium">
+                Launch at Login
+              </Label>
               <p className="text-xs text-gray-500">
-                Multi-agent mode uses specialized agents for different tasks,
-                while single agent mode uses one agent for everything.
+                Automatically start Juno when you log in to your computer
               </p>
             </div>
-          </CardContent>
-        </Card>
+            <Switch
+              id="auto-launch"
+              checked={autoLaunchEnabled}
+              onCheckedChange={handleAutoLaunchChange}
+              disabled={autoLaunchLoading}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Agent Trigger Mode</CardTitle>
-            <CardDescription>
-              Choose how to activate the AI agent with the shortcut key
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label htmlFor="agent-trigger-mode">Trigger Mode</Label>
-              <Select
-                value={settings.agentTriggerMode}
-                onValueChange={settings.handleAgentTriggerModeChange}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select trigger mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="tap">Tap to Toggle (Default)</SelectItem>
-                  <SelectItem value="hold">Hold to Activate</SelectItem>
-                </SelectContent>
-              </Select>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-blue-500" />
+            Onboarding
+          </CardTitle>
+          <CardDescription>
+            Restart the onboarding flow to learn about Juno's features
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="text-sm font-medium">
+                Restart Onboarding Flow
+              </Label>
               <p className="text-xs text-gray-500">
-                <strong>Tap to Toggle:</strong> Press and release to toggle
-                agent mode on/off.
-                <br />
-                <strong>Hold to Activate:</strong> Hold key to activate agent,
-                release to stop (like dictation mode).
+                Go through the welcome guide and setup process again
+                {onboardingInfo?.is_development_mode && (
+                  <span className="block text-blue-600 mt-1">
+                    Development mode: Onboarding always shows on restart
+                  </span>
+                )}
+              </p>
+              {onboardingInfo?.completed_at && (
+                <p className="text-xs text-gray-400 mt-1">
+                  Last completed:{" "}
+                  {new Date(onboardingInfo.completed_at).toLocaleDateString()}
+                </p>
+              )}
+            </div>
+            <Button
+              onClick={handleRestartOnboarding}
+              disabled={restartOnboardingLoading}
+              variant="outline"
+              size="sm"
+            >
+              {restartOnboardingLoading ? (
+                <>
+                  <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
+                  Restarting...
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Restart Onboarding
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Sound Effects</CardTitle>
+          <CardDescription>
+            Configure audio feedback and notifications
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="sound-enabled" className="text-sm font-medium">
+                Enable Sound Effects
+              </Label>
+              <p className="text-xs text-gray-500">
+                Play sounds for notifications and feedback
               </p>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+            <Switch
+              id="sound-enabled"
+              checked={settings.soundEnabled}
+              onCheckedChange={settings.handleSoundEnabledChange}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent Mode</CardTitle>
+          <CardDescription>
+            Choose how Juno handles tasks and AI interactions
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="agent-mode">Agent Mode</Label>
+            <Select
+              value={settings.agentMode}
+              onValueChange={settings.handleAgentModeChange}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select agent mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="multi">Multi-Agent (Recommended)</SelectItem>
+                <SelectItem value="single">Single Agent</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-gray-500">
+              Multi-agent mode uses specialized agents for different tasks,
+              while single agent mode uses one agent for everything.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent Trigger Mode</CardTitle>
+          <CardDescription>
+            Choose how to activate the AI agent with the shortcut key
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <Label htmlFor="agent-trigger-mode">Trigger Mode</Label>
+            <Select
+              value={settings.agentTriggerMode}
+              onValueChange={settings.handleAgentTriggerModeChange}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select trigger mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="tap">Tap to Toggle (Default)</SelectItem>
+                <SelectItem value="hold">Hold to Activate</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-gray-500">
+              <strong>Tap to Toggle:</strong> Press and release to toggle agent
+              mode on/off.
+              <br />
+              <strong>Hold to Activate:</strong> Hold key to activate agent,
+              release to stop (like dictation mode).
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
